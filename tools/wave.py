@@ -279,7 +279,30 @@ def _cut_worktree(repo, branch, base, worktree_root=None):
                   else f'new branch from {base}')
 
 
+def _filelock():
+    spec = importlib.util.spec_from_file_location(
+        'filelock', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 'filelock.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
+               *args, claims_path=None, **kw):
+    """Cut the next batch (see _next_batch).  The read of every queue's
+    state and the save of this one happen under the claims file lock, the
+    one tools/claims.py takes, so two drivers on the two queues cannot
+    both pick the same file (ruling R64)."""
+    if claims_path is None:
+        claims_path = os.path.join(
+            os.path.dirname(os.path.abspath(state_path)), 'claims.json')
+    with _filelock().hold(claims_path + '.lock', 'wave next'):
+        return _next_batch(disagreements_path, state_path, *args,
+                           claims_path=claims_path, **kw)
+
+
+def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
                triage_path=None, repo=None, fork_base=None,
                worktree_root=None, import_path=None, base='first',

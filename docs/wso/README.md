@@ -260,8 +260,18 @@ the mechanical checks run in parallel. Every wave-state write and every
 repo-level git operation (the cut, record, close with its fast-forward, the
 push) runs under one driver-wide lock, and the gate is serialised across
 drivers by the `tools/gates.sh` lock. A batch cut before another closed has
-the base merged into its branch just before its close (the files are
-disjoint, so it merges cleanly), because `close` only fast-forwards. The
+the base merged into its branch just before its close, because `close`
+only fast-forwards. The source files of two batches are disjoint, but
+every batch with passing oracle probes adds a case line after the same
+anchor in `oracle/CMakeLists.txt`, so the driver writes
+`oracle/CMakeLists.txt merge=union` once into the common git dir's
+`info/attributes` (only when that exact line is missing) and those lines
+merge as a union. If the base moves again while a close waits on the gate
+lock (the other queue's driver closed first), the close syncs, gates and
+tries once more before it raises a close exception. Workers run with a
+scrubbed environment: the variables that tie a process to the launching
+Claude Code session are dropped for every wrapper, and a wrapper other than
+`claude-glm` also loses the GLM endpoint, token and model variables. The
 deciding pool is recorded as `pool` in the batch's state entry, printed as
 a `- pool <name>` line in its ledger entry, and shown beside the batch in
 the scorecard.
@@ -284,8 +294,9 @@ The status file is
 - `pools`: `{<name>: {credits, budget, parked, stopped}}`. `credits` is
   this run's spend on the pool (a batch with unknown credits counts as the
   estimate), `budget` its `--budget-NAME` (null for none), `stopped` is
-  `"budget"` once the pool stopped, and `parked` is `{batch_id, at,
-  reason}`: the batch a 429 parked on that pool. A 429 parks only its own
+  `"budget"` once the pool stopped, and `parked` is `{<batch id>: {at,
+  reason}}`: the batches a 429 parked on that pool (a pool with several
+  workers can park several; a resume takes a batch off every pool's map). A 429 parks only its own
   pool; the other pools keep taking batches. This replaces the single
   top-level `parked` of the one-worker driver; a run still reads an old
   one once and moves it to its batch's pool.

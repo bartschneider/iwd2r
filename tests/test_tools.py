@@ -9827,7 +9827,7 @@ class DriverTest(unittest.TestCase):
     def test_rate_limited_worker_parks(self):
         d = self._driver(worker=_SeqWorker('', rate_limited=True))
         self.assertEqual(d.run_batch('b011'), 'parked')
-        self.assertEqual(self._status(d)['pools']['glm']['parked']['batch_id'], 'b011')
+        self.assertEqual(list(self._status(d)['pools']['glm']['parked']), ['b011'])
         self.assertEqual(self.sent, [])
         self.assertEqual(self._state()['status'], 'assigned')
 
@@ -10194,10 +10194,11 @@ class DriverTest(unittest.TestCase):
         self.assertEqual((self._rev('first'), self._rev('HEAD')), (first, root_head))
         self.assertEqual(self.git('status', '--porcelain').stdout, root_dirt)
         status = self._status(d)
-        self.assertEqual(set(status['pools']['glm']['parked']), {'batch_id', 'at', 'reason'})
-        self.assertEqual(status['pools']['glm']['parked']['batch_id'], 'b011')
-        self.assertIn('rate limited', status['pools']['glm']['parked']['reason'])
-        self.assertTrue(status['pools']['glm']['parked']['at'])
+        parked = status['pools']['glm']['parked']
+        self.assertEqual(list(parked), ['b011'])
+        self.assertEqual(set(parked['b011']), {'at', 'reason'})
+        self.assertIn('rate limited', parked['b011']['reason'])
+        self.assertTrue(parked['b011']['at'])
         self.assertIsNone(status['current'])
         self.assertEqual(status['batches']['b011']['outcome'], 'parked')
         self.assertEqual(self._state()['status'], 'assigned')
@@ -10484,10 +10485,10 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(d.run(), 1)
             self.assertEqual(len(cuts), 1)                  # no further cut
             status = self._status(d)
-            reason = status['pools']['glm']['parked']['reason']
+            reason = status['pools']['glm']['parked']['b011']['reason']
             self.assertTrue(reason.startswith('launch failed: %s: ' % label), reason)
             self.assertIn("'claude-glm'", reason)
-            self.assertEqual(status['pools']['glm']['parked']['batch_id'], 'b011')
+            self.assertEqual(list(status['pools']['glm']['parked']), ['b011'])
             self.assertEqual(status['halted']['reason'], reason)
             self.assertTrue(status['halted']['at'])
             self.assertEqual(status['exceptions'], {})
@@ -10648,8 +10649,8 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(d.run(), 1, name)
             self.assertEqual(len(cuts), 1, name)
             status = self._status(d)
-            self.assertEqual(status['pools']['glm']['parked']['batch_id'], 'b011')
-            self.assertEqual(status['pools']['glm']['parked']['reason'], 'api error: %s' % kind)
+            self.assertEqual(list(status['pools']['glm']['parked']), ['b011'])
+            self.assertEqual(status['pools']['glm']['parked']['b011']['reason'], 'api error: %s' % kind)
             self.assertEqual(status['halted']['reason'], 'api error: %s' % kind)
             self.assertEqual(status['exceptions'], {})
             self.assertEqual(len(self.sent), 1)
@@ -10770,13 +10771,16 @@ class DriverTest(unittest.TestCase):
     # A repo with `first` and one single-row batch per id, each with its own
     # address and a committed evidence file, so batches close in any order.
     def _pool_driver(self, pools, workers, ids=('b011', 'b012', 'b013'),
-                     reviewers=None, queue='wave1', **kw):
+                     reviewers=None, queue='wave1', base_files=None,
+                     on_branch=None, **kw):
         tmp = self._tmpdir()
         self.tmp = tmp
         self.root = os.path.join(tmp, 'repo')
         os.makedirs(self.root)
         self.git('init', '-q', '-b', 'first')
         _write(os.path.join(self.root, 'README'), 'x\n')
+        for rel, text in (base_files or {}).items():
+            _write(os.path.join(self.root, rel), text)
         self.git('add', '-A')
         self.git('commit', '-qm', 'base')
         batches = {}
@@ -10788,6 +10792,8 @@ class DriverTest(unittest.TestCase):
             _write(os.path.join(wt, 'docs', 'evidence', addr[2:] + '.md'),
                    f'---\naddress: {addr}\nname: F{n}\nkind: oracle\n---\n\n'
                    'corroborated by WSO at e8dd16a7\n')
+            if on_branch:
+                on_branch(wt, bid)
             self.git('add', '-A', cwd=wt)
             self.git('commit', '-qm', 'evidence ' + bid, cwd=wt)
             row = {'address': addr, 'name': 'F%d' % n, 'file': 'src/F%d.cpp' % n,
@@ -10888,8 +10894,7 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(d.run(), 3)
         self.assertEqual((wa.ids, wb.ids), (['b011'], ['b012', 'b013']))
         status = self._status(d)
-        parked = status['pools']['a']['parked']
-        self.assertEqual(parked['batch_id'], 'b011')
+        self.assertEqual(list(status['pools']['a']['parked']), ['b011'])
         self.assertIsNone(status['pools']['b']['parked'])
         self.assertIsNone(status['parked'])
         self.assertEqual(self.git('log', '-1', '--format=%s', 'p3/wso-b011').stdout.strip(),
@@ -11055,6 +11060,156 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             d.run()
         self.assertIn('b011', ran)
+
+    # -- fix round 1 (R64) ---------------------------------------------------
+
+    def test_two_429s_on_one_pool_resume_both_batches(self):
+        barrier = threading.Barrier(2, timeout=20)
+        w = self._BatchWorker(rate_limited=True, before=lambda cwd: barrier.wait())
+        pools = [driver.parse_pool('a=claude-glm:glm-5.3-flash[1m]:2')]
+        d = self._pool_driver(pools, {'a': w}, ids=('b011', 'b012'))
+        d._runner = None
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 3)
+        self.assertEqual(sorted(self._status(d)['pools']['a']['parked']),
+                         ['b011', 'b012'])
+        resume, code = d._leftovers()
+        self.assertEqual(sorted(r[0] for r in resume), ['b011', 'b012'])
+        w.rate_limited, w.before = False, None
+        d._runner = lambda fn: fn()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        with open(self.state_path) as f:
+            self.assertEqual({v['status'] for v in json.load(f)['batches'].values()},
+                             {'closed'})
+        self.assertIsNone(self._status(d)['pools']['a']['parked'])
+
+    def test_a_batch_parked_on_two_pools_resumes_once_and_clears_both(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools(), {'a': w, 'b': self._BatchWorker(credits=0.0)},
+                              ids=('b011',))
+        self._write_status(d, {'pools': {
+            'a': {'parked': {'b011': {'at': 't', 'reason': 'r'}}},
+            'b': {'parked': {'batch_id': 'b011', 'at': 't', 'reason': 'r'}}}})
+        resume, code = d._leftovers()
+        self.assertEqual([r[0] for r in resume], ['b011'])
+        self.pending[:] = []
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(w.ids, ['b011'])
+        pools = self._status(d)['pools']
+        self.assertEqual((pools['a']['parked'], pools['b']['parked']), (None, None))
+
+    def test_worker_env_is_scrubbed(self):
+        env = {'PATH': '/bin', 'HOME': '/h', 'ANTHROPIC_API_KEY': 'k',
+               'CLAUDE_CODE_CHILD_SESSION': '1', 'CLAUDE_CODE_MESSAGING_X': 'm',
+               'CLAUDE_CODE_SESSION_ID': 's', 'CLAUDE_CODE_ENTRYPOINT': 'cli',
+               'CLAUDE_CODE_EXECPATH': '/x', 'CLAUDE_PID': '9', 'CLAUDE_EFFORT': 'hi',
+               'ANTHROPIC_BASE_URL': 'u', 'ANTHROPIC_AUTH_TOKEN': 't',
+               'ANTHROPIC_DEFAULT_SONNET_MODEL': 'g', 'CLAUDE_GLM_FOO': 'x',
+               'CLAUDE_CODE_SUBAGENT_MODEL': 'g', 'CLAUDE_CODE_SUBAGENT_MODEL_X': 'g',
+               'CLAUDE_CONFIG_DIR': '/glm/cfg', 'CLAUDE_GLM_CONFIG_DIR': '/glm/cfg'}
+        session = {'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_MESSAGING_X',
+                   'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT',
+                   'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'CLAUDE_EFFORT'}
+        with mock.patch.dict(os.environ, env, clear=True):
+            _, e = driver.HeadlessWorker().command('B')          # claude-glm
+            self.assertFalse(session & set(e))
+            self.assertEqual(e['ANTHROPIC_BASE_URL'], 'u')
+            self.assertEqual(e['ANTHROPIC_DEFAULT_SONNET_MODEL'], 'g')
+            self.assertEqual(e['CLAUDE_GLM_MODEL'], 'glm-5.3-flash[1m]')
+            self.assertEqual(e['CLAUDE_CONFIG_DIR'], '/glm/cfg')
+            w = driver.HeadlessWorker(model='sonnet', wrapper='claude')
+            _, e = w.command('B')
+            self.assertEqual(sorted(e), ['ANTHROPIC_API_KEY', 'HOME', 'PATH'])
+            self.assertEqual(w.config_dir, os.path.expanduser('~/.claude'))
+        with mock.patch.dict(os.environ, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1'}, clear=True):
+            w = driver.HeadlessWorker(model='sonnet', wrapper='claude')
+            _, e = w.command('B')
+            self.assertEqual(e, {'CLAUDE_CONFIG_DIR': '/own/cfg', 'X': '1'})
+            self.assertEqual(w.config_dir, '/own/cfg')
+
+    def test_union_merge_attribute_lets_parallel_probe_lines_merge(self):
+        anchor = driver._tool('truth').CMAKE_ANCHOR
+
+        def edit(wt, bid):
+            path = os.path.join(wt, 'oracle', 'CMakeLists.txt')
+            with open(path) as f:
+                text = f.read()
+            with open(path, 'w') as f:
+                f.write(text.replace(anchor, anchor + '\n        cases/wave-%s.cpp' % bid, 1))
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011', 'b012'),
+                              base_files={'oracle/CMakeLists.txt': 'add(\n        %s\n        z.cpp)\n' % anchor},
+                              on_branch=edit)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        text = self.git('show', 'first:oracle/CMakeLists.txt').stdout
+        self.assertIn('cases/wave-b011.cpp', text)
+        self.assertIn('cases/wave-b012.cpp', text)
+        attrs = os.path.join(self.root, '.git', 'info', 'attributes')
+        d._union_merge_attributes()          # idempotent
+        with open(attrs) as f:
+            self.assertEqual(f.read().splitlines().count(d.UNION_LINE), 1)
+
+    def test_close_retries_once_when_the_base_moved_during_the_gate(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        real = d.close_batch
+        calls = []
+
+        def close(*a, **kw):
+            calls.append(1)
+            if len(calls) == 1:   # the other queue's driver wins the race
+                self.git('commit', '-q', '--allow-empty', '-m', 'other driver')
+            return real(*a, **kw)
+        d.close_batch = close
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(self.git('rev-parse', 'first').stdout,
+                         self.git('rev-parse', 'p3/wso-b011').stdout)
+        self.assertEqual(self._status(d)['exceptions'], {})
+
+    def test_halted_clears_at_run_start_and_stops_launches(self):
+        d = self._pool_driver(self._two_pools(), {'a': None, 'b': None}, ids=('b011', 'b012'))
+        self._write_status(d, {'halted': {'at': 't', 'reason': 'old'}})
+        ran = []
+
+        def run_batch(bid):
+            ran.append(bid)
+            d._halt = True       # as _halt_run does
+            return 'closed'
+        d.run_batch = run_batch
+        d.run()
+        self.assertEqual(ran, ['b011'])      # nothing launched after the halt
+        d2 = self._pool_driver(self._two_pools(), {'a': None, 'b': None}, ids=())
+        self._write_status(d2, {'halted': {'at': 't', 'reason': 'old'}})
+        self.assertEqual(d2.run(), 0)
+        self.assertIsNone(self._status(d2)['halted'])
+
+    def test_a_cut_failure_carries_no_figures_of_the_last_batch(self):
+        ticks = iter([1.0, 2.0, 3.0, 4.0])
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), clock=lambda: next(ticks))
+        cuts = iter([(0, self.CUT), (1, 'b012 not assigned: boom\n')])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        self.assertEqual(d.run(), 1)
+        self.assertIsNone(d._ctx.t0)
+        entry = self._status(d)['batches']['b012']
+        self.assertEqual(entry['outcome'], 'exception')
+        self.assertNotIn('wall', entry)
+        self.assertNotIn('tokens', entry)
+
+    def test_a_pending_resume_on_a_busy_pool_does_not_block_other_pools(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools(), {'a': None, 'b': w}, ids=('b011', 'b012'))
+        self.pending[:] = ['b012']
+        ran = []
+        d.run_batch = lambda bid: ran.append((bid, d._ctx.pool)) or 'closed'
+        d._init_pools()
+        d._busy['a'] = 1            # pool a is full, so b011 must wait
+        d._schedule([('b011', 'why', 'a')], [])
+        self.assertEqual(ran, [('b012', 'b')])
 
     # -- the second queue ------------------------------------------------------
 

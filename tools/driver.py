@@ -240,6 +240,43 @@ class FakeWorker:
         return Result(self.exit_code, self.report, None, None, self.rate_limited)
 
 
+# The worker's environment (ruling R64).  A driver launched from inside a
+# Claude Code session must not let its workers attach to that session, and
+# a plain-claude worker must not inherit the GLM wrapper's endpoint.
+SESSION_VARS = ('CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_ENTRYPOINT',
+                'CLAUDE_CODE_EXECPATH', 'CLAUDE_PID', 'CLAUDE_EFFORT')
+SESSION_PREFIXES = ('CLAUDE_CODE_MESSAGING_', 'CLAUDE_CODE_SESSION_')
+GLM_VARS = ('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN')
+GLM_PREFIXES = ('ANTHROPIC_DEFAULT_', 'CLAUDE_GLM_', 'CLAUDE_CODE_SUBAGENT_MODEL')
+
+
+def _glm_config_dir():
+    return os.environ.get('CLAUDE_GLM_CONFIG_DIR') or \
+        os.path.expanduser('~/.claude-glm')
+
+
+def _in_glm_config(path):
+    glm = os.path.realpath(_glm_config_dir())
+    real = os.path.realpath(path)
+    return real == glm or real.startswith(glm + os.sep)
+
+
+def worker_env(environ, glm):
+    """environ without the variables that tie a worker to the launching
+    session; for a wrapper other than claude-glm (glm False) also without
+    the GLM wrapper's endpoint, token and model settings.  Nothing is
+    added."""
+    env = dict(environ)
+    for k in list(env):
+        drop = k in SESSION_VARS or k.startswith(SESSION_PREFIXES)
+        if not glm:
+            drop = (drop or k in GLM_VARS or k.startswith(GLM_PREFIXES)
+                    or (k == 'CLAUDE_CONFIG_DIR' and _in_glm_config(env[k])))
+        if drop:
+            del env[k]
+    return env
+
+
 class HeadlessWorker:
     def __init__(self, model='glm-5.3-flash[1m]', max_turns=400,
                  wrapper='claude-glm', config_dir=None, run=subprocess.run):
@@ -254,15 +291,18 @@ class HeadlessWorker:
             else:
                 # A plain claude keeps its transcripts in ~/.claude (or
                 # CLAUDE_CONFIG_DIR), never in the GLM wrapper's folder.
-                config_dir = (os.environ.get('CLAUDE_CONFIG_DIR')
-                              or os.path.expanduser('~/.claude'))
+                cfg = os.environ.get('CLAUDE_CONFIG_DIR')
+                if not cfg or _in_glm_config(cfg):
+                    cfg = os.path.expanduser('~/.claude')
+                config_dir = cfg
         self.config_dir = config_dir
 
     def command(self, brief):
         argv = [self.wrapper, '-p', brief, '--output-format', 'json',
                 '--dangerously-skip-permissions', '--max-turns', str(self.max_turns)]
-        env = dict(os.environ)
-        if os.path.basename(self.wrapper) == 'claude-glm':
+        glm = os.path.basename(self.wrapper) == 'claude-glm'
+        env = worker_env(os.environ, glm)
+        if glm:
             env['CLAUDE_GLM_MODEL'] = self.model
         else:
             # A plain `claude` takes the model as a flag, and its
@@ -488,6 +528,32 @@ def pools_with_reviewers(pools, reviewer_models):
 def pool_is_glm(pool):
     """True when Z.ai credits price the pool's turns (ruling R40)."""
     return _rates(pool.model) is not None
+
+
+def parked_map(value):
+    """A pool's `parked` as {batch_id: {at, reason}} (ruling R64).  The
+    one-slot form `{batch_id, at, reason}` of the first pool driver, and
+    None, read as a map too."""
+    if not isinstance(value, dict) or not value:
+        return {}
+    if isinstance(value.get('batch_id'), str):
+        return {value['batch_id']: {'at': value.get('at'),
+                                    'reason': value.get('reason')}}
+    return {k: v for k, v in value.items() if isinstance(v, dict)}
+
+
+def _set_parked(holder, mapping):
+    holder['parked'] = dict(mapping) or None
+
+
+def _unpark_everywhere(s, batch_id):
+    """Remove batch_id from every pool's parked map (and the legacy
+    top-level slot)."""
+    for holder in [s] + [p for p in s['pools'].values() if isinstance(p, dict)]:
+        m = parked_map(holder.get('parked'))
+        if batch_id in m:
+            m.pop(batch_id)
+            _set_parked(holder, m)
 
 
 # -- the batch loop ------------------------------------------------------
@@ -987,13 +1053,7 @@ class Driver:
             s['current'] = ({'batch': left[-1][0], 'stage': left[-1][1].get('stage'),
                              'at': left[-1][1].get('at')} if left else None)
             if outcome != 'parked':
-                holders = [s] + [p for p in s['pools'].values()
-                                 if isinstance(p, dict)]
-                for holder in holders:
-                    parked = holder.get('parked')
-                    if isinstance(parked, dict) and \
-                            parked.get('batch_id') == batch_id:
-                        holder['parked'] = None
+                _unpark_everywhere(s, batch_id)
             if change:
                 change(s)
         self._update_status(apply)
@@ -1110,11 +1170,15 @@ class Driver:
         if err:
             extra['wip_error'] = err
             self.log('%s: WIP not committed: %s' % (batch_id, err))
-        parked = {'batch_id': batch_id, 'at': _now(), 'reason': reason}
+        parked = {'at': _now(), 'reason': reason}
         name = self._pool_name()
 
         def mark(s):
-            s['pools'].setdefault(name, {})['parked'] = parked
+            _unpark_everywhere(s, batch_id)
+            info = s['pools'].setdefault(name, {})
+            m = parked_map(info.get('parked'))
+            m[batch_id] = parked
+            _set_parked(info, m)
         self._finish(batch_id, 'parked', change=mark, **extra)
         self.log('%s: parked (%s)%s' % (
             batch_id, reason, '; WIP committed as %s' % wip[:8] if wip else ''))
@@ -1490,6 +1554,38 @@ class Driver:
                 batch['pool'] = name
                 _tool('wave').save_state(self.state_path, state)
 
+    UNION_LINE = 'oracle/CMakeLists.txt merge=union'
+
+    def _union_merge_attributes(self):
+        """Make oracle/CMakeLists.txt merge as a union (ruling R64): every
+        batch with passing probes adds its case line after the same anchor,
+        so parallel batches would conflict.  Written once, to the common git
+        dir's info/attributes, only when the exact line is missing."""
+        r = self._git('rev-parse', '--git-common-dir')
+        if r.returncode != 0 or not r.stdout.strip():
+            return
+        common = r.stdout.strip()
+        if not os.path.isabs(common):
+            common = os.path.join(self.repo, common)
+        path = os.path.join(common, 'info', 'attributes')
+        try:
+            with open(path, encoding='utf-8') as f:
+                text = f.read()
+        except FileNotFoundError:
+            text = ''
+        except OSError as e:
+            self.log('git attributes not read: %r' % (e,))
+            return
+        if self.UNION_LINE in text.splitlines():
+            return
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(('' if not text or text.endswith('\n') else '\n')
+                        + self.UNION_LINE + '\n')
+        except OSError as e:
+            self.log('git attributes not written: %r' % (e,))
+
     def _sync_branch(self, branch, worktree):
         """None, or why not: with batches in parallel the base may have
         moved since this branch was cut, and close only fast-forwards, so
@@ -1498,6 +1594,7 @@ class Driver:
         if self._git('merge-base', '--is-ancestor', self.base,
                      branch).returncode == 0:
             return None
+        self._union_merge_attributes()
         r = subprocess.run(['git', '-C', worktree, 'merge', '--no-edit', '-q',
                             self.base], capture_output=True, text=True)
         if r.returncode == 0:
@@ -1692,16 +1789,25 @@ class Driver:
         self._stage(batch_id, 'close')
         with self._lock:
             commits = self._commits(batch['branch'])
-            sync = self._sync_branch(batch['branch'], worktree)
-            if sync:
-                rc, text = 1, sync
-            else:
+            # Another driver may fast-forward the base while this one waits
+            # on the gate lock: on that error, and only after the gate
+            # passed, sync and gate once more in place (ruling R64).
+            for attempt in (0, 1):
+                sync = self._sync_branch(batch['branch'], worktree)
+                if sync:
+                    rc, text = 1, sync
+                    break
                 try:
                     rc, text = self.close_batch(
                         self.state_path, self.repo, batch_id, base=self.base,
                         gate=self.gate, kind=self.kind)
                 except Exception as e:
                     rc, text = 1, 'close_batch raised %r' % (e,)
+                if rc != 0 and attempt == 0 and 'not a fast-forward' in text:
+                    self.log('%s: %s moved during the gate; syncing and '
+                             'closing again' % (batch_id, self.base))
+                    continue
+                break
         if rc != 0:
             return self._exception(batch_id, 'close', [
                 l.strip() for l in text.splitlines() if l.strip()])
@@ -1869,15 +1975,17 @@ class Driver:
         batch it left in flight (the process died mid-batch)."""
         status = self._read_status()
         batches = self.load_state(self.state_path)['batches']
-        old = status['parked'] if isinstance(status['parked'], dict) else None
+        old = parked_map(status['parked'])
         if old:
-            owner = self._pool_or_first(
-                (batches.get(old.get('batch_id')) or {}).get('pool'))
-
             def migrate(s):
-                if isinstance(s['parked'], dict):
-                    s['pools'].setdefault(owner, {})['parked'] = s['parked']
-                    s['parked'] = None
+                for bid, info in parked_map(s['parked']).items():
+                    owner = self._pool_or_first(
+                        (batches.get(bid) or {}).get('pool'))
+                    pool = s['pools'].setdefault(owner, {})
+                    m = parked_map(pool.get('parked'))
+                    m.setdefault(bid, info)
+                    _set_parked(pool, m)
+                s['parked'] = None
             status = self._update_status(migrate)
         current = status['current'] if isinstance(status['current'], dict) else {}
         flying = {}
@@ -1894,25 +2002,26 @@ class Driver:
         resume = []
         parked_ids = set()
         for name, info in sorted(status['pools'].items()):
-            parked = info.get('parked') if isinstance(info, dict) else None
-            if not isinstance(parked, dict) or not parked.get('batch_id'):
+            if not isinstance(info, dict):
                 continue
-            pid = parked['batch_id']
-            parked_ids.add(pid)
-            st = batches.get(pid, {}).get('status')
-            if st == 'assigned':
-                resume.append((pid, 'was parked by the driver at %s (%s)' % (
-                    parked.get('at'), parked.get('reason')),
-                    self._pool_or_first(name)))
-            else:
-                def unpark(s, name=name, pid=pid):
-                    p = s['pools'].get(name)
-                    if isinstance(p, dict) and isinstance(p.get('parked'), dict) \
-                            and p['parked'].get('batch_id') == pid:
-                        p['parked'] = None
-                self._update_status(unpark)
-                self.log('%s was parked but is %s; parked cleared' % (
-                    pid, st or 'not in the wave state'))
+            for pid, parked in sorted(parked_map(info.get('parked')).items()):
+                if pid in parked_ids:   # named by two pools: resumed once
+                    continue
+                parked_ids.add(pid)
+                st = batches.get(pid, {}).get('status')
+                if st == 'assigned':
+                    named = (batches[pid].get('pool')
+                             if (batches[pid].get('pool') in status['pools']
+                                 and pid in parked_map(status['pools'][
+                                     batches[pid]['pool']].get('parked')))
+                             else name)
+                    resume.append((pid, 'was parked by the driver at %s (%s)' % (
+                        parked.get('at'), parked.get('reason')),
+                        self._pool_or_first(named)))
+                else:
+                    self._update_status(lambda s, pid=pid: _unpark_everywhere(s, pid))
+                    self.log('%s was parked but is %s; parked cleared' % (
+                        pid, st or 'not in the wave state'))
         for cur, info in sorted(flying.items()):
             if cur in parked_ids:
                 continue
@@ -1951,7 +2060,8 @@ class Driver:
         def init(s):
             for p in self.pools:
                 old = s['pools'].get(p.name)
-                parked = old.get('parked') if isinstance(old, dict) else None
+                parked = (parked_map(old.get('parked')) or None
+                          if isinstance(old, dict) else None)
                 s['pools'][p.name] = {
                     'credits': 0.0, 'budget': self.budgets.get(p.name),
                     'parked': parked, 'stopped': None}
@@ -1987,7 +2097,7 @@ class Driver:
             if self._busy[p.name] >= p.workers:
                 continue
             if p.name in self._parked_now or (
-                    isinstance(info, dict) and info.get('parked')):
+                    isinstance(info, dict) and parked_map(info.get('parked'))):
                 continue
             if self._pool_over_budget(p.name, status):
                 continue
@@ -2019,16 +2129,20 @@ class Driver:
                 self.log('send failed: %r' % (e,))
 
     def _one(self, batch_id, resume=None, pool=None):
-        """Run one batch on `pool` (clearing an earlier halt), count its
+        """Run one batch on `pool`, count its
         credits, and feed the breaker; an exit code when the run must
         stop, else None."""
         self._runs = []
         self._worker_ran = []
         self._ctx.pool = pool
-        if self._read_status()['halted'] is not None:
-            self._update_status(lambda s: s.__setitem__('halted', None))
-        out = (self.run_batch(batch_id, resume=resume) if resume
-               else self.run_batch(batch_id))
+        try:
+            out = (self.run_batch(batch_id, resume=resume) if resume
+                   else self.run_batch(batch_id))
+        finally:
+            # Nothing of this batch's figures may reach the next exception
+            # this thread writes (a cut failure has no batch).
+            self._ctx.t0 = None
+            self._ctx.final = None
         name = self._pool_name()
         if self._runs:
             credits = self._credits()
@@ -2036,10 +2150,9 @@ class Driver:
                 self._batch_credits.append(credits)
                 if name in self._pool_batch_credits:
                     self._pool_batch_credits[name].append(credits)
-            if name in self._pool_batch_credits:
-                spent = self._pool_spent(name)
-                self._update_status(lambda s: s['pools'].setdefault(name, {})
-                                    .__setitem__('credits', spent))
+                    spent = self._pool_spent(name)
+                    self._update_status(lambda s: s['pools'].setdefault(
+                        name, {}).__setitem__('credits', spent))
         if self._halt:
             return 1
         if out == 'parked':
@@ -2128,6 +2241,8 @@ class Driver:
         self._busy = {p.name: 0 for p in self.pools}
         self._parked_now = set()
         self._init_pools()
+        if self._read_status()['halted'] is not None:
+            self._update_status(lambda s: s.__setitem__('halted', None))
         if self._read_status()['stopped'] is not None:
             self._update_status(lambda s: s.__setitem__('stopped', None))
         resume, code = self._leftovers()
@@ -2196,6 +2311,8 @@ class Driver:
 
         def launch_next():
             nonlocal exhausted, cut_blocked, failure
+            if self._halt:
+                return False
             if pending:
                 with self._lock:
                     for i, (batch_id, why, name) in enumerate(pending):
@@ -2205,12 +2322,14 @@ class Driver:
                             self._busy[name] += 1
                             break
                     else:
-                        return False
-                # A resumed batch is in flight again, not parked.
-                self._update_status(lambda s: s['pools'].setdefault(name, {})
-                                    .__setitem__('parked', None))
-                launch(batch_id, why, name)
-                return True
+                        batch_id = None
+                if batch_id is not None:
+                    # A resumed batch is in flight again, not parked: off
+                    # every pool's map (ruling R64).
+                    self._update_status(lambda s: _unpark_everywhere(s, batch_id))
+                    launch(batch_id, why, name)
+                    return True
+                # Its pool is busy: the idle pools go on with new cuts.
             if exhausted is not None or cut_blocked:
                 return False
             if self._over_budget():
@@ -2239,23 +2358,26 @@ class Driver:
             launch(batch_id, None, name)
             return True
 
-        while True:
-            while reap(False):
-                pass
-            if failure is None and crash is None and launch_next():
-                continue
-            if running == 0:
-                break
-            reap(True)
-        for t in threads:
-            t.join()
+        try:
+            while True:
+                while reap(False):
+                    pass
+                if failure is None and crash is None and launch_next():
+                    continue
+                if running == 0:
+                    break
+                reap(True)
+        finally:
+            for t in threads:   # never leave a batch running past the run lock
+                t.join()
         if crash is not None:
             raise crash
         if failure:
             return failure
         status = self._read_status()
-        if self._parked_now or any(isinstance(p, dict) and p.get('parked')
-                                   for p in status['pools'].values()):
+        if self._parked_now or any(
+                isinstance(p, dict) and parked_map(p.get('parked'))
+                for p in status['pools'].values()):
             return 3
         return exhausted or 0
 
