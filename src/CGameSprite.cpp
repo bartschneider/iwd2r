@@ -25,6 +25,7 @@
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
 #include "CScreenMap.h"
+#include "CScreenStore.h"
 #include "CScreenWorld.h"
 #include "CScreenWorldMap.h"
 #include "CSpawn.h"
@@ -12385,7 +12386,30 @@ void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 // 0x723BF0
 void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)
 {
-    // TODO: Incomplete.
+    // dword_8E752C counts how many party members are currently hidden, so it
+    // only moves on a real transition.
+    if (field_70F2 == 1 && a1 == 0) {
+        // Coming back into view closes the store this station had open, but
+        // only for a character it controls.
+        if (a2 == TRUE
+            && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID)) {
+            g_pBaldurChitin->SelectEngine(g_pBaldurChitin->m_pEngineWorld);
+            g_pBaldurChitin->m_pEngineStore->StopStore();
+        }
+
+        CInfGame::dword_8E752C--;
+    } else if (field_70F2 == 0 && a1 == 1) {
+        CInfGame::dword_8E752C++;
+    }
+
+    if (CInfGame::dword_8E752C < 0) {
+        CInfGame::dword_8E752C = 0;
+    } else if (CInfGame::dword_8E752C > g_pBaldurChitin->GetObjectGame()->m_nCharacters) {
+        CInfGame::dword_8E752C = g_pBaldurChitin->GetObjectGame()->m_nCharacters;
+    }
+
+    field_70F2 = a1;
 }
 
 // 0x723CC0
