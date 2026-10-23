@@ -14785,6 +14785,69 @@ class TruthTest(unittest.TestCase):
         table = truth.hook_table(self.TYPED_ROWS[3:], self.TYPED_SIGS, self.TYPED_MAP, ['s'], headers)
         self.assertEqual(table['typed_from'], {'0x400': 'ghidra', '0x500': 'ghidra'})
 
+    def test_proto_type_typedefs(self):
+        self.assertEqual(truth._proto_type('POSITION'), 'ptr')
+        self.assertEqual(truth._proto_type('const RESREF'), 'ptr')
+        self.assertEqual(truth._proto_type('HWND'), 'ptr')
+        self.assertEqual(truth._proto_type('RESID'), 'u32')
+        self.assertEqual(truth._proto_type('WPARAM'), 'u32')
+        self.assertEqual(truth._proto_type('LRESULT'), 's32')
+        self.assertEqual(truth._proto_type('LONG_PTR'), 's32')
+        self.assertIsNone(truth._proto_type('CString'))
+
+    B019_HEADERS = ('class CGameEffectList {\npublic:\n'
+                    '    void RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSITION posLeave, LONG effectAmount);\n'
+                    '    void Take(CString s, RESREF resref, DWORD n);\n};\n')
+
+    def test_typed_from_headers_takes_ghidra_type_for_unknown_slot(self):
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::RemoveAllOfType', 4, 'thiscall',
+                                        ['u32', 'u16', 'u32', 's32'], None)
+        self.assertEqual(got[:3], ('thiscall', ['ptr', 'u16', 'ptr', 's32'], None))
+        self.assertFalse(got[4])
+        # a class by value with Ghidra's slot count: the slot takes Ghidra's type, the row is mixed
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall',
+                                        ['u32', 'ptr', 'u32'], None)
+        self.assertEqual((got[1], got[3], got[4]), (['u32', 'ptr', 'u32'], ['ghidra', 'ours', 'ours'], True))
+        # a different count rejects it
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 2, 'thiscall',
+                                                    ['u32', 'ptr'], None))
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall'))
+
+    def test_hook_table_mixed_typing_and_slots(self):
+        m = ' 0001:00001000       ?Take@CGameEffectList@@QAEXPAEK@Z 00401000 f a.obj\n'
+        rows = [{'address': '0x100', 'name': 'CGameEffectList::Take'}]
+        table = truth.hook_table(rows, {'0x100': 'void Take(uint a, byte *b, uint c)'}, m, ['s'], self.B019_HEADERS)
+        self.assertEqual(table['typed_from'], {'0x100': 'mixed'})
+        self.assertEqual(table['typed_slots'], {'0x100': ['ghidra', 'ours', 'ours']})
+
+    B019_ORIG = [{'tag': 'fn_100', 'a0_u32': 91363456, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+    B019_OURS = [{'tag': 'fn_100', 'a0_u32': 145435200, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+
+    def test_address_like_untyped_argument_is_not_measured(self):
+        rows = [{'address': '0x100', 'name': 'X'}]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'], ('not measured', 'address-like untyped argument a0 (91363456 vs 145435200); '
+                                                    'type it from the header'))
+        # exact slots of a mixed row
+        info = {'typed_from': {'0x100': 'mixed'}, 'typed_slots': {'0x100': ['ghidra', 'ours', 'ours', 'ours']}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'not measured')
+        # header-typed slot stays different
+        info = {'typed_from': {'0x100': 'ours'}, 'typed_slots': {'0x100': ['ours'] * 4}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'different')
+        # another field differing too, or a non-address value, stays different
+        other = [dict(self.B019_OURS[0], a1_u32=143)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, other)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        small = [dict(self.B019_OURS[0], a0_u32=5)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, small)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        only1 = [dict(self.B019_ORIG[0], a1_u32=142)]
+        v = truth.frida_verdicts({'s': ([dict(self.B019_ORIG[0], a1_u32=142)], [dict(self.B019_ORIG[0], a1_u32=143)])},
+                                 rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+
     def test_ours_env_runs_under_replay_clock(self):
         env = probe.ours_env('C:\\game', 7)
         self.assertEqual(env['IWD2R_SEED'], '7')
