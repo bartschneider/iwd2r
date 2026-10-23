@@ -601,6 +601,51 @@ Added by thierbig on 2026-10-23. It runs after Task 14 and before Task 13. Sever
   - the fact that a 429 parks one pool only.
 - [ ] **Step 6: Commit** `driver: worker pools with per-pool budget and park, a second queue for the import list`
 
+### Task 16: rules as code
+
+Added by thierbig on 2026-10-23. It runs after Task 15 and before Task 13. Nothing procedural stays in markdown: each rule becomes a refusal, a flag or a test.
+
+**Files:**
+- Create: `tools/attempt.py`, the launch counter shared by both launchers
+- Modify: `tools/wave.py` (`close_batch`, `_fast_forward`, new `_sync_base`), `tools/driver.py` (`transcript_checks`, `mechanical_checks`, WIP before the gate), `tools/gltrace.py` and `tools/winsandbox.py` with its CLI `tools/play.py` (`--new-attempt`), `docs/wso/brief-template.md`, `docs/wso/README.md`
+- Test: `tests/test_tools.py` (`WaveCloseRulesTest`, `DriverTest`, `AttemptTest`)
+
+**Interfaces:**
+- Produces:
+  - **(a) Probe before import.** `close_batch(..., allow_dump=None, ledger_path=None)` refuses each `fork` or `neither` verdict whose case id is a dump reading (`deciding_kind(case) == 'dump reading'`, i.e. `dump-*` or `readout-*`). The refusal reads `<addr>: a fork/neither verdict decided by a dump reading (<case>); probe before import, or --allow-dump <ruling id>`. `wave.py close <id> --allow-dump RULING --ledger PATH` lifts the refusal only when PATH has a line starting `Ruling <RULING>`, and close prints the ruling it used; an unknown id refuses.
+  - **(b) Transcript checks.** `driver.transcript_checks(transcript_path, covered_files) -> list[str]` reads the worker's JSONL transcript (`tool_use` blocks of assistant messages) and returns one problem per offending call:
+    - a `git` command naming a `wso/` ref (`git show wso/main:...`, `git show wso/x`, `git diff wso/...`, `git log wso/...`); the pinned sha is allowed;
+    - a whole-file read of a covered `src/*.cpp`: a `Read` with no `limit` or `limit > 200`; `cat` of the file; `sed -n 'A,Bp'` with `B-A+1 > 200`; `head`/`tail -n N` with `N > 200`;
+    - a launch of a `.wsb`, `WindowsSandbox`, or `Start-Process` from any command that is not a house runner. `HOUSE_RUNNERS = ('tools/play.py', 'tools/gltrace.py')`, invoked as `python3 -I <runner>`.
+    
+    `mechanical_checks(..., transcript=None, covered_files=())` appends these problems.
+  - **(c) Launch limit.** `attempt.launch(folder, tool, limit=2) -> str|None` reads or creates `<folder>/attempt.json` = `{launches, limit, history: [{at, reason}]}`. It increments `launches`, or returns the refusal `launch limit reached (2 of 2) for this attempt; rerun with --new-attempt "<why>"` without launching. `attempt.reset(folder, reason)` zeroes `launches` and appends `{at, reason}` to `history`. Writes are atomic (temp file plus `os.replace`). The folder is the runs root each launcher creates its per-launch folders under: gltrace's `RUNS`, and for winsandbox the parent of the `run_dir` or `host_run` it is given (ruling R16). The `--new-attempt REASON` flag goes on `gltrace.py` and `play.py`.
+  - **(d) Sync before merge, WIP before gate.** `wave._sync_base(repo, base)` runs `git pull --ff-only` in the worktree that has `base` checked out (found with `worktree_for`). A failed pull refuses with git's message. `close_batch` calls it before the fast-forward. When `base` is checked out in a worktree, `_fast_forward` moves it with `git -C <wt> merge --ff-only <branch>`, so the checkout follows the ref; `update-ref` is used only when no worktree has `base` checked out. A merge that is not a fast-forward after the pull refuses, and a close whose batch worktree has uncommitted paths already refuses. Before calling `close_batch`, the `Driver` commits WIP in the batch worktree (`WIP: before gate`), and it runs `_sync_base` before any merge it makes.
+  - **(e) The brief and the README.** `docs/wso/brief-template.md` shrinks to what a worker needs to decide rows: the rows, the bundle, the verdict grammar, the evidence phrases and kinds. Every procedural sentence that (a)-(d) or an earlier task now checks is deleted. `docs/wso/README.md` gains the line: `A rule that is not a check, a flag or a test is not a rule.`
+
+- [ ] **Step 1: Write the failing tests.** Use temp repos with a local bare upstream, plus fixture JSONL transcripts written by the tests; never the real wave-state.json and never a real launch.
+  - `test_close_refuses_dump_decided_fork_verdict`;
+  - `test_close_refuses_dump_decided_neither_verdict`;
+  - `test_close_allow_dump_needs_a_ledger_ruling` (an unknown id refuses, a known one passes and is printed);
+  - `test_close_pulls_before_fast_forward` (an upstream commit is pulled first);
+  - `test_close_refuses_when_base_diverged`;
+  - `test_fast_forward_moves_checked_out_base` (the checkout follows the ref);
+  - `test_transcript_rejects_wso_ref`;
+  - `test_transcript_allows_pinned_sha`;
+  - `test_transcript_rejects_whole_read_of_covered_file` (Read with no limit, `cat`, a `sed -n` span of 201 lines);
+  - `test_transcript_allows_short_read`;
+  - `test_transcript_rejects_wsb_launch_outside_runners`;
+  - `test_transcript_allows_house_runner`;
+  - `test_mechanical_checks_include_transcript_problems`;
+  - `test_driver_commits_wip_before_gate`;
+  - `test_attempt_refuses_third_launch`;
+  - `test_new_attempt_resets_and_records_reason`.
+- [ ] **Step 2: Run, see them fail**
+- [ ] **Step 3: Implement**
+- [ ] **Step 4: Run, see them pass**; the full tool suite; then `tools/gates.sh --base iwd2r/main`
+- [ ] **Step 5: The brief and the README.** In the commit message, list every brief sentence deleted and the check that replaced it. The README line goes into the "Running the batches" section.
+- [ ] **Step 6: Commit** `rules as code: dump-verdict refusal, transcript checks, launch limit, sync before merge`
+
 ### Task 13: first real batch under watch
 
 **Files:** none new.
