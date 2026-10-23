@@ -8939,5 +8939,100 @@ class WaveTriageTest(unittest.TestCase):
                       'replay checkpoint 0, dump reading 0, trace 0, triage 1', text)
 
 
+    def _bundle_state(self):
+        def row(a, **kw):
+            r = self.disagreement(a)
+            r.update(kw)
+            return r
+        rows = [row('0x402000', **{'class': 'ambiguous'}),
+                row('0x401000', **{'class': 'rename-only'}),
+                row('0x403000'), row('0x404000')]
+        self.wave.save_state(self.state_path, {'fork_base': self.FORK, 'batches': {
+            'b001': {'rows': rows, 'files': ['src/A.cpp'], 'branch': 'p3/wso-b001',
+                     'status': 'assigned', 'assigned_at': 't', 'verdicts': {
+                         '0x404000': {'side': 'ours', 'case': 'probe-1',
+                                      'losing_kind': 'trace'}}}}})
+
+    def test_render_brief_fills_bundle_paths(self):
+        self._bundle_state()
+        template = os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')
+        calls = []
+
+        def stub(addr):
+            calls.append(addr)
+            return 'bundle for %#x\n' % addr
+        out_dir = os.path.join(self.tmp, 'bundles')
+        rc, brief = self.wave.render_brief(
+            template, self.state_path, 'b001', bundle_dir=out_dir, bundle_fn=stub)
+        self.assertEqual(rc, 0, brief)
+        # Ambiguous plus unclassed-without-verdict; not auto, not decided.
+        self.assertEqual(sorted(calls), [0x402000, 0x403000])
+        for a in ('0x402000', '0x403000'):
+            path = os.path.join(out_dir, a + '.md')
+            self.assertIn(path, brief)
+            with open(path) as f:
+                self.assertEqual(f.read(), 'bundle for %s\n' % a.lower())
+        self.assertNotIn('0x401000.md', brief)
+        self.assertNotIn('0x404000.md', brief)
+        self.assertNotIn('{{', brief)
+        rc, brief = self.wave.render_brief(
+            template, self.state_path, 'b001', bundle_fn=stub)
+        self.assertEqual(rc, 0, brief)
+        self.assertIn('(no bundles)', brief)
+
+    def test_brief_template_has_verdict_grammar(self):
+        with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
+            text = f.read()
+        self.assertIn('{{bundle}}', text)
+        self.assertIn('3. **Bundles first.** Read the bundle for a function '
+                      'before its source; do not read a whole `src/*.cpp` the '
+                      'bundle covers.', text)
+        self.assertIn('## Verdicts', text)
+        self.assertIn('verdict <0xADDR> <fork|ours|neither> case <id>', text)
+        nums = re.findall(r'^(\d+)\. \*\*', text, re.M)
+        self.assertEqual(nums, [str(i) for i in range(1, len(nums) + 1)])
+
+    def test_scorecard_measured_column(self):
+        def v(side, case, measured=None):
+            d = {'side': side, 'case': case, 'losing_kind': None}
+            if measured:
+                d['measured'] = measured
+            return d
+        state = {'batches': {'b001': {
+            'rows': [{}] * 4, 'status': 'closed', 'verdicts': {
+                '0x1': v('ours', 'probe-1', 'probe'),
+                '0x2': v('ours', 'probe-2', 'frida'),
+                '0x3': v('ours', 'replay-1', 'replay'),
+                '0x4': v('fork', 'dump-1')}}}}
+        text = self.wave.scorecard_text(state)
+        self.assertIn('measured: probe 1, frida 1, replay 1, none 0', text)
+        self.assertIn('measured: probe 0, frida 0, replay 0, none 1', text)
+        self.assertEqual(text.count('measured: '), 2)
+
+    def test_write_scorecard_appends_calibration_once(self):
+        self.write_state()
+        report = os.path.join(self.tmp, 'report.md')
+        with open(report, 'w') as f:
+            f.write('# R\n\n## Scorecard\n\nold\n\n## Triage calibration\n\nkeep\n')
+        rc, out = self.wave.write_scorecard(
+            self.state_path, report, triage_path=self.triage_path)
+        self.assertEqual(rc, 0, out)
+        with open(report) as f:
+            text = f.read()
+        self.assertEqual(text.count('## Triage calibration'), 1)
+        self.assertIn('computed from triage.json classes over closed verdicts', text)
+        self.assertIn('rename-only', text)
+        self.assertIn('keep', text)
+        self.wave.write_scorecard(self.state_path, report,
+                                  triage_path=self.triage_path)
+        with open(report) as f:
+            self.assertEqual(f.read(), text)
+        # No triage.json: no calibration block.
+        rc, out = self.wave.write_scorecard(
+            self.state_path, report,
+            triage_path=os.path.join(self.tmp, 'absent.json'))
+        with open(report) as f:
+            self.assertNotIn('computed from triage.json', f.read())
+
 if __name__ == '__main__':
     unittest.main()

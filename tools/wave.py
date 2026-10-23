@@ -148,6 +148,24 @@ def _triage():
     return _triage_module
 
 
+_assemble_module = None
+
+
+def _assemble_bundle(address):
+    """assemble_context.bundle, loaded by path (tools/ is not on sys.path
+    under -I)."""
+    global _assemble_module
+    if _assemble_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'assemble_context',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         'assemble_context.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _assemble_module = module
+    return _assemble_module.bundle(address)
+
+
 # -- next ---------------------------------------------------------------
 
 def default_worktree_root(repo=ROOT):
@@ -482,9 +500,11 @@ def apply_triage(state_path, repo, batch_id, triage_path, fork_base,
 # -- brief --------------------------------------------------------------
 
 def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
-                 batch_id=None):
+                 batch_id=None, bundle_dir=None, bundle_fn=_assemble_bundle):
     """Fill brief-template.md for one batch; the coordinator dispatches
-    the result verbatim."""
+    the result verbatim.  With bundle_dir, a context bundle is written
+    per row the worker must decide (class ambiguous, or no class and no
+    verdict yet) and {{bundle}} lists the paths."""
     state = load_state(state_path)
     batch = state['batches'].get(batch_id or '')
     if batch is None:
@@ -500,13 +520,29 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
         for i, r in enumerate(batch['rows'], 1))
     files = '\n'.join(f'- `{f}`' for f in batch['files'])
     fork_base = str(state.get('fork_base') or DEFAULT_FORK_BASE)
+    bundle = '(no bundles)'
+    if bundle_dir:
+        decided = batch.get('verdicts', {})
+        paths = []
+        for r in batch['rows']:
+            cls = r.get('class')
+            if cls != 'ambiguous' and not (
+                    cls is None and r['address'] not in decided):
+                continue
+            os.makedirs(bundle_dir, exist_ok=True)
+            path = os.path.join(bundle_dir, f'{r["address"]}.md')
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(bundle_fn(int(r['address'], 16)))
+            paths.append(f'- `{path}`')
+        bundle = '\n'.join(paths) or '(no bundles)'
     brief = (template
              .replace('{{id}}', batch_id)
              .replace('{{branch}}', batch['branch'])
              .replace('{{fork_base}}', fork_base)
              .replace('{{size}}', str(len(batch['rows'])))
              .replace('{{files}}', files)
-             .replace('{{rows}}', rows))
+             .replace('{{rows}}', rows)
+             .replace('{{bundle}}', bundle))
     return 0, brief
 
 
@@ -734,6 +770,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
 # -- scorecard -----------------------------------------------------------
 
 SCORECARD_HEAD = '## Scorecard'
+# How a verdict was measured (verdict['measured'], default none).
+MEASURED_ORDER = ('probe', 'frida', 'replay', 'none')
 # Deciding-evidence buckets, in display order -- strongest verification
 # first, the way DISPLAY_ORDER orders the losing kinds; triage (an auto
 # verdict from the two bodies' text) comes last.  A verdict's free-form
@@ -774,6 +812,7 @@ def scorecard_text(state):
     kinds = {s: {} for s in SIDES}
     deciding = {s: {} for s in SIDES}
     every = {}
+    measured = {s: {} for s in SIDES}
     total = 0
     batches = []
     for bid, b in sorted(state['batches'].items()):
@@ -786,6 +825,8 @@ def scorecard_text(state):
             d = deciding_kind(v.get('case', ''))
             deciding[v['side']][d] = deciding[v['side']].get(d, 0) + 1
             every[d] = every.get(d, 0) + 1
+            m = v.get('measured', 'none')
+            measured[v['side']][m] = measured[v['side']].get(m, 0) + 1
         batches.append(f'{bid} {b["status"]} ({len(b["rows"])} rows)')
 
     def split(side):
@@ -803,6 +844,13 @@ def scorecard_text(state):
         return (' -- deciding evidence: '
                 + ', '.join(f'{k} {ks[k]}' for k in DECIDING_ORDER if k in ks))
 
+    def by_measured(side):
+        if not sides[side]:
+            return ''
+        return ('; measured: '
+                + ', '.join(f'{k} {measured[side].get(k, 0)}'
+                            for k in MEASURED_ORDER))
+
     lines = [
         SCORECARD_HEAD,
         '',
@@ -811,11 +859,11 @@ def scorecard_text(state):
         '`python3 tools/wave.py scorecard`):',
         '',
         f'Decided for the fork: {sides["fork"]}{split("fork")}'
-        f'{by_deciding("fork")}',
+        f'{by_deciding("fork")}{by_measured("fork")}',
         f'Decided for ours: {sides["ours"]}{split("ours")}'
-        f'{by_deciding("ours")}',
+        f'{by_deciding("ours")}{by_measured("ours")}',
         f'Decided for neither: {sides["neither"]}{split("neither")}'
-        f'{by_deciding("neither")}',
+        f'{by_deciding("neither")}{by_measured("neither")}',
         f'Deciding evidence across all {total} verdicts: '
         + ', '.join(f'{k} {every.get(k, 0)}' for k in DECIDING_ORDER),
     ]
@@ -824,11 +872,24 @@ def scorecard_text(state):
     return '\n'.join(lines) + '\n'
 
 
-def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH):
+def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
+                    triage_path=TRIAGE_PATH):
     """Replace (or append) the '## Scorecard' section of the report.
-    Idempotent: the same state writes the same bytes."""
+    Idempotent: the same state writes the same bytes.  When triage.json
+    exists the section ends with a labelled calibration block (the
+    separate '## Triage calibration' section stays triage.py's)."""
     state = load_state(state_path)
     section = scorecard_text(state)
+    if os.path.exists(triage_path):
+        rows, err = _load_list(triage_path, 'triage')
+        if err:
+            return 2, err
+        tri = _triage()
+        section += ('\nCalibration, computed from triage.json classes over '
+                    'closed verdicts:\n\n'
+                    + tri.calibration_text(tri.calibrate(state, rows)))
+        if not section.endswith('\n'):
+            section += '\n'
     try:
         with open(report_path, encoding='utf-8') as f:
             text = f.read()

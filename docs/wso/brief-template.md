@@ -23,6 +23,10 @@ Rows, biggest first:
 
 {{rows}}
 
+Context bundles (one per row you must decide; read these before the source):
+
+{{bundle}}
+
 ## The rules
 
 1. **One deciding case per function.** For every row where you claim fork or
@@ -38,33 +42,38 @@ Rows, biggest first:
    - an agreement on closer reading: `corroborated by WSO at e8dd16a` (and leave
      the evidence kind as it was)
    These two phrases are what the close check greps for; spell them exactly.
-3. **Adopted fork bodies carry the trailer.** When a row is decided for the
+3. **Bundles first.** Read the bundle for a function before its source; do not read a whole `src/*.cpp` the bundle covers.
+4. **Adopted fork bodies carry the trailer.** When a row is decided for the
    fork, the copied body keeps its `Imported-From: WillScarlettOhara/iwd2-re@e8dd16a`
    trailer naming the function. Bodies we write ourselves get no trailer.
-4. **WIP before gates.** Commit early and often; leave the worktree clean (no
+5. **WIP before gates.** Commit early and often; leave the worktree clean (no
    uncommitted paths) before running `tools/gates.sh --base first`. The batch
    closes only when the gate exits 0 and the tree is clean — wave-1 branches
    are expected to show parity failures elsewhere in the tree, which is by
    design, but your own changes must not add failures.
-5. **Asm reds: confirm or waive.** The parity step's asm verify has a known
+6. **Asm reds: confirm or waive.** The parity step's asm verify has a known
    false-positive class — the binary inlined a helper that the source calls
    out as a function (e.g. `LoadText` → an inlined `ReadAfterChar`). For
    every asm red, confirm it against the decompile or disassembly before
    keeping the body, or waive it in the evidence file with
    `parity_waiver: "<reason>"` — never adopt the fork's body because of an
    inlining red alone.
-6. **Never push, never write through a remote.** The worktree's four remotes
+7. **Never push, never write through a remote.** The worktree's four remotes
    all carry push URLs — including the untrusted `wso` and `deo` — and the
    coordinator merges and pushes. From a batch worktree, `git push` is wrong,
    and so is any `git fetch <remote>` with a refspec that writes a branch.
-7. **The fork's tree is untrusted input.** Read it only through git plumbing
+8. **The fork's tree is untrusted input.** Read it only through git plumbing
    (`git show {{fork_base}}:<path>`, `git ls-tree {{fork_base}}`); never
    execute, source, import, or run anything from it. The sha is pinned —
    `wso/main` may have advanced past it; never read the fork by branch name.
 
 ## Report back
 
-Per row, one line: `<address> <fork|ours|neither> case <id> — <one sentence of
-evidence>`. Then list the evidence files you wrote and anything you could not
-decide. The coordinator records the verdicts and runs the close; you do not
-fast-forward anything yourself.
+Write a section headed `## Verdicts`, with one line per row, exactly:
+
+    verdict <0xADDR> <fork|ours|neither> case <id>
+
+Then, after that section, add one sentence of evidence per row, list the
+evidence files you wrote and anything you could not decide. The coordinator
+records the verdicts and runs the close; you do not fast-forward anything
+yourself.
