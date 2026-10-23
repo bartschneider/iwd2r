@@ -11460,7 +11460,20 @@ BOOL CGameSprite::sub_7202E0()
 // 0x720310
 void CGameSprite::CheckSequence(BYTE& sequence)
 {
-    // TODO: Incomplete.
+    if (sequence != CGAMESPRITE_SEQ_SHOOT && sequence != CGAMESPRITE_SEQ_ATTACK) {
+        return;
+    }
+
+    CItem* item = m_equipment.m_items[m_equipment.m_selectedWeapon];
+    if (item != NULL) {
+        item->Demand();
+        if (item->GetAbility(m_equipment.m_selectedWeaponAbility) == NULL) {
+            sequence = static_cast<BYTE>(GetIdleSequence());
+        }
+        item->Release();
+    } else {
+        sequence = static_cast<BYTE>(GetIdleSequence());
+    }
 }
 
 // 0x7204C0
