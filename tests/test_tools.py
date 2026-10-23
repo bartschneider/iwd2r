@@ -7090,6 +7090,10 @@ class FridaProbeTest(unittest.TestCase):
         play.build_windows_x86(build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe',
                                checkout='/mnt/c/b', log_path='/l')
         self.assertEqual((calls[0]['checkout'], calls[0]['log_path']), ('/mnt/c/b', '/l'))
+        calls.clear()
+        play.build_windows_x86(build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe',
+                               target='iwd2r iwd2r_recorder')
+        self.assertEqual(calls[0]['target'], 'iwd2r iwd2r_recorder')
 
     def test_ours_runs_the_build_checkout_it_is_given(self):
         probe = load_tool('frida/probe')
@@ -7097,7 +7101,11 @@ class FridaProbeTest(unittest.TestCase):
                          os.path.join('/mnt/c/b', probe.OURS_EXE_REL))
         self.assertEqual(probe.ours_build('ours'),
                          os.path.join(play.WIN_CHECKOUT, probe.OURS_EXE_REL))
+        # the original side's injector and recorder come from the same
+        # checkout, so both sides' dumps follow the same schema.json
         self.assertEqual(probe.ours_build('original', '/mnt/c/b'),
+                         os.path.join('/mnt/c/b', load_tool('oracle').REPLAY_DIR_REL))
+        self.assertEqual(probe.ours_build('original'),
                          os.path.join(play.WIN_CHECKOUT, load_tool('oracle').REPLAY_DIR_REL))
 
 
@@ -10568,6 +10576,17 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(calls, [1])
         self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
 
+    @staticmethod
+    def _stage_oracle_tools(checkout):
+        """The injector and recorder an x86 build leaves under checkout, as
+        empty files (the original side of a Frida pair runs them)."""
+        oracle = driver._tool('oracle')
+        folder = os.path.join(checkout, oracle.REPLAY_DIR_REL)
+        os.makedirs(folder, exist_ok=True)
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            with open(os.path.join(folder, name), 'w'):
+                pass
+
     def _frida_builder(self, map_text=None):
         """(builder, calls, checkout): a fake per-batch x86 build whose map
         sits where the x86 build writes it, under a fake Windows checkout."""
@@ -10665,6 +10684,28 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d._frida_got['401000'][0], 'scenario failed')
         self.assertTrue(any(f.startswith('0x401000:') and 'park it' in f for f in findings), findings)
 
+    def test_driver_frida_dumps_the_schema_refuses_are_an_exception(self):
+        # a recorder (or our dumper) out of step with schema.json makes every
+        # scenario's dumps uncomparable: tooling, not the rows; nothing parks
+        d, batch = self._import_phase_driver()
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        out['world_entry']['dumps'] = {
+            'match': None, 'invalid': {'original': 24},
+            'detail': "the original's dumps fail oracle/replay/schema.json (24 of 114; first: "
+                      "checkpoint-world.json: $.world: missing required property 'enemy_creatures')"}
+        d.frida_run = lambda *a, **kw: dict(out)
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn("world_entry: the original's dumps fail oracle/replay/schema.json",
+                      cm.exception.problem)
+        self.assertIn('no row was measured, parked or rewritten', cm.exception.problem)
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=self.wt).stdout, before)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+
     def test_driver_frida_map_override_measures_the_build_beside_it(self):
         d, batch = self._import_phase_driver()
         _build, _calls, checkout = self._frida_builder(self.IMPORT_MAP)
@@ -10672,6 +10713,14 @@ class DriverTest(unittest.TestCase):
         d.frida_map = os.path.join(checkout, driver.X86_MAP_REL)
         seen = []
         d.frida_run = lambda b, table, scenarios, build_checkout=None: seen.append(build_checkout) or {}
+        # the original side runs the injector and recorder beside the map:
+        # without them the override measures nothing (the batch's exception)
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('no %s beside it' % os.path.join(
+            checkout, driver._tool('oracle').REPLAY_DIR_REL, 'injector.exe'), cm.exception.problem)
+        self.assertEqual(seen, [])
+        self._stage_oracle_tools(checkout)
         d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(seen, [checkout])
         # a map that is not where an x86 build puts it measures nothing: the
@@ -10687,23 +10736,33 @@ class DriverTest(unittest.TestCase):
 
     def test_frida_build_uses_the_worktrees_own_checkout(self):
         play = driver._tool('play')
+        oracle = driver._tool('oracle')
         calls = []
-        out = os.path.join(tempfile.mkdtemp(), 'iwd2r.exe')
-        self.addCleanup(shutil.rmtree, os.path.dirname(out), True)
-        open(os.path.splitext(out)[0] + '.map', 'w').close()
-        with mock.patch.object(play, 'sync_windows',
-                               lambda **kw: calls.append(('sync', kw))), \
+        base = os.path.join(tempfile.mkdtemp(), 'iwd2r-build')
+        self.addCleanup(shutil.rmtree, os.path.dirname(base), True)
+        want = base + '-p3-wso-i009'
+        out = os.path.join(want, driver.X86_MAP_REL[:-len('.map')] + '.exe')
+        _write(os.path.splitext(out)[0] + '.map', '')
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            _write(os.path.join(want, oracle.REPLAY_DIR_REL, name), '')
+        with mock.patch.object(play, 'WIN_BUILD_BASE', base), \
+                mock.patch.object(play, 'sync_windows',
+                                  lambda **kw: calls.append(('sync', kw))), \
                 mock.patch.object(play, 'build_windows_x86',
                                   lambda **kw: calls.append(('build', kw)) or out), \
                 mock.patch.dict(os.environ, {'IWD2R_WIN_CHECKOUT': '/mnt/c/driver-checkout'}):
             got = driver.frida_build('/home/x/wt/p3-wso-i009', log_path='/l/b.log')
-        want = play.WIN_BUILD_BASE + '-p3-wso-i009'
-        self.assertEqual(got, (want, os.path.splitext(out)[0] + '.map'))
-        self.assertEqual(calls, [('sync', {'root': '/home/x/wt/p3-wso-i009', 'checkout': want}),
-                                 ('build', {'checkout': want, 'log_path': '/l/b.log'})])
-        os.unlink(os.path.splitext(out)[0] + '.map')
-        with mock.patch.object(play, 'sync_windows', lambda **kw: None), \
-                mock.patch.object(play, 'build_windows_x86', lambda **kw: out):
+            self.assertEqual(got, (want, os.path.splitext(out)[0] + '.map'))
+            # ours, and the injector and recorder the original side runs: the
+            # recorder built from the same tree as our dumper
+            self.assertEqual(calls, [('sync', {'root': '/home/x/wt/p3-wso-i009', 'checkout': want}),
+                                     ('build', {'checkout': want, 'log_path': '/l/b.log',
+                                                'target': 'iwd2r iwd2r_injector iwd2r_recorder'})])
+            os.unlink(os.path.join(want, oracle.REPLAY_DIR_REL, oracle.RECORDER))
+            with self.assertRaises(RuntimeError) as cm:
+                driver.frida_build('/home/x/wt/p3-wso-i009')
+            self.assertIn(oracle.RECORDER, str(cm.exception))
+            os.unlink(os.path.splitext(out)[0] + '.map')
             with self.assertRaises(RuntimeError):
                 driver.frida_build('/home/x/wt/p3-wso-i009')
 
@@ -14897,31 +14956,116 @@ class TruthTest(unittest.TestCase):
             self.assertEqual(seen, [])
             self.assertIsNone(got['world_entry']['dumps'])
 
+    @staticmethod
+    def _fixture_dump(name):
+        return json.loads(_slurp(os.path.join(ROOT, 'tests', 'fixtures',
+                                              'state_dump_%s.json' % name)))
+
+    @staticmethod
+    def _dump_sides(root, orig_dumps, ours_dumps):
+        """Two replay folders under root, each holding its {file name: dump}."""
+        sides = [os.path.join(root, side) for side in ('orig', 'ours')]
+        for side, dumps in zip(sides, (orig_dumps, ours_dumps)):
+            for name, dump in dumps.items():
+                _write(os.path.join(side, name), json.dumps(dump))
+        return sides
+
     def test_compare_dumps_uses_the_replay_compare(self):
-        import tempfile
         with tempfile.TemporaryDirectory() as root:
             script = os.path.join(root, 'scenario.txt')
             _write(script, 'wait 10\ncheckpoint world\nquit\n')
-            sides = [os.path.join(root, side) for side in ('orig', 'ours')]
-            dump = {'frame': 10, 'checkpoint': 'world', 'screen': 'world', 'rng_state': 1,
-                    'world': {'area': 'AR1000'}}
-            for side in sides:
-                _write(os.path.join(side, 'checkpoint-world.json'), json.dumps(dump))
-                _write(os.path.join(side, 'frame-30.json'), json.dumps(dict(dump, frame=30)))
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            same = {'checkpoint-world.json': world, 'frame-30.json': periodic}
+            sides = self._dump_sides(root, same, same)
             got = truth.compare_dumps(sides[0], sides[1], script)
             self.assertEqual(got, {'match': True,
                                    'detail': '1 checkpoints and 1 periodic dumps match'})
-            _write(os.path.join(sides[1], 'frame-30.json'),
-                   json.dumps(dict(dump, frame=30, world={'area': 'AR1001'})))
+            moved = json.loads(json.dumps(periodic))
+            moved['chargen']['rolls'][0] += 1
+            _write(os.path.join(sides[1], 'frame-30.json'), json.dumps(moved))
             got = truth.compare_dumps(sides[0], sides[1], script)
             self.assertIs(got['match'], False)
-            self.assertIn('world.area', got['detail'])
+            self.assertIn('chargen.rolls[0]', got['detail'])
             os.unlink(os.path.join(sides[1], 'checkpoint-world.json'))
             self.assertIn('MISSING', truth.compare_dumps(sides[0], sides[1], script)['detail'])
             empty = os.path.join(root, 'empty.txt')
             _write(empty, 'wait 10\nquit\n')
             self.assertIsNone(truth.compare_dumps(os.path.join(root, 'none1'),
                                                   os.path.join(root, 'none2'), empty)['match'])
+
+    def test_compare_dumps_skips_ours_only_and_timing_fields_as_the_harness_does(self):
+        # the b014 world_entry pair, in small: the recorder writes no
+        # search_wait_timeouts and the two runs' timing fields differ; the
+        # replay compare (oracle.field_differences) skips both, so the dumps
+        # match; a world value that differs does not
+        oracle = load_tool('oracle')
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            orig = {'checkpoint-world.json': json.loads(json.dumps(world)),
+                    'frame-30.json': json.loads(json.dumps(periodic))}
+            for dump in orig.values():
+                for field in oracle.OURS_ONLY_FIELDS:
+                    dump[field.split('.')[0]].pop(field.split('.')[1])
+            ours = {'checkpoint-world.json': json.loads(json.dumps(world)),
+                    'frame-30.json': json.loads(json.dumps(periodic))}
+            for dump in ours.values():
+                dump['globals']['search_wait_timeouts'] = 3
+                for field in oracle.TIMING_FIELDS:
+                    if field == 'frame':
+                        dump['frame'] += 1
+                    else:
+                        dump['globals'][field.split('.')[1]] += 1
+            self.assertEqual(set(oracle.OURS_ONLY_FIELDS) | set(oracle.TIMING_FIELDS),
+                             {'globals.search_wait_timeouts', 'frame', 'globals.au_counter',
+                              'globals.ai_stalled_frames', 'globals.ai_overlap_frames',
+                              'globals.in_async_update', 'globals.held_frames'})
+            sides = self._dump_sides(root, orig, ours)
+            self.assertEqual(truth.compare_dumps(sides[0], sides[1], script),
+                             {'match': True, 'detail': '1 checkpoints and 1 periodic dumps match'})
+            hurt = json.loads(json.dumps(ours['checkpoint-world.json']))
+            hurt['world']['enemy_creatures'][0]['hp'] -= 1
+            _write(os.path.join(sides[1], 'checkpoint-world.json'), json.dumps(hurt))
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIs(got['match'], False)
+            self.assertIn('DIFF world.enemy_creatures[0].hp: original 4, ours 3', got['detail'])
+
+    def test_compare_dumps_refuses_dumps_the_schema_refuses(self):
+        # replay record checks every dump against schema.json (finish_replay)
+        # before anything compares it; a recorder built before the schema
+        # grew world.enemy_creatures and party morale (the b014/i001 runs:
+        # recorder.dll of 2026-10-17 12:15) is caught there, not read as an
+        # engine difference: no verdict, the side and the cause named
+        oracle = load_tool('oracle')
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            stale = json.loads(json.dumps(world))
+            del stale['world']['enemy_creatures']
+            for member in stale['world']['party']:
+                del member['morale']
+            sides = self._dump_sides(root, {'checkpoint-world.json': stale, 'frame-30.json': periodic},
+                                     {'checkpoint-world.json': world, 'frame-30.json': periodic})
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIsNone(got['match'])
+            self.assertEqual(got['invalid'], {'original': 1})
+            self.assertIn("the original's dumps fail oracle/replay/schema.json (1 of 2; first: "
+                          "checkpoint-world.json: $.world: missing required property "
+                          "'enemy_creatures')", got['detail'])
+            self.assertIn('recorder', got['detail'])
+            self.assertIn('tools/oracle.py build', got['detail'])
+            # ours failing it names our dumper
+            sides = self._dump_sides(os.path.join(root, 'b'),
+                                     {'checkpoint-world.json': world},
+                                     {'checkpoint-world.json': stale})
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertEqual((got['match'], got['invalid']), (None, {'ours': 1}))
+            self.assertIn("our dumps fail oracle/replay/schema.json", got['detail'])
+            # the same check as replay record's
+            self.assertTrue(any(oracle.check_dumps(sides[1], json.loads(
+                _slurp(oracle.REPLAY_SCHEMA))).values()))
 
     def test_frida_verdicts_dump_guard(self):
         # equal events and final totals, but the two runs did not keep the
@@ -14980,15 +15124,16 @@ class TruthTest(unittest.TestCase):
             truth.frida_run('b011', table, ['first_fight'], run=fake, root=root, clicks=1, timeout=77)
             c = fake.calls[0]
             self.assertEqual((c[c.index('--clicks') + 1], c[c.index('--timeout') + 1]), ('1', '77'))
-            # no build checkout: probe.py runs this checkout's build; with one,
-            # only ours runs it (the original side is the oracle's injector)
+            # no build checkout: probe.py runs this checkout's builds; with one,
+            # both sides run it (ours its exe, the original its injector and
+            # recorder: one tree writes both sides' dumps)
             self.assertFalse(any('--build-checkout' in c for c in fake.calls))
             fake.calls.clear()
             truth.frida_run('b011', table, ['first_fight'], run=fake, root=root,
                             build_checkout='/mnt/c/Users/u/iwd2r-build-p3-wso-i009')
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
-                             [None, '/mnt/c/Users/u/iwd2r-build-p3-wso-i009'])
+                             ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
 
     def test_frida_run_marks_exit2_side_not_measured(self):
         import tempfile
@@ -15147,6 +15292,91 @@ class TruthTest(unittest.TestCase):
             table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
             r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
             self.assertEqual(r['final'], {'orig': True, 'ours': False})
+
+    def test_a_site_frida_cannot_hook_is_reported_not_fatal(self):
+        # i001: CInfGame::CacheResFileWithResource is `ret 4` + int3 padding in
+        # our build (rva 0x1f26b0); Interceptor.attach threw at the script's
+        # top level, so the hooks after it, the loaded observation and the
+        # exit-time totals never installed: ours ended OBSERVER-ERROR with
+        # HITS-FINAL no, the error text only in the trace file
+        hooks_mod = load_tool('frida/hooks')
+        table = [{'name': 'fn_5A0950', 'rva': '0x1f26b0', 'conv': 'thiscall', 'args': ['ptr']},
+                 {'name': 'fn_5A04B0', 'rva': '0x1f26c0', 'conv': 'thiscall', 'args': ['ptr'],
+                  'ret': 's32'}]
+        js = hooks_mod.hooks_js(table)
+        self.assertEqual(js.count('try {'), 2)
+        self.assertEqual(js.count('Interceptor.attach('), 2)
+        for i, hook in enumerate(table):
+            one = hooks_mod.js_for_hook(hook, i)
+            self.assertLess(one.index('try {'), one.index('Interceptor.attach('))
+            catch = one[one.index('} catch (e) {'):]
+            self.assertIn("tag: 'unhooked', name: '%s'" % hook['name'], catch)
+            self.assertIn('error: String(e)', catch)
+        # every hook orig.py installs is guarded, its own loaded hook too
+        orig = load_tool('frida/orig')
+        full = orig.build_js({'hooks': table})
+        self.assertEqual(full.count("tag: 'unhooked'"), 3)
+        self.assertLess(full.index("tag: 'unhooked', name: 'loaded'"), full.index("tag: 'ready'"))
+        # the sidecar: an UNHOOKED line, no HITS line for it, the run still CLEAN
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        trace, status = os.path.join(d, 'o.jsonl'), os.path.join(d, 'o.status')
+        tr = orig.Trace(trace, status)
+        err = 'Error: unable to intercept function at 00B126B0; please file a bug'
+        tr.on_message({'type': 'send', 'payload': {'tag': 'unhooked', 'name': 'fn_5A0950',
+                                                   'addr': '0xb126b0', 'error': err}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'loaded'}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'final': True, 'counts': {
+            'fn_5A0950': 0, 'fn_5A04B0': 2, 'loaded': 1}}}, None)
+        self.assertEqual(tr.finish('', 1), 0)
+        text = _slurp(status)
+        self.assertIn('UNHOOKED fn_5A0950 at 0xb126b0: ' + err + '\n', text)
+        self.assertNotIn('HITS fn_5A0950', text)
+        self.assertIn('HITS fn_5A04B0 2\n', text)
+        self.assertIn('HITS-FINAL yes\n', text)
+        self.assertIn('RESULT: CLEAN', text)
+        self.assertEqual(truth._read_status(status), ('CLEAN', {'fn_5A04B0': 2, 'loaded': 1}, True))
+        # the trace keeps the event: frida_verdicts reads it
+        self.assertEqual(json.loads(_slurp(trace).splitlines()[0]),
+                         {'tag': 'unhooked', 'name': 'fn_5A0950', 'addr': '0xb126b0', 'error': err})
+        # an unhooked loaded observation cannot pass for loaded
+        tr = orig.Trace(os.path.join(d, 'l.jsonl'), os.path.join(d, 'l.status'))
+        tr.on_message({'type': 'send', 'payload': {'tag': 'unhooked', 'name': 'loaded',
+                                                   'addr': '0x1', 'error': err}}, None)
+        self.assertEqual(tr.finish('', 1), 2)
+        self.assertIn('RESULT: NOT-LOADED', _slurp(os.path.join(d, 'l.status')))
+        # any other script error: its text in the status file, not only the trace
+        tr = orig.Trace(os.path.join(d, 'e.jsonl'), os.path.join(d, 'e.status'))
+        tr.on_message({'type': 'error', 'description': 'ReferenceError: x is not defined',
+                       'stack': 'ReferenceError: x is not defined\n    at <eval> (/script1.js:54:19)',
+                       'fileName': '/script1.js', 'lineNumber': 54, 'columnNumber': 19}, None)
+        tr.loaded = True
+        self.assertEqual(tr.finish('', 1), 2)
+        text = _slurp(os.path.join(d, 'e.status'))
+        self.assertIn('ERROR script: ReferenceError: x is not defined (/script1.js:54)\n', text)
+        self.assertIn('RESULT: OBSERVER-ERROR', text)
+
+    def test_frida_verdicts_a_row_frida_could_not_hook_is_not_measured(self):
+        rows = self.ROWS[:2]
+        t = self._trace(('fn_5845D0', 7, 3), ('fn_73F560', 1, 9))
+        err = 'Error: unable to intercept function at 00B126B0; please file a bug'
+        unhooked = {'tag': 'unhooked', 'name': 'fn_5845D0', 'addr': '0xb126b0', 'error': err}
+        ours = [unhooked] + [e for e in t if not str(e['tag']).startswith('fn_5845D0')]
+        base = {'failed': None, 'final': {'orig': True, 'ours': True},
+                'hits': {'orig': {'fn_5845D0': 1, 'fn_73F560': 1}, 'ours': {'fn_73F560': 1}},
+                'dumps': {'match': True, 'detail': 'ok'}}
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=t, ours=ours)}, rows)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'Frida could not hook it on ours in '
+                                                         'world_entry (%s)' % err))
+        self.assertEqual(v['0x73F560'], ('equal', 'identical in world_entry'))
+        # the original not calling it there proves nothing either: ours is blind
+        orig = [e for e in t if not str(e['tag']).startswith('fn_5845D0')]
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=orig, ours=ours)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'not measured')
+        # either side
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=[unhooked] + orig, ours=t)}, rows)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'Frida could not hook it on the original '
+                                                         'in world_entry (%s)' % err))
 
     def test_frida_batch_types_from_our_headers_by_default(self):
         seen = []
@@ -15891,6 +16121,23 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertIsNone(bad)
         self.assertEqual(sorted(parked), ['643cc0', '643cd0'])
         self.assertEqual(parked['643cc0']['batch'], 'i002')
+
+    def test_parked_file_named_with_0x_prefix_is_read(self):
+        # i001's worker wrote docs/wso/import-parked/0x5A0950.json; the reader
+        # keys it by the bare address like a <ADDR>.json file (the brief asks
+        # for caps, no 0x; either spelling is the same row)
+        self.init_repo()
+        entry = dict(self.PARKED[0], address='0x5A0950', name='Stub', batch='i001')
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', '0x5A0950.json'),
+               json.dumps(entry))
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIsNone(bad)
+        self.assertEqual(list(parked), ['5a0950'])
+        self.assertEqual(parked['5a0950']['batch'], 'i001')
+        # anything else in the folder is still refused
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', 'notes.json'), '{}')
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIn('notes.json: not a parked row', bad)
 
     def test_import_close_refuses_parked_row_whose_evidence_remains(self):
         self._import_ready(parked=self.PARKED, evidence=('0x643CD0',))

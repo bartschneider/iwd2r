@@ -550,12 +550,14 @@ X86_EXE_REL = 'build/windows-msvc-x86/RelWithDebInfo/iwd2r.exe'
 
 
 def build_windows_x86(bat_name='play-build-x86.bat', build=build_windows,
-                      checkout=None, log_path=None):
+                      checkout=None, log_path=None, target='iwd2r'):
     """Builds the x86 RelWithDebInfo exe (with its linker map, iwd2r.map
     beside it) that tools/frida/probe.py runs in the sandbox, in checkout
-    (default WIN_CHECKOUT); returns the WSL path of the exe. build is
+    (default WIN_CHECKOUT); returns the WSL path of the exe. target (a
+    space-separated CMake target list) may add targets of the same preset,
+    e.g. the oracle's iwd2r_injector and iwd2r_recorder. build is
     injectable for tests."""
-    kw = dict(preset='windows-msvc-x86', target='iwd2r', exe_rel=X86_EXE_REL,
+    kw = dict(preset='windows-msvc-x86', target=target, exe_rel=X86_EXE_REL,
               bat_name=bat_name)
     if checkout:
         kw['checkout'] = checkout
