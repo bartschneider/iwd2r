@@ -1724,6 +1724,7 @@ class Driver:
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
+        self.exports_dir = None
         self.frida_map = frida_map
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
@@ -2332,6 +2333,11 @@ class Driver:
         for r in rows:
             text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
             sig = truth.evidence_signature(text) if text else None
+            if not sig:
+                sig = truth.export_signature(r['address'], self.exports_dir)
+                if sig:
+                    self.log('%s: frida: %s signature from the Ghidra export (the evidence has '
+                             'no Decompiled section)' % (batch_id, r['address']))
             if sig:
                 sigs[r['address']] = sig
         traces = {}

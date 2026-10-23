@@ -973,6 +973,16 @@ def compare_dumps(orig_dir, ours_dir, script):
         counts.get('enabled', 0), counts.get('frames', 0))}
 
 
+def _home_of(done, root, out):
+    """(run folder as printed by probe.py, path of `out`'s status file base)
+    of a finished probe process; (None, None) without a folder."""
+    folder = None
+    for line in (getattr(done, 'stdout', '') or '').splitlines():
+        if line.startswith('probe: ') and line[7:].startswith('runs'):
+            folder = line[7:].strip()
+    return folder, (os.path.join(root, folder, 'replay', out) if folder else None)
+
+
 def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None,
               clicks=3, hit_min=1, timeout=None, attempt_reason=None, build_checkout=None,
               dumps=compare_dumps):
@@ -1055,11 +1065,18 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                 if build_checkout:
                     cmd += ['--build-checkout', build_checkout]
                 done = run(cmd, capture_output=True, text=True, cwd=root)
-                folder = None
-                for line in (getattr(done, 'stdout', '') or '').splitlines():
-                    if line.startswith('probe: ') and line[7:].startswith('runs'):
-                        folder = line[7:].strip()
-                path = os.path.join(root, folder, 'replay', out) if folder else None
+                folder, out_path = _home_of(done, root, out)
+                if getattr(done, 'returncode', 0) == 2 and folder and \
+                        _read_status(out_path + '.status')[0] is None:
+                    # a flake (no status came home): the side runs once more
+                    i = cmd.index('--new-attempt') + 1
+                    cmd[i] = (attempt_reason(scenario, key) + ' retry: no status'
+                              if attempt_reason else
+                              'driver frida %s %s retry: %s side came home with no status'
+                              % (batch_id, scenario, target))
+                    result[key + '_retried'] = True
+                    done = run(cmd, capture_output=True, text=True, cwd=root)
+                folder, path = _home_of(done, root, out)
                 homes[key] = os.path.join(root, folder) if folder else None
                 if path and not os.path.isfile(path):
                     path = None
@@ -1337,13 +1354,44 @@ def evidence_signature(evidence_text):
     section (everything before the opening brace, joined on one line), or
     None."""
     code = _section_code(evidence_text)
-    if code is None or '{' not in code:
+    return _signature_head(code) if code is not None else None
+
+
+def _signature_head(code):
+    """The text before the first `{` of decompiled code, comments stripped and
+    whitespace joined on one line; None without a brace or an empty head."""
+    if '{' not in code:
         return None
     head = code[:code.find('{')]
     head = re.sub(r'/\*.*?\*/', '', head, flags=re.S)
     head = re.sub(r'//[^\n]*', '', head)
     head = ' '.join(head.split())
     return head or None
+
+
+def export_signature(address, exports_dir=None):
+    """The one-line signature head of the Ghidra decompile export's
+    <exports_dir>/decompile/<ADDR>.c (ADDR: `address` without 0x, uppercase),
+    or None when the file is missing, unreadable or has no `{`. exports_dir
+    None is the default of tools/ghidra/export_decompiles.py (IWD2R_HOME
+    aware)."""
+    if exports_dir is None:
+        import importlib.util
+        path = os.path.join(ROOT, 'tools', 'ghidra', 'export_decompiles.py')
+        spec = importlib.util.spec_from_file_location('_export_decompiles', path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        exports_dir = mod._exports_default()
+    addr = str(address).strip()
+    if addr[:2].lower() == '0x':
+        addr = addr[2:]
+    try:
+        with open(os.path.join(exports_dir, 'decompile', addr.upper() + '.c'),
+                  encoding='utf-8', errors='replace') as f:
+            code = f.read()
+    except OSError:
+        return None
+    return _signature_head(code)
 
 
 _check_evidence = None

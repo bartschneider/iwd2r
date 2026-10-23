@@ -10789,6 +10789,43 @@ class DriverTest(unittest.TestCase):
                 {'address': '0x403000', 'name': 'Rules::Tick'}]
         return d, {'branch': 'p3/wso-b011', 'rows': rows}
 
+    def test_driver_frida_phase_falls_back_to_the_ghidra_export_signature(self):
+        d, batch = self._import_phase_driver()
+        # 403000's evidence loses its Decompiled section
+        with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: read-only\n---\n')
+        self.git('commit', '-qam', 'no decompiled section', cwd=self.wt)
+        ex = os.path.join(self.tmp, 'exports')
+        os.makedirs(os.path.join(ex, 'decompile'))
+        with open(os.path.join(ex, 'decompile', '403000.c'), 'w') as f:
+            f.write('\nint Tick(int a,\n         int b)\n\n{\n  return 0;\n}\n')
+        names = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            names.append(sorted(h['name'] for h in table['original']['hooks']))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        line = ('b011: frida: 0x403000 signature from the Ghidra export '
+                '(the evidence has no Decompiled section)')
+        d.exports_dir = ex
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertIn('fn_403000', names[0])
+        self.assertIn(line, self.logs)
+        # without the export the row is skipped as before
+        names.clear()
+        self.logs.clear()
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertNotIn('fn_403000', names[0] if names else [])
+        self.assertNotIn(line, self.logs)
+
     def test_driver_frida_phase_runs_for_import_kind(self):
         trace = TruthTest._trace
         d, batch = self._import_phase_driver()
@@ -15134,6 +15171,79 @@ class TruthTest(unittest.TestCase):
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
                              ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_export_signature_reads_the_ghidra_export_head(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ex:
+            os.makedirs(os.path.join(ex, 'decompile'))
+            with open(os.path.join(ex, 'decompile', '407280.c'), 'w') as f:
+                f.write('/* header */\nvoid CAIGroup::GroupProtectPoint\n'
+                        '  /* the args */\n          (uint param_1,int param_2,undefined4 param_3)\n'
+                        '\n{\n  return;\n}\n')
+            with open(os.path.join(ex, 'decompile', '407FC0.c'), 'w') as f:
+                f.write('// nothing here\n')
+            want = 'void CAIGroup::GroupProtectPoint (uint param_1,int param_2,undefined4 param_3)'
+            self.assertEqual(truth.export_signature('0x407280', ex), want)
+            self.assertEqual(truth.export_signature('0x407fc0', ex), None)
+            self.assertEqual(truth.export_signature('0x999999', ex), None)
+
+    def test_frida_run_retries_a_side_that_came_home_with_no_status_once(self):
+        import tempfile
+        import subprocess as sp
+        clean = 'HITS fn_5845D0 4\nRESULT: CLEAN\n'
+        table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+
+        def make(root, ours_statuses, ours_exit_first=2):
+            calls = []
+
+            def fake(cmd, **kw):
+                calls.append(cmd)
+                target = cmd[cmd.index('--target') + 1]
+                out = cmd[cmd.index('--out') + 1]
+                d = os.path.join(root, 'runs', 'x-' + target, 'replay')
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, out), 'w') as f:
+                    f.write(json.dumps({'tag': 'fn_5845D0', 'a0_s32': 1}) + '\n')
+                rc, st = 0, clean
+                if target == 'ours':
+                    n = sum(1 for c in calls if c[c.index('--target') + 1] == 'ours') - 1
+                    rc, st = ours_statuses[min(n, len(ours_statuses) - 1)]
+                sp_path = os.path.join(d, out + '.status')
+                if os.path.exists(sp_path):
+                    os.remove(sp_path)
+                if st is not None:
+                    with open(sp_path, 'w') as f:
+                        f.write(st)
+                return sp.CompletedProcess(cmd, rc, stdout='probe: runs/x-%s\n' % target, stderr='')
+            fake.calls = calls
+            return fake
+
+        def ours_calls(fake):
+            return [c for c in fake.calls if c[c.index('--target') + 1] == 'ours']
+        with tempfile.TemporaryDirectory() as root:
+            fake = make(root, [(2, None), (0, clean)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                dumps=lambda *a: {'match': True, 'detail': 'x'})['s1']
+            self.assertTrue(r['measured'])
+            self.assertTrue(r['ours_retried'])
+            self.assertNotIn('orig_retried', r)
+            ours = ours_calls(fake)
+            self.assertEqual(len(ours), 2)
+            self.assertEqual(ours[1][ours[1].index('--new-attempt') + 1],
+                             'driver frida b011 s1 retry: ours side came home with no status')
+            fake = make(root, [(2, None)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                attempt_reason=lambda sc, k: 'why %s %s' % (sc, k))['s1']
+            self.assertFalse(r['measured'])
+            self.assertIn('ours side exited 2', r['failed'])
+            self.assertEqual(len(ours_calls(fake)), 2)
+            self.assertEqual(ours_calls(fake)[1][ours_calls(fake)[1].index('--new-attempt') + 1],
+                             'why s1 ours retry: no status')
+            fake = make(root, [(2, 'HITS fn_5845D0 0\nRESULT: UNSAFE\n')])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertFalse(r['measured'])
+            self.assertNotIn('ours_retried', r)
+            self.assertEqual(len(ours_calls(fake)), 1)
 
     def test_frida_run_marks_exit2_side_not_measured(self):
         import tempfile
