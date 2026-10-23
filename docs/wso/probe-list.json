@@ -38,5 +38,15 @@
     "reading": "fork",
     "reason": "the exe's else branch (non-NULL provider: (+0x1C90)+0x45C = 1, FUN_0064ddb0, SelectEngine) is missing from our body; deciding it needs a lobby-flow trace and dump evidence cannot carry a fork (rule 1)",
     "source": "worker"
+  },
+  {
+    "address": "0x601AE0",
+    "at": "2026-10-23T21:25:03+00:00",
+    "batch": "b018",
+    "file": "src/CScreenConnection.cpp",
+    "name": "CScreenConnection::AutoStartDirectPlayLobby",
+    "reading": "fork",
+    "reason": "our body lacks the exe's post-NewGame tail (m_nLobbyMode=1, StartMultiPlayer(1), SelectEngine) but the fork's tail needs the unported CScreenMultiPlayer engine and CBaldurChitin+0x1C90, outside this batch's owned files, and no probe/replay/trace case exists for a DirectPlay-lobby startup",
+    "source": "worker"
   }
 ]
