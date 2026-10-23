@@ -10651,7 +10651,8 @@ class DriverTest(unittest.TestCase):
                     with open(paths[side], 'w') as f:
                         f.write(''.join(json.dumps(e) + '\n' for e in events))
                 out[scenario] = {'orig': orig, 'ours': ours, 'orig_path': paths['orig'],
-                                 'ours_path': paths['ours'], 'failed': None}
+                                 'ours_path': paths['ours'], 'failed': None,
+                                 'dumps': {'match': True, 'detail': 'fixture'}}
             return out
         d.frida_run = frida_run
         before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip()
@@ -10734,7 +10735,8 @@ class DriverTest(unittest.TestCase):
                 with open(paths[side], 'w') as f:
                     f.write(''.join(json.dumps(e) + '\n' for e in events))
             out[scenario] = dict({'orig': orig, 'ours': ours, 'orig_path': paths['orig'],
-                                  'ours_path': paths['ours'], 'failed': None}, **extra)
+                                  'ours_path': paths['ours'], 'failed': None,
+                                  'dumps': {'match': True, 'detail': 'fixture'}}, **extra)
         return out
 
     def _fork_note(self, rel, text):
@@ -10833,6 +10835,36 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(findings), 3)
         self.assertTrue(all('with needs "not measured: the x86 build of' in f for f in findings),
                         findings)
+
+    def test_driver_writes_trace_evidence_only_from_matching_dumps(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        t = trace(('fn_401000', 7, 3))
+        final = {'hits': {'orig': {'fn_401000': 1}, 'ours': {'fn_401000': 1}},
+                 'final': {'orig': True, 'ours': True}}
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, t, t, dumps={'match': False, 'detail': '3 difference(s)'}, **final)
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'][0], 'not measured')
+        f401 = [f for f in findings if f.startswith('0x401000:')][0]
+        self.assertIn('dumps differ in world_entry (3 difference(s))', f401)
+        self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        # an equal verdict whose run carries no matching dumps writes nothing either
+        truth_mod = driver._tool('truth')
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, t, t, dumps=None)
+        real = truth_mod.frida_batch
+
+        def equal(batch_id, rows, sigs, map_text, run_frida=None, **kw):
+            run_frida(batch_id, {}, list(truth_mod.FRIDA_SCENARIOS))
+            return {'0x401000': ('equal', truth_mod.EQUAL_PREFIX + 'world_entry')}
+        with mock.patch.object(truth_mod, 'frida_batch', equal):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertTrue(real)
+        f401 = [f for f in findings if f.startswith('0x401000:')][0]
+        self.assertIn("measured equal in world_entry but that run's state dumps were not shown "
+                      'to match', f401)
+        self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
 
     def test_import_brief_says_read_only_until_the_driver_measures(self):
         text = _slurp(os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md'))
@@ -14661,6 +14693,81 @@ class TruthTest(unittest.TestCase):
                                        stdout='probe: runs/x-%s\n' % target, stderr='')
         fake.calls = calls
         return fake
+
+    def test_frida_run_compares_each_scenarios_dumps(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a'])
+            seen = []
+
+            def dumps(orig_dir, ours_dir, script):
+                seen.append((orig_dir, ours_dir, script))
+                return {'match': False, 'detail': '1 difference(s)'}
+            got = truth.frida_run('b011', table, ['world_entry'], run=fake, root=root, dumps=dumps)
+            self.assertEqual(seen, [(os.path.join(root, 'runs', 'x-original', 'replay'),
+                                     os.path.join(root, 'runs', 'x-ours', 'replay'),
+                                     os.path.join(root, 'runs', 'x-ours', 'scenario.txt'))])
+            self.assertEqual(got['world_entry']['dumps'], {'match': False, 'detail': '1 difference(s)'})
+            # a failed scenario compares nothing
+            seen.clear()
+            got = truth.frida_run('b011', table, ['world_entry'], run=self._frida_fake(
+                root, exits={'ours': 2}), root=root, dumps=dumps)
+            self.assertEqual(seen, [])
+            self.assertIsNone(got['world_entry']['dumps'])
+
+    def test_compare_dumps_uses_the_replay_compare(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            sides = [os.path.join(root, side) for side in ('orig', 'ours')]
+            dump = {'frame': 10, 'checkpoint': 'world', 'screen': 'world', 'rng_state': 1,
+                    'world': {'area': 'AR1000'}}
+            for side in sides:
+                _write(os.path.join(side, 'checkpoint-world.json'), json.dumps(dump))
+                _write(os.path.join(side, 'frame-30.json'), json.dumps(dict(dump, frame=30)))
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertEqual(got, {'match': True,
+                                   'detail': '1 checkpoints and 1 periodic dumps match'})
+            _write(os.path.join(sides[1], 'frame-30.json'),
+                   json.dumps(dict(dump, frame=30, world={'area': 'AR1001'})))
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIs(got['match'], False)
+            self.assertIn('world.area', got['detail'])
+            os.unlink(os.path.join(sides[1], 'checkpoint-world.json'))
+            self.assertIn('MISSING', truth.compare_dumps(sides[0], sides[1], script)['detail'])
+            empty = os.path.join(root, 'empty.txt')
+            _write(empty, 'wait 10\nquit\n')
+            self.assertIsNone(truth.compare_dumps(os.path.join(root, 'none1'),
+                                                  os.path.join(root, 'none2'), empty)['match'])
+
+    def test_frida_verdicts_dump_guard(self):
+        # equal events and final totals, but the two runs did not keep the
+        # same state: nothing is measured there, not even a difference
+        rows = [{'address': '0x5845D0'}]
+        ev = [{'tag': 'fn_5845D0', 'a0_s32': 1}]
+        base = {'orig': ev, 'ours': ev, 'failed': None, 'orig_exit': 0, 'ours_exit': 0,
+                'hits': {'orig': {'fn_5845D0': 1}, 'ours': {'fn_5845D0': 1}},
+                'final': {'orig': True, 'ours': True}}
+        for dumps, want in (({'match': True, 'detail': 'ok'}, 'equal'),
+                            ({'match': False, 'detail': '2 difference(s)'}, 'not measured'),
+                            (None, 'not measured'),
+                            ({'match': None, 'detail': 'no dump on a compared screen'}, 'not measured')):
+            got = truth.frida_verdicts({'world_entry': dict(base, dumps=dumps)}, rows)
+            self.assertEqual(got['0x5845D0'][0], want, dumps)
+        got = truth.frida_verdicts({'world_entry': dict(base, dumps={'match': False, 'detail': '2'})},
+                                   rows)
+        self.assertEqual(got['0x5845D0'], ('not measured', 'dumps differ in world_entry (2)'))
+        different = dict(base, ours=[{'tag': 'fn_5845D0', 'a0_s32': 2}],
+                         dumps={'match': False, 'detail': '2'})
+        self.assertEqual(truth.frida_verdicts({'world_entry': different}, rows)['0x5845D0'][0],
+                         'not measured')
+        # one scenario whose dumps differ keeps the row unmeasured
+        got = truth.frida_verdicts({'world_entry': dict(base, dumps={'match': True}),
+                                    'first_fight': dict(base, dumps={'match': False, 'detail': 'x'})},
+                                   rows)
+        self.assertEqual(got['0x5845D0'], ('not measured', 'dumps differ in first_fight (x)'))
 
     def test_frida_run_argv_per_side(self):
         import tempfile

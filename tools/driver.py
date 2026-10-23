@@ -2455,6 +2455,16 @@ class Driver:
         t = traces.get(scenario)
         t = t if isinstance(t, dict) else {}
         orig, ours = t.get('orig_path'), t.get('ours_path')
+        dumps = t.get('dumps')
+        if not (isinstance(dumps, dict) and dumps.get('match') is True):
+            # The dump guard: trace evidence only from a run whose two sides
+            # kept the same state (frida_run compares their dumps).
+            return ('%s: measured equal in %s but that run\'s state dumps were not shown to '
+                    'match (%s); trace evidence comes only from a run whose dumps match and '
+                    'the phase does not run again in this batch, so park it: %s' % (
+                        row['address'], scenario, (dumps or {}).get('detail') or 'not compared',
+                        park_text(row['address'], mb,
+                                  'not measured: dumps not shown to match in %s' % scenario)))
         if not (orig and ours and os.path.isfile(orig) and os.path.isfile(ours)):
             return ('%s: measured equal in %s but its trace files are missing; the phase does '
                     'not run again in this batch, so park it: %s' % (

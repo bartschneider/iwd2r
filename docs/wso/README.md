@@ -382,7 +382,15 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   runs. A row is measured equal only when `trace_diff compare` exits 0 over
   the captured events and the sidecars' total hits for its hook match (the
   hooks cap what they log, so equal events alone do not prove equal
-  frequency). The driver then rewrites that row's evidence front matter to
+  frequency), and only in a scenario whose two runs kept the same state:
+  both sides write checkpoint and periodic state dumps, `truth.frida_run`
+  compares them with the replay compare's own functions
+  (`truth.compare_dumps`: `oracle.compare_checkpoints` and
+  `compare_frames`, its screens and known differences), and a scenario whose
+  dumps differ measures nothing (its rows read `not measured`, "dumps
+  differ"); the driver writes trace evidence only from a run whose dumps
+  match (a void function logs no return, so its trace mostly measures its
+  callers; the dumps are what speak for its body). The driver then rewrites that row's evidence front matter to
   `kind: trace` with `trace_source: frida <batch>-<scenario> orig:<sha256>
   ours:<sha256> compare=0` (dropping `exemption:`) and commits it as
   `frida: trace evidence for <N> rows of <batch>`. The phase measures

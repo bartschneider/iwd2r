@@ -881,14 +881,67 @@ def _read_status(path):
     return verdict, hits, final
 
 
+_ORACLE = None
+
+
+def _oracle():
+    """tools/oracle.py, loaded by path (tools/ is not on sys.path under -I):
+    the replay tooling's dump comparison."""
+    global _ORACLE
+    if _ORACLE is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'truth_oracle', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'oracle.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _ORACLE = module
+    return _ORACLE
+
+
+def compare_dumps(orig_dir, ours_dir, script):
+    """{'match': True | False | None, 'detail': text}: whether the state
+    dumps both sides of one scenario wrote agree, compared with the replay
+    tooling's own functions and data (oracle.compare_checkpoints over the
+    scenario copy's checkpoint lines, oracle.compare_frames over the periodic
+    dumps both folders hold, the screens.json screens and the known
+    differences), as `oracle.py replay compare` does.  A missing checkpoint
+    dump is a difference; None means nothing on a compared screen was there
+    to compare (no verdict either way)."""
+    oracle = _oracle()
+    try:
+        actions = oracle.load_actions(script)
+    except (OSError, SystemExit, ValueError) as e:
+        return {'match': None, 'detail': 'scenario copy %s unreadable: %s' % (script, e)}
+    names = [a['name'] for a in actions if a.get('op') == 'checkpoint']
+    screens, known = oracle.load_screens(), oracle.load_known()
+    counts = {}
+    lines, failures, _ = oracle.compare_checkpoints(orig_dir, ours_dir, names, screens, known, counts)
+    frame_lines, frame_failures, _ = oracle.compare_frames(orig_dir, ours_dir, screens, known, counts)
+    failures += frame_failures
+    if failures:
+        every = [l.strip() for l in lines + frame_lines]
+        where = next((l for l in every if 'DIFFERENT' in l or 'MISSING' in l
+                      or 'UNREADABLE' in l), '')
+        field = next((l for l in every if l.startswith('DIFF ')), '')
+        first = '; '.join(x for x in (where, field) if x)
+        return {'match': False, 'detail': '%d difference(s)%s' % (
+            failures, '; first: %s' % first if first else '')}
+    if not counts.get('enabled') and not counts.get('frames'):
+        return {'match': None, 'detail': 'no dump on a compared screen'}
+    return {'match': True, 'detail': '%d checkpoints and %d periodic dumps match' % (
+        counts.get('enabled', 0), counts.get('frames', 0))}
+
+
 def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None,
-              clicks=3, hit_min=1, timeout=None, attempt_reason=None, build_checkout=None):
+              clicks=3, hit_min=1, timeout=None, attempt_reason=None, build_checkout=None,
+              dumps=compare_dumps):
     """{scenario: {'orig': events, 'ours': events, 'orig_path': path or None,
     'ours_path': path or None, 'orig_exit': int, 'ours_exit': int, 'final':
     {'orig': bool, 'ours': bool} (the totals are the exit-time ones),
     'result': {'orig': verdict word, 'ours': verdict word}, 'hits': {'orig':
     {hook: total}, 'ours': {...}} (None per side without a status file),
-    'measured': bool, 'failed': reason or None}}: for each scenario, both
+    'measured': bool, 'failed': reason or None, 'dumps': {'match', 'detail'} or
+    None}}: for each scenario, both
     targets run through `probe.py run` (one sandbox each, one at a time) the
     way a hand run does: --clicks (the table's `clicks`, an int or a
     {scenario: n}, else the clicks argument), --hit-min (no --hit: any hook
@@ -898,7 +951,14 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     read back (paths are absolute; the trace_source hashes are of these
     files). A scenario is failed (not measured) when either probe exits
     non-zero (a side that proves nothing exits 2) or leaves no trace file;
-    frida_verdicts leaves failed scenarios out and reports them.
+    frida_verdicts leaves failed scenarios out and reports them. Both sides
+    write checkpoint and periodic state dumps (ours under IWD2R_STATE_DUMP,
+    the original under the recorder) into their replay folders: for a
+    scenario that did not fail, dumps(orig replay folder, ours replay folder,
+    the scenario copy) (default compare_dumps, the replay tooling's compare)
+    says whether they agree; frida_verdicts measures nothing in a scenario
+    whose dumps do not match, and the driver writes trace evidence only from
+    one whose dumps match.
 
     Ours must pass --loaded-rva, else orig.py would hook the original's
     EngineActivated address inside iwd2r.exe: loaded_rva (or the table's
@@ -934,7 +994,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
             own = table.get('clicks', clicks)
             n_clicks = own.get(scenario, clicks) if isinstance(own, dict) else own
             limit = timeout or _scenario_timeout(root, scenario)
-            result = {'failed': None, 'result': {}, 'hits': {}}
+            result = {'failed': None, 'result': {}, 'hits': {}, 'dumps': None}
+            homes = {}
             for target, key in (('original', 'orig'), ('ours', 'ours')):
                 out = 'frida-%s-%s-%s.jsonl' % (batch_id, scenario, target)
                 cmd = [sys.executable, '-I', probe, 'run', '--target', target,
@@ -953,6 +1014,7 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                     if line.startswith('probe: ') and line[7:].startswith('runs'):
                         folder = line[7:].strip()
                 path = os.path.join(root, folder, 'replay', out) if folder else None
+                homes[key] = os.path.join(root, folder) if folder else None
                 if path and not os.path.isfile(path):
                     path = None
                 result[key + '_path'] = path
@@ -969,6 +1031,12 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                         target, 'exited %s' % rc if rc != 0 else 'left no trace file',
                         ' (%s)' % verdict if verdict else '')
             result['measured'] = result['failed'] is None
+            if result['measured'] and homes.get('orig') and homes.get('ours'):
+                copy = os.path.join(homes['orig'], 'scenario.txt')
+                if not os.path.isfile(copy):
+                    copy = os.path.join(homes['ours'], 'scenario.txt')
+                result['dumps'] = dumps(os.path.join(homes['orig'], 'replay'),
+                                        os.path.join(homes['ours'], 'replay'), copy)
             traces[scenario] = result
     return traces
 
@@ -1050,7 +1118,7 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('skipped', skipped[key])
             continue
         tag = hook_name(key)
-        different, equal, partial, crashed, unmeasured = [], [], [], [], []
+        different, equal, partial, crashed, unmeasured, dumped = [], [], [], [], [], []
         for scenario, value in traces.items():
             t = _as_scenario(value)
             if t['failed']:
@@ -1074,6 +1142,15 @@ def frida_verdicts(traces, rows, skipped=None):
             orig, ours = _row_events(t['orig'], tag), _row_events(t['ours'], tag)
             if not [e for e in orig + ours if str(e.get('tag', '')).startswith(tag)]:
                 continue
+            # The dump guard: a scenario whose two runs did not keep the same
+            # state (frida_run's dumps) measures nothing.
+            dumps = t.get('dumps', {'match': True})
+            if not (isinstance(dumps, dict) and dumps.get('match') is True):
+                why = (dumps or {}).get('detail') or 'not compared'
+                dumped.append('%s in %s (%s)' % (
+                    'dumps differ' if isinstance(dumps, dict) and dumps.get('match') is False
+                    else 'dumps not compared', scenario, why))
+                continue
             code = trace_diff.compare(orig, ours)
             # The hooks cap the events they log, so equal events do not show
             # equal frequency: the sidecars' totals must match too, and only
@@ -1096,8 +1173,10 @@ def frida_verdicts(traces, rows, skipped=None):
             verdicts[key] = ('different', 'differs in ' + '; '.join(different + crashed))
         elif partial:
             verdicts[key] = ('scenario failed', '; '.join(partial))
-        elif unmeasured:
-            verdicts[key] = ('not measured', 'no final HITS totals in %s' % ', '.join(unmeasured))
+        elif unmeasured or dumped:
+            verdicts[key] = ('not measured', '; '.join(
+                (['no final HITS totals in %s' % ', '.join(unmeasured)] if unmeasured else [])
+                + dumped))
         elif equal:
             verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(equal))
         else:
