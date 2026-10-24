@@ -85,7 +85,13 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    driver, committed on your branch. Every other outcome (different,
    exercised by no scenario, no hook, a failed or unmeasured scenario)
    cannot close: the phase runs once per batch, so park the row in your fix
-   round, with the `needs` the finding names.
+   round, with the `needs` the finding names. For a base-body row you listed
+   under `## Kept`, when the driver finds OUR body behaves differently from
+   the original, the finding names the difference: park the row with `needs`
+   of `"ours differs from the exe (<scenario>): <difference>; import his body
+   in a later batch"` (edit nothing back: the body was never changed). An
+   import in the fix round cannot be measured (the phase runs once), so it
+   is not offered.
    **Parking a row.** Edit that function back to the merge base's body
    (`git show <merge-base>:<path>` shows it; `git merge-base first HEAD`
    names the merge base; do not replace a file that holds other rows'
@@ -98,9 +104,13 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
         "needs": "<the scenarios that ran>: not exercised"}
 
    `needs` names what was tried. Commit all three changes together. Every
-   row you do not park must be imported: its body changed against the merge
-   base. A row whose body you leave as ours because you refused his body is
-   parked too, with `needs` saying why.
+   row you do not park must be imported (its body changed against the merge
+   base), except a base-body row you list under `## Kept`. A row whose body
+   you leave as ours because you refused his body: for a STUB row (ours is a
+   stub) refusing still parks it, with `needs` saying why; for a BASE-BODY
+   row, refusing his body means ours stays and the row goes under `## Kept`
+   with the reason (`fork body contradicts the exe: <what differs>`), never
+   parked by you.
    A row that was parked and unparked before carries an earlier attempt in that
    batch's branch history (`git log --all -- docs/evidence/<ADDRESS>.md` finds
    it); read it, do not trust it.

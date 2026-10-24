@@ -309,6 +309,14 @@ def frida_trace(text):
         ce.TRACE_SOURCES[1].fullmatch(fields.get('trace_source') or ''))
 
 
+def _frida_probe(text):
+    """The probe name of an evidence text's frida trace_source line ('' when
+    it has none): `frida <probe> orig:... ours:... compare=0`."""
+    ts = _check_evidence().front_matter(text or '').get('trace_source') or ''
+    parts = ts.split()
+    return parts[1] if len(parts) > 1 and parts[0] == 'frida' else ''
+
+
 def kept_evidence(worktree, merge_base, address, name, text):
     """Why an import row's evidence stands as it is written, or None when
     the Frida phase must measure it (the whole-branch review's ruling):
@@ -1337,7 +1345,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     # body is untouched; what the row needs instead is the
                     # Frida phase's measurement of it, kind: trace.
                     bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
-                    if bar or not frida_trace(text):
+                    if bar or not frida_trace(text) or not _frida_probe(text).startswith(
+                            f'{batch_id}-'):
                         problems.append(f'{row["address"]}: kept but not measured; park it or '
                                         f'import it')
                     continue
@@ -1751,16 +1760,16 @@ BASE_BODY_PARAGRAPH = (
     "For a row where ours is the base body, the same rules apply with one\n"
     "addition: the base body may be right and his change wrong. Read the\n"
     "original. If his body is the one it confirms, import it. If ours already\n"
-    "matches the original, do NOT park the row and do NOT touch its body: write\n"
-    "(or keep) `docs/evidence/<ADDRESS>.md` (`kind: read-only`, your reading of why\n"
-    "ours matches, and in the `## WSO delta` section the sentence `corroborated by\n"
-    "WSO at <sha>: <what he changed and why ours is right>; case\n"
-    "kept-{{id}}-<ADDRESS> decides`), commit it, and list the row under `## Kept`\n"
-    "in your report. The Frida phase then measures our body against the original\n"
-    "and, when they are equal, the driver records trace evidence for it. Park the\n"
-    "row only when his body contradicts the original and ours is wrong too\n"
-    "(`needs` says what), when it depends on a function outside the batch, or\n"
-    "when you cannot settle it. A stub row is never kept.\n\n")
+    "matches the original, do NOT park the row and do NOT touch its body: list\n"
+    "it under `## Kept` in your report, one line `kept <0xADDR> <one-line\n"
+    "reason>`. Write no evidence file for it and no verdict phrase anywhere: the\n"
+    "Frida phase measures our body against the original and, when they are\n"
+    "equal, the driver writes the trace evidence. If his body contradicts the\n"
+    "original, ours stays and the row goes under `## Kept` with the reason\n"
+    "`fork body contradicts the exe: <what differs>`; you never park it for\n"
+    "that. Park the row only when ours is wrong too (`needs` says what),\n"
+    "when it depends on a function outside the batch, or when you cannot settle\n"
+    "it. A stub row is never kept.\n\n")
 
 KEPT_REPORT_PARAGRAPH = (
     "Base-body rows you keep as ours go under a section headed `## Kept`, one line\n"
@@ -1775,8 +1784,9 @@ def _import_tally(state, import_state=None, parked=None):
     K kept / M parked' over the rows of the closed import batches (ids
     i<NNN>) of `state` and `import_state`, split by each row's category
     (none: a stub); a row with a docs/wso/import-parked entry (`parked`,
-    address keys) is parked, a row the Frida phase measured equal and
-    recorded outcome kept is kept (measured), any other closed row
+    address keys) is parked, a row recorded outcome kept (the driver marks it
+    only for a base-body row untouched against the merge base, and close
+    lets it close only with this batch's trace) is kept, any other closed row
     imported.  None without any."""
     parked = parked or {}
     seen = {}

@@ -9994,6 +9994,29 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x401000: parked') for p in probs), probs)
         self.assertTrue(any(p.startswith('0x401000: both kept and parked') for p in probs), probs)
 
+    def test_parked_evidence_check_covers_the_batch_and_what_the_branch_changed(self):
+        d = self._mc_repo({'401000': 'kind: read-only', '405000': 'stray'})
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'theirs_changed_ours_base'}]}
+        key = driver._tool('wave')._addr_key
+        wave = driver._tool('wave')
+        # a parked file `first` already carried, for a row outside the batch,
+        # with stray evidence: not this batch's problem
+        _write(os.path.join(d, wave.parked_rel('0x405000')), json.dumps(
+            {'address': '0x405000', 'name': 'n', 'file': 'f', 'batch': 'i001', 'needs': 'x'}))
+        self.assertEqual(driver._kept_and_parked_problems(batch, d, 'first', (), key, []), [])
+        # the same file changed on the branch is
+        probs = driver._kept_and_parked_problems(
+            batch, d, 'first', (), key, [wave.parked_rel('0x405000')])
+        self.assertEqual(probs, ['0x405000: parked (docs/wso/import-parked/405000.json) but '
+                                 'docs/evidence/405000.md still exists; delete it'])
+        # and a batch row's own parked file always is
+        _write(os.path.join(d, wave.parked_rel('0x401000')), json.dumps(
+            {'address': '0x401000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        probs = driver._kept_and_parked_problems(batch, d, 'first', (), key, [])
+        self.assertEqual(probs, ['0x401000: parked (docs/wso/import-parked/401000.json) but '
+                                 'docs/evidence/401000.md still exists; delete it'])
+
     def test_fix_round_rule_for_imports_names_kept(self):
         imp = driver.fix_prompt('i005', 'checks', 'p3/wso-i005', 'BRIEF', ['p'], 'import')
         self.assertIn('`## Kept`', imp)
@@ -11527,17 +11550,30 @@ class DriverTest(unittest.TestCase):
             self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
                 os.path.join(ev, addr[2:] + '.md'))), addr)
 
-    def test_driver_frida_phase_measures_kept_rows_and_records_them(self):
-        trace = TruthTest._trace
+    BASE_CAT = 'theirs_changed_ours_base'
+
+    def _kept_phase_driver(self, kept=('0x401000', '0x402000', '0x403000'), category=None):
+        """The import phase driver with `kept` listed under ## Kept, every row
+        a base-body row (or `category`) in the batch and in the import state."""
         d, batch = self._import_phase_driver()
-        d._kept = {'0x401000': 'ours matches', '0x402000': 'ours matches',
-                   '0x403000': 'ours matches'}
-        # the batch is in the import state: an equal kept row is recorded there
+        batch = dict(batch, rows=[dict(r, category=category or self.BASE_CAT)
+                                  for r in batch['rows']])
+        d._kept = {a: 'ours matches' for a in kept}
         with open(self.state_path) as f:
             state = json.load(f)
         state['batches']['b011']['rows'] = [dict(r) for r in batch['rows']]
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
+        return d, batch
+
+    def _outcomes(self):
+        with open(self.state_path) as f:
+            return {r['address']: r.get('outcome')
+                    for r in json.load(f)['batches']['b011']['rows']}
+
+    def test_driver_frida_phase_measures_kept_rows_and_records_them(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_phase_driver()
         seen = []
 
         def frida_run(b, table, scenarios, **kw):
@@ -11547,20 +11583,25 @@ class DriverTest(unittest.TestCase):
         d.frida_run = frida_run
         findings = d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(seen, [['fn_401000', 'fn_402000', 'fn_403000']])
-        # equal: trace evidence for our body, recorded as kept
+        # equal: trace evidence for our body
         fields = load_tool('check_evidence').front_matter(
             _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
         self.assertEqual(fields['kind'], 'trace')
         self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
-        with open(self.state_path) as f:
-            outcomes = {r['address']: r.get('outcome') for r in json.load(f)['batches']['b011']['rows']}
-        self.assertEqual(outcomes, {'0x401000': 'kept', '0x402000': None, '0x403000': None})
-        # different: the worker's fix-round finding
+        # every measured kept row is recorded kept; close lets only a row with
+        # this batch's trace close as kept
+        self.assertEqual(self._outcomes(),
+                         {'0x401000': 'kept', '0x402000': 'kept', '0x403000': 'kept'})
+        # different: the finding parks it with the difference, edit nothing back
         diff = [f for f in findings if f.startswith('0x402000:')]
         self.assertEqual(len(diff), 1, findings)
-        self.assertIn('ours differs from the original at ', diff[0])
-        self.assertIn('import his body if it is the one the original confirms, else park with '
-                      'the difference', diff[0])
+        self.assertIn('our body differs from the original (differs in ', diff[0])
+        self.assertIn('edit nothing back', diff[0])
+        self.assertIn('cannot be measured', diff[0])
+        self.assertIn('docs/wso/import-parked/402000.json', diff[0])
+        self.assertIn('needs "ours differs from the exe (', diff[0])
+        self.assertIn('; import his body in a later batch", and commit the three', diff[0])
+        self.assertNotIn('import his body if it is the one', diff[0])
         # not exercised: parked with the stated needs
         idle = [f for f in findings if f.startswith('0x403000:')]
         self.assertEqual(len(idle), 1, findings)
@@ -11568,9 +11609,85 @@ class DriverTest(unittest.TestCase):
         self.assertIn('needs "not exercised; ours reading matches the decompile"', idle[0])
         self.assertEqual(len(findings), 2)
 
-    def test_driver_check_parses_kept_and_import_rows_carry_the_mark(self):
+    def test_kept_needs_wording(self):
+        self.assertEqual(driver.kept_needs(['a', 'b']), driver.KEPT_UNMEASURED)
+        self.assertEqual(driver.kept_needs(['a', 'b'], 'no final HITS totals'),
+                         'a, b: not measured (no final HITS totals); '
+                         'ours reading matches the decompile')
+        self.assertEqual(driver.kept_needs('world_entry', 'dumps not shown to match'),
+                         'world_entry: not measured (dumps not shown to match); '
+                         'ours reading matches the decompile')
+
+    def test_driver_kept_row_scenario_failed_gets_the_kept_needs(self):
+        d, batch = self._kept_phase_driver(kept=('0x402000',))
+        truth_mod = driver._tool('truth')
+        got = {'0x401000': ('not measured', 'no final HITS totals in world_entry'),
+               '0x402000': ('scenario failed', 'first_fight: ours side exited 2'),
+               '0x403000': ('not measured', 'x')}
+        with mock.patch.object(truth_mod, 'frida_batch', lambda *a, **kw: dict(got)):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        by = {f[:9]: f for f in findings}
+        # the kept row: the kept needs; the rows that are not kept keep the generic text
+        self.assertIn('not measured (scenario failed: first_fight: ours side exited 2); '
+                      'ours reading matches the decompile', by['0x402000:'])
+        self.assertNotIn('ours reading matches', by['0x401000:'])
+
+    def test_driver_kept_row_dumps_mismatch_gets_the_kept_needs(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3)), trace(('fn_401000', 7, 3)),
+            dumps={'match': False, 'detail': 'heap differs'})
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        mine = [f for f in findings if f.startswith('0x401000:')]
+        self.assertEqual(len(mine), 1, findings)
+        # frida_run's dump guard makes the row 'not measured' (dumps differ)
+        self.assertIn('not measured (dumps differ in world_entry (heap differs)', mine[0])
+        self.assertIn('); ours reading matches the decompile"', mine[0])
+        self.assertEqual(self._outcomes()['0x401000'], 'kept')   # close then refuses it
+
+    def test_driver_touched_kept_row_is_measured_as_an_import_without_the_mark(self):
+        trace = TruthTest._trace
         d, batch = self._import_phase_driver()
-        d._kept = {'0x401000': 'x'}
+        base_body = '// 0x401000\nint Rules::Render(int a, int b)\n{\n  return a;\n}\n'
+        _write(os.path.join(self.root, 'src', 'R.cpp'), base_body)
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base body')
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        # the worker lists 0x401000 under ## Kept but its committed body differs
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), base_body.replace('return a;', 'return b;'))
+        self.git('commit', '-qam', 'partial edit', cwd=self.wt)
+        d._kept = {'0x401000': 'ours matches'}
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r, category=self.BASE_CAT)
+                                            for r in batch['rows']]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3)), trace(('fn_401000', 7, 3)))
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertIsNone(self._outcomes()['0x401000'])
+        # the fix round edits the body back; close refuses the row as not
+        # imported, never as kept
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), base_body)
+        self.git('commit', '-qam', 'edit back', cwd=self.wt)
+        wave = load_tool('wave')
+        rc, out = wave.close_batch(self.state_path, self.root, 'b011', kind='import', gate=False)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x401000 not imported: body unchanged', out)
+        self.assertNotIn('kept but not measured', out)
+        self.assertIsNone(self._outcomes()['0x401000'])
+
+    def test_driver_kept_mark_needs_the_base_body_category(self):
+        d, batch = self._kept_phase_driver(category='theirs_real_ours_stub')
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertEqual({r.get('kept') for r in rows}, {None})
+
+    def test_driver_check_parses_kept_and_import_rows_carry_the_mark(self):
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
         wave = driver._tool('wave')
         mb = wave.merge_base_sha(self.wt, 'first')
         rows = d._import_rows('b011', batch, self.wt, mb)
@@ -11586,6 +11703,48 @@ class DriverTest(unittest.TestCase):
         d._kept = {'0x403000': 'x'}
         rows = d._import_rows('b011', batch, self.wt, mb)
         self.assertIn('0x403000', [r['address'] for r in rows])
+        # the check parses the section: a malformed line is the report's problem
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x402000 trace\n\n'
+                             '## Kept\nkept 0x401000\n')
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('report: line 5: malformed kept line', probs[0])
+        self.assertIn('fix that line under ## Kept (one "kept <0xADDR> <one-line reason>" '
+                      'per row', probs[0])
+
+    def test_driver_check_clears_the_kept_outcome_of_a_row_off_the_section(self):
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
+        wave = driver._tool('wave')
+        with open(self.state_path) as f:
+            state = json.load(f)
+        for r in state['batches']['b011']['rows']:
+            r['outcome'] = 'kept'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        d._check('b011', self.wt, '## Imported\nimported 0x402000 trace\n\n'
+                 '## Kept\nkept 0x401000 ours is right\n')
+        self.assertEqual(self._outcomes(),
+                         {'0x401000': 'kept', '0x402000': None, '0x403000': None})
+
+    def test_driver_parked_evidence_problem_runs_through_the_fix_round(self):
+        d, batch = self._kept_phase_driver(kept=())
+        _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked', '402000.json'),
+               json.dumps({'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'b011',
+                           'needs': 'x'}))
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'park with evidence left', cwd=self.wt)
+        report = '## Imported\nimported 0x401000 trace\n'
+        text = ('0x402000: parked (docs/wso/import-parked/402000.json) but '
+                'docs/evidence/402000.md still exists; delete it')
+        _v, probs = d._check('b011', self.wt, report)
+        self.assertIn(text, probs)
+        prompt = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', probs, 'import')
+        self.assertIn('- ' + text, prompt)
+        # the worker deletes the file; the second check passes
+        self.git('rm', '-q', 'docs/evidence/402000.md', cwd=self.wt)
+        self.git('commit', '-qm', 'delete the parked row evidence', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, report)
+        self.assertNotIn(text, probs)
+        self.assertFalse([p for p in probs if 'parked' in p], probs)
 
     def test_driver_frida_phase_hooks_dependencies_imported_with_a_row(self):
         trace = TruthTest._trace
@@ -17480,6 +17639,16 @@ class WaveCloseRulesTest(unittest.TestCase):
         rc, out = self.close(kind='import')
         self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
 
+    def test_import_close_refuses_a_kept_row_whose_trace_is_another_batchs(self):
+        self._kept_ready()
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: fn\nkind: trace\ntrace_source: %s\n---\n'
+               % self.FRIDA.replace('b001-', 'b000-'))
+        self.commit_worktree('an older batch trace')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
+
     def test_import_close_never_keeps_a_stub_row(self):
         self._kept_ready(category='theirs_real_ours_stub')
         rc, out = self.close(kind='import')
@@ -19034,11 +19203,21 @@ class ImportSecondSourceTest(unittest.TestCase):
                 bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
             self.assertEqual(rc, 0, texts[bid])
             self.assertNotIn('{{', texts[bid])
-        for needle in ('## Kept', 'kept <0xADDR> <one-line reason>', 'do NOT park the row',
-                       'corroborated by\nWSO at <sha>: <what he changed and why ours is right>; case\n'
-                       'kept-i002-<ADDRESS> decides', 'A stub row is never kept'):
+        for needle in ('kept <0xADDR> <one-line reason>', 'do NOT park the row',
+                       'A stub row is never kept'):
             self.assertIn(needle, texts['i002'])
             self.assertNotIn(needle, texts['i001'])
+        # the base-body paragraph asks for no evidence file and no verdict phrase
+        self.assertIn('Write no evidence file for it and no verdict phrase anywhere',
+                      texts['i002'])
+        for text in texts.values():
+            self.assertNotIn('case\nkept-', text)
+            self.assertNotIn('kept-i002', text)
+            self.assertIn('except a base-body row you list under `## Kept`', text)
+            self.assertIn('for a STUB row (ours is a\n   stub) refusing still parks it', text)
+            self.assertIn('for a BASE-BODY\n   row, refusing his body means ours stays', text)
+            self.assertIn('ours differs from the exe (<scenario>): <difference>; import his body',
+                          text.replace('\n   ', ' '))
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')
