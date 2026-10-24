@@ -621,8 +621,11 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
             coverage_note = 'coverage: %s; candidate order unchanged' % why
         else:
             try:
-                phase = cov_mod.phase_scenarios()
-                state_of = {id(r): cov_mod.status_of(cov, r['address'], phase) for r in eligible}
+                # per row: its candidates (UI screens for CScreen/CUI files, plus
+                # any UI scenario the map says hits it), the phase's own rule
+                state_of = {id(r): cov_mod.status_of(cov, r['address'],
+                                                     cov_mod.row_scenarios(cov, [r]))
+                            for r in eligible}
                 count = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
             except (TypeError, AttributeError, ValueError, KeyError) as e:
                 state_of = None

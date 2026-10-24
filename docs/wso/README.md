@@ -369,8 +369,9 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   checked, the evidence must be `kind: trace` or better, and the tool
   tests, `check_evidence` and parity still run. The import queue skips
   the oracle phase and never rewrites wave 1's scorecard. It runs the
-  Frida phase (with `--frida`): all three scenarios (`world_entry`,
-  `first_fight`, `walk_and_talk`), each through `probe.py run` once per
+  Frida phase (with `--frida`): the scenarios the coverage map picks
+  for the batch (the nine world scenarios, plus `biography` for screen
+  rows; the driver log names them), each through `probe.py run` once per
   side. Before it the driver builds our x86 exe from the batch worktree in
   that worktree's own Windows checkout (`%USERPROFILE%\iwd2r-build-<worktree
   name>`, `driver.frida_build`, compiler output in the batch's

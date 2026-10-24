@@ -931,9 +931,22 @@ def park_text(address, mb, needs):
                                         SHARED_FILE))
 
 
-UNMEASURED_NEEDS = FRIDA_SCENARIOS_TEXT + ': not exercised'
+def unmeasured_needs(run, left=()):
+    """The `needs` of an import row no scenario that ran exercised: the
+    scenarios that ran, and the ones coverage left out (not hit per coverage)."""
+    text = ', '.join(run) + ': not exercised'
+    if left:
+        text += '; not hit per coverage: ' + ', '.join(left)
+    return text
+
+
 COVERAGE_NOT_HIT = 'coverage: no scenario hits it'
-UNMEASURED = '%s: exercised by no scenario (' + FRIDA_SCENARIOS_TEXT + '); park it: %s'
+
+
+def unmeasured(address, run, park):
+    return '%s: exercised by no scenario (%s); park it: %s' % (address, ', '.join(run), park)
+
+
 
 
 def _merge_base(worktree, base):
@@ -2344,7 +2357,8 @@ class Driver:
 
     def _frida_phase(self, batch_id, batch, worktree, verdicts):
         """After the worker, with --frida: one batched Frida differential run
-        (all three scenarios) of an x86 build of the batch worktree
+        (the scenarios the coverage map picks for the batch, see
+        _coverage_scenarios) of an x86 build of the batch worktree
         (_frida_target).  Wave 1 measures the open rows the oracle did not
         decide; the build is the branch's, so equal confirms whichever side
         the verdict records (measured frida) and different is a finding for
@@ -2363,6 +2377,7 @@ class Driver:
         once per batch, never again.  Returns the findings."""
         self._frida_got = {}
         self._frida_notes = {}
+        self._frida_ran = None
         if not self.frida or self.dry_run:
             return []
         truth = _tool('truth')
@@ -2496,10 +2511,15 @@ class Driver:
         candidate runs."""
         truth = _tool('truth')
         cands = list(truth.scenarios_for(rows, [r.get('file') for r in rows]))
+        self._frida_ran = (cands, [])
         try:
             cov_mod = _tool('coverage')
             path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
             cov, why = cov_mod.check(path, self.repo)
+            if cov is not None:
+                # a UI scenario joins when the map says it hits a row
+                cands = cov_mod.row_scenarios(cov, rows)
+                self._frida_ran = (cands, [])
             if cov is None:
                 if os.path.exists(path):
                     self.log('%s: frida: coverage map not used (%s)' % (batch_id, why))
@@ -2515,6 +2535,7 @@ class Driver:
             self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
             return [], True
         left = [sc for sc in cands if sc not in run]
+        self._frida_ran = (list(run), left)
         self.log('%s: frida: scenarios by coverage: %s (left out: %s)'
                  % (batch_id, ', '.join(run), ', '.join(left) or 'none'))
         return run, False
@@ -2586,9 +2607,11 @@ class Driver:
                     'original (%s); the phase does not run again in this batch, so park it: %s'
                     % (a, detail, park_text(a, mb, 'frida different: %s' % detail)))
         elif status == 'not-exercised':
+            run, left = getattr(self, '_frida_ran', None) or (
+                list(_tool('truth').FRIDA_SCENARIOS), [])
             needs = ('not-exercised (%s)' % detail if detail == COVERAGE_NOT_HIT
-                     else UNMEASURED_NEEDS)
-            text = UNMEASURED % (a, park_text(a, mb, needs))
+                     else unmeasured_needs(run, left))
+            text = unmeasured(a, run, park_text(a, mb, needs))
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
                 a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
