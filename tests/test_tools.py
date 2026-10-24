@@ -10035,15 +10035,27 @@ class DriverTest(unittest.TestCase):
     def test_parse_undecided_rejects_malformed_and_duplicates(self):
         h = '## Undecided\n'
         for bad in ('undecided 0x1 ours no\n', 'undecided 0x1 fork\n',
-                    'undecided 0x1\n', 'I could not decide.\n',
-                    'verdict 0x1 fork case x\n'):
+                    'undecided 0x1\n', 'Undecided: none\n',
+                    'verdict 0x1 fork case x\n', 'I could not decide 0x401000.\n'):
             with self.assertRaises(driver.ReportError, msg=bad):
                 driver.parse_undecided(h + bad)
         with self.assertRaises(driver.ReportError) as cm:
-            driver.parse_undecided(h + '\nsome note\n')
+            driver.parse_undecided(h + '\nnote on 0x401000\n')
         self.assertIn('line 3', str(cm.exception))
         with self.assertRaises(driver.ReportError):
             driver.parse_undecided(h + 'undecided 0x401000 fork a\nundecided 0x0401000 neither b\n')
+
+    def test_parse_undecided_skips_address_free_prose(self):
+        # b022 (2026-10-24): Flash wrote a placeholder under ## Undecided twice
+        # ('(none)', then '(no rows — all 20 decided)') and the checks raised
+        # each time; the same tolerance parse_report has applies here.
+        h = '## Undecided\n'
+        for prose in ('(none)\n', '(no rows — all 20 decided)\n', 'some note\n',
+                      'I could not decide.\n', 'All rows carry a verdict.\n'):
+            self.assertEqual(driver.parse_undecided(h + prose), {}, prose)
+        text = h + '(none yet)\nundecided 0x401000 fork the exe skips it\nThat is all.\n'
+        self.assertEqual(driver.parse_undecided(text),
+                         {'0x401000': ('fork', 'the exe skips it')})
 
     def test_parse_undecided_skips_code_fences(self):
         text = '## Undecided\n```text\nundecided 0x401000 fork a\n```\n```\nundecided 0x2 neither b\n```\n'
