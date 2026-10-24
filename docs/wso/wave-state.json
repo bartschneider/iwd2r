@@ -5200,17 +5200,14 @@
     "b019": {
       "assigned_at": "2026-10-23T21:04:47+00:00",
       "branch": "p3/wso-b019",
-      "closed_at": null,
+      "closed_at": "2026-10-24T05:36:08+00:00",
       "files": [
         "src/CInfButtonArray.cpp",
         "src/CScreenSave.cpp",
         "src/CGameJournal.cpp",
         "src/CScreenStart.cpp",
         "src/CUIControlTextDisplay.cpp",
-        "src/CGameEffectList.cpp",
-        "src/CSpawn.cpp",
-        "src/CResFile.cpp",
-        "src/CResCHR.cpp"
+        "src/CSpawn.cpp"
       ],
       "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
       "pool": "glm",
@@ -5333,15 +5330,6 @@
           "their_len": 429
         },
         {
-          "address": "0x4C08E0",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CGameEffectList.cpp",
-          "name": "CGameEffectList::RemoveAllOfType",
-          "our_len": 514,
-          "their_len": 338
-        },
-        {
           "address": "0x768D50",
           "category": "both_changed_differ",
           "class": "ambiguous",
@@ -5358,24 +5346,6 @@
           "name": "CUIControlTextDisplay::OnPageUp",
           "our_len": 406,
           "their_len": 372
-        },
-        {
-          "address": "0x78A280",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CResFile.cpp",
-          "name": "CResFile::GetFileSize",
-          "our_len": 391,
-          "their_len": 377
-        },
-        {
-          "address": "0x4022E0",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CResCHR.cpp",
-          "name": "CResCHR::Parse",
-          "our_len": 424,
-          "their_len": 338
         },
         {
           "address": "0x768840",
@@ -5396,8 +5366,96 @@
           "their_len": 402
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x4C6CD0": {
+          "case": "dump-4C6CD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4E28B0": {
+          "case": "dump-4E28B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4E2A00": {
+          "case": "dump-4E2A00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5879E0": {
+          "case": "dump-5879E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5884B0": {
+          "case": "dump-5884B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x588570": {
+          "case": "dump-588570",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5886A0": {
+          "case": "dump-5886A0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x588760": {
+          "case": "dump-588760",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x594170": {
+          "case": "dump-594170",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x595FB0": {
+          "case": "dump-595FB0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x596040": {
+          "case": "dump-596040",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x65C850": {
+          "case": "dump-65C850",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x65CEA0": {
+          "case": "dump-65CEA0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x65D970": {
+          "case": "dump-65D970",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x66FA90": {
+          "case": "dump-66FA90",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x768840": {
+          "case": "dump-768840",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x768D50": {
+          "case": "dump-768D50",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     },
     "b020": {
       "assigned_at": "2026-10-23T21:34:12+00:00",
