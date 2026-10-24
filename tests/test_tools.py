@@ -10762,7 +10762,9 @@ class DriverTest(unittest.TestCase):
             d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(cm.exception.stage, 'frida')
         self.assertIn('every Frida scenario failed on infrastructure (no side produced a status): '
-                      'first_fight: original side exited 2', cm.exception.problem)
+                      + '; '.join('%s: original side exited 2' % sc
+                                  for sc in sorted(driver._tool('truth').FRIDA_SCENARIOS)),
+                      cm.exception.problem)
         self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
         # the run itself raising is the same exception
         d.frida_run = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('sandbox gone'))
@@ -17582,7 +17584,8 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
         self.assertTrue(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.failed.json')))
-        self.assertIn('failed chunk(s): first_fight 1; walk_and_talk 1; world_entry 1', out.getvalue())
+        self.assertIn('failed chunk(s): ' + '; '.join('%s 1' % sc for sc in sorted(truth.FRIDA_SCENARIOS)),
+                      out.getvalue())
 
     def test_cli_dry_prints_the_launches_and_writes_nothing(self):
         import io
@@ -17677,7 +17680,7 @@ class CoverageTest(unittest.TestCase):
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 2}, 'first_fight': {'0x403000': 1}})
         rc, out = self.wave.write_scorecard(*args)
         self.assertEqual(rc, 0, out)
-        self.assertIn('Coverage: 2 of 6 candidate functions exercised by 3 scenarios (2026-10-24)',
+        self.assertIn('Coverage: 2 of 6 candidate functions exercised by %d scenarios (2026-10-24)' % len(truth.FRIDA_SCENARIOS) + '',
                       _slurp(report))
 
 
