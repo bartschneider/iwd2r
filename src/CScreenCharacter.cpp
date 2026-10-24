@@ -6131,23 +6131,17 @@ void CScreenCharacter::OnExportButtonClick()
 // 0x5E4E80
 BOOL CScreenCharacter::CanLevelUp(CGameSprite* pSprite)
 {
-    BOOL bResult = FALSE;
-
-    if (m_bMultiPlayerModifyable
-        && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
-            || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID)) {
-        CDerivedStats DStats;
-        DStats = *pSprite->GetDerivedStats();
-
-        g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetNextLevel(pSprite->m_startTypeAI.m_nClass,
-            DStats,
-            pSprite);
-
-        bResult = (pSprite->GetDerivedStats()->m_generalState & STATE_DEAD) == 0
-            && DStats.m_nLevel != pSprite->GetDerivedStats()->m_nLevel;
+    if (!m_bMultiPlayerViewable
+        || (g_pChitin->cNetwork.m_nServiceProvider != 0
+            && g_pChitin->cNetwork.m_idLocalPlayer != pSprite->m_remotePlayerID)) {
+        return FALSE;
     }
-
-    return bResult;
+    CDerivedStats stats;
+    stats = pSprite->m_derivedStats;
+    g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetNextLevel(
+        pSprite->m_startTypeAI.m_nClass, stats, pSprite);
+    return stats.m_nLevel != pSprite->m_derivedStats.m_nLevel
+        && (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0;
 }
 
 // 0x5E5330
