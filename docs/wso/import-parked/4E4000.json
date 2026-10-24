@@ -1,0 +1,1 @@
+{"address": "0x4E4000", "name": "CUIControlLabel::CUIControlLabel", "file": "src/CUIControlLabel.cpp", "batch": "i010", "needs": "world_entry: not measured (address-like untyped argument a0 (58059776 vs 77145832); type it from the header); ours reading matches the decompile"}

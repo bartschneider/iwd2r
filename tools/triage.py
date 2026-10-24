@@ -329,20 +329,44 @@ def apply_calibration(triaged, calibration):
 
 
 def regen_triage(state, rows, committed, fork_ref, ours_ref, calibration=None,
-                 show=xrec.show, type_names=None):
+                 show=xrec.show, type_names=None, log=None):
     """The triage file for `rows`: every committed entry whose address has a
     recorded verdict in `state` is kept as it is (its class was calibrated at
     its own ours_ref; re-classifying a closed row at a moved ref flips rows
-    whose fork bodies we adopted); the rest are classified at `ours_ref`."""
+    whose fork bodies we adopted); the rest are classified at `ours_ref`.
+
+    With a calibration, an OPEN row (no verdict in a closed batch) whose auto
+    class the calibration disables becomes 'ambiguous' (auto_class keeps the
+    original), kept entries included, so no open row carries a disabled class
+    by construction; each demotion goes to `log(line)`.  A closed row keeps
+    the class it was decided under."""
     decided = {a for b in state.get('batches', {}).values()
                for a in (b.get('verdicts') or {})}
-    kept = [r for r in committed if r.get('address') in decided]
+    closed = {a.upper() for b in state.get('batches', {}).values()
+              if b.get('status') == 'closed' for a in (b.get('verdicts') or {})}
+    kept = [dict(r) for r in committed if r.get('address') in decided]
     kept_addresses = {r['address'] for r in kept}
     todo = [r for r in rows if r.get('address') not in kept_addresses]
     fresh = triage_rows(todo, fork_ref, ours_ref, show=show,
                         type_names=type_names)
     if calibration is not None:
         fresh = apply_calibration(fresh, calibration)
+        on = enabled_classes(calibration)
+        demoted = []
+        for r in kept:
+            c = r.get('auto_class', r['class'])
+            if (c in AUTO_OURS and c not in on
+                    and r['address'].upper() not in closed
+                    and r['class'] != 'ambiguous'):
+                r.update({'auto_class': c, 'class': 'ambiguous',
+                          'reason': 'disabled by calibration'})
+                demoted.append(r)
+        demoted += [r for r in fresh if r.get('reason') == 'disabled by calibration']
+        if log is not None:
+            for r in demoted:
+                log('triage: %s %s demoted to ambiguous (the calibration '
+                    'disables %s)' % (r['address'], r.get('name', ''),
+                                      r['auto_class']))
     fresh = [dict(r, ours_ref=ours_ref) for r in fresh]
     return kept + fresh
 
