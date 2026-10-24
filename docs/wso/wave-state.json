@@ -6733,7 +6733,7 @@
     "b025": {
       "assigned_at": "2026-10-24T05:36:10+00:00",
       "branch": "p3/wso-b025",
-      "closed_at": null,
+      "closed_at": "2026-10-24T06:35:28+00:00",
       "files": [
         "src/CScreenSave.cpp",
         "src/CUIControlTextDisplay.cpp",
@@ -6816,8 +6816,54 @@
           "their_len": 48
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x4C0830": {
+          "case": "dump-4C0830",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4E2790": {
+          "case": "dump-4E2790",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x587960": {
+          "case": "dump-587960",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x588FF0": {
+          "case": "dump-588FF0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x589FF0": {
+          "case": "dump-589FF0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x595E70": {
+          "case": "save/button_array_updates",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x595F70": {
+          "case": "save/button_array_updates",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x65B920": {
+          "case": "dump-65B920",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     },
     "b026": {
       "assigned_at": "2026-10-24T06:13:21+00:00",
@@ -6908,6 +6954,208 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "b027": {
+      "assigned_at": "2026-10-24T06:22:53+00:00",
+      "branch": "p3/wso-b027",
+      "closed_at": null,
+      "files": [
+        "src/CMessage.cpp",
+        "src/CInfGame.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5084C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetPath::Run",
+          "our_len": 1070,
+          "their_len": 1247
+        },
+        {
+          "address": "0x5ADAE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SelectToolbar",
+          "our_len": 1105,
+          "their_len": 1209
+        },
+        {
+          "address": "0x42CDA0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
+          "our_len": 845,
+          "their_len": 1369
+        },
+        {
+          "address": "0x5007F0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageFireProjectile::Run",
+          "our_len": 1211,
+          "their_len": 994
+        },
+        {
+          "address": "0x73C490",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_73C490",
+          "our_len": 1141,
+          "their_len": 1027
+        },
+        {
+          "address": "0x502EB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageLoadDialog::Run",
+          "our_len": 1122,
+          "their_len": 1031
+        },
+        {
+          "address": "0x733660",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::SetTargetObject",
+          "our_len": 1018,
+          "their_len": 1124
+        },
+        {
+          "address": "0x4F7620",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageHandler::Broadcast",
+          "our_len": 817,
+          "their_len": 1265
+        },
+        {
+          "address": "0x71B9C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AddSpecialAbility",
+          "our_len": 1042,
+          "their_len": 989
+        },
+        {
+          "address": "0x723CC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetAC",
+          "our_len": 697,
+          "their_len": 1208
+        },
+        {
+          "address": "0x733050",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AddEffect",
+          "our_len": 919,
+          "their_len": 897
+        },
+        {
+          "address": "0x5BFC40",
+          "category": "both_changed_differ",
+          "class": "fork-stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::GetProtagonist",
+          "our_len": 1719,
+          "their_len": 91
+        },
+        {
+          "address": "0x718390",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_718390",
+          "our_len": 911,
+          "their_len": 884
+        },
+        {
+          "address": "0x502570",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageInsertResponse::Run",
+          "our_len": 1094,
+          "their_len": 592
+        },
+        {
+          "address": "0x507F70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetPath::CMessageSetPath",
+          "our_len": 789,
+          "their_len": 789
+        },
+        {
+          "address": "0x73CF10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_73CF10",
+          "our_len": 747,
+          "their_len": 759
+        },
+        {
+          "address": "0x73D080",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_73D080",
+          "our_len": 727,
+          "their_len": 747
+        },
+        {
+          "address": "0x723DB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_723DB0",
+          "our_len": 674,
+          "their_len": 765
+        },
+        {
+          "address": "0x6F50A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_6F50A0",
+          "our_len": 700,
+          "their_len": 681
+        },
+        {
+          "address": "0x75F270",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ReturnToStartLoc",
+          "our_len": 671,
+          "their_len": 697
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {
+        "0x5BFC40": {
+          "case": "triage-stub",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
