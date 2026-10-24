@@ -4380,7 +4380,8 @@ def _parse(argv):
                     'review, close, push, ledger.')
     p.add_argument('--queue', choices=sorted(wave.QUEUES), default='wave1',
                    help='wave1 (both_changed_differ, b<NNN>) or import '
-                        '(theirs_real_ours_stub and the import list, i<NNN>)')
+                        '(theirs_real_ours_stub, then theirs_changed_ours_base, '
+                        'and the import list, i<NNN>)')
     p.add_argument('--pool', action='append', default=[], metavar='SPEC',
                    help='NAME=WRAPPER:MODEL[:WORKERS], or the short form '
                         'NAME[:WORKERS] of glm or claude; repeatable '
