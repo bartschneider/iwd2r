@@ -1491,6 +1491,13 @@ def _cites_pin(text, pin):
     return False
 
 
+def gate_kind_of(output):
+    """'docs-only' when tools/gates.sh's summary says it took the docs-only
+    fast path, else 'full'."""
+    return ('docs-only' if 'gates: docs-only fast path' in output.splitlines()
+            else 'full')
+
+
 def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 kind='verdicts', base='first', gate=True, allow_dump=None,
                 ledger_path=None):
@@ -1690,6 +1697,7 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                                   (batch.get('measured_deps') or {}).get(k))
                 if bar:
                     problems.append(f'{label}: {bar}')
+    gate_kind = None
     if gate and not problems and wt is not None:
         g = subprocess.run(['bash', 'tools/gates.sh', '--base', base],
                            cwd=wt, capture_output=True, text=True)
@@ -1698,6 +1706,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                             f'(exit {g.returncode}):')
             problems += ['  ' + l
                          for l in g.stdout.splitlines()[-10:]]
+        else:
+            gate_kind = gate_kind_of(g.stdout)
     if problems:
         return 1, (f'batch {batch_id} not closed:\n'
                    + '\n'.join('  - ' + p for p in problems) + '\n')
@@ -1706,6 +1716,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
         return 1, f'batch {batch_id} not closed:\n  - {err}\n'
     batch['status'] = 'closed'
     batch['closed_at'] = _now()
+    if gate_kind:
+        batch['gate'] = gate_kind
     if kind == 'probes':
         # the rows left on the list are released: `next` offers them again
         # only per the entry's probed stamp (_probe_reoffer)
@@ -1724,7 +1736,7 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     else:
         tail = _tally_line(batch)
     return 0, (f'{batch_id} closed: {len(batch["rows"])} rows'
-               f'{tail}\n{base} fast-forwarded to {new} '
+               f'{tail}' + (f' (gate: {gate_kind})' if gate_kind else '') + f'\n{base} fast-forwarded to {new} '
                f'({branch})\n'
                + (f'dump-decided verdicts allowed by: {used}\n'
                   if used and any(
