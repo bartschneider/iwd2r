@@ -400,6 +400,36 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i004": {
+      "assigned_at": "2026-10-24T02:31:32+00:00",
+      "branch": "p3/wso-i004",
+      "closed_at": "2026-10-24T03:00:36+00:00",
+      "files": [
+        "src/CScreenSpellbook.cpp",
+        "src/CScreenOptions.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x66ECA0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CUIControlButtonSpellbookLevelSelection::CUIControlButtonSpellbookLevelSelection",
+          "our_len": 21,
+          "their_len": 40
+        },
+        {
+          "address": "0x659470",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CUIControlButtonOptionsError::CUIControlButtonOptionsError",
+          "our_len": 2,
+          "their_len": 45
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
