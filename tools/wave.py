@@ -1493,9 +1493,11 @@ def _cites_pin(text, pin):
 
 def gate_kind_of(output):
     """'docs-only' when tools/gates.sh's summary says it took the docs-only
-    fast path, else 'full'."""
-    return ('docs-only' if 'gates: docs-only fast path' in output.splitlines()
-            else 'full')
+    fast path, 'full' when it says `gates: full gate`, else 'unknown'."""
+    lines = output.splitlines()
+    if 'gates: docs-only fast path' in lines:
+        return 'docs-only'
+    return 'full' if 'gates: full gate' in lines else 'unknown'
 
 
 def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,

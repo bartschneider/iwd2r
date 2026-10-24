@@ -16155,7 +16155,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(wave.gate_kind_of('gates: docs-only fast path\ngates: all passed\n'),
                          'docs-only')
         self.assertEqual(wave.gate_kind_of('gates: full gate\ngates: all passed\n'), 'full')
-        self.assertEqual(wave.gate_kind_of('gates: all passed\n'), 'full')
+        self.assertEqual(wave.gate_kind_of('gates: all passed\n'), 'unknown')
 
     def test_state_mutations_hold_the_driver_lock(self):
         w = self._BatchWorker(credits=0.0)
@@ -21966,6 +21966,7 @@ class ClaimsTest(unittest.TestCase):
     def assert_full(self, out, base='first'):
         self.assertNotIn('skipped (docs-only', out)
         self.assertNotIn('docs-only fast path', out)
+        self.assertRegex(out, r'(?m)^gates: full gate$')
         for name in self.SKIPPED:
             name = name.replace('base first', 'base ' + base)
             self.assertRegex(out, r'(?m)^--- %s: ok$' % re.escape(name))
@@ -21982,7 +21983,9 @@ class ClaimsTest(unittest.TestCase):
         self.assertRegex(out, r'(?m)^--- fixture two: ok$')
 
     def test_gate_src_change_runs_the_full_gate(self):
-        for rel in ('src/a.cpp', 'tests/test_x.cpp', 'tests/fixtures/a.bin',
+        for rel in ('src/a.cpp', 'scenarios/start.txt', 'stray.h', 'CMakeUserPresets.json',
+                    'newdir/x.txt', 'tools/check_evidence.py', 'tools/oracle.py',
+                    'tests/test_x.cpp', 'tests/fixtures/a.bin',
                     'CMakeLists.txt', 'platform/p.cpp', 'tools/dataview_rules.json'):
             with self.subTest(rel=rel):
                 root = self.fast_repo({rel: 'z\n'})
@@ -22006,6 +22009,29 @@ class ClaimsTest(unittest.TestCase):
         _write(os.path.join(root, 'src', 'new.cpp'), 'int x;\n')
         self.assert_full(self.run_gate(root, '--base', 'first'))
 
+    def test_gate_renaming_an_engine_file_into_docs_runs_the_full_gate(self):
+        for rel in ('scenarios/x.txt', 'src/a.cpp', 'tests/fixtures/a.json',
+                    'tools/dataview_rules.json'):
+            with self.subTest(rel=rel):
+                root = self.lock_repo()
+                git = lambda *a: subprocess.run(
+                    ['git', '-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', *a],
+                    check=True, capture_output=True)
+                git('checkout', '-q', '-b', 'first')
+                _write(os.path.join(root, rel), 'content that stays identical\n' * 5)
+                git('add', '-A')
+                git('commit', '-q', '-m', 'base')
+                git('checkout', '-q', '-b', 'work')
+                os.makedirs(os.path.join(root, 'docs'), exist_ok=True)
+                git('mv', rel, 'docs/moved.txt')
+                git('commit', '-q', '-m', 'move')
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+                # the same move left uncommitted
+                git('reset', '-q', '--hard', 'HEAD~1')
+                os.makedirs(os.path.join(root, 'docs'), exist_ok=True)
+                git('mv', rel, 'docs/moved.txt')
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+
     def test_gate_full_flag_forces_the_full_gate(self):
         root = self.fast_repo({'docs/n.md': 'n\n'})
         self.assert_full(self.run_gate(root, '--base', 'first', '--full'))
@@ -22013,6 +22039,7 @@ class ClaimsTest(unittest.TestCase):
     def test_gate_without_base_is_always_full(self):
         root = self.fast_repo({'docs/n.md': 'n\n'})
         out = self.run_gate(root)
+        self.assertRegex(out, r'(?m)^gates: full gate$')
         self.assertNotIn('skipped (docs-only', out)
         self.assertNotIn('docs-only fast path', out)
 

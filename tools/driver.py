@@ -5932,7 +5932,7 @@ class Driver:
                 (reviewed, 'recovered after the last run stopped between '
                            'close and ledger'),
                 'unknown..%s (recovered)' % (tip[:8] or batch['branch']), None,
-                pool=batch.get('pool')))
+                pool=batch.get('pool'), gate=batch.get('gate')))
             self.log('%s: closed by the last run without its ledger entry; '
                      'entry written' % batch_id)
         with self._landing_lock(batch_id), self._lock:
