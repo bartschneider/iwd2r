@@ -1,0 +1,2 @@
+{"address": "0x79F950", "name": "CVidInf::RenderPointer", "file": "src/CVidInf.cpp", "batch": "i006",
+ "needs": "no Frida hook: ambiguous: 2 overloads of CVidInf::RenderPointer in our map"}

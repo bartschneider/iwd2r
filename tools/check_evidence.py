@@ -229,6 +229,29 @@ def touched(repo, base):
     return result
 
 
+def body_digest(repo, address, path=None):
+    """sha256 of the committed (HEAD) source text of the function labelled
+    `// 0xADDRESS`, looked for in `path` or else every src/*.cpp; None when
+    it is not there.  (A digest of the source slice: the Frida phase records
+    it, the check and the close compare it.)"""
+    import hashlib
+    want = int(address, 16) if isinstance(address, str) else address
+    paths = [p for p in git(repo, 'ls-tree', '-r', '--name-only', 'HEAD', '--', 'src/',
+                            check=False).stdout.splitlines() if p.endswith('.cpp')]
+    if path:
+        paths = [path] + [p for p in paths if p != path]
+    for rel in paths:
+        r = git(repo, 'show', f'HEAD:{rel}', check=False)
+        if r.returncode != 0:
+            continue
+        lines = r.stdout.splitlines()
+        for first, last, addr, _name in spans(lines):
+            if addr == want:
+                text = '\n'.join(lines[first:last + 1])
+                return hashlib.sha256(text.encode('utf-8')).hexdigest()
+    return None
+
+
 def fork_note_mentions(sha, path, address, name, run=subprocess.run):
     """(ok, reason): whether the fork's note `path` at `sha` (read with
     `git show sha:path`, never checked out or run) names the function: its
