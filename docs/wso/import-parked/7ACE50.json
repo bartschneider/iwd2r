@@ -1,0 +1,7 @@
+{
+  "address": "0x7ACE50",
+  "name": "CVidCell::CVidCell",
+  "file": "src/CVidCell.cpp",
+  "batch": "i016",
+  "needs": "world_entry: not measured (no Frida hook: ambiguous: 2 overloads of CVidCell::CVidCell in our map); ours reading matches the decompile"
+}
