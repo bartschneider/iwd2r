@@ -317,6 +317,15 @@ def _frida_probe(text):
     return parts[1] if len(parts) > 1 and parts[0] == 'frida' else ''
 
 
+def other_batch_trace(text, batch_id):
+    """True when an evidence text is a frida trace another batch's phase
+    wrote (its probe is not `<batch_id>-...`).  It measured the body that
+    batch had, which may not be the one on this branch (nothing ties the
+    trace to a body), so it does not stand for a kept row: the phase
+    measures the row again (Task 19, round 4)."""
+    return frida_trace(text) and not _frida_probe(text).startswith(f'{batch_id}-')
+
+
 def kept_evidence(worktree, merge_base, address, name, text):
     """Why an import row's evidence stands as it is written, or None when
     the Frida phase must measure it (the whole-branch review's ruling):
@@ -1373,6 +1382,13 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     this_batch = frida_trace(text) and _frida_probe(text).startswith(
                         f'{batch_id}-')
                     stands = kept_evidence(wt, mb, row['address'], row.get('name', ''), text)
+                    if stands and other_batch_trace(text, batch_id):
+                        # another batch's frida trace measured the body that
+                        # batch had: it stands only for the body this batch's
+                        # phase recorded (measured_body), still the one here
+                        want = row.get('measured_body')
+                        stands = bool(want) and _check_evidence().body_digest(
+                            wt, row['address'], row.get('file')) == want
                     if bar or not (this_batch or stands):
                         problems.append(f'{row["address"]}: kept but not measured; park it or '
                                         f'import it')
@@ -1805,8 +1821,10 @@ BASE_BODY_PARAGRAPH = (
     "body contradicts the original, ours stays and the row goes under `## Kept`\n"
     "with the reason `fork body contradicts the exe: <what differs>`; a row you\n"
     "leave as ours is never parked by you for that. Park the row only when ours\n"
-    "is wrong too (`needs` says what), when it depends on a function outside the\n"
-    "batch, or when you cannot settle it. A stub row is never kept.\n\n")
+    "is wrong too (`needs` says what), when his body is the one to import but it\n"
+    "depends on a function outside the batch (a kept row imports nothing, so\n"
+    "what ours calls never parks it), or when you cannot settle it.\n"
+    "A stub row is never kept.\n\n")
 
 # The template's `## Kept` pieces, rendered for batches that hold base-body rows
 # only (a stub batch has no `## Kept` section to write).
@@ -1824,7 +1842,7 @@ KEPT_MEASURED = (
     "   cannot be measured (the phase runs once), so it is not offered. A base-body\n"
     "   row you imported that comes back different parks as any import does.")
 KEPT_RULE4_EXCEPTION = ", except a base-body row you list under `## Kept`"
-KEPT_CLOSE = ", or kept and measured"
+KEPT_CLOSE = ", or kept (measured by the driver, or standing on oracle/replay evidence)"
 REFUSAL_STUB = (" A row whose body you leave as ours because you refused his body is\n"
                 "   parked too, with `needs` saying why.")
 REFUSAL_MIXED = (" A row whose body you leave as ours because you refused his body: for\n"

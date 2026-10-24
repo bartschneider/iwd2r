@@ -40,8 +40,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    `docs/wso/import-parked/<ADDRESS>.json` (address in caps, no `0x`, the
    same stem as its evidence file; one JSON object
    `{address, name, file, batch, needs}`) with `needs` of
-   `"fork body contradicts the exe: <what differs>"`.{{kept_refusal}} Three of
-   seven fork bodies in batch i002 did.
+   `"fork body contradicts the exe: <what differs>"`. Three of seven fork
+   bodies in batch i002 did.{{kept_refusal}}
 2. **Every commit that brings in his code carries exactly this trailer**, one
    per commit, as the last line of the message:
 

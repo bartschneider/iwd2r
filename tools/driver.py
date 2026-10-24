@@ -1310,10 +1310,14 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     return problems
 
 
-def _measured_body_problems(batch, worktree, parked, key):
+def _measured_body_problems(batch, worktree, parked, key, moved=None):
     """A row the Frida phase wrote trace evidence for (`measured_body` in the
     batch state: the digest of its body then) whose body on the branch is now
-    another one: its trace measured a body that is not the one that lands."""
+    another one: its trace measured a body that is not the one that lands.
+    A dependency (`measured_deps`) is held to it only while the batch still
+    changes it against the merge base (`moved`, address keys; None: every
+    one), as close does: edited back to the merge base's body it is no longer
+    the batch's."""
     ce = _tool('check_evidence')
     out = []
     for r in batch.get('rows', []):
@@ -1323,6 +1327,8 @@ def _measured_body_problems(batch, worktree, parked, key):
             out.append('%s: body changed after the Frida phase; park it or edit it back to the '
                        'measured body' % r['address'])
     for k, want in sorted((batch.get('measured_deps') or {}).items()):
+        if moved is not None and k not in moved:
+            continue
         if k not in parked and ce.body_digest(worktree, '0x' + k) != want:
             out.append('0x%s: body changed after the Frida phase; park it or edit it back to '
                        'the measured body' % k.upper())
@@ -1350,16 +1356,19 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
             addr = rows[k]['address'] if k in rows else '0x' + k.upper()
             problems.append('%s: parked (%s) but %s still exists; delete it'
                             % (addr, wave.parked_rel(k), rel))
-    problems += _measured_body_problems(batch, worktree, parked, key)
+    moved = None
+    if kept or batch.get('measured_deps'):
+        try:
+            moved = {key('0x%X' % a) for _p, a, _n in
+                     _tool('check_evidence').touched(worktree, base)}
+        except Exception as e:
+            what = ('whether the kept rows kept our bodies' if kept
+                    else 'which dependencies the batch still changes')
+            problems.append('cannot tell %s (%r); fix it and rerun' % (what, e))
+    problems += _measured_body_problems(batch, worktree, parked, key, moved)
     if not kept:
         return problems
-    try:
-        moved = {key('0x%X' % a) for _p, a, _n in
-                   _tool('check_evidence').touched(worktree, base)}
-    except Exception as e:
-        moved = set()
-        problems.append('cannot tell whether the kept rows kept our bodies (%r); fix it '
-                        'and rerun' % (e,))
+    moved = moved or set()
     mb = _merge_base(worktree, base)
     for a in sorted(kept, key=key):
         k = key(a)
@@ -2994,7 +3003,9 @@ class Driver:
         that are not parked, plus every function the batch touched against
         the merge base that carries a `// 0xADDR` marker (a stub dependency
         imported with a row: it is hooked and held to the same bar), less
-        those whose evidence stands as written (wave.kept_evidence)."""
+        those whose evidence stands as written (wave.kept_evidence).  For a
+        kept row a frida trace another batch wrote does not stand
+        (wave.other_batch_trace): it measured that batch's body."""
         wave = _tool('wave')
         key = wave._addr_key
         parked, bad = wave._parked_rows(worktree)
@@ -3039,6 +3050,13 @@ class Driver:
             # a kept row's included: it closes on that evidence
             why = text is not None and wave.kept_evidence(
                 worktree, mb_sha, r['address'], r.get('name', ''), text)
+            if why and r.get('kept') and wave.other_batch_trace(text, batch_id):
+                # unchanged since the merge base, but another batch's frida
+                # trace: it measured the body that batch had, and nothing ties
+                # it to the one here, so a kept row is measured again
+                self.log('%s: frida %s kept on another batch\'s frida trace (%s); measured again'
+                         % (batch_id, r['address'], wave._frida_probe(text)))
+                why = None
             if why:
                 self.log('%s: frida %s kept as written (%s); not measured'
                          % (batch_id, r['address'], why))
