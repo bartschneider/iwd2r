@@ -17,10 +17,12 @@ import importlib.util
 import os
 import random
 import shlex
+import shutil
 import signal
 import re
 import queue as queue_mod
 import subprocess
+import tempfile
 import sys
 import threading
 import time
@@ -2417,13 +2419,14 @@ class Driver:
             if sig:
                 sigs[r['address']] = sig
         # A retried batch reuses the phase's results when nothing it measured
-        # changed (frida-cache.json in the batch's driver folder).  The key is
-        # taken before the build: the table is a function of the rows, their
-        # signatures, the scenarios and the map, and the map of a build is a
-        # function of the tree ids (or, with --frida-map, of that file).
-        key_hex = self._frida_cache_key(worktree, rows, sigs, run_scenarios)
+        # changed (frida-cache.json in the batch's driver folder; the key is
+        # _frida_cache_key's, taken before the build).  Either way the
+        # (traces, info, got) go through one tail below.
+        key_hex = self._frida_cache_key(batch_id, worktree, rows, sigs, run_scenarios)
         cache_path = os.path.join(self.driver_dir, batch_id, 'frida-cache.json')
-        cached = self._frida_cache_read(batch_id, cache_path, key_hex, run_scenarios)
+        cached = self._frida_cache_read(batch_id, cache_path, key_hex) \
+            if key_hex and self.frida_cache else None
+        info = {}
         if cached is not None:
             self.log('%s: frida: results reused from %s (key %s)' % (
                 batch_id, cached['at'], key_hex[:12]))
@@ -2432,39 +2435,35 @@ class Driver:
                     'typed_slots': {k: list(v) for k, v in (cached.get('typed_slots') or {}).items()}}
             got = truth.frida_verdicts(traces, rows, cached.get('skipped') or {}, info=info)
             got = {key(a): v for a, v in got.items()}
-            self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
-                               for r in rows}
-            self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
-            exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
-            return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
-                                        verdicts, importing, mb)
-        checkout, map_path, why = self._frida_target(batch_id, worktree)
-        traces = {}
+        else:
+            checkout, map_path, why = self._frida_target(batch_id, worktree)
+            traces = {}
 
-        def run_frida(batch_id, table, scenarios):
-            # Ours runs the batch worktree's own build (the map's RVAs).
-            traces.update(self.frida_run(batch_id, table, scenarios,
-                                         build_checkout=checkout))
-            return traces
-        # A phase-wide failure (no build, the run raised, every scenario
-        # failed on infrastructure) is an exception for the human at stage
-        # frida: no row is measured, parked or rewritten (ruled).  Row-level
-        # outcomes below still park.
-        if why:
-            raise _StageError('frida', 'the Frida phase could not run: %s; no row was measured, '
-                                       'parked or rewritten; fix it and clear this exception' % why)
-        try:
-            with open(map_path, encoding='utf-8', errors='replace') as f:
-                map_text = f.read()
-            self._stage(batch_id, 'frida')
-            got = truth.frida_batch(batch_id, rows, sigs, map_text, scenarios=run_scenarios,
-                                    run_frida=run_frida,
-                                    headers=truth._our_headers(worktree), info=info)
-            got = {key(a): v for a, v in got.items()}
-        except Exception as e:
-            raise _StageError('frida', 'the Frida run raised %s; no row was measured, parked or '
-                                       'rewritten; fix it and clear this exception'
-                              % _one_line(repr(e), 300)) from None
+            def run_frida(batch_id, table, scenarios):
+                # Ours runs the batch worktree's own build (the map's RVAs).
+                traces.update(self.frida_run(batch_id, table, scenarios,
+                                             build_checkout=checkout))
+                return traces
+            # A phase-wide failure (no build, the run raised, every scenario
+            # failed on infrastructure) is an exception for the human at stage
+            # frida: no row is measured, parked or rewritten (ruled).  Row-level
+            # outcomes below still park.
+            if why:
+                raise _StageError('frida', 'the Frida phase could not run: %s; no row was '
+                                           'measured, parked or rewritten; fix it and clear this '
+                                           'exception' % why)
+            try:
+                with open(map_path, encoding='utf-8', errors='replace') as f:
+                    map_text = f.read()
+                self._stage(batch_id, 'frida')
+                got = truth.frida_batch(batch_id, rows, sigs, map_text, scenarios=run_scenarios,
+                                        run_frida=run_frida,
+                                        headers=truth._our_headers(worktree), info=info)
+                got = {key(a): v for a, v in got.items()}
+            except Exception as e:
+                raise _StageError('frida', 'the Frida run raised %s; no row was measured, parked '
+                                           'or rewritten; fix it and clear this exception'
+                                  % _one_line(repr(e), 300)) from None
         dead = _infrastructure_failure(traces)
         if dead:
             raise _StageError('frida', 'every Frida scenario failed on infrastructure (no side '
@@ -2476,7 +2475,8 @@ class Driver:
                                        '(tooling out of step, not the rows): %s; no row was '
                                        'measured, parked or rewritten; fix it and clear this '
                                        'exception' % refused)
-        self._frida_cache_write(batch_id, cache_path, key_hex, run_scenarios, traces, info)
+        if cached is None and key_hex:
+            self._frida_cache_write(batch_id, cache_path, key_hex, run_scenarios, traces, info)
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
@@ -2486,34 +2486,86 @@ class Driver:
         return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
                                     verdicts, importing, mb)
 
-    def _frida_cache_key(self, worktree, rows, sigs, scenarios):
-        """sha256 hex over what the phase measures: the worktree's src, compat,
-        oracle and platform tree ids (the inputs of its x86 build, hence of
-        the map and the hook RVAs), with --frida-map that file's bytes, the
-        rows (address, name), their signatures (the hook typing), and the
-        sorted scenario list."""
+    @staticmethod
+    def _file_sha(path):
+        with open(path, 'rb') as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    def _worktree_listing(self, worktree):
+        """The `git ls-tree -r` lines of the batch worktree's WORKING tree (what
+        play.sync_windows copies to the build: modified and untracked files
+        included, ignored ones not) with everything under docs/ left out
+        (the fix rounds the cache serves edit only evidence there).  Taken
+        through a temporary index so the real one is untouched.  Raises
+        RuntimeError when a git step fails."""
+        tmp = tempfile.mkdtemp(prefix='frida-key-')
+        try:
+            env = dict(os.environ, GIT_INDEX_FILE=os.path.join(tmp, 'index'))
+
+            def git(*args):
+                r = subprocess.run(['git', '-C', worktree, *args], capture_output=True,
+                                   text=True, env=env)
+                if r.returncode != 0:
+                    raise RuntimeError('git %s: %s' % (' '.join(args[:2]),
+                                                       _one_line(r.stderr or r.stdout, 120)))
+                return r.stdout
+            git('read-tree', 'HEAD')
+            git('add', '-A')
+            tree = git('write-tree').strip()
+            lines = git('ls-tree', '-r', tree).splitlines()
+            return [l for l in lines if not l.partition('\t')[2].startswith('docs/')]
+        finally:
+            shutil.rmtree(tmp, True)
+
+    def _frida_cache_key(self, batch_id, worktree, rows, sigs, scenarios):
+        """sha256 hex over what the phase measures, or None (logged: no reuse,
+        no cache write) when a part of it cannot be read:
+        - the batch worktree's working tree minus docs/ (_worktree_listing:
+          src, compat, oracle, platform, the cmake files, third_party: the
+          inputs of the x86 build, hence the map and the hook RVAs);
+        - the tooling's bytes from the driver checkout (truth.ROOT):
+          tools/truth.py, tools/oracle.py, tools/frida/*.py,
+          oracle/replay/schema.json and screens.json, and each scenario's
+          coverage.entry_sha; with --frida-map also that path, the map and
+          the injector.exe and recorder.dll beside it;
+        - the rows (address, name), their signatures and the sorted scenarios."""
+        truth = _tool('truth')
         h = hashlib.sha256()
-        for sub in ('src', 'compat', 'oracle', 'platform'):
-            r = subprocess.run(['git', '-C', worktree, 'rev-parse', 'HEAD:' + sub],
-                               capture_output=True, text=True)
-            h.update(('%s=%s\n' % (sub, r.stdout.strip() if r.returncode == 0 else '-')).encode())
-        if self.frida_map:
-            try:
-                with open(self.frida_map, 'rb') as f:
-                    h.update(b'map=' + os.path.abspath(self.frida_map).encode() + b' ' + hashlib.sha256(f.read()).hexdigest().encode() + b'\n')
-            except OSError:
-                h.update(b'map=unreadable\n')
+        try:
+            h.update('\n'.join(self._worktree_listing(worktree)).encode())
+            root = truth.ROOT
+            names = ['tools/truth.py', 'tools/oracle.py', 'oracle/replay/schema.json',
+                     'oracle/replay/screens.json']
+            names += sorted('tools/frida/' + n for n in os.listdir(os.path.join(root, 'tools', 'frida'))
+                            if n.endswith('.py')) if os.path.isdir(os.path.join(root, 'tools', 'frida')) else []
+            for rel in names:
+                p = os.path.join(root, rel)
+                if os.path.isfile(p):
+                    h.update(('\nfile %s %s' % (rel, self._file_sha(p))).encode())
+            cov = _tool('coverage')
+            for sc in sorted(scenarios):
+                h.update(('\nscenario %s %s' % (sc, cov.entry_sha(sc, root))).encode())
+            if self.frida_map:
+                oracle = _tool('oracle')
+                checkout = os.path.dirname(os.path.dirname(os.path.abspath(self.frida_map)))
+                extra = [self.frida_map] + [os.path.join(_map_checkout(self.frida_map) or checkout,
+                                                         oracle.REPLAY_DIR_REL, n)
+                                            for n in (oracle.INJECTOR, oracle.RECORDER)]
+                for p in extra:
+                    h.update(('\nmap %s %s' % (os.path.abspath(p), self._file_sha(p))).encode())
+        except (RuntimeError, OSError) as e:
+            self.log('%s: frida: cache key unavailable (%s); no reuse, no cache write' % (
+                batch_id, _one_line(repr(e), 160)))
+            return None
         h.update(json.dumps({'rows': sorted((r['address'], r.get('name')) for r in rows),
                              'sigs': sigs, 'scenarios': sorted(scenarios)},
                             sort_keys=True, default=str).encode())
         return h.hexdigest()
 
-    def _frida_cache_read(self, batch_id, path, key_hex, scenarios):
-        """The cache entry when reuse applies (same key and scenario set),
-        else None (one log line when the file exists but cannot be used as
-        a cache)."""
-        if not self.frida_cache:
-            return None
+    def _frida_cache_read(self, batch_id, path, key_hex):
+        """The cache entry when reuse applies (same key, and every trace file
+        it cites present with its recorded sha256), else None (one log line
+        when the file exists but cannot be used)."""
         try:
             with open(path, encoding='utf-8') as f:
                 cached = json.load(f)
@@ -2524,24 +2576,61 @@ class Driver:
                 batch_id, path, _one_line(repr(e), 120)))
             return None
         if not (isinstance(cached, dict) and isinstance(cached.get('traces'), dict)
-                and isinstance(cached.get('at'), str)):
+                and isinstance(cached.get('at'), str) and isinstance(cached.get('files'), dict)
+                and isinstance(cached.get('key'), str)):
             self.log('%s: frida: cache %s unreadable (wrong shape); running the phase' % (
                 batch_id, path))
             return None
-        if cached.get('key') != key_hex or sorted(cached.get('scenarios') or []) != sorted(scenarios):
+        if cached['key'] != key_hex:
+            self.log('%s: frida: cache key changed (%s \u2192 %s); running' % (
+                batch_id, cached['key'][:12], key_hex[:12]))
             return None
+        for fpath, sha in sorted(cached['files'].items()):
+            try:
+                ok = self._file_sha(fpath) == sha
+            except OSError:
+                ok = False
+            if not ok:
+                self.log('%s: frida: cached trace file %s is missing or changed; running' % (
+                    batch_id, fpath))
+                return None
         return cached
 
     def _frida_cache_write(self, batch_id, path, key_hex, scenarios, traces, info):
-        """Store a phase that produced verdicts: key, time, scenarios, the
-        traces frida_run returned (event lists included) and what
-        frida_verdicts needs beside them (typed_from, typed_slots, skipped).
-        Not serialisable as is: logged, no cache."""
+        """Store a phase that ran and produced verdicts: key, time, scenarios,
+        the traces frida_run returned (event lists included), the sha256 of
+        every trace file they cite, and what frida_verdicts needs beside
+        them (typed_from, typed_slots, skipped).  Not stored (logged): a phase
+        in which a scenario failed, a side exited non-zero or the dumps did
+        not match (a sandbox flake must not be frozen), or whose traces are
+        not serialisable."""
+        bad = []
+        files = {}
+        for sc, t in sorted(traces.items()):
+            if not isinstance(t, dict):
+                bad.append('%s: not a trace' % sc)
+                continue
+            if t.get('failed'):
+                bad.append('%s failed' % sc)
+            for side in ('orig', 'ours'):
+                if t.get(side + '_exit'):
+                    bad.append('%s %s exited %s' % (sc, side, t[side + '_exit']))
+                if t.get(side + '_path'):
+                    try:
+                        files[t[side + '_path']] = self._file_sha(t[side + '_path'])
+                    except OSError as e:
+                        bad.append('%s trace file unreadable (%s)' % (sc, e.__class__.__name__))
+            d = t.get('dumps')
+            if isinstance(d, dict) and d.get('match') is not True:
+                bad.append('%s dumps did not match' % sc)
+        if bad:
+            self.log('%s: frida: results not cached (%s)' % (batch_id, '; '.join(bad)[:300]))
+            return
         try:
             text = json.dumps({
                 'key': key_hex,
                 'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-                'scenarios': sorted(scenarios), 'traces': traces,
+                'scenarios': sorted(scenarios), 'traces': traces, 'files': files,
                 'typed_from': info.get('typed_from') or {},
                 'typed_slots': info.get('typed_slots') or {},
                 'skipped': info.get('skipped') or {}}, indent=1)

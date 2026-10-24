@@ -11562,14 +11562,14 @@ class DriverTest(unittest.TestCase):
         got = dict(d._frida_got)
         self.assertEqual((len(calls['run']), len(calls['build'])), (1, 1))
         path = os.path.join(d.driver_dir, 'b011', 'frida-cache.json')
-        cache = json.load(open(path))
-        self.assertEqual(sorted(cache), ['at', 'key', 'scenarios', 'skipped', 'traces',
+        cache = json.loads(_slurp(path))
+        self.assertEqual(sorted(cache), ['at', 'files', 'key', 'scenarios', 'skipped', 'traces',
                                          'typed_from', 'typed_slots'])
         self.assertEqual(cache['scenarios'], sorted(calls['run'][0]))
         self.assertEqual(self._reused_lines(), [])
         # the fix round reverted an evidence file: the reused phase rewrites it
         ev = os.path.join(self.wt, 'docs', 'evidence', '401000.md')
-        text = open(ev).read()
+        text = _slurp(ev)
         with open(ev, 'w') as f:
             f.write(text.replace('kind: trace', 'kind: read-only'))
         self.git('commit', '-qam', 'revert evidence', cwd=self.wt)
@@ -11580,7 +11580,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(second, first)
         self.assertEqual(self._reused_lines(), [
             'b011: frida: results reused from %s (key %s)' % (cache['at'], cache['key'][:12])])
-        self.assertIn('kind: trace', open(ev).read())
+        self.assertIn('kind: trace', _slurp(ev))
 
     def test_driver_frida_phase_runs_again_when_the_src_tree_changed(self):
         d, batch, calls = self._cache_driver()
@@ -11650,7 +11650,99 @@ class DriverTest(unittest.TestCase):
         bad = [l for l in self.logs if 'unreadable' in l and 'frida-cache.json' in l]
         self.assertEqual(len(bad), 1)
         self.assertEqual(self._reused_lines(), [])
-        json.load(open(path))   # overwritten with a good cache
+        json.loads(_slurp(path))   # overwritten with a good cache
+
+    def _cache_path(self, d):
+        return os.path.join(d.driver_dir, 'b011', 'frida-cache.json')
+
+    def test_driver_frida_phase_dirty_working_tree_neither_reuses_nor_writes(self):
+        d, batch, calls = self._cache_driver()
+        d._frida_phase('b011', batch, self.wt, {})
+        before = _slurp(self._cache_path(d))
+        # an uncommitted body edit (the build copies the working tree)
+        os.makedirs(os.path.join(self.wt, 'src'), exist_ok=True)
+        with open(os.path.join(self.wt, 'src', 'wip.cpp'), 'w') as f:
+            f.write('int wip() { return 1; }\n')
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual((len(calls['run']), len(calls['build'])), (2, 2))
+        self.assertEqual(self._reused_lines(), [])
+        self.assertTrue([l for l in self.logs if 'cache key changed' in l])
+        # the run on the dirty tree is cached under the dirty key, never the clean one:
+        # a clean retry (the file gone) still matches the first entry's key only if rewritten
+        self.assertNotEqual(_slurp(self._cache_path(d)), before)
+        # docs/ edits alone leave the key alone
+        os.unlink(os.path.join(self.wt, 'src', 'wip.cpp'))
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(calls['run']), 3)   # the cache held the dirty key
+
+    def test_driver_frida_phase_git_failure_means_no_cache(self):
+        d, batch, calls = self._cache_driver()
+        with mock.patch.object(driver.Driver, '_worktree_listing',
+                               side_effect=RuntimeError('git add: boom')):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertFalse(os.path.exists(self._cache_path(d)))
+        self.assertTrue([l for l in self.logs if 'cache key unavailable' in l])
+
+    def test_driver_frida_phase_a_tooling_byte_change_runs_again(self):
+        d, batch, calls = self._cache_driver()
+        truth_mod = driver._tool('truth')
+        root = self._tmpdir()
+        for rel in ('tools/truth.py', 'tools/oracle.py', 'oracle/replay/schema.json'):
+            _write(os.path.join(root, rel), 'v1\n')
+        with mock.patch.object(truth_mod, 'ROOT', root):
+            d._frida_phase('b011', batch, self.wt, {})
+            d._frida_phase('b011', batch, self.wt, {})
+            self.assertEqual(len(calls['run']), 1)
+            self.assertEqual(len(self._reused_lines()), 1)
+            _write(os.path.join(root, 'oracle/replay/schema.json'), 'v2\n')
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(calls['run']), 2)
+        self.assertEqual(len(self._reused_lines()), 1)
+
+    def test_driver_frida_phase_a_failed_scenario_or_dump_mismatch_is_not_cached(self):
+        for mutate, why in ((lambda t: t.update(failed='ours side exited 2'), 'failed'),
+                            (lambda t: t.update(ours_exit=2), 'exited 2'),
+                            (lambda t: t.update(dumps={'match': False, 'detail': 'x'}),
+                             'dumps did not match')):
+            d, batch, calls = self._cache_driver()
+            inner = d.frida_run
+
+            def run(batch_id, table, scenarios, _inner=inner, _m=mutate, **kw):
+                out = _inner(batch_id, table, scenarios, **kw)
+                _m(out[sorted(out)[0]])
+                return out
+            d.frida_run = run
+            d._frida_phase('b011', batch, self.wt, {})
+            self.assertFalse(os.path.exists(self._cache_path(d)), why)
+            self.assertTrue([l for l in self.logs if 'results not cached' in l and why in l], why)
+            os.makedirs(os.path.dirname(self._cache_path(d)), exist_ok=True)
+
+    def test_driver_frida_phase_infrastructure_failure_leaves_no_cache(self):
+        d, batch, calls = self._cache_driver()
+        d.frida_run = lambda b, table, scenarios, **kw: {
+            sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                 'failed': 'no status', 'dumps': None} for sc in scenarios}
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertFalse(os.path.exists(self._cache_path(d)))
+
+    def test_driver_frida_phase_a_missing_or_changed_trace_file_runs_again(self):
+        d, batch, calls = self._cache_driver()
+        d._frida_phase('b011', batch, self.wt, {})
+        cache = json.loads(_slurp(self._cache_path(d)))
+        victim = sorted(cache['files'])[0]
+        with open(victim, 'a') as f:
+            f.write('{"tag":"edited"}\n')
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(calls['run']), 2)
+        self.assertEqual(self._reused_lines(), [])
+        # the rerun rewrote the file and the cache: reusable again; then delete it
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(calls['run']), 2)
+        self.assertEqual(len(self._reused_lines()), 1)
+        os.unlink(victim)
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(calls['run']), 3)
 
     def test_write_trace_evidence_touches_only_front_matter(self):
         d = self._tmpdir()
