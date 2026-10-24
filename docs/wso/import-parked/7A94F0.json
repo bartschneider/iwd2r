@@ -1,1 +1,0 @@
-{"address": "0x7A94F0", "name": "CSound::ExclusivePlay", "file": "src/CSound.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_3C = his m_bFrequencySet); exe decompile confirms our body"}

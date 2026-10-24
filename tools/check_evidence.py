@@ -170,6 +170,51 @@ def evidence_name(address):
     return f'{address:X}.md'
 
 
+def _evidence_key(address):
+    """0x78A2F0 / '0X78a2f0' / 0x78A2F0 -> '78a2f0': one spelling."""
+    if isinstance(address, int):
+        return f'{address:x}'
+    return address.strip().lower().removeprefix('0x')
+
+
+def misspelt_in(names, address):
+    """The entries of `names` (file names, not paths) that spell `address`'s
+    evidence file other than `<ADDR>.md` (caps, no 0x): `0x78A2F0.md`,
+    `0X78A2F0.md`, `78a2f0.md`, `0x78a2f0.MD`, any case mix."""
+    key = _evidence_key(address)
+    canonical = f'{key.upper()}.md'
+    out = []
+    for name in sorted(names):
+        stem, dot, ext = name.rpartition('.')
+        if (dot and ext.lower() == 'md' and name != canonical
+                and stem.lower().removeprefix('0x') == key):
+            out.append(name)
+    return out
+
+
+def misspelt_evidence(repo, address):
+    """Repo-relative paths of the misspelt evidence files for `address` in
+    the working tree (the canonical one is not among them)."""
+    folder = os.path.join(repo, EVIDENCE_DIR)
+    names = os.listdir(folder) if os.path.isdir(folder) else []
+    return [f'{EVIDENCE_DIR}/{n}' for n in misspelt_in(names, address)
+            if os.path.isfile(os.path.join(folder, n))]
+
+
+def canonical_evidence(repo, address):
+    """(canonical path, misspelt sibling or None): `docs/evidence/<ADDR>.md`
+    (caps, no 0x) for `address` (an int or any spelling of it), and, when
+    that file is not in the working tree `repo` but a misspelt sibling is,
+    the sibling's repo-relative path (the one to rename; the first when
+    several).  Never renames: the driver does (Driver._check), the gate only
+    reports."""
+    rel = f'{EVIDENCE_DIR}/{_evidence_key(address).upper()}.md'
+    if os.path.isfile(os.path.join(repo, rel)):
+        return rel, None
+    siblings = misspelt_evidence(repo, address)
+    return rel, (siblings[0] if siblings else None)
+
+
 def spans(lines):
     """(first, last, address, name) line indexes of each labelled function."""
     defs = labels.definitions(lines)
@@ -288,7 +333,15 @@ def problem(repo, address, name='', run=None):
     rel = f'{EVIDENCE_DIR}/{evidence_name(address)}'
     r = git(repo, 'show', f'HEAD:{rel}', check=False)
     if r.returncode != 0:
-        return f'no {rel}', None
+        names = git(repo, 'ls-tree', '--name-only', f'HEAD:{EVIDENCE_DIR}',
+                    check=False).stdout.splitlines() if git(
+            repo, 'rev-parse', '--verify', '--quiet', f'HEAD:{EVIDENCE_DIR}',
+            check=False).returncode == 0 else []
+        odd = misspelt_in(names, address)
+        if odd:
+            return (f'no {rel}, but {EVIDENCE_DIR}/{odd[0]} is spelt wrong: '
+                    f'name it {rel} (caps, no 0x)'), None
+        return f'no {rel}; write {rel} (caps, no 0x)', None
     fields = front_matter(r.stdout)
     recorded = fields.get('address', '')
     try:

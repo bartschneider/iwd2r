@@ -6054,7 +6054,7 @@
     "b022": {
       "assigned_at": "2026-10-24T02:28:26+00:00",
       "branch": "p3/wso-b022",
-      "closed_at": null,
+      "closed_at": "2026-10-24T06:22:51+00:00",
       "files": [
         "src/CMessage.cpp",
         "src/CGameAIBase.cpp",
@@ -6245,13 +6245,127 @@
           "their_len": 1709
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x433580": {
+          "case": "dump-433580",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x45C730": {
+          "case": "dump-45C730",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x45EDE0": {
+          "case": "dump-45EDE0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x460300": {
+          "case": "dump-460300",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4F7830": {
+          "case": "dump-4F7830",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4F9150": {
+          "case": "dump-4F9150",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x504CA0": {
+          "case": "dump-504CA0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5BD6B0": {
+          "case": "dump-5BD6B0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5C7B10": {
+          "case": "dump-5C7B10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6FBF10": {
+          "case": "dump-6FBF10",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x717FC0": {
+          "case": "dump-717FC0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x71D0B0": {
+          "case": "dump-71D0B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7238C0": {
+          "case": "dump-7238C0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x727720": {
+          "case": "dump-727720",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x734550": {
+          "case": "trace-734550-vfx-block-and-d0",
+          "losing_kind": null,
+          "measured": "frida",
+          "side": "neither"
+        },
+        "0x73CD00": {
+          "case": "trace-73CD00-strnicmp-fold",
+          "losing_kind": "oracle",
+          "measured": "frida",
+          "side": "fork"
+        },
+        "0x73D1B0": {
+          "case": "dump-73D1B0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x75DFD0": {
+          "case": "dump-75DFD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x75E150": {
+          "case": "dump-75E150",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x75E330": {
+          "case": "dump-75E330",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
     },
     "b023": {
       "assigned_at": "2026-10-24T02:28:26+00:00",
       "branch": "p3/wso-b023",
-      "closed_at": null,
+      "closed_at": "2026-10-24T06:13:19+00:00",
       "files": [
         "src/CAIGroup.cpp",
         "src/CScreenLoad.cpp",
@@ -6447,8 +6561,114 @@
           "their_len": 233
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x4058E0": {
+          "case": "group/rotate_offsets",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x405E00": {
+          "case": "dump-405E00",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x405F60": {
+          "case": "dump-405F60",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x447C20": {
+          "case": "dump-447C20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x447CD0": {
+          "case": "dump-447CD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x448250": {
+          "case": "dump-448250",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4EA580": {
+          "case": "dump-4EA580",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54CF80": {
+          "case": "dump-54CF80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54CFE0": {
+          "case": "dump-54CFE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54D130": {
+          "case": "dump-54D130",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F8C10": {
+          "case": "dump-5F8C10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F9580": {
+          "case": "dump-5F9580",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F9640": {
+          "case": "dump-5F9640",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F9720": {
+          "case": "dump-5F9720",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x63DB40": {
+          "case": "dump-63DB40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x678050": {
+          "case": "dump-678050",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x67A070": {
+          "case": "dump-67A070",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x681690": {
+          "case": "dump-681690",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x77BD00": {
+          "case": "dump-77BD00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7C18F0": {
+          "case": "dump-7C18F0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
     },
     "b024": {
       "assigned_at": "2026-10-24T04:09:25+00:00",
@@ -6504,6 +6724,542 @@
         },
         "0x553B40": {
           "case": "dump-553B40",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
+    },
+    "b025": {
+      "assigned_at": "2026-10-24T05:36:10+00:00",
+      "branch": "p3/wso-b025",
+      "closed_at": "2026-10-24T06:35:28+00:00",
+      "files": [
+        "src/CScreenSave.cpp",
+        "src/CUIControlTextDisplay.cpp",
+        "src/CInfButtonArray.cpp",
+        "src/CGameEffectList.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x65B920",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::OnCancelButtonClick",
+          "our_len": 306,
+          "their_len": 314
+        },
+        {
+          "address": "0x4E2790",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CUIControlTextDisplay.cpp",
+          "name": "CUIControlTextDisplay::OnScroll",
+          "our_len": 282,
+          "their_len": 280
+        },
+        {
+          "address": "0x589FF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_589FF0",
+          "our_len": 246,
+          "their_len": 199
+        },
+        {
+          "address": "0x4C0830",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffectList.cpp",
+          "name": "CGameEffectList::sub_4C0830",
+          "our_len": 190,
+          "their_len": 212
+        },
+        {
+          "address": "0x587960",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonSettings::CInfButtonSettings",
+          "our_len": 132,
+          "their_len": 167
+        },
+        {
+          "address": "0x588FF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::ResetState",
+          "our_len": 151,
+          "their_len": 115
+        },
+        {
+          "address": "0x595E70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::UpdateCustomizableButtonTypes",
+          "our_len": 128,
+          "their_len": 121
+        },
+        {
+          "address": "0x595F70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::UpdateSelectedWeaponSet",
+          "our_len": 91,
+          "their_len": 48
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x4C0830": {
+          "case": "dump-4C0830",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4E2790": {
+          "case": "dump-4E2790",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x587960": {
+          "case": "dump-587960",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x588FF0": {
+          "case": "dump-588FF0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x589FF0": {
+          "case": "dump-589FF0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x595E70": {
+          "case": "save/button_array_updates",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x595F70": {
+          "case": "save/button_array_updates",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x65B920": {
+          "case": "dump-65B920",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
+    },
+    "b026": {
+      "assigned_at": "2026-10-24T06:13:21+00:00",
+      "branch": "p3/wso-b026",
+      "closed_at": "2026-10-24T06:43:09+00:00",
+      "files": [
+        "src/CScreenSpellbook.cpp",
+        "src/CStore.cpp",
+        "src/CItem.cpp",
+        "src/CVidPoly.cpp",
+        "src/CDerivedStats.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x66BB00",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::OnCancelButtonClick",
+          "our_len": 255,
+          "their_len": 231
+        },
+        {
+          "address": "0x54CA80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::IsItemAcceptable",
+          "our_len": 216,
+          "their_len": 216
+        },
+        {
+          "address": "0x54C1D0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::RemoveItemExt",
+          "our_len": 186,
+          "their_len": 215
+        },
+        {
+          "address": "0x4E9840",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CItem.cpp",
+          "name": "CItem::sub_4E9840",
+          "our_len": 187,
+          "their_len": 189
+        },
+        {
+          "address": "0x54C5B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::AddItemExt",
+          "our_len": 139,
+          "their_len": 153
+        },
+        {
+          "address": "0x7C0DB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::CVidPoly",
+          "our_len": 126,
+          "their_len": 111
+        },
+        {
+          "address": "0x447E30",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDamageReduction::GetEffectiveAmount",
+          "our_len": 81,
+          "their_len": 78
+        },
+        {
+          "address": "0x447F10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDamageReduction::SetSource",
+          "our_len": 70,
+          "their_len": 72
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x447E30": {
+          "case": "dump-447E30",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x447F10": {
+          "case": "dump-447F10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4E9840": {
+          "case": "dump-4E9840",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x54C1D0": {
+          "case": "dump-54C1D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54C5B0": {
+          "case": "dump-54C5B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54CA80": {
+          "case": "dump-54CA80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x66BB00": {
+          "case": "dump-66BB00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7C0DB0": {
+          "case": "dump-7C0DB0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
+    },
+    "b027": {
+      "assigned_at": "2026-10-24T06:22:53+00:00",
+      "branch": "p3/wso-b027",
+      "closed_at": "2026-10-24T07:42:55+00:00",
+      "files": [
+        "src/CMessage.cpp",
+        "src/CInfGame.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5084C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetPath::Run",
+          "our_len": 1070,
+          "their_len": 1247
+        },
+        {
+          "address": "0x5ADAE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::SelectToolbar",
+          "our_len": 1105,
+          "their_len": 1209
+        },
+        {
+          "address": "0x73C490",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_73C490",
+          "our_len": 1141,
+          "their_len": 1027
+        },
+        {
+          "address": "0x502EB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageLoadDialog::Run",
+          "our_len": 1122,
+          "their_len": 1031
+        },
+        {
+          "address": "0x733660",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::SetTargetObject",
+          "our_len": 1018,
+          "their_len": 1124
+        },
+        {
+          "address": "0x71B9C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AddSpecialAbility",
+          "our_len": 1042,
+          "their_len": 989
+        },
+        {
+          "address": "0x723CC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetAC",
+          "our_len": 697,
+          "their_len": 1208
+        },
+        {
+          "address": "0x733050",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AddEffect",
+          "our_len": 919,
+          "their_len": 897
+        },
+        {
+          "address": "0x5BFC40",
+          "category": "both_changed_differ",
+          "class": "fork-stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::GetProtagonist",
+          "our_len": 1719,
+          "their_len": 91
+        },
+        {
+          "address": "0x718390",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_718390",
+          "our_len": 911,
+          "their_len": 884
+        },
+        {
+          "address": "0x502570",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageInsertResponse::Run",
+          "our_len": 1094,
+          "their_len": 592
+        },
+        {
+          "address": "0x507F70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetPath::CMessageSetPath",
+          "our_len": 789,
+          "their_len": 789
+        },
+        {
+          "address": "0x73CF10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_73CF10",
+          "our_len": 747,
+          "their_len": 759
+        },
+        {
+          "address": "0x73D080",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_73D080",
+          "our_len": 727,
+          "their_len": 747
+        },
+        {
+          "address": "0x723DB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_723DB0",
+          "our_len": 674,
+          "their_len": 765
+        },
+        {
+          "address": "0x6F50A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_6F50A0",
+          "our_len": 700,
+          "their_len": 681
+        },
+        {
+          "address": "0x75F270",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ReturnToStartLoc",
+          "our_len": 671,
+          "their_len": 697
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x502570": {
+          "case": "readout-502570",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x502EB0": {
+          "case": "readout-502EB0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x507F70": {
+          "case": "readout-507F70",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5084C0": {
+          "case": "readout-5084C0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5ADAE0": {
+          "case": "readout-5ADAE0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5BFC40": {
+          "case": "triage-stub",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6F50A0": {
+          "case": "readout-6F50A0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x718390": {
+          "case": "readout-718390",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x71B9C0": {
+          "case": "readout-71B9C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x723CC0": {
+          "case": "readout-723CC0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x723DB0": {
+          "case": "readout-723DB0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x733050": {
+          "case": "readout-733050",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x733660": {
+          "case": "readout-733660",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x73C490": {
+          "case": "readout-73C490",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x73CF10": {
+          "case": "readout-73CF10",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x73D080": {
+          "case": "readout-73D080",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x75F270": {
+          "case": "readout-75F270",
           "losing_kind": "trace",
           "measured": "frida",
           "side": "ours"

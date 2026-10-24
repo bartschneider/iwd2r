@@ -13,10 +13,10 @@
     "bytes": 3168415
   },
   "verified": {
-    "functions": 337,
-    "bytes": 478840,
+    "functions": 336,
+    "bytes": 478145,
     "by_kind": {
-      "oracle": 179,
+      "oracle": 178,
       "replay": 153,
       "trace": 5
     }

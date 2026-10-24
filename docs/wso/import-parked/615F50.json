@@ -1,1 +1,0 @@
-{"address": "0x615F50", "name": "CScreenCreateChar::OnDoneButtonClick", "file": "src/CScreenCreateChar.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_36 = his m_critSect in CUIManager); his only other delta is replacing our NOTE comment with a TODO; exe decompile confirms our body"}

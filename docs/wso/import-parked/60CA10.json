@@ -1,1 +1,0 @@
-{"address": "0x60CA10", "name": "CScreenCreateChar::ResetFeatsPanel", "file": "src/CScreenCreateChar.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (sub_763A40 = his CanSelectFeat); exe decompile confirms our body"}
