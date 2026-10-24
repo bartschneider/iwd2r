@@ -101,9 +101,9 @@ Decided for ours: 372 (losing kind: trace 372) -- deciding evidence: replay chec
 Decided for neither: 9 -- deciding evidence: dump reading 8, trace 1; measured: probe 0, frida 0, replay 0, none 9
 Deciding evidence across all 391 verdicts: oracle probe 0, replay checkpoint 37, dump reading 351, trace 1, triage 2
 
-Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm), b014 closed (18 rows, pool glm), b015 closed (20 rows, pool glm), b016 closed (18 rows, pool glm), b017 closed (20 rows, pool glm), b018 closed (19 rows, pool glm), b019 assigned (20 rows, pool glm), b020 closed (18 rows, pool glm), b021 closed (20 rows, pool glm)
+Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm), b014 closed (18 rows, pool glm), b015 closed (20 rows, pool glm), b016 closed (18 rows, pool glm), b017 closed (20 rows, pool glm), b018 closed (19 rows, pool glm), b019 assigned (20 rows, pool glm), b020 closed (18 rows, pool glm), b021 closed (20 rows, pool glm), b022 assigned (20 rows, pool glm), b023 assigned (20 rows, pool glm)
 
-Coverage: 664 of 1348 candidate functions exercised by 9 scenarios (2026-10-24)
+Coverage: 667 of 1348 candidate functions exercised by 10 scenarios (2026-10-24)
 
 Calibration, computed from triage.json classes over closed verdicts:
 
