@@ -25,6 +25,7 @@ The coordinator's wave loop, one command each::
                                                 # original-exe hit map per scenario
     python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
     python3 tools/wave.py run --clear b011      # the coordinator's retry of an exception
+    python3 tools/wave.py run --clear b011 --rerun   # a checks/review exception re-runs the worker (plain --clear re-checks the last report)
 
 Rows come from docs/wso/disagreements.json (tools/xrec.py); batch state
 lives in docs/wso/wave-state.json, created by the first `next`.  Nothing

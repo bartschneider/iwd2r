@@ -17064,6 +17064,145 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
         self.assertEqual(len(self._state_of(d, 'b011')['verdicts']), 1)
 
+    # Task 25: a cleared checks or review exception re-checks the last report.
+
+    def _recheck_setup(self, reviewer=None, review=False):
+        """b011 with a worker whose report names a case the evidence file does
+        not (a checks exception after its one fix round); returns (d, w, fix)
+        where fix() is the coordinator's hand fix to the evidence."""
+        class Bad(_SeqWorker):
+            def run(w, brief, cwd):
+                w.briefs.append(brief)
+                w.cwds.append(cwd)
+                return driver.Result(0, '## Verdicts\n\nverdict 0x40B000 ours case dump-zzz\n',
+                                     None, 0.0, False)
+        w = Bad('')
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
+                              reviewers=reviewer)
+        if review:
+            d.review_needed = lambda *a, **kw: (True, 'test')
+        phases = []
+        d._frida_phase = lambda *a, **kw: phases.append(1) or []
+        d.frida = True
+        self.phases = phases
+        ev = os.path.join(self.tmp, 'wt-b011', 'docs', 'evidence', '40B000.md')
+
+        def fix():
+            _write(ev, '---\naddress: 0x40B000\nname: F11\nkind: oracle\n---\n\n'
+                       'corroborated by WSO at e8dd16a7; case dump-zzz decides\n')
+        return d, w, fix
+
+    def _recheck_first_run(self, d):
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+
+    def test_a_cleared_checks_exception_rechecks_the_last_report_without_the_worker(self):
+        d, w, fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(len(w.briefs), 2)               # the worker and its one fix round
+        fix()
+        self.git('add', '-A', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self.git('commit', '-qm', 'hand fix', cwd=os.path.join(self.tmp, 'wt-b011'))
+        phases_before = len(self.phases)
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), 2)               # the worker did not run again
+        self.assertEqual(len(self.phases), phases_before + 1)
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+        b = self._status(d)['batches']['b011']
+        self.assertEqual(b['outcome'], 'closed')
+        self.assertEqual(b['retry_kind'], 'recheck')
+        with open(d.ledger_path) as f:
+            self.assertIn('retried at its recheck stage: last report re-checked; '
+                          'the worker is not run again', f.read())
+
+    def test_a_recheck_that_finds_the_same_problems_raises_the_exception_again(self):
+        d, w, _fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        first = self._status(d)['exceptions']['b011']['problems']
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 2)               # no worker, no fix round
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(exc['problems'][0], 'unchanged after recheck; fix by hand or '
+                                             'clear with --rerun')
+        self.assertEqual(exc['problems'][1:], first)
+        # and again: the marker does not make the next recheck look new
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 2)
+        self.assertEqual(self._status(d)['exceptions']['b011']['problems'][1:], first)
+
+    def test_a_cleared_review_exception_rechecks_and_reviews_again(self):
+        blocking = '## Findings\n\n- BLOCKING: nope\n'
+        r = _SeqWorker(blocking, blocking, self.CLEAN_REVIEW, credits=0.0)
+        good = _SeqWorker('x')
+        d, w, fix = self._recheck_setup(reviewer={'a': r}, review=True)
+        fix()
+        self.git('add', '-A', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self.git('commit', '-qm', 'evidence', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self._recheck_first_run(d)
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'review')
+        workers, reviews = len(w.briefs), len(r.briefs)
+        self._clear(d, 'b011')
+        d.review_needed = lambda *a, **kw: (True, 'test')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), workers)         # no worker
+        self.assertEqual(len(r.briefs), reviews + 1)     # the reviewer ran again
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+
+    def test_clear_rerun_reenters_a_checks_exception_at_the_worker(self):
+        d, w, fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        self.assertEqual(driver.clear_exception(d.status_path, 'b011', True)[0], 0)
+        self.assertEqual(self._status(d)['cleared']['b011']['rerun'], True)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertTrue(len(w.briefs) > 2)
+        self.assertTrue(w.briefs[2].startswith('Resume:'), w.briefs[2][:60])
+        self.assertEqual(self._status(d)['batches']['b011'].get('retry_kind'), 'rerun')
+
+    def test_clear_without_rerun_marks_the_exception_for_a_recheck(self):
+        exc = {'stage': 'checks', 'problems': ['p1', 'p2'], 'at': 't'}
+        tmp, path = self._status_tmp({'exceptions': {'b011': exc, 'first': {'stage': 'x'}},
+                                      'batches': {'b011': {'outcome': 'exception'}}})
+        self.assertEqual(driver.clear_exception(path, 'b011')[0], 0)
+        self.assertEqual(driver.clear_exception(path, 'first')[0], 0)
+        with open(path) as f:
+            st = json.load(f)
+        self.assertEqual(st['cleared'], {'b011': {'stage': 'checks', 'rerun': False,
+                                                  'problems': ['p1', 'p2']}})
+
+    def test_worker_brief_frida_exceptions_keep_the_worker_reentry(self):
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        for stage in ('worker', 'brief', 'frida', 'record', 'close'):
+            self._write_cleared(d, stage)
+            d._retry_stage.clear()
+            self.assertEqual(d._cleared(), ['b011'])
+            self.assertEqual(d._retry_stage['b011'], stage)
+        for stage, want in (('checks', 'recheck'), ('review', 'recheck')):
+            self._write_cleared(d, stage)
+            self.assertEqual(d._cleared(), ['b011'])
+            self.assertEqual(d._retry_stage['b011'], want)
+        self._write_cleared(d, 'review', rerun=True)
+        d._cleared()
+        self.assertEqual(d._retry_stage['b011'], 'review')
+        self.assertEqual(d._retry_kind['b011'], 'rerun')
+
+    def _write_cleared(self, d, stage, rerun=False):
+        os.makedirs(os.path.dirname(d.status_path), exist_ok=True)
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {}, 'cleared': {'b011': {
+                'stage': stage, 'rerun': rerun, 'problems': []}},
+                'batches': {'b011': {'outcome': 'exception', 'stage': stage}}}, f)
+
     def test_a_cleared_push_exception_pushes_again_without_the_worker(self):
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))

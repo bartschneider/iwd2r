@@ -2061,10 +2061,13 @@ def status_lock(status_path):
     return _tool('filelock').hold(status_path + '.lock', 'wave.py run')
 
 
-def clear_exception(status_path, batch_id):
+def clear_exception(status_path, batch_id, rerun=False):
     """Remove status['exceptions'][batch_id] under the status lock:
     (0, the removed entry), or (2, None) when there is no such entry.
-    StatusError when the file cannot be read."""
+    StatusError when the file cannot be read.  The removed stage, problems
+    and `rerun` are kept under status['cleared'][batch_id] for the driver's
+    retry (Task 25: a checks or review exception is re-checked, not
+    re-run, unless `rerun`); the reserved `first` entry keeps none."""
     if not os.path.isfile(status_path):
         return 2, None
     with status_lock(status_path):
@@ -2072,6 +2075,10 @@ def clear_exception(status_path, batch_id):
         if batch_id not in status['exceptions']:
             return 2, None
         entry = status['exceptions'].pop(batch_id)
+        if batch_id != BASE_TESTS_KEY and isinstance(entry, dict):
+            status.setdefault('cleared', {})[batch_id] = {
+                'stage': entry.get('stage'), 'rerun': bool(rerun),
+                'problems': list(entry.get('problems') or [])}
         status['updated_at'] = _now()
         _tool('wave')._save_json(status_path, status)
     return 0, entry
@@ -2176,6 +2183,10 @@ def blocking_findings(report):
 
 BASE_TESTS_LOG = 'base-tests-%s.log'     # per queue: two drivers share the dir
 BASE_TESTS_TIMEOUT = 600
+RECHECK_STAGES = ('checks', 'review', 'reviewer', 'reviewer-2')   # a cleared one is re-checked
+UNCHANGED_PROBLEM = 'unchanged after recheck; fix by hand or clear with --rerun'
+RECHECK_LEDGER = ('retried at its recheck stage: last report re-checked; '
+                  'the worker is not run again')
 BASE_TESTS_KEY = 'first'     # the reserved exceptions key (not a batch id)
 
 
@@ -2380,6 +2391,8 @@ class Driver:
         self._imported = {}
         self._stopping = False     # SIGTERM or SIGINT arrived (ruling R72)
         self._retry_stage = {}     # cleared batch id -> the stage it failed at
+        self._retry_kind = {}      # cleared batch id -> 'recheck' | 'rerun' (checks/review only)
+        self._retry_problems = {}  # cleared batch id -> the problems its exception recorded
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
         self._no_transcript = 0    # batch exceptions in a row without one
@@ -2470,7 +2483,7 @@ class Driver:
 
         def apply(s):
             old = s['batches'].get(batch_id)
-            for field in ('oracle_findings', 'frida_written'):
+            for field in ('oracle_findings', 'frida_written', 'retry_kind'):
                 if isinstance(old, dict) and old.get(field):
                     entry[field] = old[field]
             s['batches'][batch_id] = entry
@@ -4599,6 +4612,16 @@ class Driver:
                 batch_id, batch, worktree,
                 self._saved_verdicts(batch_id, batch) if stage == 'record' else {},
                 (False, 'retry at %s: worker and review not run again' % stage))
+        kind = self._retry_kind.pop(batch_id, None)
+        recorded = self._retry_problems.pop(batch_id, None)
+        if stage == 'recheck' and self.dry_run:
+            stage = 'checks'
+        if kind and not self.dry_run:
+            self._update_status(lambda s: (
+                s['batches'].setdefault(batch_id, {}).__setitem__('retry_kind', kind),
+                (s.get('cleared') or {}).pop(batch_id, None)))
+        if stage == 'recheck':
+            return self._recheck(batch_id, batch, worktree, name, recorded)
         if self.kind == 'import':
             # the worker runs again and so does the phase: nothing recorded by
             # an earlier run (outcome kept, measured bodies) carries over
@@ -4627,10 +4650,25 @@ class Driver:
         out = self._settle(batch_id, res, 'worker', worktree)
         if out:
             return out
-        verdicts, problems = self._check(batch_id, worktree, res.report)
+        return self._after_worker(batch_id, batch, worktree, name, worker, brief,
+                                  res.report)
+
+    def _after_worker(self, batch_id, batch, worktree, name, worker, brief, report,
+                      recorded=None):
+        """Everything after a worker's (or a recheck's) report: the checks,
+        the Frida phase, one fix round, the review, the landing.  `recorded`
+        (a recheck): the problems of the cleared exception; the same
+        problems again raise it again with no fix round."""
+        verdicts, problems = self._check(batch_id, worktree, report)
         # Frida runs once, here, clean check or not; what it finds joins the
         # one fix round (ruling R58).
         problems = problems + self._frida_phase(batch_id, batch, worktree, verdicts)
+        if recorded is not None and problems and \
+                [p for p in problems if p != UNCHANGED_PROBLEM] == \
+                [p for p in recorded if p != UNCHANGED_PROBLEM]:
+            # a recheck that finds what the cleared exception recorded: no
+            # fix round (the owner's ruling), the exception again
+            return self._exception(batch_id, 'checks', [UNCHANGED_PROBLEM] + problems)
         if problems:
             self.log('%s: %d problem(s); one fix round' % (batch_id, len(problems)))
             res = self._fix(batch_id, batch, worker, worktree, 'mechanical checks',
@@ -4683,6 +4721,36 @@ class Driver:
                 why, self.seed, ' after one fix round' if fixed else ''))
 
         return self._land(batch_id, batch, worktree, verdicts, review)
+
+    def _recheck(self, batch_id, batch, worktree, name, recorded):
+        """A cleared checks or review exception (Task 25): the last saved
+        worker report is checked against the CURRENT worktree (the
+        coordinator may have fixed the cause by hand) and the batch goes on as
+        after a worker stage.  The worker is not run, the resume preamble is
+        not used, and there is no extra fix round for problems the exception
+        already recorded."""
+        line = 'driver %s: %s' % (batch_id, RECHECK_LEDGER)
+        self._append_ledger(line)
+        self.log(line)
+        self._stage(batch_id, 'recheck')
+        report = next(self._saved_reports(batch_id), None)
+        if report is None:
+            return self._exception(batch_id, 'checks', [
+                'no saved worker report to recheck in %s; clear with --rerun' % os.path.join(
+                    self.driver_dir, batch_id)])
+        if self.kind == 'verdicts':
+            self._probe = {k: ('ours', 'probe-%s-%s' % (batch_id, k.upper()))
+                           for k in (self._carry_probe_passes(batch_id, worktree) or ())}
+        try:
+            rc, brief = self.render_brief(
+                self.template_path, self.state_path, batch_id,
+                bundle_dir=os.path.join(self.driver_dir, 'bundles', batch_id))
+        except Exception as e:
+            rc, brief = 1, 'render_brief raised %r' % (e,)
+        if rc != 0:
+            return self._exception(batch_id, 'brief', [brief.strip()])
+        return self._after_worker(batch_id, batch, worktree, name,
+                                  self._worker_of(name), brief, report, recorded or [])
 
     def _saved_verdicts(self, batch_id, batch):
         """The verdicts of the last saved report that the state does not
@@ -5058,7 +5126,7 @@ class Driver:
         verdict and so is adopted anew (ruling R71)."""
         batch = self.load_state(self.state_path)['batches'].get(batch_id) or {}
         stage = self._retry_stage.get(batch_id)
-        if batch.get('status') != 'assigned' or stage in ('record', 'close'):
+        if batch.get('status') != 'assigned' or stage in ('record', 'close', 'recheck'):
             return None
         if not batch.get('verdicts') and self.queue == 'wave1' and \
                 not self.dry_run and (self.worktree_for(
@@ -5081,6 +5149,17 @@ class Driver:
             stage = info.get('stage')
             if st == 'assigned' or (st == 'closed' and stage == 'push'):
                 out.append(bid)
+                note = (status.get('cleared') or {}).get(bid)
+                note = note if isinstance(note, dict) else {}
+                if stage in RECHECK_STAGES and note:
+                    # plain --clear re-checks the last report; --rerun, or an
+                    # exception removed by hand (no note), re-enters at the
+                    # worker
+                    kind = 'rerun' if note.get('rerun') else 'recheck'
+                    self._retry_kind[bid] = kind
+                    self._retry_problems[bid] = [str(p) for p in note.get('problems') or []]
+                    if kind == 'recheck':
+                        stage = 'recheck'
                 self._retry_stage[bid] = stage
         return out
 
@@ -5758,6 +5837,9 @@ def _parse(argv):
                      help="remove that batch's exception from the status "
                           "file, under its lock (the coordinator's retry); "
                           "exit 2 when there is none")
+    p.add_argument('--rerun', action='store_true',
+                   help='with --clear: re-enter a checks or review exception at '
+                        'the worker stage (the default re-checks the last report)')
     try:
         args, extra = p.parse_known_args(argv)
     except SystemExit as e:
@@ -5881,12 +5963,12 @@ def driver_from_args(argv, repo=None):
     return _build(args, repo or _tool('wave').ROOT)
 
 
-def _clear(batch_id, repo, queue='wave1'):
+def _clear(batch_id, repo, queue='wave1', rerun=False):
     """`wave.py run --clear <batch_id>`: 0, 2 when the status file holds
     no exception for it, 1 when the file cannot be read."""
     path = os.path.join(repo, status_rel(queue))
     try:
-        rc, entry = clear_exception(path, batch_id)
+        rc, entry = clear_exception(path, batch_id, rerun)
     except StatusError as e:
         print('wave.py run --clear: the status file cannot be read: %s' % e,
               file=sys.stderr)
@@ -5952,7 +6034,7 @@ def main(argv=None, repo=None):
     args, err = _parse(sys.argv[1:] if argv is None else argv)
     if err is None:
         if args.clear is not None:
-            return _clear(args.clear, repo, args.queue)
+            return _clear(args.clear, repo, args.queue, args.rerun)
         d, err = _build(args, repo)
     if err:
         if err[1]:
