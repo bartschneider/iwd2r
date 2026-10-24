@@ -3,8 +3,8 @@
 # to opening_done, without its checkpoints), saves into the empty slot
 # through Options, then loads that save through Options. Coordinates for
 # Resolution=800. Runs to the end headless since CInfGame::AddCharacterToParty
-# (0x5BD070) fills m_characters. Pending until it has checkpoints to compare
-# with the original.
+# (0x5BD070) fills m_characters. Checkpoints (added 2026-10-23, task 5) at each
+# screen of the path, so it compares with the original.
 # walk_and_talk.txt to the end of the opening dialog (its comments say
 # what each step does).
 wait 60
@@ -113,16 +113,19 @@ wait 60
 click 612 111
 wait 60
 # The save screen: one slot, "Empty", its Delete disabled.
+checkpoint save_screen
 shot 01_save
 # The slot's Save (685,101): the Save As popup, "Prologue, 7 hours".
 click 685 101
 wait 60
 type Probe One
 wait 15
+checkpoint save_as
 shot 02_save_as
 # The popup's Save (464,320): back in the world, "Save successful".
 click 464 320
 wait 300
+checkpoint saved
 shot 03_saved
 # Options, Load Game (612,81), the popup's Load (458,240).
 click 690 568
@@ -132,9 +135,11 @@ wait 60
 click 458 240
 wait 90
 # The load screen: "Probe One", "Prologue, 7 hours" and the file time.
+checkpoint load_screen
 shot 04_load
 # The slot's Load (685,101): the world again.
 click 685 101
 wait 400
+checkpoint loaded
 shot 05_loaded
 quit
