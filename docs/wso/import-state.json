@@ -434,7 +434,7 @@
     "i005": {
       "assigned_at": "2026-10-24T03:14:29+00:00",
       "branch": "p3/wso-i005",
-      "closed_at": null,
+      "closed_at": "2026-10-24T05:56:08+00:00",
       "files": [
         "src/CGameEffect.cpp",
         "src/CScreenCreateChar.cpp",
@@ -612,7 +612,7 @@
           "their_len": 2050
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i006": {
