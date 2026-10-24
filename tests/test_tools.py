@@ -13165,6 +13165,14 @@ class DriverTest(unittest.TestCase):
             self.assertFalse(driver._history_rewrite(args, ['src/A.cpp']), q)
         # and the checker notices a forbidden quote
         self.assertTrue(driver._history_rewrite(['checkout', 'first', '--', 'x']))
+        # i003's worker ran `git stash list --format='%H %gs'`: reading the
+        # stash is not a rewrite; every other stash form still is
+        self.assertFalse(driver._history_rewrite(['stash', 'list', "--format=%H %gs"]))
+        self.assertFalse(driver._history_rewrite(['stash', 'show', '-p', 'stash@{0}']))
+        for form in (['stash'], ['stash', 'push', '-m', 'x'], ['stash', 'pop'],
+                     ['stash', 'apply'], ['stash', 'drop'], ['stash', 'clear'],
+                     ['stash', '--include-untracked']):
+            self.assertTrue(driver._history_rewrite(form), form)
         # The prose remedies too (first's 021a6cb0): no worker-facing text tells
         # a worker to revert or restore, and none puts a whole file back except
         # the out-of-scope-path check, whose files hold no batch row.

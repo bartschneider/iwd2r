@@ -717,7 +717,8 @@ def _split_unquoted(text, seps):
 def _history_rewrite(args, covered=(), tracked=None):
     """True when the arguments of a `git` command (after the command word)
     rewrite or discard history or work: reset, rebase, revert, restore,
-    clean, stash, filter-repo, push, update-ref, commit --amend, branch
+    clean, stash (except the read-only `stash list` / `stash show`),
+    filter-repo, push, update-ref, commit --amend, branch
     -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
     branch switch (`--`, -f, -B, `.`, a path after a start point, or one
     argument that names a covered file, looks like a path or starts with a
@@ -732,6 +733,12 @@ def _history_rewrite(args, covered=(), tracked=None):
     if not rest:
         return False
     sub, rest = rest[0], rest[1:]
+    if sub == 'stash':
+        # `git stash list` / `git stash show` only read the stash; every
+        # other form (push, pop, apply, drop, clear, a bare `git stash`)
+        # moves work around
+        pos = [a for a in rest if not a.startswith('-')]
+        return not (pos and pos[0] in ('list', 'show'))
     if sub in _HISTORY_VERBS:
         return True
     if sub == 'commit':
