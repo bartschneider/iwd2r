@@ -80,7 +80,14 @@ WSO_DELTA_HEAD = '## WSO delta'
 
 DEFAULT_SIZE = 20
 DEFAULT_CATEGORY = 'both_changed_differ'
-IMPORT_CATEGORY = 'theirs_real_ours_stub'
+# The import queue's sources, in the order `next --queue import` draws
+# from them: rows where ours is a stub, then rows where ours is still the
+# base and his fork changed it.  IMPORT_CATEGORY (the first) stays as an
+# alias for what imports it.
+IMPORT_CATEGORIES = ('theirs_real_ours_stub', 'theirs_changed_ours_base')
+IMPORT_CATEGORY = IMPORT_CATEGORIES[0]
+CATEGORY_LABEL = {'theirs_real_ours_stub': 'ours is a stub',
+                  'theirs_changed_ours_base': 'ours is the base body'}
 IMPORT_STATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-state.json')
 IMPORT_TEMPLATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md')
 # The two queues (ruling R11).  wave1 cuts the both_changed_differ rows,
@@ -94,6 +101,7 @@ QUEUES = {
               'prefix': 'b', 'triage': True, 'kind': 'verdicts',
               'template': TEMPLATE_PATH, 'status': 'status.json'},
     'import': {'state': IMPORT_STATE_PATH, 'category': IMPORT_CATEGORY,
+               'categories': IMPORT_CATEGORIES,
                'prefix': 'i', 'triage': False, 'kind': 'import',
                'template': IMPORT_TEMPLATE_PATH,
                'status': 'status-import.json'},
@@ -492,6 +500,79 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                            claims_path=claims_path, **kw)
 
 
+def _import_pool(rows, category, decided, owned, importing, disagreements_path,
+                 coverage_path, coverage_root, repo, include_uncovered):
+    """(eligible rows, rows without an address, coverage note, None) for one
+    category, or ([], 0, None, (rc, message)) when it offers nothing."""
+    def in_category(r):
+        return r.get('category') == category
+
+    no_addr = sum(1 for r in rows if in_category(r) and not r.get('address'))
+    candidates = []
+    seen = set()
+    for r in rows:
+        if (in_category(r) and r.get('address')
+                and _addr_key(r['address']) not in decided
+                and _addr_key(r['address']) not in seen):
+            seen.add(_addr_key(r['address']))
+            candidates.append(r)
+    eligible = [r for r in candidates if r['file'] not in owned]
+    if not eligible:
+        if candidates:
+            return [], 0, None, (2, 'nothing left to assign: %d row%s wait%s on files '
+                                 'owned by assigned batches or claimed by streams\n'
+                                 % (len(candidates), 's' if len(candidates) != 1 else '',
+                                    '' if len(candidates) != 1 else 's'))
+        return [], 0, None, (2, f'nothing left: every {category} row is assigned or decided\n')
+    eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
+                                 r['file'], r['name']))
+    coverage_note = None
+    if importing:
+        # The coverage map (tools/coverage.py): covered rows first, most
+        # scenarios first; rows no scenario exercises are left out.
+        cov_mod = _coverage()
+        cpath = coverage_path or os.path.join(
+            os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
+        cov, why = cov_mod.check(cpath, coverage_root or repo or ROOT)
+        if cov is None:
+            coverage_note = 'coverage: %s; candidate order unchanged' % why
+        else:
+            try:
+                # per row: its candidates (UI screens for CScreen/CUI files, plus
+                # any UI scenario the map says hits it), the phase's own rule
+                state_of = {id(r): cov_mod.status_of(cov, r['address'],
+                                                     cov_mod.row_scenarios(cov, [r]))
+                            for r in eligible}
+                count = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
+            except (TypeError, AttributeError, ValueError, KeyError) as e:
+                state_of = None
+                coverage_note = 'coverage: map unreadable (%r); candidate order unchanged' % (e,)
+            if state_of is not None:
+                hit = [r for r in eligible if state_of[id(r)] == 'hit']
+                # stale hits rank above unknown but never decide: such a row is
+                # unknown for the leave-out decision
+                stale_hit = [r for r in eligible if state_of[id(r)] == 'unknown'
+                             and cov_mod.covered(cov, r['address'], include_stale=True)]
+                unknown = [r for r in eligible if state_of[id(r)] == 'unknown'
+                           and r not in stale_hit]
+                dead = [r for r in eligible if state_of[id(r)] == 'dead']
+                hit.sort(key=lambda r: -count[id(r)])   # stable: size order within a count
+                eligible = hit + stale_hit + unknown + (dead if include_uncovered else [])
+                notes = []
+                if not include_uncovered:
+                    notes.append('coverage: %d candidate row(s) left out as exercised by no '
+                                 'scenario' % len(dead))
+                if unknown or stale_hit:
+                    notes.append('coverage: %d row(s) kept that no scenario measured (unknown)'
+                                 % (len(unknown) + len(stale_hit)))
+                coverage_note = '\n'.join(notes) or None
+                if not eligible:
+                    return [], 0, None, (2, 'nothing left: every remaining import row is '
+                                         'exercised by no scenario (--include-uncovered '
+                                         'offers them anyway)\n')
+    return eligible, no_addr, coverage_note, None
+
+
 def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
                triage_path=None, repo=None, fork_base=None,
@@ -510,8 +591,9 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     claims.json beside the state file) are skipped like those of assigned
     batches.
 
-    queue='import' (ruling R11) takes the rows of the import category
-    (`theirs_real_ours_stub`) plus the import list's entries (completed
+    queue='import' (ruling R11) takes the rows of the import categories
+    (`theirs_real_ours_stub` first; once none of those is undecided,
+    `theirs_changed_ours_base`) plus the import list's entries (completed
     from disagreements.json by address), applies no triage, cuts ids
     i<NNN> and still cuts the worktree.  Files held by the assigned
     batches of the other queue's state file, beside this one, are skipped
@@ -585,74 +667,17 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     except (OSError, ValueError, AttributeError) as e:
         return 2, f'claims file {claims_path}: {e}\n'
 
-    if importing:
-        category = q['category']
-
-    def in_category(r):
-        return r.get('category') == category
-
-    no_addr = sum(1 for r in rows if in_category(r) and not r.get('address'))
-    candidates = []
-    seen = set()
-    for r in rows:
-        if (in_category(r) and r.get('address')
-                and _addr_key(r['address']) not in decided
-                and _addr_key(r['address']) not in seen):
-            seen.add(_addr_key(r['address']))
-            candidates.append(r)
-    eligible = [r for r in candidates if r['file'] not in owned]
+    cats = tuple(q.get('categories', ())) if importing else (category,)
+    last_failure = None
+    for category in cats:
+        eligible, no_addr, coverage_note, failure = _import_pool(
+            rows, category, decided, owned, importing, disagreements_path,
+            coverage_path, coverage_root, repo, include_uncovered)
+        if eligible:
+            break
+        last_failure = failure      # the last category's message carries the hint that matters
     if not eligible:
-        if candidates:
-            return 2, ('nothing left to assign: %d row%s wait%s on files '
-                       'owned by assigned batches or claimed by streams\n'
-                       % (len(candidates), 's' if len(candidates) != 1 else '',
-                          '' if len(candidates) != 1 else 's'))
-        return 2, f'nothing left: every {category} row is assigned or decided\n'
-    eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
-                                 r['file'], r['name']))
-    coverage_note = None
-    if importing:
-        # The coverage map (tools/coverage.py): covered rows first, most
-        # scenarios first; rows no scenario exercises are left out.
-        cov_mod = _coverage()
-        cpath = coverage_path or os.path.join(
-            os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
-        cov, why = cov_mod.check(cpath, coverage_root or repo or ROOT)
-        if cov is None:
-            coverage_note = 'coverage: %s; candidate order unchanged' % why
-        else:
-            try:
-                # per row: its candidates (UI screens for CScreen/CUI files, plus
-                # any UI scenario the map says hits it), the phase's own rule
-                state_of = {id(r): cov_mod.status_of(cov, r['address'],
-                                                     cov_mod.row_scenarios(cov, [r]))
-                            for r in eligible}
-                count = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
-            except (TypeError, AttributeError, ValueError, KeyError) as e:
-                state_of = None
-                coverage_note = 'coverage: map unreadable (%r); candidate order unchanged' % (e,)
-            if state_of is not None:
-                hit = [r for r in eligible if state_of[id(r)] == 'hit']
-                # stale hits rank above unknown but never decide: such a row is
-                # unknown for the leave-out decision
-                stale_hit = [r for r in eligible if state_of[id(r)] == 'unknown'
-                             and cov_mod.covered(cov, r['address'], include_stale=True)]
-                unknown = [r for r in eligible if state_of[id(r)] == 'unknown'
-                           and r not in stale_hit]
-                dead = [r for r in eligible if state_of[id(r)] == 'dead']
-                hit.sort(key=lambda r: -count[id(r)])   # stable: size order within a count
-                eligible = hit + stale_hit + unknown + (dead if include_uncovered else [])
-                notes = []
-                if not include_uncovered:
-                    notes.append('coverage: %d candidate row(s) left out as exercised by no '
-                                 'scenario' % len(dead))
-                if unknown or stale_hit:
-                    notes.append('coverage: %d row(s) kept that no scenario measured (unknown)'
-                                 % (len(unknown) + len(stale_hit)))
-                coverage_note = '\n'.join(notes) or None
-                if not eligible:
-                    return 2, ('nothing left: every remaining import row is exercised by no '
-                               'scenario (--include-uncovered offers them anyway)\n')
+        return last_failure
     chosen = eligible[:size]
     pre = q['prefix']
     nid = 1 + max((int(m.group(1)) for bid in state['batches']
@@ -683,6 +708,8 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     lines = [f'{batch_id} assigned: {len(chosen)} rows, {len(files)} files, '
              f'branch {branch}',
              f'files: {", ".join(files)}']
+    if importing:
+        lines.append(f'category: {category}')
     for i, r in enumerate(chosen, 1):
         lines.append(f'{i:2}. {r["address"]}  {r["name"]}  {r["file"]}  '
                      f'theirs {r["their_len"]} / ours {r["our_len"]}')
@@ -905,10 +932,13 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
             template = f.read()
     except OSError as e:
         return 2, f'no template {template_path}: {e}\n'
-    rows = '\n'.join(
-        f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
-        f'theirs {r["their_len"]} / ours {r["our_len"]} chars)'
-        for i, r in enumerate(batch['rows'], 1))
+    def row_line(i, r):
+        # an import row says what ours is: a stub, or the base body
+        label = CATEGORY_LABEL.get(r.get('category'))
+        tail = f'; {label}' if label else ''
+        return (f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
+                f'theirs {r["their_len"]} / ours {r["our_len"]} chars{tail})')
+    rows = '\n'.join(row_line(i, r) for i, r in enumerate(batch['rows'], 1))
     files = '\n'.join(f'- `{f}`' for f in batch['files'])
     fork_base = str(batch.get('fork_base') or state.get('fork_base')
                     or DEFAULT_FORK_BASE)
@@ -1696,7 +1726,32 @@ def deciding_kind(case):
     return 'trace'
 
 
-def scorecard_text(state):
+def _import_tally(state, import_state=None, parked=None):
+    """'imports: stubs N imported / M parked; base-body N imported / M
+    parked' over the rows of the closed import batches (ids i<NNN>) of
+    `state` and `import_state`, split by each row's category (none: a
+    stub); a row with a docs/wso/import-parked entry (`parked`, address
+    keys) is parked, any other closed row imported.  None without any."""
+    parked = parked or {}
+    seen = {}
+    for st in (state, import_state):
+        for bid, b in (st or {}).get('batches', {}).items():
+            if not re.fullmatch(r'i\d+', bid) or b.get('status') != 'closed':
+                continue
+            for r in b.get('rows', []):
+                seen[(bid, _addr_key(r.get('address')))] = r
+    if not seen:
+        return None
+    n = {'stubs': [0, 0], 'base-body': [0, 0]}
+    for (bid, key), r in seen.items():
+        which = ('base-body' if r.get('category') == 'theirs_changed_ours_base'
+                 else 'stubs')
+        n[which][1 if key in parked else 0] += 1
+    return ('imports: stubs %d imported / %d parked; base-body %d imported / %d parked'
+            % (*n['stubs'], *n['base-body']))
+
+
+def scorecard_text(state, import_state=None, parked=None):
     """The '## Scorecard' section: per-side tally, split by losing kind
     and by deciding evidence kind, plus one line per batch."""
     sides = {s: 0 for s in SIDES}
@@ -1761,6 +1816,9 @@ def scorecard_text(state):
     ]
     if batches:
         lines += ['', 'Batches: ' + ', '.join(batches)]
+    tally = _import_tally(state, import_state, parked)
+    if tally:
+        lines += ['', tally]
     return '\n'.join(lines) + '\n'
 
 
@@ -1820,7 +1878,7 @@ def coverage_line(folder=None):
 
 def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
                     triage_path=TRIAGE_PATH, calibration_path=CALIBRATION_PATH,
-                    audit_path=None):
+                    audit_path=None, repo=None):
     """Replace (or append) the '## Scorecard' section of the report.
     Idempotent: the same state writes the same bytes.  When triage.json
     exists the section ends with a labelled calibration block (the
@@ -1829,7 +1887,20 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
     paragraph; when docs/wso/audit.json (beside the state file, or
     audit_path) exists it ends with the rule-3 audit sample paragraph."""
     state = load_state(state_path)
-    section = scorecard_text(state)
+    docs = os.path.dirname(os.path.abspath(state_path))
+    imp_path = os.path.join(docs, os.path.basename(IMPORT_STATE_PATH))
+    imp_state = None
+    if os.path.abspath(imp_path) != os.path.abspath(state_path) and os.path.exists(imp_path):
+        try:
+            imp_state = load_state(imp_path)
+        except (OSError, ValueError) as e:
+            return 2, f'import state {imp_path}: {e}\n'
+    parked = {}
+    try:
+        parked, _ = _parked_rows(repo or os.path.dirname(os.path.dirname(docs)))
+    except OSError:
+        pass
+    section = scorecard_text(state, imp_state, parked)
     section += '\n' + coverage_line(os.path.dirname(os.path.abspath(state_path))) + '\n'
     if audit_path is None:
         audit_path = os.path.join(

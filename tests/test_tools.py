@@ -18585,5 +18585,127 @@ class ReStatusTest(unittest.TestCase):
                         gates.index('step "recovery status"'))
 
 
+class ImportSecondSourceTest(unittest.TestCase):
+    """Task 16: `next --queue import` draws stubs first, then the base-body
+    rows (theirs_changed_ours_base); the category rides into the batch,
+    the brief and the scorecard."""
+    STUB, BASE = 'theirs_real_ours_stub', 'theirs_changed_ours_base'
+    ROWS = [
+        {'address': '0x401000', 'category': STUB, 'file': 'src/A.cpp',
+         'name': 'A', 'their_len': 90, 'our_len': 2},
+        {'address': '0x403000', 'category': STUB, 'file': 'src/C.cpp',
+         'name': 'C', 'their_len': 70, 'our_len': 2},
+        {'address': '0x405000', 'category': BASE, 'file': 'src/E.cpp',
+         'name': 'E', 'their_len': 200, 'our_len': 190},
+        {'address': '0x406000', 'category': BASE, 'file': 'src/F.cpp',
+         'name': 'F', 'their_len': 50, 'our_len': 40},
+        {'address': '0x407000', 'category': BASE, 'file': 'src/G.cpp',
+         'name': 'G', 'their_len': 30, 'our_len': 20}]
+    cov = CoverageTest.cov
+    next_import = CoverageTest.next_import
+    rows_of = CoverageTest.rows_of
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.wave = load_tool('wave')
+        self.dp = os.path.join(self.tmp, 'docs', 'wso', 'disagreements.json')
+        _write(self.dp, json.dumps(self.ROWS))
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), '# timeout: 99\nquit\n')
+        _write(os.path.join(self.tmp, 'scenarios', 'first_fight.txt'), 'quit\n')
+
+    def state(self):
+        with open(os.path.join(self.tmp, 'import-state.json')) as f:
+            return json.load(f)
+
+    def test_alias_and_tuple(self):
+        self.assertEqual(self.wave.IMPORT_CATEGORIES, (self.STUB, self.BASE))
+        self.assertEqual(self.wave.IMPORT_CATEGORY, self.STUB)
+
+    def test_stubs_first_then_base_rows_covered_first(self):
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 4, '0x405000': 1,
+                                  '0x407000': 2},
+                  'first_fight': {'0x406000': 1, '0x407000': 1}})
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])
+        self.assertIn('category: theirs_real_ours_stub', out)
+        self.assertEqual([r['category'] for r in self.state()['batches']['i001']['rows']],
+                         [self.STUB] * 2)
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        # base-body rows now: most scenarios first, then size order
+        self.assertEqual(self.rows_of(out), ['0x406000', '0x407000'])
+        self.assertIn('category: theirs_changed_ours_base', out)
+        self.assertEqual([r['category'] for r in self.state()['batches']['i002']['rows']],
+                         [self.BASE] * 2)
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x405000'])
+
+    def test_uncovered_base_rows_are_left_out_without_the_flag(self):
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
+        self.next_import()
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x406000'])
+        rc, out = self.next_import()
+        self.assertEqual(rc, 2, out)
+        rc, out = self.next_import(include_uncovered=True)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sorted(self.rows_of(out)), ['0x405000', '0x407000'])
+
+    def test_brief_names_the_category_and_the_park_sentence(self):
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
+        self.next_import()
+        self.next_import()
+        for bid, label in (('i001', 'ours is a stub'), ('i002', 'ours is the base body')):
+            rc, text = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, text)
+            self.assertIn('; ' + label + ')', text)
+            self.assertIn('ours already matches the exe: <what you checked>', text)
+            self.assertNotIn('{{', text)
+
+    def test_scorecard_splits_the_import_tally(self):
+        docs = os.path.join(self.tmp, 'docs', 'wso')
+        batches = {
+            'i001': {'status': 'closed', 'rows': [
+                {'address': '0x401000', 'category': self.STUB},
+                {'address': '0x403000'}], 'files': [], 'branch': 'x', 'verdicts': {}},
+            'i002': {'status': 'closed', 'rows': [
+                {'address': '0x405000', 'category': self.BASE},
+                {'address': '0x406000', 'category': self.BASE},
+                {'address': '0x407000', 'category': self.BASE}],
+                'files': [], 'branch': 'y', 'verdicts': {}},
+            'i003': {'status': 'assigned', 'rows': [
+                {'address': '0x408000', 'category': self.BASE}],
+                'files': [], 'branch': 'z', 'verdicts': {}}}
+        _write(os.path.join(docs, 'import-state.json'),
+               json.dumps({'fork_base': 'e8dd16a7', 'batches': batches}))
+        _write(os.path.join(docs, 'wave-state.json'),
+               json.dumps({'fork_base': 'e8dd16a7', 'batches': {}}))
+        for a in ('403000', '406000'):
+            _write(os.path.join(docs, 'import-parked', a + '.json'),
+                   json.dumps({'address': '0x' + a, 'name': 'n', 'file': 'f',
+                               'batch': 'i', 'needs': 'x'}))
+        report = os.path.join(self.tmp, 'report.md')
+        # beside the wave state: the import state is read from its sibling
+        rc, out = self.wave.write_scorecard(
+            os.path.join(docs, 'wave-state.json'), report,
+            os.path.join(self.tmp, 'no-triage.json'), None, os.path.join(self.tmp, 'no-audit'),
+            repo=self.tmp)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('imports: stubs 1 imported / 1 parked; base-body 2 imported / 1 parked',
+                      _slurp(report))
+        # the import state itself as the state file counts once
+        rc, out = self.wave.write_scorecard(
+            os.path.join(docs, 'import-state.json'), report,
+            os.path.join(self.tmp, 'no-triage.json'), None, os.path.join(self.tmp, 'no-audit'),
+            repo=self.tmp)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('imports: stubs 1 imported / 1 parked; base-body 2 imported / 1 parked',
+                      _slurp(report))
+
+
 if __name__ == '__main__':
     unittest.main()

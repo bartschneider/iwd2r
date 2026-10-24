@@ -1,8 +1,9 @@
 # Import batch {{id}}: bring in {{size}} functions
 
 You are importing {{size}} functions where WillScarlettOhara's decompilation
-(iwd2-re@{{fork_base}}) has a real body and ours is a stub, or where the row
-already left wave 1 for the import list. His body is the starting point, not
+(iwd2-re@{{fork_base}}) has a real body and ours is a stub, where ours is
+still the base body (Alexander Batalov's) and his fork changed it, or where
+the row already left wave 1 for the import list. His body is the starting point, not
 a verdict: you adapt it, check it against the original, verify it, and record
 where it came from. Where the original contradicts it, the original wins.
 
@@ -15,9 +16,15 @@ Files you own (do not touch functions outside them; other streams own the rest):
 
 {{files}}
 
-Rows, biggest first:
+Rows, biggest first. Each says what ours is: a stub, or the base body.
 
 {{rows}}
+
+For a row where ours is the base body, the same rules apply with one
+addition: the base body may be right and his change wrong. "Ours already
+matches the original" is a legitimate park, with
+`needs: "ours already matches the exe: <what you checked>"`;
+a row is imported only when his body is the one the original confirms.
 
 Context bundles (one per row; read these before the source):
 
