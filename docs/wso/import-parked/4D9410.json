@@ -1,0 +1,1 @@
+{"address": "0x4D9410", "name": "CUIControlEditMultiLine::CUIControlEditMultiLine", "file": "src/CUIControlEditMultiLine.cpp", "batch": "i010", "needs": "world_entry: not measured (address-like untyped argument a0 (61995248 vs 81651128); type it from the header); ours reading matches the decompile"}
