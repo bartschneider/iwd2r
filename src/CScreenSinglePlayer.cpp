@@ -2059,11 +2059,11 @@ void CScreenSinglePlayer::OnPartySelectionDoneButtonClick()
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     CStringList* pCharacters = pGame->GetImportCharacters();
 
-    sprintf(byte_8F64C0, "%s %i", (LPCSTR)PARTY, m_nTopParty + m_nParty);
+    sprintf(byte_8F64C0, "%s %i", (LPCTSTR)PARTY, m_nTopParty + m_nParty);
 
     INT nCharacters = 0;
     for (INT nCharacterSlot = 0; nCharacterSlot < 6; nCharacterSlot++) {
-        sprintf(byte_8F74E0, "%s%i", (LPCSTR)CHAR, nCharacterSlot + 1);
+        sprintf(byte_8F74E0, "%s%i", (LPCTSTR)CHAR, nCharacterSlot + 1);
         DWORD nSize = GetPrivateProfileStringA(byte_8F64C0,
             byte_8F74E0,
             "",
