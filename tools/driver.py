@@ -2184,6 +2184,10 @@ def blocking_findings(report):
 BASE_TESTS_LOG = 'base-tests-%s.log'     # per queue: two drivers share the dir
 BASE_TESTS_TIMEOUT = 600
 RECHECK_STAGES = ('checks', 'review', 'reviewer', 'reviewer-2')   # a cleared one is re-checked
+# Problems only the coordinator can clear: never a fix round (Task 26).
+COORDINATOR_PROBLEMS = ('first conflicts with this branch in ',
+                        'first could not be merged into this branch')
+WAITING_LANDING_NOTE = 'waiting for the landing lock'
 UNCHANGED_PROBLEM = 'unchanged after recheck; fix by hand or clear with --rerun'
 RECHECK_LEDGER = ('retried at its recheck stage: last report re-checked; '
                   'the worker is not run again')
@@ -2712,6 +2716,10 @@ class Driver:
                             '<one-line reason>" per row, for a base-body row you leave as '
                             'ours; never also under ## Imported)' % e]
         self._stage(batch_id, 'checks')
+        if not self.dry_run:
+            merge_problems = self._merge_before_checks(batch_id, worktree)
+            if merge_problems:
+                return {}, merge_problems
         if self.kind == 'import':
             self._clear_kept_outcomes(batch_id, self._kept)
         if self.kind != 'import' and not self.dry_run:
@@ -4205,7 +4213,7 @@ class Driver:
         tip = self._git('rev-parse', '--verify', branch).stdout.strip()
         if not mb or not tip:
             return 'unknown (%s..%s)' % (self.base, branch)
-        n = self._git('rev-list', '--count', '%s..%s' % (mb, tip)).stdout.strip()
+        n = self._git('rev-list', '--count', '--no-merges', '%s..%s' % (mb, tip)).stdout.strip()
         return '%s..%s (%s commit%s)' % (mb[:8], tip[:8], n, '' if n == '1' else 's')
 
     def _worker_of(self, name):
@@ -4276,14 +4284,25 @@ class Driver:
         the base is merged into the branch first (the files are disjoint;
         a no-op when the base is already an ancestor).  The base is pulled
         first (ruling R17).  Under the lock."""
-        why = self.sync_base(self.repo, self.base)
-        if why:
-            return why
+        return self._merge_base_into(branch, worktree)[0]
+
+    def _merge_base_into(self, branch, worktree, when='the close', pull=True,
+                         message=None):
+        """(why or None, conflicting paths): the merge _sync_branch does,
+        also run before the mechanical checks (`when`, `pull` False: the
+        close alone pulls; `message`: the merge commit's subject).  A merge
+        that conflicts is aborted; the paths it conflicted in come back."""
+        if pull:
+            why = self.sync_base(self.repo, self.base)
+            if why:
+                return why, []
         if self._git('merge-base', '--is-ancestor', self.base,
                      branch).returncode == 0:
-            return None
+            return None, []
         self._union_merge_attributes()
-        r = subprocess.run(['git', '-C', worktree, 'merge', '--no-edit', '-q',
+        how = ['-m', message + '\n\n' + STATE_COMMIT_TRAILER + '\n',
+               '--cleanup=strip'] if message else ['--no-edit', '--cleanup=strip']
+        r = subprocess.run(['git', '-C', worktree, 'merge', *how, '-q',
                             self.base], capture_output=True, text=True)
         if r.returncode != 0 and self._only_map_conflicts(worktree):
             # A worker's own docs/MAP.md edit: the close regenerates the map
@@ -4292,14 +4311,99 @@ class Driver:
             if r.returncode == 0:
                 r = self._git_in(worktree, 'add', '--', 'docs/MAP.md')
             if r.returncode == 0:
-                r = self._git_in(worktree, 'commit', '-q', '--no-edit')
+                r = self._git_in(worktree, 'commit', '-q', '--no-edit',
+                                '--cleanup=strip')
         if r.returncode == 0:
-            self.log('%s: %s merged into it before the close' % (branch, self.base))
-            return None
+            self.log('%s: %s merged into it before %s' % (branch, self.base, when))
+            return None, []
+        conflicts = self._git_in(worktree, 'diff', '--name-only',
+                                 '--diff-filter=U').stdout.split()
         subprocess.run(['git', '-C', worktree, 'merge', '--abort'],
                        capture_output=True, text=True)
         return 'merging %s into %s failed: %s' % (
-            self.base, branch, _one_line((r.stderr or '') + (r.stdout or '')))
+            self.base, branch, _one_line((r.stderr or '') + (r.stdout or ''))), conflicts
+
+    def _merge_before_checks(self, batch_id, worktree):
+        """A problem list: [] when `first` was merged into the batch branch
+        (or needed no merge, or the worktree is dirty), else the one
+        coordinator problem.  The checks must see the tree the close will
+        gate (Task 26); a merge conflict is the coordinator's, never the
+        worker's (the worker may not merge)."""
+        try:
+            branch = self.load_state(self.state_path)['batches'][batch_id]['branch']
+        except (OSError, KeyError, ValueError, TypeError):
+            return []
+        r = self._git_in(worktree, 'merge-base', '--is-ancestor', self.base, 'HEAD')
+        if r.returncode != 1:          # 0: nothing moved; else not a repo we can read
+            return []
+        st = self._git_in(worktree, 'status', '--porcelain', '-uall')
+        if st.returncode != 0 or [l for l in st.stdout.splitlines()
+                                  if l[3:].split(' -> ')[-1].strip('"') != REPORT_DRAFT]:
+            return []                  # the uncommitted-paths problem covers it
+        with self._writing():
+            why, conflicts = self._merge_base_into(
+                branch, worktree, when='the checks', pull=False,
+                message='merge %s into %s before the checks' % (self.base, branch))
+        if not why:
+            return []
+        if conflicts:
+            return ['%s conflicts with this branch in %s; the coordinator resolves it'
+                    % (self.base, ', '.join(sorted(conflicts)))]
+        return ['%s could not be merged into this branch (%s); the coordinator '
+                'resolves it' % (self.base, why)]
+
+    LANDING_POLL = 0.25    # seconds between tries at the landing lock
+
+    def _landing_path(self):
+        """<git common dir>/iwd2r-landing.lock: one per repository, so every
+        driver process (both queues) lands on `first` one at a time."""
+        r = self._git('rev-parse', '--path-format=absolute', '--git-common-dir')
+        common = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() \
+            else os.path.join(self.repo, '.git')
+        return os.path.join(common, 'iwd2r-landing.lock')
+
+    def _note(self, batch_id, note):
+        """Set (or clear, with None) the status note of the batch's stage."""
+        def apply(s):
+            for entry in (s.get('current'), s['running'].get(batch_id)):
+                if isinstance(entry, dict) and (entry.get('batch') in (None, batch_id)):
+                    if note is None:
+                        entry.pop('note', None)
+                    else:
+                        entry['note'] = note
+        self._update_status(apply)
+
+    @contextlib.contextmanager
+    def _landing_lock(self, batch_id):
+        """Hold the repository's landing lock over merge-first, gate, map,
+        fast-forward and push.  While another driver holds it the status
+        shows the close stage with a waiting note; a stop while waiting
+        raises _Stop, and the lock is released however the block ends.  The
+        gate's own lock (tools/gates.sh, .gates.lock) is a different file
+        and stays: it serialises gates for every caller of gates.sh."""
+        path = self._landing_path()
+        noted = False
+        try:
+            with contextlib.ExitStack() as stack:
+                while True:
+                    if self._stopping:
+                        raise _Stop()
+                    try:
+                        stack.enter_context(_tool('filelock').hold(
+                            path, 'driver landing', timeout=self.LANDING_POLL))
+                        break
+                    except TimeoutError:
+                        if not noted:
+                            noted = True
+                            self.log('%s: waiting for the landing lock' % batch_id)
+                            self._note(batch_id, WAITING_LANDING_NOTE)
+                if noted:
+                    noted = False
+                    self._note(batch_id, None)
+                yield
+        finally:
+            if noted:              # a stop (or an error) while waiting
+                self._note(batch_id, None)
 
     STOP_WAIT = 30     # seconds a stop waits for a git write in progress
 
@@ -4660,6 +4764,9 @@ class Driver:
         (a recheck): the problems of the cleared exception; the same
         problems again raise it again with no fix round."""
         verdicts, problems = self._check(batch_id, worktree, report)
+        if problems and problems[0].startswith(COORDINATOR_PROBLEMS):
+            # not the worker's to fix (it may not merge): no fix round
+            return self._exception(batch_id, 'checks', problems)
         # Frida runs once, here, clean check or not; what it finds joins the
         # one fix round (ruling R58).
         problems = problems + self._frida_phase(batch_id, batch, worktree, verdicts)
@@ -4860,53 +4967,54 @@ class Driver:
         if failed:
             return self._exception(batch_id, 'record', failed)
         self._stage(batch_id, 'close')
-        with self._lock, self._writing():
-            commits = self._commits(batch['branch'])
-            # Uncommitted paths were a mechanical-check problem already
-            # (ruling R71); nothing is committed on the worker's behalf.
-            # Another driver may fast-forward the base while this one waits
-            # on the gate lock: on that error, and only after the gate
-            # passed, sync and gate once more in place (ruling R64).
-            for attempt in (0, 1):
-                sync = self._sync_branch(batch['branch'], worktree)
-                if sync:
-                    rc, text = 1, sync
+        with self._landing_lock(batch_id):
+            with self._lock, self._writing():
+                commits = self._commits(batch['branch'])
+                # Uncommitted paths were a mechanical-check problem already
+                # (ruling R71); nothing is committed on the worker's behalf.
+                # Another driver may fast-forward the base while this one waits
+                # on the gate lock: on that error, and only after the gate
+                # passed, sync and gate once more in place (ruling R64).
+                for attempt in (0, 1):
+                    sync = self._sync_branch(batch['branch'], worktree)
+                    if sync:
+                        rc, text = 1, sync
+                        break
+                    try:
+                        why = self._regen_map(worktree)
+                    except Exception as e:
+                        why = 'raised %r' % (e,)
+                    if why:
+                        rc, text = 1, 'regenerating docs/MAP.md failed: %s' % why
+                        break
+                    try:
+                        rc, text = self.close_batch(
+                            self.state_path, self.repo, batch_id, base=self.base,
+                            gate=self.gate, kind=self.kind)
+                    except Exception as e:
+                        rc, text = 1, 'close_batch raised %r' % (e,)
+                    if rc != 0 and attempt == 0 and 'not a fast-forward' in text:
+                        self.log('%s: %s moved during the gate; syncing and '
+                                 'closing again' % (batch_id, self.base))
+                        continue
                     break
-                try:
-                    why = self._regen_map(worktree)
-                except Exception as e:
-                    why = 'raised %r' % (e,)
-                if why:
-                    rc, text = 1, 'regenerating docs/MAP.md failed: %s' % why
-                    break
-                try:
-                    rc, text = self.close_batch(
-                        self.state_path, self.repo, batch_id, base=self.base,
-                        gate=self.gate, kind=self.kind)
-                except Exception as e:
-                    rc, text = 1, 'close_batch raised %r' % (e,)
-                if rc != 0 and attempt == 0 and 'not a fast-forward' in text:
-                    self.log('%s: %s moved during the gate; syncing and '
-                             'closing again' % (batch_id, self.base))
-                    continue
-                break
-        if rc != 0:
-            return self._exception(batch_id, 'close', [
-                l.strip() for l in text.splitlines() if l.strip()])
-        self.log(text.rstrip())
-        with self._lock, self._writing():
-            if self.kind == 'verdicts':
-                # The import queue has no verdicts: its state must not
-                # overwrite wave 1's scorecard.
-                try:
-                    rc, text = self.write_scorecard(
-                        self.state_path, self.report_path, self.triage_path,
-                        calibration_path=self.calibration_path)
-                    self.log(text.rstrip())
-                except Exception as e:   # the batch is closed; the scorecard can wait
-                    self.log('scorecard not written: %r' % (e,))
-            self._commit_state(batch_id)
-            err = self.push()
+            if rc != 0:
+                return self._exception(batch_id, 'close', [
+                    l.strip() for l in text.splitlines() if l.strip()])
+            self.log(text.rstrip())
+            with self._lock, self._writing():
+                if self.kind == 'verdicts':
+                    # The import queue has no verdicts: its state must not
+                    # overwrite wave 1's scorecard.
+                    try:
+                        rc, text = self.write_scorecard(
+                            self.state_path, self.report_path, self.triage_path,
+                            calibration_path=self.calibration_path)
+                        self.log(text.rstrip())
+                    except Exception as e:   # the batch is closed; the scorecard can wait
+                        self.log('scorecard not written: %r' % (e,))
+                self._commit_state(batch_id)
+                err = self.push()
         batch = self.load_state(self.state_path)['batches'][batch_id]
         entry = ledger_entry(
             dict(batch, id=batch_id), batch['verdicts'],
@@ -5229,7 +5337,7 @@ class Driver:
                 pool=batch.get('pool')))
             self.log('%s: closed by the last run without its ledger entry; '
                      'entry written' % batch_id)
-        with self._lock:
+        with self._landing_lock(batch_id), self._lock:
             self._commit_state(batch_id)
             err = self.push()
         self._finish(batch_id, 'closed')

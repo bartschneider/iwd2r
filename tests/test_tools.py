@@ -16433,6 +16433,265 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'first').stdout,
                          self.git('rev-parse', 'p3/wso-b011').stdout)
 
+    # -- Task 26: the checks run on a tree that includes first; one landing lock
+
+    _T26_REPORT = '## Verdicts\n\nverdict 0x40B000 ours case dump-b011\n'
+
+    def _t26_driver(self, **kw):
+        d = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
+                              ids=('b011',), **kw)
+        self.seen = []
+
+        def steps(batch, wt, verdicts, **k):
+            self.seen.append((os.path.isfile(os.path.join(wt, 'late.txt')), k.get('tests', True)))
+            return []
+        d.mechanical_checks = steps
+        wt = os.path.join(self.tmp, 'wt-b011')
+        return d, wt
+
+    def _first_moves(self, text='late\n', name='late.txt'):
+        _write(os.path.join(self.root, name), text)
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'first moved')
+
+    def test_check_merges_first_when_it_moved_and_the_tree_is_clean(self):
+        d, wt = self._t26_driver()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            before = self._rev('HEAD', cwd=wt)
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, [])
+        self.assertEqual(self.seen, [(True, True)])      # steps ran on the merged tree
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)
+        self.assertIn(before, parents)
+        body = self.git('log', '-1', '--format=%B', cwd=wt).stdout
+        self.assertTrue(body.startswith('merge first into p3/wso-b011 before the checks'))
+        self.assertIn(driver.STATE_COMMIT_TRAILER, body)
+        self.assertEqual(sum('merged into it before the checks' in l for l in self.logs), 1)
+
+    def test_check_without_a_move_makes_no_merge(self):
+        d, wt = self._t26_driver()
+        before = self._rev('HEAD', cwd=wt)
+        d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(self._rev('HEAD', cwd=wt), before)
+        self.assertEqual(self.seen, [(False, True)])
+
+    def test_check_with_a_dirty_tree_skips_the_merge(self):
+        d, wt = self._t26_driver()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            _write(os.path.join(wt, 'wip.txt'), 'x\n')
+            before = self._rev('HEAD', cwd=wt)
+            d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(self._rev('HEAD', cwd=wt), before)
+        self.assertEqual(self.seen, [(False, True)])
+
+    def test_check_conflict_is_one_coordinator_problem_and_aborts(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'f.txt'), 'branch\n')
+        d, wt = self._t26_driver(base_files={'f.txt': 'base\n'}, on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves('first\n', 'f.txt')
+            before = self._rev('HEAD', cwd=wt)
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ['first conflicts with this branch in f.txt; '
+                                    'the coordinator resolves it'])
+        self.assertEqual(self.seen, [])
+        self.assertEqual(self._rev('HEAD', cwd=wt), before)
+        self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+        self.assertNotEqual(subprocess.run(
+            ['git', '-C', wt, 'rev-parse', '-q', '--verify', 'MERGE_HEAD'],
+            capture_output=True).returncode, 0)
+
+    def test_conflict_gets_no_fix_round_and_raises_the_checks_exception(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'f.txt'), 'branch\n')
+        w = self._BatchWorker(credits=0.0,
+                              before=lambda cwd: self._first_moves('first\n', 'f.txt'))
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
+                              base_files={'f.txt': 'base\n'}, on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 1)               # no fix-round prompt
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(len(exc['problems']), 1)
+        self.assertIn('the coordinator resolves it', exc['problems'][0])
+
+    def test_map_only_conflict_merge_message_has_no_conflicts_comment(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'docs', 'MAP.md'), 'branch\n')
+        d, wt = self._t26_driver(base_files={'docs/MAP.md': 'base\n'}, on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves('first\n', 'docs/MAP.md')
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, [])
+        body = self.git('log', '-1', '--format=%B', cwd=wt).stdout
+        self.assertNotIn('Conflicts', body)
+        self.assertNotIn('#', body)
+        self.assertIn(driver.STATE_COMMIT_TRAILER, body)
+
+    def test_ledger_commit_count_ignores_the_pre_check_merge(self):
+        d, wt = self._t26_driver()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            d._check('b011', wt, self._T26_REPORT)
+        self.assertIn('(1 commit)', d._commits('p3/wso-b011'))
+
+    def test_settle_closed_takes_the_landing_lock(self):
+        d, wt = self._t26_driver()
+        d.LANDING_POLL = 0.05
+        d._has_ledger_entry = lambda b: True
+        d._commit_state = lambda b: None
+        order = []
+        d.push = lambda: (order.append('push'), None)[1]
+        state = d.load_state(d.state_path)
+        state['batches']['b011']['status'] = 'closed'
+        d._stage('b011', 'close')
+        t = threading.Thread(target=lambda: d._settle_closed('b011'))
+        with filelock.hold(d._landing_path(), 'test'):
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d).get('current') or {}).get('note') == \
+                        driver.WAITING_LANDING_NOTE:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail('did not wait for the landing lock')
+            self.assertEqual(order, [])
+        t.join(10)
+        self.assertEqual(order, ['push'])
+
+    def test_stop_while_waiting_clears_the_waiting_note(self):
+        d1, d2 = self._t26_two_drivers()
+        d2._stage('b012', 'close')
+        d2.LANDING_POLL = 0.05
+
+        def waiter():
+            try:
+                with d2._landing_lock('b012'):
+                    pass
+            except driver._Stop:
+                pass
+        with filelock.hold(d2._landing_path(), 'test'):
+            t = threading.Thread(target=waiter)
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d2).get('current') or {}).get('note'):
+                    break
+                time.sleep(0.05)
+            d2._stopping = True
+            t.join(10)
+        st = self._status(d2)
+        self.assertNotIn('note', st['current'])
+        self.assertNotIn('note', st['running']['b012'])
+
+    def _t26_two_drivers(self):
+        d1 = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
+                               ids=('b011', 'b012'))
+        d1.next_batch = lambda *a, **k: self.NOTHING
+        state2 = os.path.join(self.tmp, 'wave-state-2.json')
+        shutil.copy(self.state_path, state2)
+        d2 = driver.Driver(
+            self.root, state2, None, None, os.path.join(self.tmp, 'ledger2.md'),
+            os.path.join(self.tmp, 'driver2', 'status.json'), pools=d1.pools,
+            workers_by_pool=d1.workers_by_pool, reviewers_by_pool=d1.reviewers_by_pool,
+            runner=lambda fn: fn(), push=lambda: self.pushes.append(2),
+            send=self.sent.append, gate=False, log=self.logs.append, queue='wave1',
+            base_tests=False)
+        d2.mechanical_checks = d1.mechanical_checks
+        d2.report_path = d1.report_path
+        d2.triage_path = d1.triage_path
+        return d1, d2
+
+    def _status_or_empty(self, d):
+        try:
+            return self._status(d)
+        except (OSError, ValueError):
+            return {}
+
+    def _land_args(self, d, bid):
+        batch = d.load_state(d.state_path)['batches'][bid]
+        addr = batch['rows'][0]['address']
+        return (bid, batch, os.path.join(self.tmp, 'wt-' + bid),
+                {addr: ('ours', 'dump-' + bid)}, (False, 'not sampled'))
+
+    def test_landing_lock_serialises_two_drivers_and_the_second_lands_cleanly(self):
+        d1, d2 = self._t26_two_drivers()
+        events, out = [], {}
+        real1, real2 = d1.close_batch, d2.close_batch
+
+        def slow(*a, **k):
+            events.append('start1')
+            time.sleep(1.0)
+            r = real1(*a, **k)
+            events.append('end1')
+            return r
+
+        def second(*a, **k):
+            events.append('start2')
+            r = real2(*a, **k)
+            events.append('end2')
+            return r
+        d1.close_batch, d2.close_batch = slow, second
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            t1 = threading.Thread(target=lambda: out.__setitem__(
+                1, d1._land(*self._land_args(d1, 'b011'))))
+            t1.start()
+            while 'start1' not in events:
+                time.sleep(0.02)
+            t2 = threading.Thread(target=lambda: out.__setitem__(
+                2, d2._land(*self._land_args(d2, 'b012'))))
+            t2.start()
+            noted = False
+            for _ in range(100):
+                st = self._status_or_empty(d2)
+                cur = st.get('current') or {}
+                if cur.get('stage') == 'close' and cur.get('note') == driver.WAITING_LANDING_NOTE:
+                    noted = True
+                    break
+                time.sleep(0.05)
+            t1.join(30)
+            t2.join(30)
+        self.assertTrue(noted)
+        self.assertEqual(out, {1: 'closed', 2: 'closed'}, self._status(d2).get('exceptions'))
+        self.assertEqual(events, ['start1', 'end1', 'start2', 'end2'])
+        self.assertNotIn('note', self._status(d2)['running'].get('b012', {}))
+        self.assertEqual(self._rev('first'), self._rev('p3/wso-b012'))
+        self.assertEqual(self.git('merge-base', '--is-ancestor', 'p3/wso-b011', 'first'
+                                  ).returncode, 0)
+
+    def test_landing_lock_is_per_repo_and_released_on_stop_while_waiting(self):
+        d1, d2 = self._t26_two_drivers()
+        path = d1._landing_path()
+        self.assertEqual(path, d2._landing_path())
+        self.assertTrue(path.endswith(os.path.join('.git', 'iwd2r-landing.lock')))
+        raised = []
+
+        def waiter():
+            try:
+                with d2._landing_lock('b012'):
+                    raised.append('got it')
+            except driver._Stop:
+                raised.append('stop')
+        d2._stage('b012', 'close')
+        with filelock.hold(path, 'test'):
+            t = threading.Thread(target=waiter)
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d2).get('current') or {}).get('note') == \
+                        driver.WAITING_LANDING_NOTE:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail('no waiting note')
+            d2._stopping = True
+            t.join(10)
+        self.assertEqual(raised, ['stop'])
+        with filelock.hold(path, 'again', timeout=1):
+            pass                                        # the stopped waiter holds nothing
+
     def test_transcript_does_not_flag_look_alikes(self):
         for cmd in ('git cat-file -p e8dd16a7:src/A.cpp', 'grep -n cat src/A.cpp',
                     'cat src/A.cpp | head -40', 'grep -rn WindowsSandbox tools',
