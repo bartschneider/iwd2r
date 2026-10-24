@@ -25,6 +25,7 @@
 #include "CScreenCreateChar.h"
 #include "CScreenInventory.h"
 #include "CScreenMap.h"
+#include "CScreenStore.h"
 #include "CScreenWorld.h"
 #include "CScreenWorldMap.h"
 #include "CSpawn.h"
@@ -11460,7 +11461,20 @@ BOOL CGameSprite::sub_7202E0()
 // 0x720310
 void CGameSprite::CheckSequence(BYTE& sequence)
 {
-    // TODO: Incomplete.
+    if (sequence != CGAMESPRITE_SEQ_SHOOT && sequence != CGAMESPRITE_SEQ_ATTACK) {
+        return;
+    }
+
+    CItem* item = m_equipment.m_items[m_equipment.m_selectedWeapon];
+    if (item != NULL) {
+        item->Demand();
+        if (item->GetAbility(m_equipment.m_selectedWeaponAbility) == NULL) {
+            sequence = static_cast<BYTE>(GetIdleSequence());
+        }
+        item->Release();
+    } else {
+        sequence = static_cast<BYTE>(GetIdleSequence());
+    }
 }
 
 // 0x7204C0
@@ -12383,9 +12397,32 @@ void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 }
 
 // 0x723BF0
-void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)
+void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
-    // TODO: Incomplete.
+    // dword_8E752C counts how many party members are currently hidden, so it
+    // only moves on a real transition.
+    if (field_70F2 == 1 && a1 == 0) {
+        // Coming back into view closes the store this station had open, but
+        // only for a character it controls.
+        if (a2 == TRUE
+            && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+                || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID)) {
+            g_pBaldurChitin->SelectEngine(g_pBaldurChitin->m_pEngineWorld);
+            g_pBaldurChitin->m_pEngineStore->StopStore();
+        }
+
+        CInfGame::dword_8E752C--;
+    } else if (field_70F2 == 0 && a1 == 1) {
+        CInfGame::dword_8E752C++;
+    }
+
+    if (CInfGame::dword_8E752C < 0) {
+        CInfGame::dword_8E752C = 0;
+    } else if (CInfGame::dword_8E752C > g_pBaldurChitin->GetObjectGame()->m_nCharacters) {
+        CInfGame::dword_8E752C = g_pBaldurChitin->GetObjectGame()->m_nCharacters;
+    }
+
+    field_70F2 = a1;
 }
 
 // 0x723CC0

@@ -235,6 +235,18 @@ not touched.  A fork/neither resolve reads the losing kind from the batch
 branch, like `verdict`, so the branch must still exist and carry the
 evidence file.
 
+`python3 tools/wave.py undecide <batch> <address> fork|neither <reason...>` is
+the reverse, for the coordinator: it moves a row of an `assigned` batch to the
+probe list (`source: coordinator`) and drops its verdict, as the driver does
+for `## Undecided` rows.  It refuses a closed batch, a foreign address, or an
+address already listed, and writes nothing then.  The batch branch must then
+hold our body for that function (the merge base's) and an evidence file with
+no deciding sentence; `resolve` brings the row back.  Run it while the batch is
+not in flight (its exception cleared but not yet retried, or the driver paused):
+the command edits the state without the driver's lock, like `resolve` and
+`unpark`, and a worker running on that batch could still record a verdict for
+the moved row.
+
 A rule that is not a check, a flag or a test is not a rule.
 
 `close` refuses
@@ -346,9 +358,11 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   `compat/`, `docs/evidence/`, `docs/MAP.md`, `oracle/cases/` and
   `oracle/CMakeLists.txt`, a `fork` verdict whose evidence has no `kind:`
   line. (A stale `docs/MAP.md` is no longer checked here: the close
-  regenerates it.) The
-  `corroborated by WSO` phrase is required only for verdicts the driver
-  recorded from an oracle probe pass.
+  regenerates it.) Every verdict row's evidence carries the deciding
+  sentence (`disagreed with WSO at <sha>: ...; case <id> decides` or
+  `corroborated by WSO at <sha>: ...; case <id> decides`, wrapped lines
+  allowed) and the checks enforce it; a driver probe pass needs the
+  `corroborated by WSO` form.
 - Retrying a cleared exception (`--clear`): at the `close`, `record` or
   `push` stage the batch goes straight to that stage on its worktree and
   recorded verdicts, with no worker run; at any other stage the worker
@@ -367,8 +381,9 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   checked, the evidence must be `kind: trace` or better, and the tool
   tests, `check_evidence` and parity still run. The import queue skips
   the oracle phase and never rewrites wave 1's scorecard. It runs the
-  Frida phase (with `--frida`): all three scenarios (`world_entry`,
-  `first_fight`, `walk_and_talk`), each through `probe.py run` once per
+  Frida phase (with `--frida`): the scenarios the coverage map picks
+  for the batch (the nine world scenarios, plus `biography` for screen
+  rows; the driver log names them), each through `probe.py run` once per
   side. Before it the driver builds our x86 exe from the batch worktree in
   that worktree's own Windows checkout (`%USERPROFILE%\iwd2r-build-<worktree
   name>`, `driver.frida_build`, compiler output in the batch's
@@ -459,6 +474,25 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
 - `--clear BATCH_ID`: removes that batch's entry from `exceptions`,
   prints what it removed, and exits 0, or 2 when there is no such entry.
   The next run retries that batch before any new cut.
+
+  Scenario rules of the phase. A UI-only scenario (`truth.FRIDA_UI_SCENARIOS`,
+  `biography`) never reaches the world screen, so both sides run with
+  `--no-loaded` (CLEAN when the game ends without a crash). A scenario that
+  fails the same non-crash way on both sides (both NOT-LOADED, both no
+  status, the same OBSERVER-ERROR) measured nothing: it is left out of every
+  row (`info['uninformative']`, one driver log line each) and, if every
+  scenario is such, the phase's infrastructure exception fires; a one-sided
+  failure still reads `scenario failed`. A scenario must not depend on state
+  it wrote in an earlier run: every probe run (both sides, the coverage pass
+  too) starts with the empty save folder a replay record gives
+  (`probe.saves_of_its_own`, `oracle.prepared_saves` mode empty: the copy's
+  own saves wait aside and are put back, the run's saves go to
+  `runs/<stamp>/replay/saves`), so a saving scenario sees the same state on
+  both sides every time; a scenario that needs a save goes through
+  `--load`. `save_load_screens` stays in `truth.PHASE_HELD_OUT` until one
+  real original/ours pair confirms matching dumps. The driver's stop
+  (SIGTERM, SIGINT) also kills the running `probe.py` launches and taskkills
+  the sandbox processes.
 
 **Pools and threads.** Pools share the batches: a batch goes to the first
 pool that has a free worker, is not parked and is under its budget, and

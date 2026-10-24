@@ -1384,9 +1384,50 @@ void CInfGame::DestroyGame(BOOLEAN bProgressBarRequired, BOOLEAN bProgressBarInP
 }
 
 // 0x5A0160
-void CInfGame::sub_5A0160()
+void CInfGame::sub_5A0160()  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
-    // TODO: Incomplete.
+    CString sSearchPath = g_pChitin->cDimm.cResCache.m_sDirName + "data\\*.*";
+    CString sResolvedSearchPath;
+    if (g_pChitin->lAliases.ResolveFileName(sSearchPath, sResolvedSearchPath) == FALSE) {
+        sResolvedSearchPath = sSearchPath;
+    }
+
+    CFileFind fileFind;
+    BOOLEAN bWorking = fileFind.FindFile(sResolvedSearchPath, 0);
+    while (bWorking) {
+        bWorking = fileFind.FindNextFile();
+
+        CString sBifFileName = fileFind.GetFilePath();
+        INT nSlash = sBifFileName.Find('\\');
+        while (nSlash != -1) {
+            sBifFileName = sBifFileName.Right(sBifFileName.GetLength() - nSlash - 1);
+            nSlash = sBifFileName.Find('\\');
+        }
+
+        CString sBifName = sBifFileName.Left(sBifFileName.GetLength() - 4);
+        CString sExtension = sBifFileName.Right(4);
+        sExtension.MakeUpper();
+        if (sExtension.Compare(".BIF") == 0) {
+            CString sMinimumSize;
+            CPoint ptLocation;
+            if (m_ruleTables.m_tCacheValidation.Find(sBifName, ptLocation, FALSE) == TRUE) {
+                if (m_ruleTables.m_tCacheValidation.GetWidth() < 2
+                    || m_ruleTables.m_tCacheValidation.GetHeight() <= ptLocation.y
+                    || ptLocation.y < 0) {
+                    sMinimumSize = m_ruleTables.m_tCacheValidation.GetDefault();
+                } else {
+                    sMinimumSize = m_ruleTables.m_tCacheValidation.GetAt(CPoint(1, ptLocation.y));
+                }
+            } else {
+                sMinimumSize = m_ruleTables.m_tCacheValidation.GetDefault();
+            }
+
+            g_pChitin->cDimm.cResCache.ValidateFile(g_pChitin->cDimm.GetResFileID(sBifName),
+                atol(sMinimumSize));
+        }
+    }
+
+    fileFind.Close();
 }
 
 // 0x5A04B0
@@ -10046,6 +10087,63 @@ BOOLEAN CInfGame::GetGameSpyCharacterInformation(INT nCharacterSlot, CString& sN
         INFINITE);
 
     return TRUE;
+}
+
+// 0x5C7440
+//
+// An item that could not be placed where the loot/give code intended must not
+// leak.  Droppable items go on the disposable list; an undroppable (flag 0x1)
+// item is force-fit into a free personal slot on the looter -- bumping a
+// droppable occupant if necessary -- so quest items can never be lost.
+void CInfGame::PutBackItem(CItem* pItem, LONG nLooterId)
+{
+    if ((pItem->GetFlagsFile() & 0x1) == 0) {
+        AddDisposableItem(pItem);
+        return;
+    }
+
+    CGameSprite* pLooter;
+    BYTE rc;
+    do {
+        rc = m_cObjectArray.GetShare(nLooterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pLooter),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    INT nEmptySlot = -1;
+    INT nBumpSlot = -1;
+    for (INT nSlot = 18; nSlot < 34; nSlot++) {
+        CItem* pSlotItem = pLooter->GetEquipment()->m_items[nSlot];
+        if (pSlotItem == NULL) {
+            nEmptySlot = nSlot;
+        } else if ((pSlotItem->GetFlagsFile() & 0x1) == 0) {
+            nBumpSlot = nSlot;
+        }
+    }
+
+    if (nEmptySlot < 0) {
+        if (nBumpSlot < 0) {
+            AddDisposableItem(pItem);
+            m_cObjectArray.ReleaseShare(nLooterId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+            return;
+        }
+        CItem* pBumped = pLooter->GetEquipment()->m_items[nBumpSlot];
+        if (pBumped != NULL) {
+            AddDisposableItem(pBumped);
+        }
+        pLooter->GetEquipment()->m_items[nBumpSlot] = pItem;
+    } else {
+        pLooter->GetEquipment()->m_items[nEmptySlot] = pItem;
+    }
+
+    CMessage* message = new CMessageSpriteEquipment(pLooter, nLooterId, nLooterId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    m_cObjectArray.ReleaseShare(nLooterId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
 }
 
 // 0x5C76B0

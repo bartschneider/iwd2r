@@ -40,6 +40,7 @@ everything else stays under runs/.
 """
 import argparse
 import datetime
+import contextlib
 import json
 import os
 import shutil
@@ -73,7 +74,10 @@ POST_LOAD_FALLBACK = 180             # --post-load when the scenario has no head
 
 
 def log(message):
-    print('sandbox: %s' % message, flush=True)
+    try:
+        print('sandbox: %s' % message, flush=True)
+    except (BrokenPipeError, OSError):
+        pass      # the parent is gone: the cleanup that logs must still run
 
 
 def venv_python():
@@ -300,6 +304,24 @@ def wait_for_result_file(path, seconds):
         time.sleep(2)
 
 
+@contextlib.contextmanager
+def saves_of_its_own(game, out_dir, dry):
+    """Every probe run starts with the empty save folder a replay record
+    gives (oracle.prepared_saves, mode empty, the copy's own saves aside and
+    put back afterwards, the run's saves moved into out_dir/saves): a
+    scenario that saves (save_load_screens) sees the same state on both
+    sides and every run, and no player save is touched.  A plan-only run
+    changes nothing.  Inside the replay and sandbox locks, as record_original
+    holds them."""
+    if dry:
+        yield {}
+        return
+    with oracle.prepared_saves(oracle.mpsave_dir(game),
+                               {'mode': 'empty', 'load': None}, out_dir,
+                               oracle.save_aside(game)) as report:
+        yield report
+
+
 def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
              probe, seed, dump_every, dry, status_name='frida-trace.jsonl.status'):
     """One sandbox for one side -- winsandbox.run_replay's shape with the
@@ -388,12 +410,16 @@ def report(out_dir, status_name):
 
 
 def ours_build(target, build_checkout=None):
-    """The build folder a side runs from: the original's injector and
-    recorder from this checkout's oracle build; ours from build_checkout's
-    x86 RelWithDebInfo build (the checkout that built the bodies under
-    test, e.g. a batch worktree's), else this checkout's."""
+    """The build folder a side runs from, in build_checkout (the checkout
+    that built the bodies under test, e.g. a batch worktree's) else this
+    checkout's: the original's injector and recorder from its oracle build,
+    ours from its x86 RelWithDebInfo build.  One checkout for both sides, so
+    the recorder writing the original's dumps and the dumper writing ours
+    come from one tree and follow one schema.json (a recorder.dll older than
+    the schema in the driver's checkout made every b014/i001 dump guard
+    fail)."""
     if target == 'original':
-        return os.path.join(play.WIN_CHECKOUT, oracle.REPLAY_DIR_REL)
+        return os.path.join(build_checkout or play.WIN_CHECKOUT, oracle.REPLAY_DIR_REL)
     return os.path.join(build_checkout or play.WIN_CHECKOUT, OURS_EXE_REL)
 
 
@@ -424,7 +450,8 @@ def run(ns):
                        else 'iwd2r.exe')
     if not os.path.isfile(exe):
         if ns.target == 'original':
-            sys.exit('probe: no %s; run tools/oracle.py build' % exe)
+            sys.exit('probe: no %s; build the oracle there (tools/oracle.py build for '
+                     'this checkout; driver.frida_build for a batch checkout)' % exe)
         sys.exit('probe: no %s; build windows-msvc-x86 first' % exe)
     if not dry:
         winsandbox.deploy_runtime(exe, log, arch='x86')
@@ -468,7 +495,8 @@ def run(ns):
     rc = 2
     try:
         with filelock.hold(oracle.REPLAY_LOCK, 'replay'), \
-                filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
+                filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'), \
+                saves_of_its_own(game, out_dir, dry):
             result = run_side(ns.target, script, folders, logon_cmd, timeout,
                               host_run, out_dir, ns.probe, ns.seed,
                               ns.dump_every, dry, status_name)
@@ -530,11 +558,12 @@ def add_side_args(p):
                    help="ours side: loaded observation site as an RVA off "
                         '--module')
     p.add_argument('--build-checkout', metavar='CHECKOUT',
-                   help='ours side: the Windows checkout (a WSL path) whose '
-                        + OURS_EXE_REL + '/iwd2r.exe runs, e.g. a batch '
-                        "worktree's (default: this checkout's, "
-                        'play.WIN_CHECKOUT); the tools are staged from this '
-                        'checkout either way')
+                   help='the Windows checkout (a WSL path) a side runs from, '
+                        "e.g. a batch worktree's: ours its "
+                        + OURS_EXE_REL + '/iwd2r.exe, the original its '
+                        + oracle.REPLAY_DIR_REL + ' injector and recorder '
+                        "(default: this checkout's, play.WIN_CHECKOUT); the "
+                        'tools are staged from this checkout either way')
     p.add_argument('--module', default=None,
                    help='module --loaded-rva resolves against '
                         '(default iwd2r.exe)')

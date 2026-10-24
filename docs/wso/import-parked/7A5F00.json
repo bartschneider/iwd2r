@@ -1,0 +1,1 @@
+{"address": "0x7A5F00", "name": "CNetwork::EnumerateSessions", "file": "src/CNetwork.cpp", "batch": "i001", "needs": "fork body is DirectPlay (DPSESSIONDESC2, IDirectPlay::GetCaps/EnumSessions) which ADR 0002 deletes from our tree; it cannot compile here and with the null provider the only reachable path is the failure return, which ours already is; kept our body"}

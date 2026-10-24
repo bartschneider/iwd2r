@@ -754,9 +754,67 @@ void CheckLimitsCase(CaseContext& ctx)
     }
 }
 
+// The exe's CDerivedStats constructor zeroes the two 10-entry
+// decrementing arrays at +0x328 and +0x378 (0x443CA3, 0x443CB9) and, after
+// BonusInit, empties them again (0x4E7050 at 0x443FD5, 0x443FE0).  Our
+// header does not declare those members yet, so ours cannot hold this
+// state and the case stays pending: it checks the original's contract,
+// not a comparison.
+//
+// The fixture is the raw pre-construction bytes of the object: a full-size
+// block from the original's operator new (0xE58 bytes, the exe's sizeof
+// CDerivedStats -- m_disabledSpellTypes[3] ends at 0xE58), filled with a
+// deterministic poison so a skipped region cannot pass by the luck of a
+// zeroing allocator.  The ctor never reads pre-construction bytes, so the
+// poison is safe to leave under every member it initializes.
+constexpr uintptr_t kDStatsCtor = 0x443B30;
+constexpr size_t kDStatsFullSize = 0xE58;
+constexpr uintptr_t kDStatsSpellLevelVtable = 0x84852c;
+constexpr size_t kDecrementingBegin = 0x328;
+constexpr size_t kDecrementingEnd = 0x3C8;
+using DStatsCtorFn = void(__fastcall*)(void* self, void* edx);
+
+void DStatsCtorZeroesDecrementing(CaseContext& ctx)
+{
+    uint8_t* block = nullptr;
+    ctx.CallOriginal([&] {
+        block = static_cast<uint8_t*>(reinterpret_cast<OriginalNewFn>(kOriginalNew)(kDStatsFullSize));
+    });
+
+    const int rounds = ctx.iterations < 8 ? 8 : ctx.iterations;
+    for (int round = 0; round < rounds; ++round) {
+        std::mt19937 poison(static_cast<uint32_t>(ctx.seed ^ (0xC0DEC7E5u + static_cast<uint32_t>(round))));
+        for (size_t i = 0; i < kDStatsFullSize; ++i) {
+            block[i] = static_cast<uint8_t>(0x01 + (poison() >> 24) % 0xFF);
+        }
+        ctx.SetInputs("round " + std::to_string(round));
+        ctx.CallOriginal([&] {
+            reinterpret_cast<DStatsCtorFn>(kDStatsCtor)(block, nullptr);
+        });
+        ctx.CountInputs(1);
+
+        // The ctor ran: it installed the spell-level list vtable at +0x188.
+        uintptr_t vtable = 0;
+        std::memcpy(&vtable, block + 0x188, sizeof(vtable));
+        if (!oracle::Compare(ctx, kDStatsSpellLevelVtable, vtable)) {
+            break;
+        }
+        // The disagreement: both arrays are zero after construction, not
+        // pre-construction garbage.
+        for (size_t off = kDecrementingBegin; off < kDecrementingEnd; off += 4) {
+            uint32_t value = 0;
+            std::memcpy(&value, block + off, sizeof(value));
+            if (!oracle::Compare(ctx, 0u, value)) {
+                break;
+            }
+        }
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("rules/spell_automatic_picker", SpellAutomaticPicker);
 ORACLE_CASE("rules/starting_hp", StartingHitPoints);
 ORACLE_CASE("rules/roll_hit_points", RollHitPoints);
 ORACLE_CASE("rules/check_limits", CheckLimitsCase);
+ORACLE_CASE_PENDING("rules/dstats_ctor_zeroes_decrementing", DStatsCtorZeroesDecrementing, "ours cannot hold the +0x328..+0x3C7 state until CDerivedStats.h declares the two 10-entry decrementing arrays; original-only until then");

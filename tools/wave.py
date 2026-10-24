@@ -8,12 +8,17 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py verdict b001 0x643CC0 ours probe-9
     python3 tools/wave.py close b001           # gates, then ff `first`
     python3 tools/wave.py resolve 0x716E80 ours dump-716E80   # a probe-list row into its batch
+    python3 tools/wave.py undecide b016 0x5D79B0 fork <reason>  # a batch row onto the probe list
+    python3 tools/wave.py unpark 0x5152C0 [--reason TEXT]     # a parked import row back to the queue
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
     python3 tools/wave.py status
     python3 tools/wave.py recompare [--tip SHA] [--no-fetch]   # queue what Will's tip adds
     python3 tools/wave.py run [--queue wave1|import] [--pool SPEC]... [--budget C] [--seed S]   # the driver
-    python3 tools/wave.py next --queue import   # cut an import batch i<NNN>
+    python3 tools/wave.py next --queue import   # cut an import batch i<NNN> (covered rows first;
+                                                # --include-uncovered keeps the rest)
+    python3 tools/wave.py coverage [--scenarios a,b] [--chunk N] [--addresses FILE] [--dry]
+                                                # original-exe hit map per scenario
     python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
     python3 tools/wave.py run --clear b011      # the coordinator's retry of an exception
 
@@ -75,7 +80,14 @@ WSO_DELTA_HEAD = '## WSO delta'
 
 DEFAULT_SIZE = 20
 DEFAULT_CATEGORY = 'both_changed_differ'
-IMPORT_CATEGORY = 'theirs_real_ours_stub'
+# The import queue's sources, in the order `next --queue import` draws
+# from them: rows where ours is a stub, then rows where ours is still the
+# base and his fork changed it.  IMPORT_CATEGORY (the first) stays as an
+# alias for what imports it.
+IMPORT_CATEGORIES = ('theirs_real_ours_stub', 'theirs_changed_ours_base')
+IMPORT_CATEGORY = IMPORT_CATEGORIES[0]
+CATEGORY_LABEL = {'theirs_real_ours_stub': 'ours is a stub',
+                  'theirs_changed_ours_base': 'ours is the base body'}
 IMPORT_STATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-state.json')
 IMPORT_TEMPLATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md')
 # The two queues (ruling R11).  wave1 cuts the both_changed_differ rows,
@@ -89,6 +101,7 @@ QUEUES = {
               'prefix': 'b', 'triage': True, 'kind': 'verdicts',
               'template': TEMPLATE_PATH, 'status': 'status.json'},
     'import': {'state': IMPORT_STATE_PATH, 'category': IMPORT_CATEGORY,
+               'categories': IMPORT_CATEGORIES,
                'prefix': 'i', 'triage': False, 'kind': 'import',
                'template': IMPORT_TEMPLATE_PATH,
                'status': 'status-import.json'},
@@ -191,6 +204,22 @@ def _triage():
     return _triage_module
 
 
+_coverage_module = None
+
+
+def _coverage():
+    """tools/coverage.py, loaded by path (tools/ is not on sys.path under -I)."""
+    global _coverage_module
+    if _coverage_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'wave_coverage', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                          'coverage.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _coverage_module = module
+    return _coverage_module
+
+
 _truth_module = None
 
 
@@ -280,6 +309,23 @@ def frida_trace(text):
         ce.TRACE_SOURCES[1].fullmatch(fields.get('trace_source') or ''))
 
 
+def _frida_probe(text):
+    """The probe name of an evidence text's frida trace_source line ('' when
+    it has none): `frida <probe> orig:... ours:... compare=0`."""
+    ts = _check_evidence().front_matter(text or '').get('trace_source') or ''
+    parts = ts.split()
+    return parts[1] if len(parts) > 1 and parts[0] == 'frida' else ''
+
+
+def other_batch_trace(text, batch_id):
+    """True when an evidence text is a frida trace another batch's phase
+    wrote (its probe is not `<batch_id>-...`).  It measured the body that
+    batch had, which may not be the one on this branch (nothing ties the
+    trace to a body), so it does not stand for a kept row: the phase
+    measures the row again (Task 19, round 4)."""
+    return frida_trace(text) and not _frida_probe(text).startswith(f'{batch_id}-')
+
+
 def kept_evidence(worktree, merge_base, address, name, text):
     """Why an import row's evidence stands as it is written, or None when
     the Frida phase must measure it (the whole-branch review's ruling):
@@ -340,6 +386,20 @@ def parked_rel(address):
     return f'{IMPORT_PARKED_DIR}/{_addr_key(address).upper()}.json'
 
 
+def parked_stem_key(name):
+    """The address key of a parked file's name (`0x401000.json`, `401000.JSON`
+    and `401000.json` all name 401000): the one spelling rule of the folder."""
+    stem = name[:-len('.json')] if name.lower().endswith('.json') else name
+    return _addr_key(stem.lower())
+
+
+def parked_path_key(rel):
+    """The address key of a repo path under docs/wso/import-parked/, else None."""
+    head, _, name = rel.rpartition('/')
+    return parked_stem_key(name) if head == IMPORT_PARKED_DIR and name.lower().endswith(
+        '.json') else None
+
+
 def _parked_rows(worktree):
     """({address key: entry}, problem or None) of the worktree's
     docs/wso/import-parked/<ADDR>.json files: the rows import batches
@@ -355,7 +415,7 @@ def _parked_rows(worktree):
     for name in names:
         rel = f'{IMPORT_PARKED_DIR}/{name}'
         stem = name[:-len('.json')] if name.endswith('.json') else None
-        if not stem or not re.fullmatch(r'[0-9A-Fa-f]+', stem):
+        if not stem or not re.fullmatch(r'(?:0[xX])?[0-9A-Fa-f]+', stem):
             problems.append(f'{rel}: not a parked row; the folder holds only <ADDR>.json files')
             continue
         try:
@@ -373,7 +433,7 @@ def _parked_rows(worktree):
             problems.append(f'{rel} records address {entry["address"]}; name the file '
                             f'after its row ({parked_rel(entry["address"])})')
             continue
-        out[_addr_key(stem.lower())] = entry
+        out[parked_stem_key(name)] = entry
     return out, ('; '.join(problems) or None)
 
 
@@ -471,11 +531,92 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                            claims_path=claims_path, **kw)
 
 
+def _import_pool(rows, category, decided, owned, importing, disagreements_path,
+                 coverage_path, coverage_root, repo, include_uncovered):
+    """(eligible rows, rows without an address, coverage note, None) for one
+    category, or ([], 0, None, (rc, message)) when it offers nothing."""
+    def in_category(r):
+        return r.get('category') == category
+
+    no_addr = sum(1 for r in rows if in_category(r) and not r.get('address'))
+    candidates = []
+    seen = set()
+    for r in rows:
+        if (in_category(r) and r.get('address')
+                and _addr_key(r['address']) not in decided
+                and _addr_key(r['address']) not in seen):
+            seen.add(_addr_key(r['address']))
+            candidates.append(r)
+    eligible = [r for r in candidates if r['file'] not in owned]
+    if not eligible:
+        if candidates:
+            return [], 0, None, (2, 'nothing left to assign: %d row%s wait%s on files '
+                                 'owned by assigned batches or claimed by streams\n'
+                                 % (len(candidates), 's' if len(candidates) != 1 else '',
+                                    '' if len(candidates) != 1 else 's'))
+        return [], 0, None, (2, f'nothing left: every {category} row is assigned or decided\n')
+    eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
+                                 r['file'], r['name']))
+    coverage_note = None
+    if importing:
+        # The coverage map (tools/coverage.py): covered rows first, most
+        # scenarios first; rows no scenario exercises are left out.
+        cov_mod = _coverage()
+        cpath = coverage_path or os.path.join(
+            os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
+        cov, why = cov_mod.check(cpath, coverage_root or repo or ROOT)
+        if cov is None:
+            coverage_note = 'coverage: %s; candidate order unchanged' % why
+        else:
+            try:
+                # per row: its candidates (UI screens for CScreen/CUI files, plus
+                # any UI scenario the map says hits it), the phase's own rule
+                state_of = {id(r): cov_mod.status_of(cov, r['address'],
+                                                     cov_mod.row_scenarios(cov, [r]))
+                            for r in eligible}
+                # a row Frida refuses everywhere queues as it did before the
+                # status existed (unknown); so does one refused in some
+                # scenarios and dead in the rest
+                state_of = {id(r): ('unknown' if state_of[id(r)] == 'unhookable'
+                                    or (state_of[id(r)] == 'dead' and cov_mod.refused_in(
+                                        cov, r['address'], cov_mod.row_scenarios(cov, [r])))
+                                    else state_of[id(r)]) for r in eligible}
+                count = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
+            except (TypeError, AttributeError, ValueError, KeyError) as e:
+                state_of = None
+                coverage_note = 'coverage: map unreadable (%r); candidate order unchanged' % (e,)
+            if state_of is not None:
+                hit = [r for r in eligible if state_of[id(r)] == 'hit']
+                # stale hits rank above unknown but never decide: such a row is
+                # unknown for the leave-out decision
+                stale_hit = [r for r in eligible if state_of[id(r)] == 'unknown'
+                             and cov_mod.covered(cov, r['address'], include_stale=True)]
+                unknown = [r for r in eligible if state_of[id(r)] == 'unknown'
+                           and r not in stale_hit]
+                dead = [r for r in eligible if state_of[id(r)] == 'dead']
+                hit.sort(key=lambda r: -count[id(r)])   # stable: size order within a count
+                eligible = hit + stale_hit + unknown + (dead if include_uncovered else [])
+                notes = []
+                if not include_uncovered:
+                    notes.append('coverage: %d candidate row(s) left out as exercised by no '
+                                 'scenario' % len(dead))
+                if unknown or stale_hit:
+                    notes.append('coverage: %d row(s) kept that no scenario measured (unknown)'
+                                 % (len(unknown) + len(stale_hit)))
+                coverage_note = '\n'.join(notes) or None
+                if not eligible:
+                    return [], 0, None, (2, 'nothing left: every remaining import row is '
+                                         'exercised by no scenario (--include-uncovered '
+                                         'offers them anyway)\n')
+    return eligible, no_addr, coverage_note, None
+
+
 def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                size=DEFAULT_SIZE, category=DEFAULT_CATEGORY, *,
                triage_path=None, repo=None, fork_base=None,
                worktree_root=None, import_path=None, base='first',
-               claims_path=None, queue='wave1', probe_path=None):
+               claims_path=None, queue='wave1', probe_path=None,
+               coverage_path=None, coverage_root=None, include_uncovered=False):
     """Rank the unclaimed rows, take the biggest `size`, record the batch.
 
     With triage_path (the CLI passes docs/wso/triage.json and ROOT) it
@@ -488,8 +629,9 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     claims.json beside the state file) are skipped like those of assigned
     batches.
 
-    queue='import' (ruling R11) takes the rows of the import category
-    (`theirs_real_ours_stub`) plus the import list's entries (completed
+    queue='import' (ruling R11) takes the rows of the import categories
+    (`theirs_real_ours_stub` first; once none of those is undecided,
+    `theirs_changed_ours_base`) plus the import list's entries (completed
     from disagreements.json by address), applies no triage, cuts ids
     i<NNN> and still cuts the worktree.  Files held by the assigned
     batches of the other queue's state file, beside this one, are skipped
@@ -563,31 +705,17 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     except (OSError, ValueError, AttributeError) as e:
         return 2, f'claims file {claims_path}: {e}\n'
 
-    if importing:
-        category = q['category']
-
-    def in_category(r):
-        return r.get('category') == category
-
-    no_addr = sum(1 for r in rows if in_category(r) and not r.get('address'))
-    candidates = []
-    seen = set()
-    for r in rows:
-        if (in_category(r) and r.get('address')
-                and _addr_key(r['address']) not in decided
-                and _addr_key(r['address']) not in seen):
-            seen.add(_addr_key(r['address']))
-            candidates.append(r)
-    eligible = [r for r in candidates if r['file'] not in owned]
+    cats = tuple(q.get('categories', ())) if importing else (category,)
+    last_failure = None
+    for category in cats:
+        eligible, no_addr, coverage_note, failure = _import_pool(
+            rows, category, decided, owned, importing, disagreements_path,
+            coverage_path, coverage_root, repo, include_uncovered)
+        if eligible:
+            break
+        last_failure = failure      # the last category's message carries the hint that matters
     if not eligible:
-        if candidates:
-            return 2, ('nothing left to assign: %d row%s wait%s on files '
-                       'owned by assigned batches or claimed by streams\n'
-                       % (len(candidates), 's' if len(candidates) != 1 else '',
-                          '' if len(candidates) != 1 else 's'))
-        return 2, f'nothing left: every {category} row is assigned or decided\n'
-    eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
-                                 r['file'], r['name']))
+        return last_failure
     chosen = eligible[:size]
     pre = q['prefix']
     nid = 1 + max((int(m.group(1)) for bid in state['batches']
@@ -618,6 +746,8 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     lines = [f'{batch_id} assigned: {len(chosen)} rows, {len(files)} files, '
              f'branch {branch}',
              f'files: {", ".join(files)}']
+    if importing:
+        lines.append(f'category: {category}')
     for i, r in enumerate(chosen, 1):
         lines.append(f'{i:2}. {r["address"]}  {r["name"]}  {r["file"]}  '
                      f'theirs {r["their_len"]} / ours {r["our_len"]}')
@@ -628,6 +758,8 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
         return 0, '\n'.join(lines) + '\n'
     lines.append(f'worktree {wt} ({how})')
     if importing:
+        if coverage_note:
+            lines.append(coverage_note)
         return 0, '\n'.join(lines) + '\n'
     rc, out = apply_triage(
         state_path, repo, batch_id, triage_path,
@@ -838,10 +970,13 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
             template = f.read()
     except OSError as e:
         return 2, f'no template {template_path}: {e}\n'
-    rows = '\n'.join(
-        f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
-        f'theirs {r["their_len"]} / ours {r["our_len"]} chars)'
-        for i, r in enumerate(batch['rows'], 1))
+    def row_line(i, r):
+        # an import row says what ours is: a stub, or the base body
+        label = CATEGORY_LABEL.get(r.get('category'))
+        tail = f'; {label}' if label else ''
+        return (f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
+                f'theirs {r["their_len"]} / ours {r["our_len"]} chars{tail})')
+    rows = '\n'.join(row_line(i, r) for i, r in enumerate(batch['rows'], 1))
     files = '\n'.join(f'- `{f}`' for f in batch['files'])
     fork_base = str(batch.get('fork_base') or state.get('fork_base')
                     or DEFAULT_FORK_BASE)
@@ -869,6 +1004,15 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
              .replace('{{files}}', files)
              .replace('{{rows}}', rows)
              .replace('{{bundle}}', bundle))
+    base_rows = any(r.get('category') == 'theirs_changed_ours_base' for r in batch['rows'])
+    brief = (brief.replace('{{base_body}}', BASE_BODY_PARAGRAPH.replace('{{id}}', batch_id)
+                                if base_rows else '')
+             .replace('{{kept_report}}', KEPT_REPORT_PARAGRAPH if base_rows else '')
+             .replace('{{kept_refusal}}', KEPT_REFUSAL if base_rows else '')
+             .replace('{{kept_measured}}', KEPT_MEASURED if base_rows else '')
+             .replace('{{kept_rule4}}', KEPT_RULE4_EXCEPTION if base_rows else '')
+             .replace('{{kept_close}}', KEPT_CLOSE if base_rows else '')
+             .replace('{{refusal_rule}}', REFUSAL_MIXED if base_rows else REFUSAL_STUB))
     return 0, brief
 
 
@@ -1062,14 +1206,48 @@ def _ruling_line(ledger_path, ruling):
     return None
 
 
+def evidence_paragraphs(text):
+    """The logical lines of an evidence file: a run of consecutive non-empty
+    lines is one Markdown paragraph, joined with single spaces (workers
+    hard-wrap prose); a heading and each line of a fenced code block stay
+    their own entries; a blank line separates."""
+    out, run, fence = [], [], False
+
+    def flush():
+        if run:
+            out.append(' '.join(run))
+            del run[:]
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith('```') or line.startswith('~~~'):
+            flush()
+            out.append(raw.rstrip())
+            fence = not fence
+        elif fence:
+            out.append(raw.rstrip())
+        elif not line or line == '---':
+            flush()
+            if line:
+                out.append(line)
+        elif line.startswith('#'):
+            flush()
+            out.append(line)
+        else:
+            run.append(line)
+    flush()
+    return out
+
+
 def _cites_pin(text, pin):
     """True when an evidence phrase names `pin` (either may be the
     abbreviation of the other, 7 hex digits at least)."""
-    for p in EVIDENCE_PHRASES:
-        for m in re.finditer(re.escape(p) + r' at ([0-9a-fA-F]{7,40})', text):
-            sha = m.group(1).lower()
-            if pin.lower().startswith(sha) or sha.startswith(pin.lower()):
-                return True
+    for para in evidence_paragraphs(text):
+        for p in EVIDENCE_PHRASES:
+            for m in re.finditer(re.escape(p) + r'\s+at\s+([0-9a-fA-F]{7,40})',
+                                 para):
+                sha = m.group(1).lower()
+                if pin.lower().startswith(sha) or sha.startswith(pin.lower()):
+                    return True
     return False
 
 
@@ -1174,7 +1352,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     if kind != 'verdicts' else ''))
                 continue
             if kind == 'verdicts':
-                if not any(p in text for p in EVIDENCE_PHRASES):
+                if not any(p in para for para in evidence_paragraphs(text)
+                           for p in EVIDENCE_PHRASES):
                     problems.append(
                         f'{rel}: neither {" nor ".join(EVIDENCE_PHRASES)} '
                         f'in the body')
@@ -1185,9 +1364,35 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                         f'"corroborated by WSO at <sha>" line names this '
                         f'batch\'s pin {batch["fork_base"][:7]}')
             else:
+                if (wt is not None and row.get('measured_body') and frida_trace(text)
+                        and _check_evidence().body_digest(
+                            wt, row['address'], row.get('file')) != row['measured_body']):
+                    problems.append(f'{row["address"]}: body changed after the Frida phase; '
+                                    f'park it or edit it back to the measured body')
+                    continue
                 # Imported means changed: a body left (or put back) as the
                 # stub cannot close on any evidence, and only touched
                 # functions have their trace_source checked by the gate.
+                if (k not in touched and row.get('outcome') == 'kept'
+                        and row.get('category') == 'theirs_changed_ours_base'):
+                    # Kept (Task 19): ours already matches the original, so the
+                    # body is untouched; what the row needs instead is the
+                    # Frida phase's measurement of it, kind: trace.
+                    bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
+                    this_batch = frida_trace(text) and _frida_probe(text).startswith(
+                        f'{batch_id}-')
+                    stands = kept_evidence(wt, mb, row['address'], row.get('name', ''), text)
+                    if stands and other_batch_trace(text, batch_id):
+                        # another batch's frida trace measured the body that
+                        # batch had: it stands only for the body this batch's
+                        # phase recorded (measured_body), still the one here
+                        want = row.get('measured_body')
+                        stands = bool(want) and _check_evidence().body_digest(
+                            wt, row['address'], row.get('file')) == want
+                    if bar or not (this_batch or stands):
+                        problems.append(f'{row["address"]}: kept but not measured; park it or '
+                                        f'import it')
+                    continue
                 if k not in touched:
                     problems.append(f'row {row["address"]} not imported: body unchanged '
                                     f'against {mb[:12] if mb else base}; import it or park '
@@ -1216,7 +1421,14 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                                     f'it like a row, or edit it back and park it')
                     continue
                 with open(path, encoding='utf-8') as f:
-                    bar = _import_bar(wt, mb, '0x' + k, name, rel, f.read())
+                    dep_text = f.read()
+                want = (batch.get('measured_deps') or {}).get(k)
+                if (want and frida_trace(dep_text)
+                        and _check_evidence().body_digest(wt, '0x' + k) != want):
+                    problems.append(f'{label}: body changed after the Frida phase; park it or '
+                                    f'edit it back to the measured body')
+                    continue
+                bar = _import_bar(wt, mb, '0x' + k, name, rel, dep_text)
                 if bar:
                     problems.append(f'{label}: {bar}')
     if gate and not problems and wt is not None:
@@ -1411,11 +1623,13 @@ def _dump_refusal(addr, case, remedy):
 
 
 def _evidence_decided_by(text, case):
-    """True when a line of an evidence file carries one of EVIDENCE_PHRASES
-    and ends with `case <case> decides`."""
+    """True when a physical line or a logical line (paragraph, see
+    evidence_paragraphs) of an evidence file carries one of EVIDENCE_PHRASES and ends with
+    `case <case> decides`."""
+    tail = f'case {case} decides'
     return any(any(p in line for p in EVIDENCE_PHRASES)
-               and line.rstrip().rstrip('.').endswith(f'case {case} decides')
-               for line in text.splitlines())
+               and line.rstrip().rstrip('.').endswith(tail)
+               for line in text.splitlines() + evidence_paragraphs(text))
 
 
 def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
@@ -1486,6 +1700,74 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT):
                f'probe list now {len(remaining)} entries\n')
 
 
+def unpark(addresses, reason=None, state_path=IMPORT_STATE_PATH, repo=ROOT):
+    """Return parked import rows to the queue.  Each address needs its
+    docs/wso/import-parked/<ADDR>.json and a row in a closed batch of the
+    import state; the file goes, the row moves from the batch's `rows` to
+    its `unparked` list with `at`, `reason` and `needs`, so `next --queue
+    import` offers it again.  Any refusal (exit 1) writes nothing.  No git:
+    the caller commits."""
+    if not addresses:
+        return 2, 'unpark: at least one address is required\n'
+    reason = reason or 'needs met'
+    parked, problem = _parked_rows(repo)
+    if problem:
+        return 2, f'{problem}\n'
+    # the file each row was read from, under whatever spelling it carries
+    # (<ADDR>.json, 0x<ADDR>.json, lower case): that is the file to remove
+    folder = os.path.join(repo, IMPORT_PARKED_DIR)
+    files = {}
+    for name in (sorted(os.listdir(folder)) if os.path.isdir(folder) else []):
+        stem = name[:-len('.json')] if name.endswith('.json') else None
+        if stem and re.fullmatch(r'(?:0[xX])?[0-9A-Fa-f]+', stem):
+            files.setdefault(_addr_key(stem.lower()), os.path.join(folder, name))
+    state = load_state(state_path)
+    plan, refusals, seen = [], [], set()
+    for address in addresses:
+        key = _addr_key(str(address).lower())      # the parked keys are lower case
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = parked.get(key)
+        if entry is None:
+            refusals.append(f'{address}: not parked')
+            continue
+        hit = next(((bid, b, r) for bid, b in sorted(state['batches'].items())
+                    for r in b.get('rows', [])
+                    if _addr_key(r.get('address')) == key), None)
+        if hit is None:
+            refusals.append(f'{address}: in no import batch')
+        elif hit[1].get('status') != 'closed':
+            refusals.append(f'{address}: in assigned batch {hit[0]}; '
+                            f'close or clear it first')
+        else:
+            plan.append((key, entry, *hit))
+    if refusals:
+        return 1, '\n'.join(refusals) + '\n'
+    lines, now = [], _now()
+    for key, entry, bid, batch, row in plan:
+        batch['rows'] = [r for r in batch['rows'] if r is not row]
+        moved = dict(row, at=now, reason=reason, needs=entry.get('needs'))
+        batch.setdefault('unparked', []).append(moved)
+        lines.append(f'unparked 0x{key.upper()} {row.get("name")} '
+                     f'(was {entry.get("needs")}) from {bid}')
+    save_state(state_path, state)
+    stuck = []
+    for key, *_ in plan:
+        try:
+            os.unlink(files[key])
+        except OSError as e:
+            stuck.append(f'{os.path.relpath(files[key], repo)} ({e.strerror or e})')
+    lines.append(f'commit {os.path.relpath(state_path, repo)} and {IMPORT_PARKED_DIR}')
+    if stuck:
+        # the row is back in the queue but still reads as parked until the
+        # file is gone; nothing else to redo
+        lines.append('the state is saved but these parked files remain; delete them '
+                     'by hand and commit: ' + '; '.join(stuck))
+        return 1, '\n'.join(lines) + '\n'
+    return 0, '\n'.join(lines) + '\n'
+
+
 # -- scorecard -----------------------------------------------------------
 
 SCORECARD_HEAD = '## Scorecard'
@@ -1524,7 +1806,88 @@ def deciding_kind(case):
     return 'trace'
 
 
-def scorecard_text(state):
+BASE_BODY_PARAGRAPH = (
+    "For a row where ours is the base body, the same rules apply with one\n"
+    "addition: the base body may be right and his change wrong. Read the\n"
+    "original. If his body is the one it confirms, import it. If ours already\n"
+    "matches the original, do NOT park the row and do NOT touch its body: write\n"
+    "(or keep) `docs/evidence/<ADDRESS>.md` (`kind: read-only`, with an\n"
+    "`exemption:` that gives your reading, what you checked against the\n"
+    "disassembly; no verdict phrase and no frida line; an existing oracle,\n"
+    "replay or trace file stays untouched), commit it, and list the\n"
+    "row under `## Kept` in your report, one line `kept <0xADDR> <one-line\n"
+    "reason>`. The Frida phase then measures our body against the original and,\n"
+    "when they are equal, the driver rewrites that file to `kind: trace`. If his\n"
+    "body contradicts the original, ours stays and the row goes under `## Kept`\n"
+    "with the reason `fork body contradicts the exe: <what differs>`; a row you\n"
+    "leave as ours is never parked by you for that. Park the row only when ours\n"
+    "is wrong too (`needs` says what), when his body is the one to import but it\n"
+    "depends on a function outside the batch (a kept row imports nothing, so\n"
+    "what ours calls never parks it), or when you cannot settle it.\n"
+    "A stub row is never kept.\n\n")
+
+# The template's `## Kept` pieces, rendered for batches that hold base-body rows
+# only (a stub batch has no `## Kept` section to write).
+KEPT_REFUSAL = (" For a base-body row that refusal is a `## Kept` line with that reason,\n"
+                "   not a park: keep or write its `docs/evidence/<ADDR>.md` (`kind:\n"
+                "   read-only`, `exemption:` with what the exe shows); do not delete it\n"
+                "   (the delete instruction above is for stub rows only).")
+KEPT_MEASURED = (
+    " For a base-body row you listed under `## Kept`, when the driver finds OUR\n"
+    "   body behaves differently from the original, the finding names the scenario\n"
+    "   and the difference: park the row with `needs` of `\"ours differs from the\n"
+    "   exe (<scenario>): <difference>; import his body in a later batch\"` (the\n"
+    "   body was never changed, so there is nothing to edit back: delete its\n"
+    "   evidence file, write the parked file and take the row off `## Kept`). An import in the fix round\n"
+    "   cannot be measured (the phase runs once), so it is not offered. A base-body\n"
+    "   row you imported that comes back different parks as any import does.")
+KEPT_RULE4_EXCEPTION = ", except a base-body row you list under `## Kept`"
+KEPT_CLOSE = ", or kept (measured by the driver, or standing on oracle/replay evidence)"
+REFUSAL_STUB = (" A row whose body you leave as ours because you refused his body is\n"
+                "   parked too, with `needs` saying why.")
+REFUSAL_MIXED = (" A row whose body you leave as ours because you refused his body: for\n"
+                 "   a STUB row (ours is a stub) refusing still parks it, with `needs`\n"
+                 "   saying why; for a BASE-BODY row, refusing his body means ours stays\n"
+                 "   and the row goes under `## Kept` with the reason (`fork body\n"
+                 "   contradicts the exe: <what differs>`), never parked by you.")
+
+KEPT_REPORT_PARAGRAPH = (
+    "Base-body rows you keep as ours go under a section headed `## Kept`, one line\n"
+    "per row, never also under `## Imported`:\n"
+    "\n"
+    "    kept <0xADDR> <one-line reason>\n"
+    "\n")
+
+
+def _import_tally(state, import_state=None, parked=None):
+    """'imports: stubs N imported / K kept / M parked; base-body N imported /
+    K kept / M parked' over the rows of the closed import batches (ids
+    i<NNN>) of `state` and `import_state`, split by each row's category
+    (none: a stub); a row with a docs/wso/import-parked entry (`parked`,
+    address keys) is parked, a row recorded outcome kept (the driver marks it
+    only for a base-body row untouched against the merge base, and close
+    lets it close only with this batch's trace) is kept, any other closed row
+    imported.  None without any."""
+    parked = parked or {}
+    seen = {}
+    for st in (state, import_state):
+        for bid, b in (st or {}).get('batches', {}).items():
+            if not re.fullmatch(r'i\d+', bid) or b.get('status') != 'closed':
+                continue
+            for r in b.get('rows', []):
+                seen[(bid, _addr_key(r.get('address')))] = r
+    if not seen:
+        return None
+    n = {'stubs': [0, 0, 0], 'base-body': [0, 0, 0]}
+    for (bid, key), r in seen.items():
+        which = ('base-body' if r.get('category') == 'theirs_changed_ours_base'
+                 else 'stubs')
+        n[which][2 if key in parked else 1 if r.get('outcome') == 'kept' else 0] += 1
+    return ('imports: stubs %d imported / %d kept / %d parked; '
+            'base-body %d imported / %d kept / %d parked' % (*n['stubs'], *n['base-body']))
+
+
+def scorecard_text(state, import_state=None, parked=None):
     """The '## Scorecard' section: per-side tally, split by losing kind
     and by deciding evidence kind, plus one line per batch."""
     sides = {s: 0 for s in SIDES}
@@ -1589,6 +1952,9 @@ def scorecard_text(state):
     ]
     if batches:
         lines += ['', 'Batches: ' + ', '.join(batches)]
+    tally = _import_tally(state, import_state, parked)
+    if tally:
+        lines += ['', tally]
     return '\n'.join(lines) + '\n'
 
 
@@ -1625,9 +1991,30 @@ def audit_text(audit):
             f'{results.count("flip")} flips.\n'), None
 
 
+def coverage_line(folder=None):
+    """`Coverage: <covered> of <candidates> candidate functions exercised by
+    <k> scenarios (<date>)` from coverage.json beside the state file, or
+    `Coverage: not measured`."""
+    folder = folder or os.path.dirname(DISAGREEMENTS_PATH)
+    cov_mod = _coverage()
+    path = os.path.join(folder, 'coverage.json')
+    cov, why = cov_mod.check(path, os.path.dirname(os.path.dirname(folder)) or ROOT)
+    if cov is None:
+        return 'Coverage: not measured' + ('' if why.startswith('no map') else ' (%s)' % why)
+    try:
+        cands = cov_mod.candidates(os.path.join(folder, 'disagreements.json'))
+        hit = sum(1 for a in cands if cov_mod.covered(cov, a))
+        stale = [s for s in cov.get('stale', ()) if s in cov['scenarios']]
+        return 'Coverage: %d of %d candidate functions exercised by %d scenarios%s (%s)' % (
+            hit, len(cands), len(cov['scenarios']) - len(stale),
+            ' (%d stale)' % len(stale) if stale else '', str(cov.get('at', ''))[:10])
+    except (OSError, ValueError, TypeError, AttributeError, KeyError):
+        return 'Coverage: not measured (map unreadable)'
+
+
 def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
                     triage_path=TRIAGE_PATH, calibration_path=CALIBRATION_PATH,
-                    audit_path=None):
+                    audit_path=None, repo=None):
     """Replace (or append) the '## Scorecard' section of the report.
     Idempotent: the same state writes the same bytes.  When triage.json
     exists the section ends with a labelled calibration block (the
@@ -1636,7 +2023,21 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
     paragraph; when docs/wso/audit.json (beside the state file, or
     audit_path) exists it ends with the rule-3 audit sample paragraph."""
     state = load_state(state_path)
-    section = scorecard_text(state)
+    docs = os.path.dirname(os.path.abspath(state_path))
+    imp_path = os.path.join(docs, os.path.basename(IMPORT_STATE_PATH))
+    imp_state = None
+    if os.path.abspath(imp_path) != os.path.abspath(state_path) and os.path.exists(imp_path):
+        try:
+            imp_state = load_state(imp_path)
+        except (OSError, ValueError) as e:
+            return 2, f'import state {imp_path}: {e}\n'
+    parked = {}
+    try:
+        parked, _ = _parked_rows(repo or os.path.dirname(os.path.dirname(docs)))
+    except OSError:
+        pass
+    section = scorecard_text(state, imp_state, parked)
+    section += '\n' + coverage_line(os.path.dirname(os.path.abspath(state_path))) + '\n'
     if audit_path is None:
         audit_path = os.path.join(
             os.path.dirname(os.path.abspath(state_path)), 'audit.json')
@@ -1716,7 +2117,71 @@ def status(state_path=STATE_PATH):
     return 0, '\n'.join(lines) + '\n'
 
 
+def undecide(batch_id, address, reading, reason, state_path=STATE_PATH,
+             repo=ROOT):
+    """Move a row of an assigned batch to the probe list by hand, the move
+    the driver makes for a worker's `## Undecided` row (ruling R73); the
+    reverse of `resolve`.  Exit 2 refuses and nothing is written."""
+    if reading not in ('fork', 'neither'):
+        return 2, 'reading must be fork or neither\n'
+    if not reason or not reason.strip():
+        return 2, 'a reason is required\n'
+    state = load_state(state_path)
+    batch = state['batches'].get(batch_id)
+    if batch is None:
+        return 2, f'no batch {batch_id}\n'
+    if batch.get('status') != 'assigned':
+        return 2, (f'{batch_id} is closed; a closed row is reopened through '
+                   f'the probe list by hand\n')
+    row = next((r for r in batch['rows']
+                if _addr_key(r.get('address')) == _addr_key(address)), None)
+    if row is None:
+        return 2, f'{address} is not a row of {batch_id}\n'
+    probe_path = os.path.join(repo, PROBE_LIST_REL)
+    probes, err = _load_list(probe_path, 'probe list', missing_ok=True)
+    if err:
+        return 2, err
+    if any(_addr_key(e['address']) == _addr_key(address) for e in probes):
+        return 2, f'{row["address"]} is already on the probe list\n'
+    addr = row['address']
+    verdicts = batch.setdefault('verdicts', {})
+    dropped = verdicts.pop(addr, None)
+    if dropped is None:
+        dropped = next((verdicts.pop(k) for k in list(verdicts)
+                        if _addr_key(k) == _addr_key(addr)), None)
+    batch['rows'] = [r for r in batch['rows'] if r is not row]
+    batch['files'] = _files_of(batch['rows'])
+    probes.append({'address': addr, 'at': _now(), 'batch': batch_id,
+                   'file': row.get('file'), 'name': row.get('name'),
+                   'reading': reading, 'reason': reason.strip(),
+                   'source': 'coordinator'})
+    # The list first: a crash between the writes leaves the row in both.
+    _save_json(probe_path, probes)
+    save_state(state_path, state)
+    out = (f'moved {addr} out of {batch_id} to the probe list ({reading}); '
+           f'probe list now {len(probes)} entries\n')
+    if dropped is not None:
+        out += f'dropped its verdict: {json.dumps(dropped, sort_keys=True)}\n'
+    out += (f'the {batch["branch"]} branch must now hold: our body for that '
+            f'function (the merge base\'s), and an evidence file without a '
+            f'deciding sentence (the checks skip rows without a verdict '
+            f'line).  `wave.py resolve {addr} <side> <case>` brings it back.\n')
+    return 0, out
+
+
+def _line_buffer():
+    """Flush each line when stdout/stderr are not a tty, so a redirected
+    long run shows progress as it happens."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, 'reconfigure') and not stream.isatty():
+                stream.reconfigure(line_buffering=True)
+        except (ValueError, OSError):      # a closed or replaced stream
+            pass
+
+
 def main(argv=None):
+    _line_buffer()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
@@ -1724,9 +2189,12 @@ def main(argv=None):
     cmd, rest = argv[0], argv[1:]
     if cmd == 'next':
         size, category, queue = DEFAULT_SIZE, DEFAULT_CATEGORY, 'wave1'
+        include = False
         it = iter(rest)
         for a in it:
-            if a == '--queue':
+            if a == '--include-uncovered':
+                include = True
+            elif a == '--queue':
                 queue = next(it, '')
                 if queue not in QUEUES:
                     print('wave next: --queue is one of '
@@ -1748,8 +2216,13 @@ def main(argv=None):
             else:
                 print(f'wave next: unknown option {a}', file=sys.stderr)
                 return 2
+        if include and queue != 'import':
+            print('wave next: --include-uncovered only applies to --queue import',
+                  file=sys.stderr)
+            return 2
         extra = {} if queue == 'wave1' else {
-            'state_path': QUEUES[queue]['state'], 'queue': queue}
+            'state_path': QUEUES[queue]['state'], 'queue': queue,
+            'include_uncovered': include}
         rc, out = next_batch(
             size=size, category=category,
             triage_path=TRIAGE_PATH if QUEUES[queue]['triage'] else None,
@@ -1790,6 +2263,31 @@ def main(argv=None):
                   file=sys.stderr)
             return 2
         rc, out = resolve_probe(rest[0], rest[1], rest[2])
+    elif cmd == 'undecide':
+        if len(rest) < 4:
+            print('usage: wave.py undecide <batch> <address> fork|neither '
+                  '<reason...>', file=sys.stderr)
+            return 2
+        rc, out = undecide(rest[0], rest[1], rest[2], ' '.join(rest[3:]))
+    elif cmd == 'unpark':
+        addrs, reason, it = [], None, iter(rest)
+        for a in it:
+            if a == '--reason':
+                reason = next(it, None)
+                if reason is None:
+                    print('wave unpark: --reason needs a value', file=sys.stderr)
+                    return 2
+            elif a == '--queue':
+                if next(it, '') != 'import':
+                    print('wave unpark: --queue is import', file=sys.stderr)
+                    return 2
+            else:
+                addrs.append(a)
+        if not addrs:
+            print('usage: wave.py unpark <address> [<address> ...] '
+                  '[--reason TEXT] [--queue import]', file=sys.stderr)
+            return 2
+        rc, out = unpark(addrs, reason)
     elif cmd == 'recompare':
         kw, it = {}, iter(rest)
         for a in it:
@@ -1807,6 +2305,8 @@ def main(argv=None):
                 print(f'wave recompare: unknown option {a}', file=sys.stderr)
                 return 2
         rc, out = recompare(**kw)
+    elif cmd == 'coverage':
+        return _coverage().main(rest)
     elif cmd == 'scorecard':
         rc, out = write_scorecard()
     elif cmd == 'status':
