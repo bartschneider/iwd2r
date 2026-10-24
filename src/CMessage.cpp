@@ -419,12 +419,6 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_SWAPITEM_REQUEST = 82;
 // 0x84CF5A
 const BYTE CBaldurMessage::MSG_SUBTYPE_SWAPITEM_REPLY = 114;
 
-// 0x84CF5E
-const BYTE CBaldurMessage::MSG_TYPE_CHAPTER = 74;
-
-// 0x84CF60
-const BYTE CBaldurMessage::MSG_SUBTYPE_CHAPTER_ANNOUNCE_STATUS = 97;
-
 // 0x84CF64
 const BYTE CBaldurMessage::MSG_TYPE_JOURNAL = 106;
 
@@ -3309,41 +3303,9 @@ BOOLEAN CBaldurMessage::OnPauseAnnounceStatus(INT nMsgFrom, BYTE* pMessage, DWOR
 // 0x434EB0
 BOOLEAN CBaldurMessage::ChapterAnnounceStatus(BYTE nChapter, CResRef cResRef)
 {
-    if (g_pChitin->cNetwork.GetSessionOpen() != TRUE
-        || g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
-        return FALSE;
-    }
+    // TODO: Incomplete.
 
-    CString sResRef;
-    cResRef.CopyToString(sResRef);
-
-    BYTE nResRefLength = static_cast<BYTE>(sResRef.GetLength());
-    DWORD dwSize = sizeof(BYTE) + sizeof(BYTE) + nResRefLength;
-    BYTE* pByteMessage = CreateBuffer(dwSize);
-    if (pByteMessage == NULL) {
-        return FALSE;
-    }
-
-    DWORD cnt = 0;
-
-    pByteMessage[cnt] = nChapter;
-    cnt += sizeof(BYTE);
-
-    pByteMessage[cnt] = nResRefLength;
-    cnt += sizeof(BYTE);
-
-    memcpy(pByteMessage + cnt, sResRef.GetBuffer(nResRefLength), nResRefLength);
-
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
-        CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
-        MSG_TYPE_CHAPTER,
-        MSG_SUBTYPE_CHAPTER_ANNOUNCE_STATUS,
-        pByteMessage,
-        dwSize);
-
-    DestroyBuffer(pByteMessage);
-
-    return TRUE;
+    return FALSE;
 }
 
 // 0x435360
