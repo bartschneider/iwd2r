@@ -2165,42 +2165,54 @@ void CScreenCharacter::TimerSynchronousUpdate()
     pVidMode->Flip(TRUE);
 }
 
+namespace {
+
+const INT INFORMATION_PANEL_ITEM_COUNT = 11;
+const DWORD INFORMATION_PANEL_CATEGORY_LABEL_START = 0x10000004;
+const DWORD INFORMATION_PANEL_UNUSED_LABEL_START = 0x1000000A;
+const DWORD INFORMATION_PANEL_UNUSED_HOTAREA_START = 33;
+const DWORD INFORMATION_PANEL_UNUSED_HOTAREA_END = 37;
+
+} // namespace
+
 // 0x5DAF30
 void CScreenCharacter::UpdateInformationPanel()
 {
     CUIPanel* pPanel = m_cUIManager.GetPanel(57);
 
     // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
-    // __LINE__: 3747
+    // __LINE__: 6807
     UTIL_ASSERT(pPanel != NULL);
 
-    UpdateLabel(pPanel, 0x10000004, "%s", (LPCSTR)FetchString(17088));
-    UpdateLabel(pPanel, 0x10000005, "%s", (LPCSTR)FetchString(24766));
-    UpdateLabel(pPanel, 0x10000006, "%s", (LPCSTR)FetchString(36361));
-    UpdateLabel(pPanel, 0x10000007, "%s", (LPCSTR)FetchString(41403));
-    UpdateLabel(pPanel, 0x10000008, "%s", (LPCSTR)FetchString(41393));
-    UpdateLabel(pPanel, 0x10000009, "%s", (LPCSTR)FetchString(11983));
-    UpdateLabel(pPanel, 0x1000000A, "");
-    UpdateLabel(pPanel, 0x1000000B, "");
-    UpdateLabel(pPanel, 0x1000000C, "");
-    UpdateLabel(pPanel, 0x1000000D, "");
-    UpdateLabel(pPanel, 0x1000000E, "");
+    UpdateLabel(pPanel, INFORMATION_PANEL_CATEGORY_LABEL_START, "%s", (LPCSTR)FetchString(17088));
+    UpdateLabel(pPanel, INFORMATION_PANEL_CATEGORY_LABEL_START + 1, "%s", (LPCSTR)FetchString(23998));
+    UpdateLabel(pPanel, INFORMATION_PANEL_CATEGORY_LABEL_START + 2, "%s", (LPCSTR)FetchString(36361));
+    UpdateLabel(pPanel, INFORMATION_PANEL_CATEGORY_LABEL_START + 3, "%s", (LPCSTR)FetchString(41403));
+    UpdateLabel(pPanel, INFORMATION_PANEL_CATEGORY_LABEL_START + 4, "%s", (LPCSTR)FetchString(41393));
+    UpdateLabel(pPanel, INFORMATION_PANEL_CATEGORY_LABEL_START + 5, "%s", (LPCSTR)FetchString(11983));
 
-    for (DWORD nButtonID = 33; nButtonID < 38; nButtonID++) {
-        static_cast<CUIControlButton*>(pPanel->GetControl(nButtonID))->SetEnabled(FALSE);
+    for (INT nLabel = 0; nLabel < 5; nLabel++) {
+        UpdateLabel(pPanel, INFORMATION_PANEL_UNUSED_LABEL_START + nLabel, "");
+    }
+
+    for (DWORD nControlID = INFORMATION_PANEL_UNUSED_HOTAREA_START; nControlID <= INFORMATION_PANEL_UNUSED_HOTAREA_END; nControlID++) {
+        CUIControlButton* pButton = static_cast<CUIControlButton*>(pPanel->GetControl(nControlID));
+
+        pButton->SetEnabled(FALSE);
     }
 
     sub_5F8C90(field_1846);
     sub_5F91F0(field_184A);
 
-    CUIControlScrollbarCharacter5F9410* pScrollBar = static_cast<CUIControlScrollbarCharacter5F9410*>(pPanel->GetControl(4));
+    CUIControlScrollBar* pScrollBar = static_cast<CUIControlScrollBar*>(pPanel->GetControl(4));
 
     // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenCharacter.cpp
-    // __LINE__: 3775
+    // __LINE__: 6837
     UTIL_ASSERT(pScrollBar != NULL);
 
-    // NOTE: Uninline.
-    pScrollBar->UpdateScrollBar();
+    CScreenCharacter* pCharacter = g_pBaldurChitin->m_pEngineCharacter;
+    UTIL_ASSERT(pCharacter != NULL);
+    pScrollBar->AdjustScrollBar(pCharacter->field_1852, pCharacter->field_184E, INFORMATION_PANEL_ITEM_COUNT);
 }
 
 // 0x5DB200
