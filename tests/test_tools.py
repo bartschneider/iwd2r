@@ -10184,6 +10184,20 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x401000: parked') for p in probs), probs)
         self.assertTrue(any(p.startswith('0x401000: both kept and parked') for p in probs), probs)
 
+    def test_only_theirs_row_under_kept_is_refused(self):
+        d = self._mc_repo({'401000': 'kind: read-only'})
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'only_theirs'}]}
+        ce = driver._tool('check_evidence')
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
+                mock.patch.object(ce, 'touched', return_value=[]):
+            probs = [p for p in driver.mechanical_checks(
+                batch, d, {}, run=self._mc_run(0, []), kind='import', kept=['0x401000'])
+                if 'first' not in p.split(':')[0] and not p.startswith('git ')]
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith('0x401000: listed under ## Kept but ours has no '
+                                            'body there; an only-theirs row is never kept'), probs)
+
     def test_parked_evidence_check_covers_the_batch_and_what_the_branch_changed(self):
         d = self._mc_repo({'401000': 'kind: read-only', '405000': 'stray'})
         batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
@@ -12777,6 +12791,42 @@ class DriverTest(unittest.TestCase):
         self.assertFalse([p for p in probs if 'after the Frida phase' in p], probs)
         rc, out = self._close_import()
         self.assertEqual(rc, 0, out)
+
+    def test_driver_only_theirs_row_is_measured_when_touched_and_parked_by_removal(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_phase_driver(kept=(), category='only_theirs')
+        # the worker adds the function (absent at the merge base) and commits
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), self.BASE_R)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'add 401000', cwd=self.wt)
+        self.assertEqual(
+            [a for _p, a, _n in driver._tool('check_evidence').touched(self.wt, 'first')],
+            [0x401000])
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 4)))
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        # equal: trace evidence, no outcome (never kept)
+        self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
+        self.assertEqual(set(self._outcomes().values()), {None})
+        # unexercised: parked by REMOVING the function, never edit back
+        idle = [f for f in findings if f.startswith('0x403000:')]
+        self.assertEqual(len(idle), 1, findings)
+        self.assertIn('remove the function you added (and its declaration) so the file is back '
+                      "to the merge base's text for it", idle[0])
+        self.assertNotIn('edit that function back', idle[0])
+        self.assertIn('docs/wso/import-parked/403000.json', idle[0])
+        self.assertIn('needs "', idle[0])
+        diff = [f for f in findings if f.startswith('0x402000:')]
+        self.assertIn('remove the function you added', diff[0])
+        # a stub row's text is unchanged
+        d2, batch2 = self._kept_phase_driver(kept=())
+        d2.frida_run = d.frida_run
+        f2 = d2._frida_phase('b011', batch2, self.wt, {})
+        self.assertTrue([f for f in f2 if 'edit that function back' in f], f2)
+        self.assertFalse([f for f in f2 if 'remove the function you added' in f], f2)
 
     T_SRC = '// 0x404000\nint Rules::Tick(int a, int b)\n{\n  return a + b;\n}\n'
     T_EVIDENCE = ('---\naddress: 0x404000\nname: Rules::Tick\nkind: read-only\n'
@@ -19491,6 +19541,38 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.batches()['b001']['status'], 'closed')
 
+    def _mark_only_theirs(self):
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            r['category'] = 'only_theirs'
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_import_close_accepts_an_imported_and_a_parked_only_theirs_row(self):
+        # Draw imported (new function, this batch's trace), Render imported
+        self._import_ready(trace=('0x643CC0', '0x643CD0'), src=1)
+        self._mark_only_theirs()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_accepts_a_parked_only_theirs_row_with_the_function_removed(self):
+        self._import_ready(parked=self.PARKED)
+        self._mark_only_theirs()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_refuses_a_parked_only_theirs_row_whose_function_is_still_there(self):
+        self._import_ready(parked=self.PARKED)
+        self._mark_only_theirs()
+        _write(os.path.join(self.wt, 'src', 'A.cpp'), self.RENDER_BODY + self.SRC_BODY % 1)
+        self.commit_worktree('add it back')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: parked (docs/wso/import-parked/643CD0.json) but its body is '
+                      'still changed against first', out)
+
     def test_import_close_refuses_unparked_dropped_row(self):
         self._import_ready(parked=[])
         first = self.first_sha()
@@ -20955,7 +21037,7 @@ class ImportSecondSourceTest(unittest.TestCase):
             return json.load(f)
 
     def test_alias_and_tuple(self):
-        self.assertEqual(self.wave.IMPORT_CATEGORIES, (self.STUB, self.BASE))
+        self.assertEqual(self.wave.IMPORT_CATEGORIES[:2], (self.STUB, self.BASE))
         self.assertEqual(self.wave.IMPORT_CATEGORY, self.STUB)
 
     def test_stubs_first_then_base_rows_covered_first(self):
@@ -21079,6 +21161,77 @@ class ImportSecondSourceTest(unittest.TestCase):
                       flat(texts['i002']))
         self.assertIn('(the delete instruction above is for stub rows only). 2. **Every commit',
                       flat(texts['i002']))
+
+    ONLY = 'only_theirs'
+    ONLY_ROWS = [
+        {'address': '0x409000', 'category': ONLY, 'file': 'src/P.cpp',
+         'name': 'P', 'their_len': 500, 'our_len': 0},
+        {'address': '0x40A000', 'category': ONLY, 'file': 'src/Q.cpp',
+         'name': 'Q', 'their_len': 400, 'our_len': 0}]
+
+    def with_only(self):
+        _write(self.dp, json.dumps(self.ROWS + self.ONLY_ROWS))
+
+    def test_only_theirs_is_the_third_category(self):
+        self.assertEqual(self.wave.IMPORT_CATEGORIES, (self.STUB, self.BASE, self.ONLY))
+        self.assertEqual(self.wave.IMPORT_CATEGORY, self.STUB)
+
+    def test_only_theirs_rows_come_after_stub_and_base_rows(self):
+        self.with_only()
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x405000': 1, '0x406000': 1,
+                                  '0x407000': 1, '0x409000': 9, '0x40A000': 9}})
+        got = []
+        for i in range(1, 5):
+            rc, out = self.next_import()
+            self.assertEqual(rc, 0, out)
+            got.append(self.rows_of(out))
+            if i == 4:
+                self.assertIn('category: only_theirs', out)
+        self.assertEqual(got[0], ['0x401000', '0x403000'])
+        self.assertEqual(sorted(got[1] + got[2]), ['0x405000', '0x406000', '0x407000'])
+        self.assertEqual(got[3], ['0x409000', '0x40A000'])
+        self.assertEqual([r['category'] for r in self.state()['batches']['i004']['rows']],
+                         [self.ONLY] * 2)
+
+    def test_brief_renders_the_only_theirs_paragraph_only_for_such_batches(self):
+        self.with_only()
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x409000': 1}})
+        self.next_import()
+        # base rows are uncovered here, so the next batch is the only-theirs one
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x409000'], out)
+        texts = {}
+        for bid in ('i001', 'i002'):
+            rc, texts[bid] = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, texts[bid])
+            self.assertNotIn('{{', texts[bid])
+        flat = lambda t: t.replace('\n   ', ' ').replace('\n', ' ')
+        for needle in ('For a row where ours has no body', 'git show <fork sha>:<path>',
+                       'the `// 0x<ADDRESS>` header comment', 'REMOVING the function you added',
+                       'never goes under `## Kept`'):
+            self.assertIn(needle, flat(texts['i002']), needle)
+            self.assertNotIn(needle, flat(texts['i001']), needle)
+        self.assertIn('`0x409000` **P** (src/P.cpp, theirs 500 / ours 0 chars; ours has no body)',
+                      texts['i002'])
+        self.assertNotIn('ours has no body)', texts['i001'])
+
+    def test_scorecard_splits_only_theirs_without_touching_the_old_line(self):
+        st = {'batches': {'i001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'category': self.ONLY},
+            {'address': '0x2', 'category': self.ONLY},
+            {'address': '0x3', 'category': self.ONLY},
+            {'address': '0x4'}]}}}
+        self.assertEqual(
+            self.wave._import_tally(st, None, {'3': {}}),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked; only-theirs 2 imported / 1 parked')
+        st['batches']['i001']['rows'] = st['batches']['i001']['rows'][3:]
+        self.assertEqual(
+            self.wave._import_tally(st),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked')
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')

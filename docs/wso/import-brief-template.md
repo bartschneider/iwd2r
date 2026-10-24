@@ -16,11 +16,11 @@ Files you own (do not touch functions outside them; other streams own the rest):
 
 {{files}}
 
-Rows, biggest first. Each says what ours is: a stub, or the base body.
+Rows, biggest first. Each says what ours is: a stub, the base body, or no body at all.
 
 {{rows}}
 
-{{base_body}}Context bundles (one per row; read these before the source):
+{{only_theirs}}{{base_body}}Context bundles (one per row; read these before the source):
 
 {{bundle}}
 
