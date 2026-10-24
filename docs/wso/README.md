@@ -235,6 +235,18 @@ not touched.  A fork/neither resolve reads the losing kind from the batch
 branch, like `verdict`, so the branch must still exist and carry the
 evidence file.
 
+`python3 tools/wave.py undecide <batch> <address> fork|neither <reason...>` is
+the reverse, for the coordinator: it moves a row of an `assigned` batch to the
+probe list (`source: coordinator`) and drops its verdict, as the driver does
+for `## Undecided` rows.  It refuses a closed batch, a foreign address, or an
+address already listed, and writes nothing then.  The batch branch must then
+hold our body for that function (the merge base's) and an evidence file with
+no deciding sentence; `resolve` brings the row back.  Run it while the batch is
+not in flight (its exception cleared but not yet retried, or the driver paused):
+the command edits the state without the driver's lock, like `resolve` and
+`unpark`, and a worker running on that batch could still record a verdict for
+the moved row.
+
 A rule that is not a check, a flag or a test is not a rule.
 
 `close` refuses

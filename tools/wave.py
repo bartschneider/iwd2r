@@ -8,6 +8,7 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py verdict b001 0x643CC0 ours probe-9
     python3 tools/wave.py close b001           # gates, then ff `first`
     python3 tools/wave.py resolve 0x716E80 ours dump-716E80   # a probe-list row into its batch
+    python3 tools/wave.py undecide b016 0x5D79B0 fork <reason>  # a batch row onto the probe list
     python3 tools/wave.py unpark 0x5152C0 [--reason TEXT]     # a parked import row back to the queue
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
@@ -1909,7 +1910,71 @@ def status(state_path=STATE_PATH):
     return 0, '\n'.join(lines) + '\n'
 
 
+def undecide(batch_id, address, reading, reason, state_path=STATE_PATH,
+             repo=ROOT):
+    """Move a row of an assigned batch to the probe list by hand, the move
+    the driver makes for a worker's `## Undecided` row (ruling R73); the
+    reverse of `resolve`.  Exit 2 refuses and nothing is written."""
+    if reading not in ('fork', 'neither'):
+        return 2, 'reading must be fork or neither\n'
+    if not reason or not reason.strip():
+        return 2, 'a reason is required\n'
+    state = load_state(state_path)
+    batch = state['batches'].get(batch_id)
+    if batch is None:
+        return 2, f'no batch {batch_id}\n'
+    if batch.get('status') != 'assigned':
+        return 2, (f'{batch_id} is closed; a closed row is reopened through '
+                   f'the probe list by hand\n')
+    row = next((r for r in batch['rows']
+                if _addr_key(r.get('address')) == _addr_key(address)), None)
+    if row is None:
+        return 2, f'{address} is not a row of {batch_id}\n'
+    probe_path = os.path.join(repo, PROBE_LIST_REL)
+    probes, err = _load_list(probe_path, 'probe list', missing_ok=True)
+    if err:
+        return 2, err
+    if any(_addr_key(e['address']) == _addr_key(address) for e in probes):
+        return 2, f'{row["address"]} is already on the probe list\n'
+    addr = row['address']
+    verdicts = batch.setdefault('verdicts', {})
+    dropped = verdicts.pop(addr, None)
+    if dropped is None:
+        dropped = next((verdicts.pop(k) for k in list(verdicts)
+                        if _addr_key(k) == _addr_key(addr)), None)
+    batch['rows'] = [r for r in batch['rows'] if r is not row]
+    batch['files'] = _files_of(batch['rows'])
+    probes.append({'address': addr, 'at': _now(), 'batch': batch_id,
+                   'file': row.get('file'), 'name': row.get('name'),
+                   'reading': reading, 'reason': reason.strip(),
+                   'source': 'coordinator'})
+    # The list first: a crash between the writes leaves the row in both.
+    _save_json(probe_path, probes)
+    save_state(state_path, state)
+    out = (f'moved {addr} out of {batch_id} to the probe list ({reading}); '
+           f'probe list now {len(probes)} entries\n')
+    if dropped is not None:
+        out += f'dropped its verdict: {json.dumps(dropped, sort_keys=True)}\n'
+    out += (f'the {batch["branch"]} branch must now hold: our body for that '
+            f'function (the merge base\'s), and an evidence file without a '
+            f'deciding sentence (the checks skip rows without a verdict '
+            f'line).  `wave.py resolve {addr} <side> <case>` brings it back.\n')
+    return 0, out
+
+
+def _line_buffer():
+    """Flush each line when stdout/stderr are not a tty, so a redirected
+    long run shows progress as it happens."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, 'reconfigure') and not stream.isatty():
+                stream.reconfigure(line_buffering=True)
+        except (ValueError, OSError):      # a closed or replaced stream
+            pass
+
+
 def main(argv=None):
+    _line_buffer()
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
@@ -1991,6 +2056,12 @@ def main(argv=None):
                   file=sys.stderr)
             return 2
         rc, out = resolve_probe(rest[0], rest[1], rest[2])
+    elif cmd == 'undecide':
+        if len(rest) < 4:
+            print('usage: wave.py undecide <batch> <address> fork|neither '
+                  '<reason...>', file=sys.stderr)
+            return 2
+        rc, out = undecide(rest[0], rest[1], rest[2], ' '.join(rest[3:]))
     elif cmd == 'unpark':
         addrs, reason, it = [], None, iter(rest)
         for a in it:
