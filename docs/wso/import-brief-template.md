@@ -54,7 +54,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    so in the commit message.
 4. **Evidence is mandatory; the driver measures it.** For every function
    you import (each row, and each dependency you bring in) write
-   `docs/evidence/<ADDRESS>.md` (address in caps, no `0x`), front matter
+   `docs/evidence/<ADDRESS>.md` (address in caps, no `0x`; for 0x78A2F0 the file
+   is `docs/evidence/78A2F0.md`, never `0x78A2F0.md`), front matter
    `address:` / `name:` / `kind: read-only` with an `exemption:` that
    describes your reading (what you checked against the disassembly). Do not
    declare `trace`, `replay` or `oracle` yourself, and never write a
