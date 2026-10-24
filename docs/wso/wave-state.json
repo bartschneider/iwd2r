@@ -8206,7 +8206,7 @@
     "b033": {
       "assigned_at": "2026-10-24T16:20:26+00:00",
       "branch": "p3/wso-b033",
-      "closed_at": null,
+      "closed_at": "2026-10-24T18:21:04+00:00",
       "files": [
         "src/CScreenCharacter.cpp",
         "src/CScreenInventory.cpp",
@@ -8223,15 +8223,6 @@
           "name": "CScreenCharacter::IsDoneButtonClickable",
           "our_len": 1375,
           "their_len": 1148
-        },
-        {
-          "address": "0x5DAF30",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CScreenCharacter.cpp",
-          "name": "CScreenCharacter::UpdateInformationPanel",
-          "our_len": 972,
-          "their_len": 1333
         },
         {
           "address": "0x62AE70",
@@ -8306,15 +8297,6 @@
           "their_len": 487
         },
         {
-          "address": "0x5E4E80",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CScreenCharacter.cpp",
-          "name": "CScreenCharacter::CanLevelUp",
-          "our_len": 486,
-          "their_len": 422
-        },
-        {
           "address": "0x5EBDD0",
           "category": "both_changed_differ",
           "class": "rename-only",
@@ -8324,10 +8306,55 @@
           "their_len": 400
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
+        "0x5C1160": {
+          "case": "dump-5C1160",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D8B50": {
+          "case": "dump-5D8B50",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D9610": {
+          "case": "dump-5D9610",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E1910": {
+          "case": "dump-5E1910",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E1F50": {
+          "case": "dump-5E1F50",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E71A0": {
+          "case": "dump-5E71A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
         "0x5EBDD0": {
           "case": "triage-rename",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5EC420": {
+          "case": "dump-5EC420",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F6EA0": {
+          "case": "dump-5F6EA0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62AE70": {
+          "case": "dump-62AE70",
           "losing_kind": "trace",
           "side": "ours"
         }
