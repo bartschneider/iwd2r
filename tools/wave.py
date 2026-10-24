@@ -561,27 +561,38 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                            claims_path=claims_path, **kw)
 
 
+def probe_hits(row, disagreements_path, coverage_path=None, coverage_root=None, repo=None):
+    """The scenarios the coverage map says hit a probe row (the candidates of
+    the phase for it, no hold-out filter), sorted; [] without a usable map."""
+    cov_mod = _coverage()
+    cpath = coverage_path or os.path.join(
+        os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
+    try:
+        cov, _why = cov_mod.check(cpath, coverage_root or repo or ROOT)
+        if cov is None:
+            return []
+        return sorted(cov_mod.covered(cov, row['address'], cov_mod.row_scenarios(cov, [row])))
+    except (TypeError, AttributeError, ValueError, KeyError, OSError):
+        return []
+
+
 def _probe_reoffer(row, disagreements_path, coverage_path, coverage_root, repo):
-    """Whether a probe row a closed batch released may be cut again: the
-    entry was stamped by the phase (`probed`: batch, scenarios, pin) and either
-    its pin moved or the coverage map now gives it a scenario that stamp lacks.
-    An unstamped row, or one with no usable map and the same pin, is not."""
+    """Whether a probe row a closed batch released may be cut again.  The
+    phase stamped the entry (`probed`: batch, scenarios that ran, `hits` the
+    scenarios the map gave the row then, pin, `hand` for a neither / hand-ruling
+    row).  Offered again when the pin moved, or (never for a `hand` row) when the
+    map now has a hitting scenario the stamp's `hits` lacked.  An unstamped row,
+    or one with no usable map and the same pin, is not."""
     stamp = (row or {}).get('probed')
     if not isinstance(stamp, dict) or not stamp:
         return False
     if stamp.get('pin') != row.get('fork_base'):
         return True
-    cov_mod = _coverage()
-    cpath = coverage_path or os.path.join(
-        os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
-    cov, _why = cov_mod.check(cpath, coverage_root or repo or ROOT)
-    if cov is None:
+    if stamp.get('hand'):
         return False
-    try:
-        now = cov_mod.covered(cov, row['address'], cov_mod.row_scenarios(cov, [row]))
-    except (TypeError, AttributeError, ValueError, KeyError):
-        return False
-    return any(sc not in (stamp.get('scenarios') or ()) for sc in now)
+    seen = stamp.get('hits') if stamp.get('hits') is not None else stamp.get('scenarios')
+    now = probe_hits(row, disagreements_path, coverage_path, coverage_root, repo)
+    return any(sc not in (seen or ()) for sc in now)
 
 
 def _import_pool(rows, category, decided, owned, importing, disagreements_path,

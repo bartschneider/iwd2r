@@ -1536,6 +1536,15 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
     return problems
 
 
+def _mb_evidence_kind(worktree, base, rel):
+    """The `kind:` of an evidence file at the merge base of the worktree's HEAD
+    and `base`, or None (no file, no kind)."""
+    r = subprocess.run(['git', '-C', worktree, 'show', '%s:%s' % (_merge_base(worktree, base), rel)],
+                       capture_output=True, text=True)
+    m = _tool('wave').KIND_RE.search(r.stdout) if r.returncode == 0 else None
+    return m.group(1) if m else None
+
+
 def _probe_candidate_problems(batch, worktree, base, candidates, key):
     """The probe batch's checks (Task 28), in the worker's terms.  Every row
     needs one `candidate` line (none for an address outside the batch).  Before
@@ -1603,12 +1612,17 @@ def _probe_candidate_problems(batch, worktree, base, candidates, key):
                             % (a, a))
             continue
         kind = wave.KIND_RE.search(text) if text is not None else None
-        if kind and kind.group(1) != 'read-only':
-            problems.append('%s: evidence is kind %s; a fork candidate needs kind: read-only '
-                            '(the driver rewrites it to trace). List the row as `candidate %s '
-                            'neither evidence is kind %s; needs a hand ruling`, edit its body '
-                            'back and put %s back as the merge base has it'
-                            % (rel, kind.group(1), a, kind.group(1), rel))
+        have = kind.group(1) if kind else None
+        was = _mb_evidence_kind(worktree, base, rel)
+        bad = next((x for x in (have, was) if x not in (None, 'read-only')), None)
+        if bad:
+            problems.append('%s: evidence is kind %s (%s); a fork candidate needs kind: '
+                            'read-only both on the branch and at the merge base (the driver '
+                            'rewrites it to trace). List the row as `candidate %s neither '
+                            'evidence is kind %s; needs a hand ruling`, edit its body back and '
+                            'put %s back as the merge base has it'
+                            % (rel, bad, 'on the branch' if bad == have else 'at the merge base',
+                               a, bad, rel))
             continue
         if k not in touched:
             problems.append('%s: listed as `candidate fork` but its body is unchanged against %s; '
@@ -4192,12 +4206,19 @@ class Driver:
                         r[f] = v
             _tool('wave').save_state(self.state_path, state)
 
-    def _probed_stamp(self, batch_id, row, batch, scenarios):
+    def _probed_stamp(self, batch_id, row, batch, scenarios, hand=False):
         """The `probed` stamp of a probe-list entry the phase refreshed: the
-        batch, the scenarios that ran for it and the pin its body came from."""
-        return {'batch': batch_id, 'scenarios': sorted(scenarios or ()),
-                'pin': row.get('fork_base') or batch.get('fork_base')
-                or _tool('wave').DEFAULT_FORK_BASE}
+        batch, the scenarios that ran for it, the scenarios the coverage map
+        says hit it (`hits`: what `next` compares a later map with), the pin its
+        body came from, and `hand` for a row only a person can rule on."""
+        stamp = {'batch': batch_id, 'scenarios': sorted(scenarios or ()),
+                 'hits': _tool('wave').probe_hits(row, self.disagreements_path, None,
+                                                  self.repo, self.repo),
+                 'pin': row.get('fork_base') or batch.get('fork_base')
+                 or _tool('wave').DEFAULT_FORK_BASE}
+        if hand:
+            stamp['hand'] = True
+        return stamp
 
     def _record_probe_rows(self, batch_id, worktree):
         """The record stage of a probe batch: every `fork-equal` row (decided by
@@ -4329,22 +4350,22 @@ class Driver:
             k = key(r['address'])
             if k not in listed:
                 continue           # resolved by an earlier run of this batch
-            if r.get('outcome') == 'fork-equal' and (
-                    not r.get('measured_body') or ce.body_digest(
-                        worktree, r['address'], r.get('file')) == r['measured_body']):
-                continue           # decided by an earlier phase of this batch, body unchanged
+            if r.get('outcome') == 'fork-equal':
+                continue           # decided by an earlier phase; the checks and the record
+                #                    stage refuse a body that moved since
             outcomes[r['address']] = {'outcome': None, 'measured_body': None, 'case': None,
                                       'losing_kind': None}
             side, reason = cands.get(k, (None, None))
             if side == 'neither':
                 # not built, not measured: the entry stays, its reason refreshed
                 self._probe_list_edit(r['address'], reason=reason, stamp=self._probed_stamp(
-                    batch_id, r, batch, []))
+                    batch_id, r, batch, [], hand=True))
                 outcomes[r['address']]['outcome'] = 'kept'
                 self.log('%s: %s stays on the probe list (candidate neither: %s)' % (
                     batch_id, r['address'], reason))
             elif side == 'fork' and k in touched and self._evidence_kind(
-                    worktree, r['address']) == 'read-only':
+                    worktree, r['address']) == 'read-only' and _mb_evidence_kind(
+                    worktree, self.base, wave._evidence_rel(r['address'])) in (None, 'read-only'):
                 fork_rows.append(dict(r))
         self._probe_outcomes(batch_id, outcomes)
         if not fork_rows:
@@ -4426,8 +4447,6 @@ class Driver:
             rel = wave._evidence_rel(a)
             was = self._git_in(worktree, 'show', '%s:%s' % (mb_sha or self.base, rel))
             m = wave.KIND_RE.search(was.stdout) if was.returncode == 0 else None
-            if not sentence_ok:
-                continue           # no outcome: the fix round writes the sentence
             self._probe_outcomes(batch_id, {a: {
                 'outcome': 'fork-equal', 'case': case,
                 'losing_kind': m.group(1) if m else 'read-only',
@@ -5488,7 +5507,10 @@ class Driver:
         if failed:
             return self._exception(batch_id, 'record', failed)
         if self.kind == 'probes':
-            failed = self._record_probe_rows(batch_id, worktree)
+            try:
+                failed = self._record_probe_rows(batch_id, worktree)
+            except (ValueError, OSError) as e:
+                failed = ['recording the probe rows raised %r' % (e,)]
             if failed:
                 return self._exception(batch_id, 'record', failed)
         with self._lock:
