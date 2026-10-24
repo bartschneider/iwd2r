@@ -1927,9 +1927,10 @@ def undecide(batch_id, address, reading, reason, state_path=STATE_PATH,
     if any(_addr_key(e['address']) == _addr_key(address) for e in probes):
         return 2, f'{row["address"]} is already on the probe list\n'
     addr = row['address']
-    dropped = batch['verdicts'].pop(addr, None)
+    verdicts = batch.setdefault('verdicts', {})
+    dropped = verdicts.pop(addr, None)
     if dropped is None:
-        dropped = next((batch['verdicts'].pop(k) for k in list(batch['verdicts'])
+        dropped = next((verdicts.pop(k) for k in list(verdicts)
                         if _addr_key(k) == _addr_key(addr)), None)
     batch['rows'] = [r for r in batch['rows'] if r is not row]
     batch['files'] = _files_of(batch['rows'])
@@ -1955,8 +1956,11 @@ def _line_buffer():
     """Flush each line when stdout/stderr are not a tty, so a redirected
     long run shows progress as it happens."""
     for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, 'reconfigure') and not stream.isatty():
-            stream.reconfigure(line_buffering=True)
+        try:
+            if hasattr(stream, 'reconfigure') and not stream.isatty():
+                stream.reconfigure(line_buffering=True)
+        except (ValueError, OSError):      # a closed or replaced stream
+            pass
 
 
 def main(argv=None):
