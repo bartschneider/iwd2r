@@ -2289,6 +2289,7 @@ BOOL CVidInf::RenderPointer(UINT nSurface)
 
     g_pChitin->m_bPointerUpdated = TRUE;
 
+    INT nPointerNumber = m_nPointerNumber;
     positionLock.Lock(INFINITE);
     CPoint pt = g_pChitin->m_ptPointer;
     positionLock.Unlock();
@@ -2308,8 +2309,8 @@ BOOL CVidInf::RenderPointer(UINT nSurface)
         pt.y,
         rClip,
         m_rPointerStorage,
-        m_nPointerNumber > 0);
-    RenderPointerImage(pPointerVidCell, nSurface, m_nPointerNumber, pt.x, pt.y, rClip);
+        nPointerNumber > 0);
+    RenderPointerImage(pPointerVidCell, nSurface, nPointerNumber, pt.x, pt.y, rClip);
     renderLock.Unlock();
 
     return TRUE;
