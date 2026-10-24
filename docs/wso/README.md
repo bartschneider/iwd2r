@@ -475,6 +475,25 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   prints what it removed, and exits 0, or 2 when there is no such entry.
   The next run retries that batch before any new cut.
 
+  Scenario rules of the phase. A UI-only scenario (`truth.FRIDA_UI_SCENARIOS`,
+  `biography`) never reaches the world screen, so both sides run with
+  `--no-loaded` (CLEAN when the game ends without a crash). A scenario that
+  fails the same non-crash way on both sides (both NOT-LOADED, both no
+  status, the same OBSERVER-ERROR) measured nothing: it is left out of every
+  row (`info['uninformative']`, one driver log line each) and, if every
+  scenario is such, the phase's infrastructure exception fires; a one-sided
+  failure still reads `scenario failed`. A scenario must not depend on state
+  it wrote in an earlier run: every probe run (both sides, the coverage pass
+  too) starts with the empty save folder a replay record gives
+  (`probe.saves_of_its_own`, `oracle.prepared_saves` mode empty: the copy's
+  own saves wait aside and are put back, the run's saves go to
+  `runs/<stamp>/replay/saves`), so a saving scenario sees the same state on
+  both sides every time; a scenario that needs a save goes through
+  `--load`. `save_load_screens` stays in `truth.PHASE_HELD_OUT` until one
+  real original/ours pair confirms matching dumps. The driver's stop
+  (SIGTERM, SIGINT) also kills the running `probe.py` launches and taskkills
+  the sandbox processes.
+
 **Pools and threads.** Pools share the batches: a batch goes to the first
 pool that has a free worker, is not parked and is under its budget, and
 ties rotate round-robin. Each busy worker is one thread, up to the pool's
