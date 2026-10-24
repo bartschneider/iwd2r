@@ -2579,6 +2579,191 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "i016": {
+      "assigned_at": "2026-10-24T21:37:23+00:00",
+      "branch": "p3/wso-i016",
+      "closed_at": null,
+      "files": [
+        "src/CSound.cpp",
+        "src/CUIControlButton.cpp",
+        "src/CVidCell.cpp",
+        "src/CGameArea.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CScreenChapter.cpp",
+        "src/CGameAnimationTypeCharacter.cpp",
+        "src/CMessage.cpp",
+        "src/CResFile.cpp",
+        "src/CChitin.cpp",
+        "src/CInfGame.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/CNetwork.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x7A8C90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CSound.cpp",
+          "name": "CSound::CSound",
+          "our_len": 445,
+          "their_len": 452
+        },
+        {
+          "address": "0x4D57C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlButton.cpp",
+          "name": "CUIControlButton::SetEnabled",
+          "our_len": 433,
+          "their_len": 436
+        },
+        {
+          "address": "0x4D4E10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlButton.cpp",
+          "name": "CUIControlButton::OnLButtonUp",
+          "our_len": 247,
+          "their_len": 249
+        },
+        {
+          "address": "0x7ACE50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::CVidCell",
+          "our_len": 151,
+          "their_len": 152
+        },
+        {
+          "address": "0x7A9DB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CSound.cpp",
+          "name": "CSound::Play",
+          "our_len": 2416,
+          "their_len": 2441
+        },
+        {
+          "address": "0x479DB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::GetSong",
+          "our_len": 1001,
+          "their_len": 1001
+        },
+        {
+          "address": "0x68DEC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::TimerSynchronousUpdate",
+          "our_len": 892,
+          "their_len": 918
+        },
+        {
+          "address": "0x5D4E10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "name": "CUIControlTextDisplayChapter::TimerAsynchronousUpdate",
+          "our_len": 755,
+          "their_len": 779
+        },
+        {
+          "address": "0x6CC180",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeCharacter.cpp",
+          "name": "CGameAnimationTypeCharacter::GetSndArmor",
+          "our_len": 648,
+          "their_len": 675
+        },
+        {
+          "address": "0x5146C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage101::Run",
+          "our_len": 524,
+          "their_len": 526
+        },
+        {
+          "address": "0x789950",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResFile.cpp",
+          "name": "CResFile::AddCacheCount",
+          "our_len": 482,
+          "their_len": 521
+        },
+        {
+          "address": "0x78E930",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CChitin.cpp",
+          "name": "CChitin::~CChitin",
+          "our_len": 476,
+          "their_len": 498
+        },
+        {
+          "address": "0x694AE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::UpdatePartyGoldStatus",
+          "our_len": 403,
+          "their_len": 415
+        },
+        {
+          "address": "0x5D39A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "name": "CScreenChapter::SwitchMainPanel",
+          "our_len": 339,
+          "their_len": 341
+        },
+        {
+          "address": "0x5AF7F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::WorldEngineActivated",
+          "our_len": 187,
+          "their_len": 277
+        },
+        {
+          "address": "0x5D4AC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "name": "CUIControlButtonChapterDone::OnLButtonClick",
+          "our_len": 229,
+          "their_len": 231
+        },
+        {
+          "address": "0x693860",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::CancelEngine",
+          "our_len": 218,
+          "their_len": 234
+        },
+        {
+          "address": "0x78A900",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResFile.cpp",
+          "name": "CResFile::UnCache",
+          "our_len": 209,
+          "their_len": 227
+        },
+        {
+          "address": "0x725D30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteSpellList::sub_725D30",
+          "our_len": 201,
+          "their_len": 231
+        },
+        {
+          "address": "0x7A5800",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::SetJoinEnabled",
+          "our_len": 117,
+          "their_len": 120
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   }
 }
