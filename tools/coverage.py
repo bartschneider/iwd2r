@@ -172,6 +172,11 @@ def run(scenarios, chunk=DEFAULT_CHUNK, run=subprocess.run, root=ROOT,
                        '--probe', paths[i - 1], '--scenario', s, '--out', out,
                        '--clicks', str(CLICKS), '--timeout',
                        str(truth._scenario_timeout(root, s)), '--new-attempt', reason]
+                if s in truth.FRIDA_UI_SCENARIOS:
+                    # a UI-only scenario never reaches the world screen: the
+                    # observer must not read that as NOT-LOADED (biography's
+                    # four chunks failed that way on 2026-10-23)
+                    cmd.append('--no-loaded')
                 if log:
                     log(reason)
                 complete, hits, status = False, {}, None

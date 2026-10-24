@@ -18004,6 +18004,22 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(coverage.covered(data, '0x402000'), [])
         self.assertIsNone(coverage.read(os.path.join(self.tmp, 'nope.json')))
 
+    def test_ui_scenarios_run_the_original_with_no_loaded(self):
+        # biography never reaches the world screen; without --no-loaded the
+        # observer reports NOT-LOADED and every chunk reads failed (2026-10-23)
+        clean = lambda body: body + 'HITS-FINAL yes\nRESULT: CLEAN\n'
+        fake = self._status_fake(self.tmp, {
+            ('world_entry', 1): [clean('HITS fn_401000 1\n')],
+            ('biography', 1): [clean('HITS fn_401000 1\n')]})
+        for name in ('world_entry', 'biography'):
+            with open(os.path.join(self.tmp, 'scenarios', name + '.txt'), 'a'):
+                pass
+        coverage.run(['world_entry', 'biography'], chunk=5, run=fake, root=self.tmp,
+                     addresses=['0x401000'])
+        by = {c[c.index('--scenario') + 1]: c for c in fake.calls}
+        self.assertIn('--no-loaded', by['biography'])
+        self.assertNotIn('--no-loaded', by['world_entry'])
+
     def test_stale_follows_the_scenario_set(self):
         data = self.cov({'world_entry': {}})
         self.assertEqual(data['scenarios_sha'], coverage.scenarios_sha(self.tmp))
