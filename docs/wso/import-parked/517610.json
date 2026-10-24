@@ -1,0 +1,1 @@
+{"address": "0x517610", "name": "CMultiplayerSettings::InitializeSettings", "file": "src/CMultiplayerSettings.cpp", "batch": "i007", "needs": "world_entry: not measured (frequency difference only: identical in world_entry); ours reading matches the decompile"}
