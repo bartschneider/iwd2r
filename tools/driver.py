@@ -1012,7 +1012,11 @@ def kept_needs(scenarios, detail=None):
     return '%s: not measured (%s); ours reading matches the decompile' % (scenarios, detail)
 
 
-def park_text(address, mb, needs, edit_back=True, kept=False):
+ONLY_THEIRS_REMOVE = ("remove the function you added (and its declaration) so the file is back to "
+                      "the merge base's text for it (`git show %s:<path>` shows it)")
+
+
+def park_text(address, mb, needs, edit_back=True, kept=False, only_theirs=False):
     """How a worker parks one import row (the import brief's rule): the
     function edited back, its evidence deleted, its own file under
     docs/wso/import-parked/ (one per row, so parallel batches never
@@ -1027,9 +1031,10 @@ def park_text(address, mb, needs, edit_back=True, kept=False):
                 'write docs/wso/import-parked/%s.json {"address", "name", "file", "batch", '
                 '"needs"} with needs %s, and commit the two together%s'
                 % (stem, stem, json.dumps(needs), OFF_KEPT if kept else ''))
+    back = ONLY_THEIRS_REMOVE if only_theirs else EDIT_BACK
     return ('%s, delete docs/evidence/%s.md, write docs/wso/import-parked/%s.json '
             '{"address", "name", "file", "batch", "needs"} with needs %s, and commit '
-            'the three together%s; %s' % (EDIT_BACK % mb, stem, stem, json.dumps(needs),
+            'the three together%s; %s' % (back % mb, stem, stem, json.dumps(needs),
                                           OFF_KEPT if kept else '', SHARED_FILE))
 
 
@@ -1459,6 +1464,9 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
         if row is None:
             problems.append('%s: kept line for an address outside this batch; remove that '
                             'line' % a)
+        elif row.get('category') == 'only_theirs':
+            problems.append('%s: listed under ## Kept but ours has no body there; an only-theirs '
+                            'row is never kept: import it or park it (remove the function)' % a)
         elif row.get('category') != 'theirs_changed_ours_base':
             problems.append('%s: listed under ## Kept but ours is a stub there; a stub is '
                             'never kept: import it or park it' % a)
@@ -3275,8 +3283,9 @@ class Driver:
         nothing else can measure it)."""
         a = row['address']
         kept = bool(row.get('kept'))
+        ot = row.get('category') == 'only_theirs'
         def park(needs):
-            return park_text(a, mb, needs, edit_back=not kept, kept=kept)
+            return park_text(a, mb, needs, edit_back=not kept, kept=kept, only_theirs=ot)
         dep = (' It is a dependency you imported with the batch: park the rows that need '
                'it with it.' if row.get('dependency') else '')
         if status == 'equal' and cite is None:
@@ -3291,8 +3300,8 @@ class Driver:
             # and a compare=0 citation of a run that did not would be false.
             return ('%s: equal only up to a frequency difference (%s); no scenario compared '
                     'exactly, so no trace evidence can cite one, and the phase does not run '
-                    'again in this batch, so park it: %s' % (a, detail, park_text(
-                        a, mb, 'frida frequency only, no exact compare: %s' % detail))) + dep
+                    'again in this batch, so park it: %s' % (a, detail, park(
+                        'frida frequency only, no exact compare: %s' % detail))) + dep
         if status == 'equal':
             err = self._trace_evidence(batch_id, worktree, row, cite, traces, mb, kept)
             return err + dep if err else None
@@ -3560,6 +3569,7 @@ class Driver:
         `scenario`'s run (one whose compare returned 0); None, or the finding
         that says why it could not be."""
         wave = _tool('wave')
+        ot = row.get('category') == 'only_theirs'
         orig, ours, dumps, bad = self._trace_pair(traces, scenario)
         if bad == 'dumps':
             # The dump guard: trace evidence only from a run whose two sides
@@ -3571,13 +3581,13 @@ class Driver:
                         park_text(row['address'], mb, kept_needs(
                             scenario, 'dumps not shown to match') if kept
                             else 'not measured: dumps not shown to match in %s' % scenario,
-                            edit_back=not kept, kept=kept)))
+                            edit_back=not kept, kept=kept, only_theirs=ot)))
         if bad == 'files':
             return ('%s: measured equal in %s but its trace files are missing; the phase does '
                     'not run again in this batch, so park it: %s' % (
                         row['address'], scenario, park_text(
                             row['address'], mb, kept_needs(scenario, 'trace files missing')
-                            if kept else 'frida trace files missing', edit_back=not kept, kept=kept)))
+                            if kept else 'frida trace files missing', edit_back=not kept, kept=kept, only_theirs=ot)))
         dirty = self._dirty_source(worktree, row)
         if dirty:
             self.log('%s: %s: %s has uncommitted changes at the Frida phase; trace evidence '
@@ -3587,7 +3597,7 @@ class Driver:
                     'park it: %s' % (row['address'], scenario, dirty, park_text(
                         row['address'], mb, kept_needs(scenario, 'source file uncommitted')
                         if kept else 'source file has uncommitted changes at the Frida phase',
-                        edit_back=not kept, kept=kept)))
+                        edit_back=not kept, kept=kept, only_theirs=ot)))
         path = os.path.join(worktree, wave._evidence_rel(row['address']))
         try:
             _write_trace_evidence(path, '%s-%s' % (batch_id, scenario), orig, ours)
@@ -3597,7 +3607,7 @@ class Driver:
                         row['address'], e, park_text(
                             row['address'], mb, kept_needs(
                                 scenario, 'evidence not rewritable: %s' % e) if kept
-                            else 'evidence not rewritable: %s' % e, edit_back=not kept, kept=kept)))
+                            else 'evidence not rewritable: %s' % e, edit_back=not kept, kept=kept, only_theirs=ot)))
         return None
 
     def _frida_lines(self, batch_id):
@@ -5330,6 +5340,7 @@ def _parse(argv):
     p.add_argument('--queue', choices=sorted(wave.QUEUES), default='wave1',
                    help='wave1 (both_changed_differ, b<NNN>) or import '
                         '(theirs_real_ours_stub, then theirs_changed_ours_base, '
+                        'then only_theirs, '
                         'and the import list, i<NNN>)')
     p.add_argument('--pool', action='append', default=[], metavar='SPEC',
                    help='NAME=WRAPPER:MODEL[:WORKERS], or the short form '
