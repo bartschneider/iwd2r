@@ -1,8 +1,8 @@
 ---
 address: 0x6EEBA0
 name: CGameAnimationTypeMonsterIcewindNew::Render
-exemption: "a render function; checked by the world_entry render shot (tools/play.py --linux --headless, scenarios/pending/world_entry.txt)"
-kind: replay
+exemption: "fork row, probe list p001: the exe ORs 0x2 into the render flags only when transparency != 0 and pushes the same dwRenderFlags to both FXRender calls, which a dump reading cannot decide; adopted WSO's body, which passes plain dwRenderFlags to both FXRender calls where ours re-ORed 0x2 unconditionally at the call sites"
+kind: read-only
 ghidra_version: 12.1.4
 ---
 
@@ -122,3 +122,7 @@ LAB_006eec63:
 In the not-fading branch (bFadeOut == 0) the original passes NULL as pFxRect: 0x6EEDAA `xor eax,eax`, `je` on bFadeOut == 0, then 0x6EEDE2 `push eax` (0) as pFxRect after pushing &CPoint(0, 0), for CInfinity::FXUnlock 0x5CE930 at 0x6EEDE6. The fading branch passes &rFXRect and ptPos + ptReference. Ours passed &rFXRect in both branches; now NULL in the not-fading one. Once CVidPoly::FillPoly 0x7C13A0 is ported, a non-NULL pFxRect makes FXUnlock fill the rect with the transparent colour through a dithered FillPoly, so every creature would draw 50% dithered.
 
 Address: slot 36 (Render) of the CGameAnimationTypeMonsterIcewindNew vtable 0x85BA60 (entry at 0x85BAF0) holds 0x6EEBA0.
+
+## WSO delta
+
+Adopted from WSO at e8dd16a, body unchanged: his `Render` passes plain `dwRenderFlags` to both `FXRender` calls, where ours re-ORed `0x2` unconditionally at the call sites (`dwRenderFlags | 0x2`), so with `transparency == 0` ours still handed the alpha-blend flag to `FXRender`; in his body `0x2` joins only inside the `transparency != 0` branch (already present in ours) per the exe at 0x6EECA8. The rest is shape, not behaviour: he names the `FXLock` result `bLocked` and carries a three-line comment on the `transparency` branch; the asserts, the MIRROR_BAM/FXPREP flag block, tint, weapon cell, `FXRenderClippingPolys`, the two `FXUnlock` branches and `FXBltFrom` are identical to ours.
