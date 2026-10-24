@@ -1,0 +1,1 @@
+{"address": "0x4D5B90", "name": "CUIControlSlider::CUIControlSlider", "file": "src/CUIControlSlider.cpp", "batch": "i007", "needs": "world_entry: not measured (address-like untyped argument a0 (89900512 vs 81404040); type it from the header); ours reading matches the decompile"}
