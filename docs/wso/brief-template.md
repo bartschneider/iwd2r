@@ -37,7 +37,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    checkpoint id). A fork or neither verdict needs a probe, replay or trace
    case; dump-* and readout-* decide only ours.
 2. **The evidence line.** Write `docs/evidence/<ADDRESS>.md` (address in caps,
-   no `0x`) for every function you touch, front matter `address:` / `name:` /
+   no `0x`; for 0x78A2F0 the file is `docs/evidence/78A2F0.md`, never
+   `0x78A2F0.md`) for every function you touch, front matter `address:` / `name:` /
    `kind:` (`kind: oracle` or `kind: replay`), and exactly one line in the body
    saying the outcome:
    - a disagreement: `disagreed with WSO at {{fork_base7}}: <what differed>; case <id> decides`

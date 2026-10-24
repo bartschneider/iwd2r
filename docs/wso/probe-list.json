@@ -118,5 +118,35 @@
     "reading": "neither",
     "reason": "his Parse is behaviorally identical to ours (memcmp(\"CHR \") vs the 0x20524843 compare) and both deviate from the exe in the same two corners \u2014 a NULL buffer returns FALSE where it returns m_bParsed, and the V2.2-mismatch path falls through to m_bParsed = TRUE where the exe destroys the temporaries and returns 0 \u2014 and no campaign checkpoint loads a malformed or wrong-version CHR, so no probe case exists; ours kept per rule 13",
     "source": "worker"
+  },
+  {
+    "address": "0x42CDA0",
+    "at": "2026-10-24T07:27:21+00:00",
+    "batch": "b027",
+    "file": "src/CMessage.cpp",
+    "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
+    "reading": "fork",
+    "reason": "\u2014 exe's lock-status handler jumps to the multiplayer lobby (m_pEngineMultiPlayer StartMultiPlayer/SelectEngine, m_nLobbyMode=1, second engine-gated re-entry) where ours only sets the temp cursor; the lobby behavior is real multiplayer-path work, and adopting fork's body is a behavior change beyond a rename",
+    "source": "worker"
+  },
+  {
+    "address": "0x5007F0",
+    "at": "2026-10-24T07:27:21+00:00",
+    "batch": "b027",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageFireProjectile::Run",
+    "reading": "fork",
+    "reason": "\u2014 exe's Run fires the projectile sound and updates projectile state per the bundle decompile where ours stops short; needs the ADR-0002 single-player call on whether fire-projectile feedback belongs in this build before adopting",
+    "source": "worker"
+  },
+  {
+    "address": "0x4F7620",
+    "at": "2026-10-24T07:27:21+00:00",
+    "batch": "b027",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageHandler::Broadcast",
+    "reading": "fork",
+    "reason": "\u2014 exe marshals the message and SendSpecificMessage's it (SEND_GUARANTEED|SEND_ALL_PLAYERS, flags 0x300) under a session-open gate where ours omits the send per ADR 0002; fork's body names m_bLocalControl (+0x6B, our field_6B), which our tree lacks, so it cannot be adopted as-is",
+    "source": "worker"
   }
 ]
