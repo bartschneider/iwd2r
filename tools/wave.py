@@ -629,7 +629,11 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                             for r in eligible}
                 # a row Frida refuses everywhere queues as it did before the
                 # status existed (unknown)
-                state_of = {k: ('unknown' if v == 'unhookable' else v) for k, v in state_of.items()}
+                # (also one refused in some scenarios and dead in the rest)
+                state_of = {id(r): ('unknown' if state_of[id(r)] == 'unhookable'
+                                    or (state_of[id(r)] == 'dead' and cov_mod.refused_in(
+                                        cov, r['address'], cov_mod.row_scenarios(cov, [r])))
+                                    else state_of[id(r)]) for r in eligible}
                 count = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
             except (TypeError, AttributeError, ValueError, KeyError) as e:
                 state_of = None

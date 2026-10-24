@@ -10952,7 +10952,7 @@ class DriverTest(unittest.TestCase):
         self._coverage_map({'world_entry': {'0x401000': 4}})
         path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
         cov = json.loads(_slurp(path))
-        # walk_and_talk has not measured 0x402000, but others did: it is not forced
+        # first_fight: measured everywhere, hits nothing; walk_and_talk: 0x402000 not measured
         cov['scenarios']['walk_and_talk']['hooked'] = ['0x401000', '0x403000']
         _write(path, json.dumps(cov))
         seen = self._scenario_recorder(d)
@@ -10960,9 +10960,10 @@ class DriverTest(unittest.TestCase):
             d._frida_phase('b011', batch, self.wt, {})
         except driver._StageError:
             pass
-        self.assertEqual(seen, [['world_entry']])
-        left = [s for s in driver._tool('truth').FRIDA_SCENARIOS if s != 'world_entry']
-        self.assertIn('b011: frida: scenarios by coverage: world_entry '
+        self.assertEqual(seen, [['world_entry', 'walk_and_talk']])
+        left = [s for s in driver._tool('truth').FRIDA_SCENARIOS
+                if s not in ('world_entry', 'walk_and_talk')]
+        self.assertIn('b011: frida: scenarios by coverage: world_entry, walk_and_talk '
                       '(cover 1 of 3 rows; left out: %s)' % ', '.join(left), self.logs)
 
     def _cover_map(self, hits, hooked=None, refused=None, scenarios=None):
@@ -10972,7 +10973,9 @@ class DriverTest(unittest.TestCase):
                'at': '2026-10-24T00:00:00Z',
                'scenarios': {sc: {'sha': coverage.entry_sha(sc, self.root), 'hooks': 3,
                                   'refused': list((refused or {}).get(sc, [])), 'failed_chunks': [],
-                                  'measured': 0, 'hooked': list(hooked if hooked is not None else allrows),
+                                  'measured': 0, 'hooked': [a for a in (hooked if hooked is not None else allrows)
+                                                          if a not in [coverage.norm(x[3:]) for x in
+                                                                       (refused or {}).get(sc, [])]],
                                   'hits': hits.get(sc, {})} for sc in phase}}
         _write(os.path.join(self.root, 'docs', 'wso', 'coverage.json'), json.dumps(cov))
 
@@ -11029,18 +11032,54 @@ class DriverTest(unittest.TestCase):
                                                         driver._tool('truth').FRIDA_SCENARIOS})
         self.assertEqual(seen, [])
         self.assertEqual(set(d._frida_got.values()),
-                         {('not-exercised', driver.COVERAGE_UNHOOKABLE)})
+                         {('not measured', driver.COVERAGE_UNHOOKABLE)})
         cov = coverage.read(os.path.join(self.root, 'docs', 'wso', 'coverage.json'))
         self.assertEqual(coverage.status_of(cov, '0x402000', ['world_entry', 'first_fight']), 'unhookable')
         text = d._import_outcome('b011', self.wt, {'address': '0x402000', 'name': 'x'},
-                                 'not-exercised', driver.COVERAGE_UNHOOKABLE, {}, 'abc', None)
+                                 'not measured', driver.COVERAGE_UNHOOKABLE, {}, 'abc', None)
         self.assertIn('not measured (Frida refuses the hook; coverage)', text)
+        self.assertNotIn('exercised by no scenario', text)
 
     def test_driver_frida_phase_a_row_refused_in_one_scenario_is_measured_in_the_other(self):
         d, seen = self._cover_phase(self._rows('0x402000'), {'first_fight': {'0x402000': 1}}, hooked=['0x402000'],
                         refused={'world_entry': ['fn_402000']})
         self.assertEqual(seen, [['first_fight']])
         self.assertNotIn('Frida refuses', '\n'.join(self.logs))
+
+    def test_driver_frida_phase_a_scenario_that_never_measured_a_dead_row_runs(self):
+        # 0x402000: measured and dead everywhere but level_up, whose hooked lacks it
+        d, batch = self._import_phase_driver()
+        self._cover_map({'world_entry': {'0x401000': 1}}, hooked=['0x401000', '0x402000'])
+        path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
+        cov = json.loads(_slurp(path))
+        cov['scenarios']['level_up']['hooked'] = ['0x401000']
+        _write(path, json.dumps(cov))
+        d._import_rows = lambda *a, **kw: self._rows('0x401000', '0x402000')
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [['world_entry', 'level_up']])
+
+    def test_driver_frida_phase_a_phase_verdict_is_not_masked_as_unhookable(self):
+        d, batch = self._import_phase_driver()
+        self._cover_map({'world_entry': {'0x401000': 1}}, hooked=['0x401000'],
+                        refused={sc: ['fn_402000'] for sc in driver._tool('truth').FRIDA_SCENARIOS})
+        d._import_rows = lambda *a, **kw: self._rows('0x401000', '0x402000')
+        self._scenario_recorder(d)
+        inner = driver._tool('truth').frida_batch
+        key = driver._tool('wave')._addr_key
+        fake = lambda *a, **kw: {'0x401000': ('equal', 'x'), '0x402000': ('different', 'crash')}
+        driver._tool('truth').frida_batch = fake
+        try:
+            try:
+                d._frida_phase('b011', batch, self.wt, {})
+            except driver._StageError:
+                pass
+        finally:
+            driver._tool('truth').frida_batch = inner
+        self.assertEqual(d._frida_got.get(key('0x402000')), ('different', 'crash'))
 
     def test_driver_frida_phase_b019_like_three_world_scenarios_cover_twenty_rows(self):
         addrs = ['0x%X' % (0x401000 + 0x100 * i) for i in range(20)]
@@ -18467,6 +18506,16 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000', '0x407000'])
         self.assertIn('coverage: 0 candidate row(s) left out as exercised by no scenario', out)
         self.assertIn('coverage: 2 row(s) kept that no scenario measured (unknown)', out)
+
+    def test_next_import_keeps_a_row_refused_in_some_scenarios_and_dead_in_the_rest(self):
+        cands = coverage.candidates(self.dp)
+        data = self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
+        data['scenarios']['world_entry']['refused'] = ['fn_407000']
+        data['scenarios']['world_entry']['hooked'] = [a for a in cands if a != '0x407000']
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
+        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
 
     def test_next_include_uncovered_needs_the_import_queue(self):
         err = io.StringIO()

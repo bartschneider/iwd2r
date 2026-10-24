@@ -2405,7 +2405,7 @@ class Driver:
             # verdicts have, read by the loop below.
             hit_text = '%s; consulted %s' % (COVERAGE_NOT_HIT, ', '.join(self._frida_consulted))
             self._frida_got = {key(r['address']): (
-                ('not-exercised', COVERAGE_UNHOOKABLE)
+                ('not measured', COVERAGE_UNHOOKABLE)
                 if key(r['address']) in self._frida_unhookable else ('not-exercised', hit_text))
                 for r in rows}
             return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
@@ -2480,7 +2480,11 @@ class Driver:
                                        'exception' % refused)
         if cached is None and key_hex:
             self._frida_cache_write(batch_id, cache_path, key_hex, run_scenarios, traces, info)
-        got.update({k: ('not-exercised', COVERAGE_UNHOOKABLE) for k in self._frida_unhookable})
+        # a row coverage says Frida cannot hook reads so unless the phase itself
+        # measured it (equal or different: a crash recorded as different, a hook
+        # the original now accepts) -- that verdict is never masked
+        got.update({k: ('not measured', COVERAGE_UNHOOKABLE) for k in self._frida_unhookable
+                    if got.get(k, ('',))[0] not in ('equal', 'different')})
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
@@ -2690,11 +2694,13 @@ class Driver:
 
     def _coverage_scenarios(self, batch_id, rows):
         """(scenarios to run, skip): the phase's candidates (truth.scenarios_for)
-        narrowed by the coverage map.  With a usable map a candidate runs when
-        it hits at least one row or has not measured one (unknown forces it
-        in); when none does, skip is True (every row is dead in every
-        candidate: no build, no launch).  Without a usable map every
-        candidate runs."""
+        narrowed by the coverage map (coverage.cover_plan).  With a usable map
+        the scenarios run are a greedy minimal cover of the rows some fresh
+        scenario hits, plus every candidate that neither measured nor refused
+        a row no fresh scenario hits (unknown); a row Frida refuses in every
+        candidate is unhookable and forces nothing.  When nothing runs, skip is
+        True (every row is dead or unhookable: no build, no launch).  Without
+        a usable map every candidate runs."""
         truth = _tool('truth')
         cands = list(truth.scenarios_for(rows, [r.get('file') for r in rows]))
         self._frida_ran = (cands, [])
@@ -2807,13 +2813,15 @@ class Driver:
         elif status == 'not-exercised':
             run, left = getattr(self, '_frida_ran', None) or (
                 list(_tool('truth').FRIDA_SCENARIOS), [])
-            needs = ('not measured (%s)' % detail if detail == COVERAGE_UNHOOKABLE
-                     else 'not-exercised (%s)' % detail if detail.startswith(COVERAGE_NOT_HIT)
+            needs = ('not-exercised (%s)' % detail if detail.startswith(COVERAGE_NOT_HIT)
                      else unmeasured_needs(run, left))
             text = unmeasured(a, run, park_text(a, mb, needs))
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
                 a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
+        elif status == 'not measured' and detail == COVERAGE_UNHOOKABLE:
+            text = ('%s: not measured (%s); the phase does not run again in this batch, so '
+                    'park it: %s' % (a, detail, park_text(a, mb, 'not measured (%s)' % detail)))
         else:
             # scenario failed, not measured: nothing measured the row, and the
             # close would refuse it with no retry left.

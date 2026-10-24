@@ -23,8 +23,8 @@ from the scenario's files now (or is absent) counts as NOT measured for every
 row ("unknown"), so editing one scenario never makes another's entry stale.
 A map with failed chunks, or with no fresh complete phase scenario, is never
 `usable`.  Consumers: `wave.py next --queue import` (covered rows first), the
-driver's frida phase (runs the scenarios that hit its rows or have not
-measured them) and the scorecard line.  The pass itself is run by hand:
+driver's frida phase (runs a minimal cover of the scenarios that hit its
+rows, plus those that have not measured a row nothing hit) and the scorecard line.  The pass itself is run by hand:
 
   python3 -I tools/wave.py coverage [--scenarios a,b,c] [--chunk N]
                                     [--addresses FILE] [--dry]
@@ -413,15 +413,13 @@ def cover_order(cands):
 def cover_plan(cov, rows, cands):
     """The Frida phase's scenario choice for rows (dicts with 'address') among
     cands (a list): 'run' (cands order), 'left', 'hit' (rows a scenario hits),
-    'unknown' (addresses no fresh scenario measured: the full set runs),
+    'unknown' (addresses some candidate neither measured nor refused),
     'unhookable' (addresses every fresh scenario refused), 'covered' and
     'total' (distinct rows).  Rows hit by a fresh scenario are covered by a
     greedy set cover (most uncovered rows first, ties in cover_order); a
-    candidate without a fresh entry (no entry, or stale) runs when a row no
-    fresh scenario hits cannot be judged without it."""
-    stale = cov.get('stale', ())
-    fresh = [s for s in cands if isinstance(cov['scenarios'].get(s), dict) and s not in stale]
-    loose = [s for s in cands if s not in fresh]
+    candidate that neither measured nor refused a row no fresh scenario hits
+    (a stale or missing entry, or a partial `hooked`) runs.  Row states are
+    status_of's."""
     hit, unknown, unhookable, forced = {}, [], [], set()
     addrs = []
     for r in rows:
@@ -429,17 +427,15 @@ def cover_plan(cov, rows, cands):
         if a in addrs:
             continue
         addrs.append(a)
-        by = set(covered(cov, a, cands))
-        if by:
-            hit[a] = by
-        elif fresh and len(refused_in(cov, a, fresh)) == len(fresh):
+        state = status_of(cov, a, cands)
+        if state == 'hit':
+            hit[a] = set(covered(cov, a, cands))
+        elif state == 'unhookable':
             unhookable.append(a)
-        elif not measured(cov, a, fresh):
+        elif state == 'unknown':
             unknown.append(a)
-        else:
-            forced.update(loose)
-    if unknown:
-        forced.update(cands)
+            done = set(measured(cov, a, cands)) | set(refused_in(cov, a, cands))
+            forced.update(s for s in cands if s not in done)
     chosen = set()
     todo = dict(hit)
     ordered = cover_order(cands)
