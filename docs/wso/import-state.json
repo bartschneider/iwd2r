@@ -924,7 +924,7 @@
     "i007": {
       "assigned_at": "2026-10-24T05:56:10+00:00",
       "branch": "p3/wso-i007",
-      "closed_at": null,
+      "closed_at": "2026-10-24T08:28:56+00:00",
       "files": [
         "src/CResFile.cpp",
         "src/CScreenCreateChar.cpp",
@@ -950,7 +950,6 @@
           "file": "src/CResFile.cpp",
           "name": "CResFile::OpenFile",
           "our_len": 2876,
-          "outcome": "kept",
           "their_len": 2877
         },
         {
@@ -967,7 +966,6 @@
           "file": "src/CScreenInventory.cpp",
           "name": "CScreenInventory::EngineGameInit",
           "our_len": 1818,
-          "outcome": "kept",
           "their_len": 1822
         },
         {
@@ -976,7 +974,6 @@
           "file": "src/CMultiplayerSettings.cpp",
           "name": "CMultiplayerSettings::InitializeSettings",
           "our_len": 1688,
-          "outcome": "kept",
           "their_len": 1703
         },
         {
@@ -993,7 +990,6 @@
           "file": "src/CScreenCreateChar.cpp",
           "name": "CScreenCreateChar::EngineInitialized",
           "our_len": 1577,
-          "outcome": "kept",
           "their_len": 1581
         },
         {
@@ -1002,7 +998,6 @@
           "file": "src/CVidInf.cpp",
           "name": "CVidInf::FXUnlock",
           "our_len": 1542,
-          "outcome": "kept",
           "their_len": 1554
         },
         {
@@ -1011,7 +1006,6 @@
           "file": "src/CScreenSinglePlayer.cpp",
           "name": "CScreenSinglePlayer::CheckCharacterButtons",
           "our_len": 1487,
-          "outcome": "kept",
           "their_len": 1490
         },
         {
@@ -1020,7 +1014,6 @@
           "file": "src/CNetwork.cpp",
           "name": "CNetworkWindow::CheckIncomingQueue",
           "our_len": 1415,
-          "outcome": "kept",
           "their_len": 1439
         },
         {
@@ -1029,7 +1022,6 @@
           "file": "src/CScreenConnection.cpp",
           "name": "CScreenConnection::EngineInitialized",
           "our_len": 1350,
-          "outcome": "kept",
           "their_len": 1354
         },
         {
@@ -1046,7 +1038,6 @@
           "file": "src/CScreenCreateChar.cpp",
           "name": "CScreenCreateChar::OnMouseMove",
           "our_len": 1228,
-          "outcome": "kept",
           "their_len": 1324
         },
         {
@@ -1055,7 +1046,6 @@
           "file": "src/CUIControlSlider.cpp",
           "name": "CUIControlSlider::CUIControlSlider",
           "our_len": 1272,
-          "outcome": "kept",
           "their_len": 1276
         },
         {
@@ -1064,7 +1054,6 @@
           "file": "src/CChitin.cpp",
           "name": "CChitin::InitGraphics",
           "our_len": 1195,
-          "outcome": "kept",
           "their_len": 1307
         },
         {
@@ -1073,7 +1062,6 @@
           "file": "src/CUIControlEdit.cpp",
           "name": "CUIControlEdit::CUIControlEdit",
           "our_len": 1223,
-          "outcome": "kept",
           "their_len": 1229
         },
         {
@@ -1082,7 +1070,6 @@
           "file": "src/CChitin.cpp",
           "name": "CChitin::WinMain",
           "our_len": 1067,
-          "outcome": "kept",
           "their_len": 1326
         },
         {
@@ -1091,7 +1078,6 @@
           "file": "src/CDimm.cpp",
           "name": "CDimm::Release",
           "our_len": 1091,
-          "outcome": "kept",
           "their_len": 1157
         },
         {
@@ -1100,7 +1086,6 @@
           "file": "src/CScreenOptions.cpp",
           "name": "CScreenOptions::EngineInitialized",
           "our_len": 1110,
-          "outcome": "kept",
           "their_len": 1114
         },
         {
@@ -1109,7 +1094,6 @@
           "file": "src/CAliasList.cpp",
           "name": "CAliasList::ResolveFileName",
           "our_len": 1108,
-          "outcome": "kept",
           "their_len": 1112
         },
         {
@@ -1118,11 +1102,10 @@
           "file": "src/CScreenCreateChar.cpp",
           "name": "CScreenCreateChar::OnKeyDown",
           "our_len": 1094,
-          "outcome": "kept",
           "their_len": 1097
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i008": {
