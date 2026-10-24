@@ -7,6 +7,7 @@
 #include "CInfGame.h"
 #include "CInfinity.h"
 #include "CResArea.h"
+#include "CResBinary.h"
 #include "CResCHR.h"
 #include "CResCRE.h"
 #include "CResDLG.h"

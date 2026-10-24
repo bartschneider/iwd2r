@@ -1,0 +1,7 @@
+{
+  "address": "0x693860",
+  "name": "CScreenWorld::CancelEngine",
+  "file": "src/CScreenWorld.cpp",
+  "batch": "i016",
+  "needs": "ours is also wrong against the exe, and his body (rename-only delta) shares both errors. exe 0x693860 switch on [this+0xea4]: jump table at 0x6938e8 maps 0/7 to plain return, 6 to StopCommand (0x69388f, then state=-1), 8 to StopContainer (0x69387c, then state=-1), 1-5 to the assert (0x6938cb); ==0x11 (17) alone goes to StopDeath (0x6938a2, then state=-1); the high path (cmp 0x16/jae 0x15 at 0x6938b5) plain-returns on 19, 21 and 22 and asserts on 18, 20; 15 falls through (ja 0x6938cb after cmp 0x8) to UtilAssert(9124). Ours groups case 15 with 17 under StopDeath and has no case 22 (falls to UTIL_ASSERT) — both wrong. Import with the switch corrected to: -1/0/7/19/21/22 return; 6 StopCommand + -1; 8 StopContainer + -1; 17 StopDeath + -1; default UtilAssert(9124)."
+}

@@ -1,0 +1,7 @@
+{
+  "address": "0x5D4E10",
+  "name": "CUIControlTextDisplayChapter::TimerAsynchronousUpdate",
+  "file": "src/CScreenChapter.cpp",
+  "batch": "i016",
+  "needs": "ours is also wrong against the exe, and his body (rename-only delta) inherits it. exe 0x5d4e10 tail builds the dirty rect from this->m_ptOrigin/m_size alone: left=[this+0xe] (0x5d4ee2), top=[this+0x12], right=[this+0x16]+left, bottom=[this+0x1a]+top, then calls CUIPanel::InvalidateRect (0x4d3810) with m_pPanel loaded only for the thiscall ecx (0x5d4efe, [esi+6]). Ours passes CRect(m_pPanel->m_ptOrigin + m_ptOrigin, m_size) — CUIPanel::InvalidateRect already intersects against CRect(m_ptOrigin, m_size) and OffsetRect(-m_ptOrigin), so the extra panel-origin add double-offsets. Everything else in the body matches the exe (field_A62 negated-short store at +0xa62, field_5A word increment, +0xa65 gate/counter, pChapter +0x14c/+0x1c0/+0x1b8). Import with the m_pPanel->m_ptOrigin add dropped."
+}
