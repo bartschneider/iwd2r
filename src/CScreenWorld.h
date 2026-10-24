@@ -22,9 +22,6 @@ class CUIControlTextDisplay;
 class CScreenWorld : public CBaldurEngine {
 public:
     static const LONG BORED_TIME;
-    // Set by StartStore: the store is arbitrated by the session host rather
-    // than driven locally. Always FALSE for a bag and in single player.
-    static BOOL bMultiplayerStore;
     static int dword_8F85BC;
 
     CScreenWorld();
