@@ -1840,15 +1840,25 @@ def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
         m = re.fullmatch(r'docs/evidence/([0-9A-Fa-f]+)\.md', rel)
         if not m:
             continue
-        subject = run(['git', '-C', worktree, 'log', '-1', '--format=%s', 'HEAD', '--', rel],
-                      capture_output=True, text=True).stdout.strip()
         try:
             with open(os.path.join(worktree, rel), encoding='utf-8') as f:
                 src = ce.front_matter(f.read()).get('trace_source') or ''
         except OSError:
             continue
-        if subject.startswith('frida:'):
-            frida[m.group(1).lower()] = src
+        # the line is the driver's when a `frida:` commit on the branch introduced
+        # it, whoever edited the file after; a worker's own commit under that
+        # subject cannot be told apart here (the driver's real check catches it)
+        log = run(['git', '-C', worktree, 'log', '--format=%H%x00%s', mb + '..HEAD', '--', rel],
+                  capture_output=True, text=True).stdout
+        for entry in log.splitlines():
+            sha, _, subject = entry.partition('\x00')
+            if not subject.startswith('frida:'):
+                continue
+            at = run(['git', '-C', worktree, 'show', '%s:%s' % (sha, rel)],
+                     capture_output=True, text=True)
+            if at.returncode == 0 and (ce.front_matter(at.stdout).get('trace_source') or '') == src:
+                frida[m.group(1).lower()] = src
+                break
     checks = mechanical_checks(
         dict(batch, id=batch_id), worktree, parsed, run=run, kind=kind, base=base,
         undecided=sorted(listed), frida_lines=frida, kept=sorted(kept), tests=False)
@@ -1857,9 +1867,27 @@ def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
     return problems + spelling + [' '.join(p.split()) for p in checks]
 
 
+def _exclude_draft(worktree):
+    r = subprocess.run(['git', '-C', worktree, 'rev-parse', '--git-path', 'info/exclude'],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        return
+    path = os.path.join(worktree, r.stdout.strip())
+    try:
+        have = open(path, encoding='utf-8').read() if os.path.isfile(path) else ''
+        if REPORT_DRAFT not in have.splitlines():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(('' if not have or have.endswith('\n') else '\n') + REPORT_DRAFT + '\n')
+    except OSError:
+        pass
+
+
 def selfcheck_main(argv):
     """`wave.py selfcheck --batch <id> [--report <file>]`, run in the batch
-    worktree: the report from the file, else `.report.md` there, else stdin."""
+    worktree: the report from --report (`-` is stdin), else `.report.md` there.
+    The one write it makes: `.report.md` into the repository's info/exclude when
+    missing (untracked; a worktree cut before the .gitignore entry needs it)."""
     batch_id = report = None
     it = iter(argv)
     for a in it:
@@ -1880,10 +1908,14 @@ def selfcheck_main(argv):
         return 2
     top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
     worktree = top.stdout.strip() if top.returncode == 0 and top.stdout.strip() else os.getcwd()
+    _exclude_draft(worktree)
     if report is None and os.path.isfile(os.path.join(worktree, REPORT_DRAFT)):
         report = os.path.join(worktree, REPORT_DRAFT)
+    if report is None:
+        print('no report: write %s first or pass --report' % REPORT_DRAFT, file=sys.stderr)
+        return 2
     try:
-        if report is None:
+        if report == '-':
             text = sys.stdin.read()
         else:
             with open(report, encoding='utf-8') as f:

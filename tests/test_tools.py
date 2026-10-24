@@ -10344,6 +10344,19 @@ class DriverTest(unittest.TestCase):
         self.sc_git('commit', '-q', '--amend', '-m', 'frida: trace evidence for 1 rows of b011')
         probs = driver.selfcheck('b011', d, self._sc_report())
         self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # the worker then edits that file's prose: the driver's line stays legitimate
+        path = os.path.join(d, 'docs/evidence/402000.md')
+        _write(path, _slurp(path) + '\nmore reading, case dump-402000 decides\n')
+        self.sc_git('commit', '-q', '-am', 'worker adds a sentence')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # a worker line under a non-frida subject is still flagged
+        _write(os.path.join(d, 'docs/evidence/401000.md'),
+               _slurp(path).replace('402000', '401000'))
+        self.sc_git('commit', '-q', '-am', 'worker evidence with a frida line')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertTrue(any(p.startswith('docs/evidence/401000.md: a frida trace_source')
+                            for p in probs), probs)
 
     def test_selfcheck_edits_outside_the_allowed_paths_and_uncommitted_paths(self):
         d = self._sc_repo()
@@ -10376,9 +10389,14 @@ class DriverTest(unittest.TestCase):
         r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
                            cwd=d, capture_output=True, text=True)
         self.assertEqual((r.returncode, r.stdout), (0, 'selfcheck: OK\n'), r.stderr)
-        # stdin when there is no draft, and a file by --report
+        # no draft: exit 2 without reading stdin; stdin by `--report -`, a file by --report
         os.unlink(os.path.join(d, '.report.md'))
         r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
+                           cwd=d, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('no report: write .report.md first or pass --report', r.stderr)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', '-'],
                            cwd=d, input='chat note\n', capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
         self.assertIn('report: no ## Verdicts section', r.stdout)
@@ -10392,10 +10410,27 @@ class DriverTest(unittest.TestCase):
         r = subprocess.run(['python3', '-I', wave_py, 'selfcheck'], cwd=d,
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
-        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b999'],
-                           cwd=d, input='', capture_output=True, text=True)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b999',
+                            '--report', other], cwd=d, capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
         self.assertIn('batch b999 is not in docs/wso/wave-state.json', r.stdout)
+
+    def test_selfcheck_cli_excludes_the_draft_untracked(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        exclude = os.path.join(d, '.git', 'info', 'exclude')
+        self.assertNotIn('.report.md', _slurp(exclude) if os.path.exists(exclude) else '')
+        status = self.sc_git('status', '--porcelain', '-uall').stdout
+        head = self.sc_git('rev-parse', 'HEAD').stdout
+        for _ in range(2):
+            r = subprocess.run(['python3', '-I', os.path.join(ROOT, 'tools', 'wave.py'),
+                                'selfcheck', '--batch', 'b011'], cwd=d,
+                               capture_output=True, text=True)
+            self.assertEqual(r.stdout, 'selfcheck: OK\n', r.stdout)
+        self.assertEqual(_slurp(exclude).splitlines().count('.report.md'), 1)
+        self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+        self.assertEqual(self.sc_git('status', '--porcelain', '-uall').stdout, '')
+        self.assertIn('?? .report.md', status)
 
     def test_selfcheck_never_edits(self):
         d = self._sc_repo(evidence=['401000'])
@@ -10411,7 +10446,9 @@ class DriverTest(unittest.TestCase):
     def test_selfcheck_rule_is_pinned_in_the_briefs_and_the_fix_prompt(self):
         for name, n in (('brief-template.md', 15), ('import-brief-template.md', 10)):
             text = _slurp(os.path.join(ROOT, 'docs', 'wso', name))
-            rule = text.split('\n%d. **Selfcheck last.**' % n)[1].split('\n\n')[0]
+            m = re.search(r'\n(\d+)\. \*\*Selfcheck last\.\*\*', text)
+            n = int(m.group(1))
+            rule = text.split(m.group(0))[1].split('\n\n')[0]
             for need in ('`.report.md`', 'python3 -I tools/wave.py selfcheck --batch {{id}}',
                          'selfcheck: OK', 'same text as your report'):
                 self.assertIn(need, rule, name)
