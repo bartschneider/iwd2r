@@ -97,11 +97,13 @@ above; the sort order was verified programmatically.
 Per-side tally across every batch in docs/wso/wave-state.json, split by deciding evidence kind (regenerate with `python3 tools/wave.py scorecard`):
 
 Decided for the fork: 10 (losing kind: oracle 1, replay 1, read-only 8) -- deciding evidence: dump reading 10; measured: probe 0, frida 0, replay 0, none 10
-Decided for ours: 316 (losing kind: trace 316) -- deciding evidence: replay checkpoint 27, dump reading 287, triage 2; measured: probe 0, frida 17, replay 0, none 299
+Decided for ours: 333 (losing kind: trace 333) -- deciding evidence: replay checkpoint 37, dump reading 294, triage 2; measured: probe 0, frida 23, replay 0, none 310
 Decided for neither: 8 -- deciding evidence: dump reading 8; measured: probe 0, frida 0, replay 0, none 8
-Deciding evidence across all 334 verdicts: oracle probe 0, replay checkpoint 27, dump reading 305, trace 0, triage 2
+Deciding evidence across all 351 verdicts: oracle probe 0, replay checkpoint 37, dump reading 312, trace 0, triage 2
 
-Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm), b014 closed (18 rows, pool glm), b015 closed (20 rows, pool glm), b016 assigned (20 rows, pool glm), b017 assigned (20 rows, pool glm), b018 closed (19 rows, pool glm), b019 assigned (20 rows, pool glm), b020 closed (18 rows, pool glm)
+Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm), b014 closed (18 rows, pool glm), b015 closed (20 rows, pool glm), b016 assigned (18 rows, pool glm), b017 assigned (20 rows, pool glm), b018 closed (19 rows, pool glm), b019 assigned (20 rows, pool glm), b020 closed (18 rows, pool glm), b021 assigned (20 rows, pool glm)
+
+Coverage: 594 of 1348 candidate functions exercised by 3 scenarios (2026-10-24)
 
 Calibration, computed from triage.json classes over closed verdicts:
 
