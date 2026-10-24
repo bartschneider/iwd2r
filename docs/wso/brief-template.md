@@ -93,6 +93,10 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
     merge base) and commit; do not replace a file that holds other rows'
     changes. Workers only add and commit. The driver stops a batch whose
     transcript shows a history rewrite.
+15. **Selfcheck last.** Write your report to `.report.md` in the worktree (git
+    ignores it), run `python3 -I tools/wave.py selfcheck --batch {{id}}`, fix every
+    line it prints, and run it again until it prints `selfcheck: OK`; then return
+    the same text as your report.
 
 ## Report back
 
@@ -111,3 +115,7 @@ Then add one sentence of evidence per row under `## Notes`, list the
 evidence files you wrote and anything else you could not do. The coordinator
 records the verdicts and runs the close; you do not fast-forward anything
 yourself.
+
+Write the report to `.report.md` in the worktree first, run
+`python3 -I tools/wave.py selfcheck --batch {{id}}`, fix every line it prints
+until it prints `selfcheck: OK`, then return the same text as the report.

@@ -16,11 +16,11 @@ Files you own (do not touch functions outside them; other streams own the rest):
 
 {{files}}
 
-Rows, biggest first. Each says what ours is: a stub, or the base body.
+Rows, biggest first. Each says what ours is: a stub, the base body, or no body at all.
 
 {{rows}}
 
-{{base_body}}Context bundles (one per row; read these before the source):
+{{only_theirs}}{{base_body}}Context bundles (one per row; read these before the source):
 
 {{bundle}}
 
@@ -140,6 +140,10 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    merge base) and commit; do not replace a file that holds other rows'
    changes. Workers only add and commit. The driver stops a batch that
    rewrites history.
+10. **Selfcheck last.** Write your report to `.report.md` in the worktree (git
+    ignores it), run `python3 -I tools/wave.py selfcheck --batch {{id}}`, fix every
+    line it prints, and run it again until it prints `selfcheck: OK`; then return
+    the same text as your report.
 
 ## Report back
 
@@ -150,3 +154,7 @@ Write a section headed `## Imported`, with one line per function:
 {{kept_report}}Then list the commits you made, the evidence files you wrote and anything you
 could not import. Do not write a `## Verdicts` section. You do not
 fast-forward anything yourself; the driver records and closes.
+
+Write the report to `.report.md` in the worktree first, run
+`python3 -I tools/wave.py selfcheck --batch {{id}}`, fix every line it prints
+until it prints `selfcheck: OK`, then return the same text as the report.

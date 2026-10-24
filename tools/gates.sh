@@ -4,7 +4,7 @@
 # minutes. Linux presets always; the Windows builds with --windows.
 #
 #   tools/gates.sh [--base REV] [--windows] [--skip-clang] [--no-wait]
-#                  [--summary-fixture]
+#                  [--full] [--summary-fixture]
 #
 # --base is the evidence check's base (default: iwd2r/main, what CI's push
 # event would have used). Engine tests run serially and muted. Exits 1 on the
@@ -18,14 +18,25 @@
 # whether ccache was used (both Linux presets, when `command -v ccache`
 # succeeds). --summary-fixture runs two trivial steps and the summary (tests).
 # Exit status: 3 for --no-wait with the lock held, 4 when flock itself fails.
+# Docs-only fast path: when --base is given and the branch changed no engine
+# input against it (may_skip below is an allow-list of the paths that none of
+# the engine build, ctest, the replay/scenario tests or the gate itself read;
+# any other path runs the full gate), the linux-gcc, linux-clang and
+# structural parity steps print `skipped (docs-only change against BASE)`
+# and the summary says `gates: docs-only fast path`; every other step runs.
+# --full forces the full gate; without --base (CI's default) it is always full;
+# a BASE that is not an ancestor of HEAD, or that cannot be diffed, is full.
+# A docs-only close does not re-check the engine state of the base; the next
+# engine batch's full gate does.
 # The lock file is git-ignored: `git clean -X` deletes it mid-hold, and a new
 # gate would then lock a fresh inode and run beside the old one.
 set -u
 cd "$(dirname "$0")/.."
-BASE=iwd2r/main; WINDOWS=0; CLANG=1; NOWAIT=0; DRYLOCK=; FIXTURE=0
+BASE=iwd2r/main; BASE_GIVEN=0; FULL=0; WINDOWS=0; CLANG=1; NOWAIT=0; DRYLOCK=; FIXTURE=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --base) BASE="$2"; shift 2 ;;
+        --base) BASE="$2"; BASE_GIVEN=1; shift 2 ;;
+        --full) FULL=1; shift ;;
         --windows) WINDOWS=1; shift ;;
         --skip-clang) CLANG=0; shift ;;
         --no-wait) NOWAIT=1; shift ;;
@@ -34,6 +45,44 @@ while [ $# -gt 0 ]; do
         *) echo "gates: unknown option $1" >&2; exit 2 ;;
     esac
 done
+# Whether a changed path MAY skip the engine steps: an allow-list, so anything
+# unknown (a root-level file, a new directory, CMakeUserPresets.json) runs the
+# full gate. tools/ is allowed except what the gate or the C++ tests read:
+# the gate itself (gates.sh, parity/), tools/dataview_rules.json (the C++
+# tests), tools/check_evidence.py and tools/oracle.py.
+may_skip() {
+    case "$1" in
+        tools/gates.sh|tools/parity/*|tools/dataview_rules.json|tools/check_evidence.py|tools/oracle.py) return 1 ;;
+        docs/*|.superpowers/*|.github/*|tools/*) return 0 ;;
+        README.md|LICENSE.md|tests/test_tools.py) return 0 ;;
+    esac
+    return 1
+}
+# Sets DOCS_ONLY=1 when the fast path applies. Every git failure fails closed
+# (full gate). Renames are listed as two paths (--no-renames), so moving an
+# engine file into docs/ still names the engine path.
+DOCS_ONLY=0
+detect_docs_only() {
+    local list f rc=0
+    [ "$FULL" = 0 ] && [ "$BASE_GIVEN" = 1 ] || return 0
+    git rev-parse --verify -q "$BASE^{commit}" >/dev/null 2>&1 || return 0
+    git merge-base --is-ancestor "$BASE" HEAD 2>/dev/null || return 0
+    list=$(mktemp) || return 0
+    # Uncommitted and untracked paths count too: the gate certifies the tree.
+    { git -c core.quotePath=false diff --no-renames -z --name-only "$BASE"...HEAD \
+        && git -c core.quotePath=false diff --no-renames -z --name-only HEAD \
+        && git -c core.quotePath=false ls-files -z --others --exclude-standard
+    } > "$list" 2>/dev/null || rc=1
+    if [ "$rc" = 0 ]; then
+        while IFS= read -r -d '' f; do
+            may_skip "$f" || { rc=1; break; }
+        done < "$list"
+    fi
+    rm -f "$list"
+    [ "$rc" = 0 ] && DOCS_ONLY=1
+    return 0
+}
+detect_docs_only
 failed=()
 GATE_START=$SECONDS
 USE_CCACHE=0
@@ -46,8 +95,14 @@ step() {
     if "$@" 9>&-; then echo "--- $name: ok"; else echo "--- $name: FAILED"; failed+=("$name"); fi
     echo "step $name: $((SECONDS - t0))s"
 }
+# A step the docs-only fast path skips.
+gated_step() {
+    if [ "$DOCS_ONLY" = 1 ]; then echo "=== $1: skipped (docs-only change against $BASE)"; return 0; fi
+    step "$@"
+}
 summary() {
     echo
+    if [ "$DOCS_ONLY" = 1 ]; then echo "gates: docs-only fast path"; else echo "gates: full gate"; fi
     echo "gates: total $((SECONDS - GATE_START))s"
     if [ "$USE_CCACHE" = 1 ]; then echo "gates: ccache: installed, launcher set for ${PRESETS_BUILT:-no preset (none built)}"
     else echo "gates: ccache not used (not installed)"; fi
@@ -56,6 +111,9 @@ summary() {
 }
 if [ "$FIXTURE" = 1 ]; then
     step "fixture one" true
+    gated_step "linux-gcc build and tests" true
+    [ "$CLANG" = 1 ] && gated_step "linux-clang build and tests" true
+    gated_step "structural parity (base $BASE)" true
     step "fixture two" true
     summary; exit $?
 fi
@@ -185,8 +243,8 @@ linux_preset() {
     copy_unchanged || rc=1
     return "$rc"
 }
-step "linux-gcc build and tests" linux_preset linux-gcc
-[ "$CLANG" = 1 ] && step "linux-clang build and tests" linux_preset linux-clang
+gated_step "linux-gcc build and tests" linux_preset linux-gcc
+[ "$CLANG" = 1 ] && gated_step "linux-clang build and tests" linux_preset linux-clang
 step "tool tests" python3 -I tests/test_tools.py
 step "subsystem map" python3 -I tools/gen_map.py --check
 step "recovery status" python3 -I tools/re_status.py --check
@@ -210,7 +268,7 @@ parity_step() {
         echo "structural parity: skipped (no vanilla exe)"
     fi
 }
-step "structural parity (base $BASE)" parity_step
+gated_step "structural parity (base $BASE)" parity_step
 format_check() {
     local files
     files=$(git diff --name-only --diff-filter=d 4fa36bc -- '*.cpp' '*.h' | grep -v '^src/' || true)

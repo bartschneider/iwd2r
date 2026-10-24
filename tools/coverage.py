@@ -28,6 +28,10 @@ rows, plus those that have not measured a row nothing hit) and the scorecard lin
 
   python3 -I tools/wave.py coverage [--scenarios a,b,c] [--chunk N]
                                     [--addresses FILE] [--dry]
+  python3 -I tools/wave.py coverage --pending [--chunk N] [--dry]
+      (only the candidates `wave.py recompare` recorded in
+      docs/wso/coverage.pending.json; merged into the map, list emptied,
+      both committed)
 
 Standard library only; `run` is injectable and the tests never launch.
 """
@@ -46,6 +50,7 @@ COVERAGE_PATH = os.path.join(ROOT, COVERAGE_REL)
 CATEGORIES = ('theirs_real_ours_stub', 'theirs_changed_ours_base', 'only_theirs',
               'both_changed_differ', 'both_stub_diff')
 DEFAULT_CHUNK = 400
+PENDING_REL = os.path.join('docs', 'wso', 'coverage.pending.json')
 CLICKS = 3          # as frida_run: the phase's scenarios run with 3 clicks
 
 _MODS = {}
@@ -337,6 +342,78 @@ def write(path, results, root=ROOT, exe=None, merge=True):
     return data
 
 
+def known_addresses(cov):
+    """The set of normalised addresses a map has an opinion on: hooked,
+    refused (by fn_ name) or hit in any scenario."""
+    found = set()
+    for r in (cov or {}).get('scenarios', {}).values():
+        for a in list(r.get('hooked', ())) + list(r.get('hits', {})):
+            try:
+                found.add(norm(a))
+            except (TypeError, ValueError):
+                pass
+        for n in r.get('refused', ()):
+            try:
+                found.add(norm(_addr_of(n)))
+            except (TypeError, ValueError):
+                pass
+    return found
+
+
+def read_pending(path):
+    """The pending candidates ([{address, name, file, category, at}]) at
+    path; [] when the file is missing or unreadable."""
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [e for e in data if isinstance(e, dict) and e.get('address')]
+
+
+def merge_pending_results(path, results, root=ROOT):
+    """Write `results` (a pass over new candidates) into the map at path
+    ADDING to each scenario's entry instead of replacing it: hooks add up,
+    hooked/refused unite, hits are added.  An entry keeps its stamp (a stale
+    entry stays stale; the new hits are only as fresh as the old stamp)."""
+    old = read(path)
+    merged = {}
+    for s, r in results.items():
+        o = (old or {}).get('scenarios', {}).get(s)
+        if not o:
+            merged[s] = r
+            continue
+        hits = dict(o.get('hits', {}))
+        hits.update(r['hits'])
+        merged[s] = {
+            'hooks': o.get('hooks', 0) + r['hooks'],
+            'refused': sorted(set(o.get('refused', ())) | set(r['refused'])),
+            'failed_chunks': list(o.get('failed_chunks', ())),
+            'hooked': sorted(set(o.get('hooked', ())) | set(r.get('hooked', ())),
+                             key=lambda a: int(a, 16)),
+            'hits': hits,
+            'sha': o.get('sha') or r.get('sha'),
+            'scenarios_sha': r.get('scenarios_sha')}
+    return write(path, merged, root, merge=True)
+
+
+def commit_paths(root, rels, message):
+    """Stage and commit `rels` alone in the repo at root; None or why not."""
+    def git(*a):
+        return subprocess.run(['git', '-C', root, *a], capture_output=True, text=True)
+    r = git('add', '--', *rels)
+    if r.returncode != 0:
+        return 'git add failed: %s' % (r.stderr or r.stdout).strip()
+    if git('diff', '--cached', '--quiet', '--', *rels).returncode == 0:
+        return None
+    r = git('commit', '-q', '-m', message, '--', *rels)
+    if r.returncode != 0:
+        return 'git commit failed: %s' % (r.stderr or r.stdout).strip()
+    return None
+
+
 def read(path):
     try:
         with open(path, encoding='utf-8') as f:
@@ -499,6 +576,7 @@ def usable(path, root=ROOT):
 
 def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
     scenarios, chunk, addrs, dry, restamp_ = None, DEFAULT_CHUNK, None, False, False
+    pending_ = False
     it = iter(argv)
     for a in it:
         if a == '--scenarios':
@@ -515,6 +593,8 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
             dry = True
         elif a == '--restamp':
             restamp_ = True
+        elif a == '--pending':
+            pending_ = True
         else:
             print('wave coverage: unknown option %s' % a, file=sys.stderr)
             return 2
@@ -524,6 +604,8 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
         return rc
     if scenarios is None:
         scenarios = default_scenarios()
+    if pending_:
+        return _main_pending(scenarios, chunk, dry, root, run_, out)
     try:
         addresses = (read_addresses(addrs) if addrs else
                      candidates(os.path.join(root, 'docs', 'wso', 'disagreements.json')))
@@ -570,6 +652,61 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
     if note:
         out.write(note + '\n')
     out.write('wrote %s\n' % path)
+    return 0
+
+
+def _main_pending(scenarios, chunk, dry, root, run_, out):
+    """`wave.py coverage --pending`: the count-only pass over the pending
+    candidates only; the hits join coverage.json, the pending list empties
+    and both files are committed."""
+    ppath = os.path.join(root, PENDING_REL)
+    mpath = os.path.join(root, COVERAGE_REL)
+    pending = read_pending(ppath)
+    addresses = sorted({int(norm(e['address']), 16) for e in pending})
+    addresses = ['0x%X' % a for a in addresses if TEXT_START <= a < TEXT_END]
+    if not pending:
+        out.write('coverage: nothing pending\n')
+        return 0
+    cov = read(mpath)
+    bad = sorted(s for s in scenarios if cov is None or s not in cov['scenarios'])
+    bad += stale_entries(cov, root, set(scenarios)) if cov is not None else []
+    if bad:
+        out.write('coverage --pending: refused: %s %s in the map; run a full '
+                  '`wave.py coverage` for %s first\n' % (
+                      ', '.join(sorted(set(bad))),
+                      'is stale or absent' if len(set(bad)) == 1 else 'are stale or absent',
+                      ','.join(sorted(set(bad)))))
+        return 1
+    launches = plan(scenarios, addresses, chunk)
+    if dry:
+        out.write('coverage: %d pending candidate(s), %d launch(es)\n'
+                  % (len(addresses), len(launches)))
+        out.write(_tooling_line() + '\n')
+        for s, i, n, k in launches:
+            out.write('coverage %s chunk %d/%d: %d hooks\n' % (s, i, n, k))
+        return 0
+    results = run(scenarios, chunk, run=run_, root=root, addresses=addresses,
+                  log=lambda m: out.write(m + '\n'))
+    failed = {s: r['failed_chunks'] for s, r in results.items() if r['failed_chunks']}
+    if failed:
+        out.write('coverage: failed chunk(s): %s; nothing merged, the pending list stays\n'
+                  % '; '.join('%s %s' % (s, ','.join(map(str, c))) for s, c in sorted(failed.items())))
+        return 1
+    data = merge_pending_results(mpath, results, root)
+    for s in results:
+        r = data['scenarios'][s]
+        out.write('%s: %d hits recorded over %d hooks\n' % (s, len(r['hits']), r['hooks']))
+    with open(ppath, 'w', encoding='utf-8', newline='\n') as f:
+        f.write('[]\n')
+    err = commit_paths(root, [COVERAGE_REL, PENDING_REL],
+                       'coverage: %d pending candidates measured\n\n'
+                       'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'
+                       % len(pending))
+    if err:
+        out.write('coverage: merged, but %s\n' % err)
+        return 1
+    out.write('coverage: %d pending candidates measured; merged into %s and committed\n'
+              % (len(pending), COVERAGE_REL))
     return 0
 
 

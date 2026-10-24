@@ -112,3 +112,7 @@ void FUN_005ebdd0(void)
 ## Notes
 
 Ported (was missing). When the spell changes: icon cleared; for a spell, the icon is the spell's icon with its last letter made 'B', and the tooltip the spell's name (set even when the resource is missing); for none, no tooltip.
+
+## WSO delta
+
+disagreed with WSO at ee42010d790692f2aec12de8154f9d88b56efc8b: rename-only; case triage-rename decides
