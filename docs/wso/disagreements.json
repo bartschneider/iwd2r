@@ -54843,8 +54843,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::CheckSummonPopup",
   "address": "0x5E0FD0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 3319,
   "our_len": 3732
  },
  {
@@ -54915,8 +54915,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::sub_5DB200",
   "address": "0x5DB200",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 2370,
   "our_len": 3131
  },
  {
@@ -54947,8 +54947,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::UpdateSkillsPanel",
   "address": "0x5F7B00",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 2574,
   "our_len": 2856
  },
  {
@@ -55051,8 +55051,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::UpdateFeatsPanel",
   "address": "0x5E87E0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 2016,
   "our_len": 2220
  },
  {
@@ -55123,8 +55123,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::OnKeyDown",
   "address": "0x5D72D0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 1757,
   "our_len": 1977
  },
  {
@@ -55211,8 +55211,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::SummonPreviousPopup",
   "address": "0x5E1B20",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 1807,
   "our_len": 1788
  },
  {
@@ -55427,8 +55427,8 @@
   "file": "src/CRuleTables.cpp",
   "name": "CRuleTables::sub_542CB0",
   "address": "0x542CB0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 897,
   "our_len": 1333
  },
  {
@@ -55491,8 +55491,8 @@
   "file": "src/Icewind586B70.cpp",
   "name": "Icewind586B70::sub_5872C0",
   "address": "0x5872C0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 1125,
   "our_len": 1190
  },
  {
@@ -55603,8 +55603,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::SummonNextPopup",
   "address": "0x5E1910",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 1081,
   "our_len": 1024
  },
  {
@@ -55643,8 +55643,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::UpdateInformationPanel",
   "address": "0x5DAF30",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 1333,
   "our_len": 972
  },
  {
@@ -55779,16 +55779,16 @@
   "file": "src/CMessage.cpp",
   "name": "CMessage89::Run",
   "address": "0x5129D0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 770,
   "our_len": 773
  },
  {
   "file": "src/CMessage.cpp",
   "name": "CMessage96::Run",
   "address": "0x513180",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 768,
   "our_len": 769
  },
  {
@@ -55859,8 +55859,8 @@
   "file": "src/CRuleTables.cpp",
   "name": "CRuleTables::sub_5461E0",
   "address": "0x5461E0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 630,
   "our_len": 701
  },
  {
@@ -55891,8 +55891,8 @@
   "file": "src/Icewind586B70.cpp",
   "name": "Icewind586B70::sub_586DC0",
   "address": "0x586DC0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 813,
   "our_len": 696
  },
  {
@@ -56027,8 +56027,8 @@
   "file": "src/CScreenCreateChar.cpp",
   "name": "CScreenCreateChar::sub_618D10",
   "address": "0x618D10",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 700,
   "our_len": 537
  },
  {
@@ -56051,16 +56051,16 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::CanLevelUp",
   "address": "0x5E4E80",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 422,
   "our_len": 486
  },
  {
   "file": "src/CScreenCharacter.cpp",
   "name": "CUIControlButtonCharacter5EBC60::SetSpell",
   "address": "0x5EBDD0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 400,
   "our_len": 483
  },
  {
@@ -56131,8 +56131,8 @@
   "file": "src/CItem.cpp",
   "name": "CItem::sub_4EA4A0",
   "address": "0x4EA4A0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 396,
   "our_len": 401
  },
  {
@@ -56179,8 +56179,8 @@
   "file": "src/CRuleTables.cpp",
   "name": "CRuleTables::sub_545EB0",
   "address": "0x545EB0",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 257,
   "our_len": 319
  },
  {
@@ -56475,16 +56475,16 @@
   "file": "src/CMessage.cpp",
   "name": "CMessage89::GetMsgSubType",
   "address": "0x4AD380",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 54,
   "our_len": 48
  },
  {
   "file": "src/CMessage.cpp",
   "name": "CMessage96::GetMsgSubType",
   "address": "0x4AD390",
-  "category": "only_ours",
-  "their_len": 0,
+  "category": "both_changed_differ",
+  "their_len": 64,
   "our_len": 48
  },
  {
@@ -56963,9 +56963,9 @@
   "file": "src/CAIGroup.cpp",
   "name": "CAIGroup::GroupDrawMove",
   "address": "0x407FC0",
-  "category": "theirs_real_ours_stub",
+  "category": "both_changed_differ",
   "their_len": 4975,
-  "our_len": 2
+  "our_len": 4463
  },
  {
   "file": "src/CScreenWorld.cpp",
@@ -57107,9 +57107,9 @@
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::sub_723BF0",
   "address": "0x723BF0",
-  "category": "theirs_real_ours_stub",
+  "category": "both_changed_differ",
   "their_len": 614,
-  "our_len": 2
+  "our_len": 575
  },
  {
   "file": "src/CGameSprite.cpp",
@@ -57139,9 +57139,9 @@
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::CheckSequence",
   "address": "0x720310",
-  "category": "theirs_real_ours_stub",
+  "category": "both_changed_differ",
   "their_len": 346,
-  "our_len": 2
+  "our_len": 351
  },
  {
   "file": "src/CUnknown2.cpp",
@@ -57227,8 +57227,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::LevelUp",
   "address": "0x5E56F0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 7458,
   "our_len": 9573
  },
  {
@@ -57243,8 +57243,8 @@
   "file": "src/CScreenCreateChar.cpp",
   "name": "CScreenCreateChar::sub_617D80",
   "address": "0x617D80",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 4326,
   "our_len": 5392
  },
  {
@@ -57267,8 +57267,8 @@
   "file": "src/CScreenCreateChar.cpp",
   "name": "CScreenCreateChar::UpdateCharacterSummary",
   "address": "0x610DC0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 4188,
   "our_len": 4325
  },
  {
@@ -57291,8 +57291,8 @@
   "file": "src/CInfGame.cpp",
   "name": "CInfGame::CharacterExport",
   "address": "0x5A1AB0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 3618,
   "our_len": 3811
  },
  {
@@ -57323,8 +57323,8 @@
   "file": "src/CInfGame.cpp",
   "name": "CInfGame::RestPartyPrivate",
   "address": "0x5C1350",
-  "category": "ours_real_theirs_stub",
-  "their_len": 14,
+  "category": "both_changed_differ",
+  "their_len": 3737,
   "our_len": 3522
  },
  {
@@ -57339,8 +57339,8 @@
   "file": "src/CScreenInventory.cpp",
   "name": "CScreenInventory::IdentifyWithSpell",
   "address": "0x62A4B0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 3132,
   "our_len": 3364
  },
  {
@@ -57355,8 +57355,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::ResetSpellsPanel",
   "address": "0x5D9970",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 2284,
   "our_len": 2884
  },
  {
@@ -57395,8 +57395,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::CheckDropSlot",
   "address": "0x5E6A30",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 2063,
   "our_len": 2324
  },
  {
@@ -57411,8 +57411,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CUIControlButtonCharacter5EBC60::OnLButtonClick",
   "address": "0x5EBFA0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 1827,
   "our_len": 2222
  },
  {
@@ -57435,8 +57435,8 @@
   "file": "src/CScreenInventory.cpp",
   "name": "CScreenInventory::CopySpell",
   "address": "0x62B0B0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 1847,
   "our_len": 2005
  },
  {
@@ -57451,8 +57451,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::OnLevelUpButtonClick",
   "address": "0x5E5330",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 1852,
   "our_len": 1911
  },
  {
@@ -57483,8 +57483,8 @@
   "file": "src/CInfGame.cpp",
   "name": "CInfGame::CanRestParty",
   "address": "0x5C1E30",
-  "category": "ours_real_theirs_stub",
-  "their_len": 14,
+  "category": "both_changed_differ",
+  "their_len": 1564,
   "our_len": 1711
  },
  {
@@ -57531,8 +57531,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::ResetSkillsPanel",
   "address": "0x5F7850",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 1483,
   "our_len": 1565
  },
  {
@@ -57547,16 +57547,16 @@
   "file": "src/CScreenInventory.cpp",
   "name": "CScreenInventory::IsErrorButtonClickable",
   "address": "0x62A060",
-  "category": "ours_real_theirs_stub",
-  "their_len": 14,
+  "category": "both_changed_differ",
+  "their_len": 1587,
   "our_len": 1480
  },
  {
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::ResetFeatsPanel",
   "address": "0x5DA200",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 1438,
   "our_len": 1482
  },
  {
@@ -57579,8 +57579,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::IsDoneButtonClickable",
   "address": "0x5E1F50",
-  "category": "ours_real_theirs_stub",
-  "their_len": 14,
+  "category": "both_changed_differ",
+  "their_len": 1148,
   "our_len": 1375
  },
  {
@@ -57627,8 +57627,8 @@
   "file": "src/CScreenInventory.cpp",
   "name": "CScreenInventory::IdentifyWithScroll",
   "address": "0x62AE70",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 1170,
   "our_len": 1121
  },
  {
@@ -57659,8 +57659,8 @@
   "file": "src/CVariableHash.cpp",
   "name": "CVariableHash::MarshalToCharacter",
   "address": "0x550600",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 947,
   "our_len": 1033
  },
  {
@@ -57683,8 +57683,8 @@
   "file": "src/CInfGame.cpp",
   "name": "CInfGame::RestParty",
   "address": "0x5C1160",
-  "category": "ours_real_theirs_stub",
-  "their_len": 14,
+  "category": "both_changed_differ",
+  "their_len": 1087,
   "our_len": 938
  },
  {
@@ -57715,16 +57715,16 @@
   "file": "src/CRuleTables.cpp",
   "name": "CRuleTables::sub_5463E0",
   "address": "0x5463E0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 856,
   "our_len": 829
  },
  {
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::sub_5D8B50",
   "address": "0x5D8B50",
-  "category": "ours_real_theirs_stub",
-  "their_len": 2,
+  "category": "both_changed_differ",
+  "their_len": 770,
   "our_len": 811
  },
  {
@@ -57811,8 +57811,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CUIControlButtonCharacter5EBC60::Render",
   "address": "0x5EC420",
-  "category": "ours_real_theirs_stub",
-  "their_len": 14,
+  "category": "both_changed_differ",
+  "their_len": 487,
   "our_len": 533
  },
  {
@@ -57859,8 +57859,8 @@
   "file": "src/CRuleTables.cpp",
   "name": "CRuleTables::GetStartingHitPoints",
   "address": "0x542FA0",
-  "category": "ours_real_theirs_stub",
-  "their_len": 10,
+  "category": "both_changed_differ",
+  "their_len": 184,
   "our_len": 202
  },
  {
@@ -62707,8 +62707,8 @@
   "file": "src/CScreenCreateChar.cpp",
   "name": "CScreenCreateChar::UpdateMainPanel",
   "address": "0x607BB0",
-  "category": "ours_changed_theirs_base",
-  "their_len": 4175,
+  "category": "both_changed_differ",
+  "their_len": 5098,
   "our_len": 5195
  },
  {
@@ -63643,8 +63643,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::ResetAbility",
   "address": "0x5D9610",
-  "category": "ours_changed_theirs_base",
-  "their_len": 773,
+  "category": "both_changed_differ",
+  "their_len": 753,
   "our_len": 806
  },
  {
@@ -63675,7 +63675,7 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CScreenCharacter::ResetErrorPanel",
   "address": "0x5E71A0",
-  "category": "ours_changed_theirs_base",
+  "category": "both_changed_differ",
   "their_len": 779,
   "our_len": 787
  },
@@ -63715,8 +63715,8 @@
   "file": "src/CScreenCharacter.cpp",
   "name": "CUIControlButtonCharacterFeatsPlusMinus::OnLButtonDown",
   "address": "0x5F6EA0",
-  "category": "ours_changed_theirs_base",
-  "their_len": 743,
+  "category": "both_changed_differ",
+  "their_len": 794,
   "our_len": 753
  },
  {
@@ -64827,8 +64827,8 @@
   "file": "src/C2DArray.cpp",
   "name": "C2DArray::Find",
   "address": "0x4038E0",
-  "category": "ours_changed_theirs_base",
-  "their_len": 171,
+  "category": "both_changed_differ",
+  "their_len": 179,
   "our_len": 173
  },
  {
