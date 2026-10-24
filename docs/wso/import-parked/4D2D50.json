@@ -1,0 +1,1 @@
+{"address": "0x4D2D50", "name": "CUIPanel::sub_4D2D50", "file": "src/CUIPanel.cpp", "batch": "i013", "needs": "world_entry: not measured (called on one side only in world_entry); ours reading matches the decompile"}

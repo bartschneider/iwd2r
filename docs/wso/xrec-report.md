@@ -97,13 +97,13 @@ above; the sort order was verified programmatically.
 Per-side tally across every batch in docs/wso/wave-state.json, split by deciding evidence kind (regenerate with `python3 tools/wave.py scorecard`):
 
 Decided for the fork: 11 (losing kind: oracle 2, replay 1, read-only 8) -- deciding evidence: dump reading 10, trace 1; measured: probe 0, frida 1, replay 0, none 10
-Decided for ours: 516 (losing kind: trace 516) -- deciding evidence: replay checkpoint 47, dump reading 464, trace 2, triage 3; measured: probe 0, frida 98, replay 0, none 418
+Decided for ours: 530 (losing kind: trace 530) -- deciding evidence: replay checkpoint 47, dump reading 477, trace 2, triage 4; measured: probe 0, frida 100, replay 0, none 430
 Decided for neither: 10 -- deciding evidence: dump reading 8, trace 2; measured: probe 0, frida 1, replay 0, none 9
-Deciding evidence across all 537 verdicts: oracle probe 0, replay checkpoint 47, dump reading 482, trace 5, triage 3
+Deciding evidence across all 551 verdicts: oracle probe 0, replay checkpoint 47, dump reading 495, trace 5, triage 4
 
-Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm), b014 closed (18 rows, pool glm), b015 closed (20 rows, pool glm), b016 closed (18 rows, pool glm), b017 closed (20 rows, pool glm), b018 closed (19 rows, pool glm), b019 closed (17 rows, pool glm), b020 closed (18 rows, pool glm), b021 closed (20 rows, pool glm), b022 closed (20 rows, pool glm), b023 closed (20 rows, pool glm), b024 closed (3 rows, pool glm), b025 closed (8 rows, pool glm), b026 closed (8 rows, pool glm), b027 closed (17 rows, pool glm), b028 closed (20 rows, pool glm), b029 closed (4 rows, pool glm), b030 closed (17 rows, pool glm), b031 closed (12 rows, pool glm), b032 assigned (4 rows, pool glm)
+Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm), b014 closed (18 rows, pool glm), b015 closed (20 rows, pool glm), b016 closed (18 rows, pool glm), b017 closed (20 rows, pool glm), b018 closed (19 rows, pool glm), b019 closed (17 rows, pool glm), b020 closed (18 rows, pool glm), b021 closed (20 rows, pool glm), b022 closed (20 rows, pool glm), b023 closed (20 rows, pool glm), b024 closed (3 rows, pool glm), b025 closed (8 rows, pool glm), b026 closed (8 rows, pool glm), b027 closed (17 rows, pool glm), b028 closed (20 rows, pool glm), b029 closed (4 rows, pool glm), b030 closed (17 rows, pool glm), b031 closed (12 rows, pool glm), b032 closed (4 rows, pool glm), b033 closed (10 rows, pool glm)
 
-imports: stubs 6 imported / 0 kept / 27 parked; base-body 0 imported / 0 kept / 22 parked
+imports: stubs 6 imported / 0 kept / 27 parked; base-body 0 imported / 15 kept / 27 parked
 
 Coverage: 667 of 1397 candidate functions exercised by 10 scenarios (2026-10-24)
 
@@ -114,7 +114,7 @@ rename-only         1     1  enabled
 signature-only      3     3  enabled
 fork-stub           2     2  enabled
 ours-stub           0     0  never enabled
-ambiguous         507   528  never enabled
+ambiguous         520   541  never enabled
     mismatches: 0x5FDB20, 0x600B50, 0x63C940, 0x65BCF0, 0x704D40, 0x737EF0, 0x738E70, 0x73B760, 0x5FD0A0, 0x614EF0, 0x63BE80, 0x67B8A0, 0x708280, 0x72FD20, 0x67E560, 0x5D3A80, 0x7941D0, 0x7A3FD0, 0x671FC0, 0x734550, 0x73CD00
 
 Truth calibration (seed 2026-10-22, sample 0x58FF20, 0x5DE2C0, 0x62F360, 0x7338E0, 0x46B160, 0x54C770, 0x4BBCB0, 0x5ABA20, 0x71FC00, 0x6175A0, tools/truth.py over the 18 ruling rows with side fork or neither plus a sample of 10 dump-decided ours rows; a path measures a row when it gives pass/fail (oracle) or equal/different (Frida) and agrees on pass or equal): oracle probes: measured 0 of 28 rows, agreed 0, disagreed 0; Frida trace diff: measured 13 of 28 rows, agreed 12, disagreed 1; Frida on by default: yes.

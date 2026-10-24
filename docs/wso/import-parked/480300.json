@@ -1,0 +1,1 @@
+{"address": "0x480300", "name": "CGameContainer::SetItem", "file": "src/CGameContainer.cpp", "batch": "i014", "needs": "the second UpdateContainerStatus argument: the exe pushes ebx = nSlotNum (prologue mov ebx,[esp+0x14], then movsx eax,bx and push ebx; push eax; call [edx+0xe8] at 0x4803d7); ours and the fork both pass -1"}

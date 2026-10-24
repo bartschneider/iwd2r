@@ -1,0 +1,1 @@
+{"address": "0x546AA0", "name": "CRuleTables::GetEncumbranceMod", "file": "src/CRuleTables.cpp", "batch": "i014", "needs": "world_entry: not measured (frequency difference only: identical in walk_and_talk, equip_shots); ours reading matches the decompile"}

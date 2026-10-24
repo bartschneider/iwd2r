@@ -8131,7 +8131,7 @@
     "b032": {
       "assigned_at": "2026-10-24T16:06:13+00:00",
       "branch": "p3/wso-b032",
-      "closed_at": null,
+      "closed_at": "2026-10-24T17:17:54+00:00",
       "files": [
         "src/CMessage.cpp"
       ],
@@ -8143,6 +8143,7 @@
           "category": "both_changed_differ",
           "class": "ambiguous",
           "file": "src/CMessage.cpp",
+          "measured_body": "06035a4d9207fcf5c19140dafc641b135f04ade1a8a57559bbe8edf030733928",
           "name": "CMessage89::Run",
           "our_len": 773,
           "their_len": 770
@@ -8152,6 +8153,7 @@
           "category": "both_changed_differ",
           "class": "ambiguous",
           "file": "src/CMessage.cpp",
+          "measured_body": "cefeabac4ec97e270fd1b792239b6444a554b363604a6033529b429031c29670",
           "name": "CMessage96::Run",
           "our_len": 769,
           "their_len": 768
@@ -8175,8 +8177,188 @@
           "their_len": 54
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x4AD380": {
+          "case": "dump-4AD380",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4AD390": {
+          "case": "dump-4AD390",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5129D0": {
+          "case": "dump-5129D0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x513180": {
+          "case": "dump-513180",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
+    },
+    "b033": {
+      "assigned_at": "2026-10-24T16:20:26+00:00",
+      "branch": "p3/wso-b033",
+      "closed_at": "2026-10-24T18:21:04+00:00",
+      "files": [
+        "src/CScreenCharacter.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CInfGame.cpp"
+      ],
+      "fork_base": "ee42010d790692f2aec12de8154f9d88b56efc8b",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5E1F50",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::IsDoneButtonClickable",
+          "our_len": 1375,
+          "their_len": 1148
+        },
+        {
+          "address": "0x62AE70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::IdentifyWithScroll",
+          "our_len": 1121,
+          "their_len": 1170
+        },
+        {
+          "address": "0x5E1910",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::SummonNextPopup",
+          "our_len": 1024,
+          "their_len": 1081
+        },
+        {
+          "address": "0x5C1160",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::RestParty",
+          "our_len": 938,
+          "their_len": 1087
+        },
+        {
+          "address": "0x5D8B50",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::sub_5D8B50",
+          "our_len": 811,
+          "their_len": 770
+        },
+        {
+          "address": "0x5E71A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::ResetErrorPanel",
+          "our_len": 787,
+          "their_len": 779
+        },
+        {
+          "address": "0x5D9610",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::ResetAbility",
+          "our_len": 806,
+          "their_len": 753
+        },
+        {
+          "address": "0x5F6EA0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacterFeatsPlusMinus::OnLButtonDown",
+          "our_len": 753,
+          "their_len": 794
+        },
+        {
+          "address": "0x5EC420",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacter5EBC60::Render",
+          "our_len": 533,
+          "their_len": 487
+        },
+        {
+          "address": "0x5EBDD0",
+          "category": "both_changed_differ",
+          "class": "rename-only",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacter5EBC60::SetSpell",
+          "our_len": 483,
+          "their_len": 400
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x5C1160": {
+          "case": "dump-5C1160",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D8B50": {
+          "case": "dump-5D8B50",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5D9610": {
+          "case": "dump-5D9610",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E1910": {
+          "case": "dump-5E1910",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E1F50": {
+          "case": "dump-5E1F50",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5E71A0": {
+          "case": "dump-5E71A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5EBDD0": {
+          "case": "triage-rename",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5EC420": {
+          "case": "dump-5EC420",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F6EA0": {
+          "case": "dump-5F6EA0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x62AE70": {
+          "case": "dump-62AE70",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     }
   },
   "fork_base": "ee42010d790692f2aec12de8154f9d88b56efc8b"

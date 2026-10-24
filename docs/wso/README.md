@@ -370,7 +370,34 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   cut is adopted again. The one aoe line per exception is
   `driver: <id> exception at <stage>; see <status file>`, never problem text.
 
-- `--queue wave1|import`: which list to work (default `wave1`). `wave1`
+- `--queue wave1|import|probes`: which list to work (default `wave1`).
+  `probes` (Task 28) is `docs/wso/probe-state.json`: batches `p<NNN>`
+  (branch `p3/wso-p<NNN>`, status `driver/status-probes.json`, brief
+  `probe-brief-template.md`) of up to 20 rows of `docs/wso/probe-list.json`.
+  The worker adopts the fork body for each `fork` row (report section
+  `## Candidates`: `candidate <0xADDR> fork|neither <reason>`; a `neither` row
+  is not built); the Frida phase decides it. Equal: the evidence becomes
+  `kind: trace`, the driver adds `...; case frida-<batch>-<scenario> decides`
+  under `## WSO delta` and records the row through `resolve_probe` (fork,
+  measured frida) so it returns to its original batch. Different: the finding
+  is appended to the entry's `reason`, an entry goes to
+  `docs/wso/engine-gaps.json`, and the fix round puts our body back. Not
+  exercised: the entry stays, its reason refreshed. `close --kind probes`
+  needs every row resolved or back on the list with our body; the scorecard
+  gains a `probes: resolved N, on list M` line. The phase only records the
+  decision (`outcome: fork-equal`, case, measured body, losing kind on the
+  probe-state row); the record stage, after the checks and the (mandatory) review,
+  calls `resolve_probe`. A fork candidate's evidence must be `kind: read-only`;
+  a `neither`-reading row can only be listed as `neither`. A row an open batch
+  holds is not cut again; a closed batch releases the rows it left on the list,
+  stamped `probed: {batch, scenarios, hits, pin, hand}`, and `next` offers one
+  again only when the coverage map now gives it a scenario in neither `scenarios`
+  (what ran) nor `hits` (what the map gave it then), or its pin moved; a `hand`
+  row (a `neither` candidate, or a fork body that measured different) only on a
+  pin move. To undo a `fork-equal` row a review rejected, remove `outcome`,
+  `case`, `measured_body` and `losing_kind` from its probe-state row (and put
+  the evidence file back as the merge base has it); the phase measures it again
+  at the next run. `wave1`
   is `docs/wso/wave-state.json`: the `both_changed_differ` rows, triaged,
   batch ids `b<NNN>`, brief `brief-template.md`, closed with verdicts.
   `import` is `docs/wso/import-state.json`: the `theirs_real_ours_stub`

@@ -1,0 +1,1 @@
+{"address": "0x47C890", "name": "CGameContainer::CGameContainer", "file": "src/CGameContainer.cpp", "batch": "i014", "needs": "world_entry: not measured (no Frida hook: ambiguous: 2 overloads of CGameContainer::CGameContainer in our map); ours reading matches the decompile"}

@@ -178,5 +178,25 @@
     "reading": "fork",
     "reason": "the fork body ports CGameObjectArray 0x5C9300 (rest blocked while any sprite holds spell states 46/47) where ours leaves a TODO (src/CInfGame.cpp:9273); no probe, replay or trace case can decide it, 0x5C9300 is unported, and src/CGameObjectArray.h is not mine to edit",
     "source": "worker"
+  },
+  {
+    "address": "0x5DAF30",
+    "at": "2026-10-24T18:11:45+00:00",
+    "batch": "b033",
+    "file": "src/CScreenCharacter.cpp",
+    "name": "CScreenCharacter::UpdateInformationPanel",
+    "reading": "fork",
+    "reason": "the exe fetches strref 0x5DBE (23998) for the information panel where ours uses 24766 (0x60BE, a hex transposition), but dump-5DAF30 decides only ours and no probe or replay case exists for info-panel labels, and adopting the fork body needs header renames that are not mine to edit",
+    "source": "worker"
+  },
+  {
+    "address": "0x5E4E80",
+    "at": "2026-10-24T18:11:45+00:00",
+    "batch": "b033",
+    "file": "src/CScreenCharacter.cpp",
+    "name": "CScreenCharacter::CanLevelUp",
+    "reading": "fork",
+    "reason": "the exe gates CanLevelUp on the BOOL at this+0x7FA (m_bMultiPlayerViewable) where ours reads m_bMultiPlayerModifyable (+0x7FE), diverging when a viewed character is not Orderable, but dump reading says fork only and no probe, replay or trace case can exercise the restricted-permission multiplayer path",
+    "source": "worker"
   }
 ]

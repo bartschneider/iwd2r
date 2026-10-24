@@ -1,0 +1,1 @@
+{"address": "0x788860", "name": "CDimm::ServiceRequest", "file": "src/CDimm.cpp", "batch": "i009", "needs": "world_entry: not measured (no Frida hook: ambiguous: 2 overloads of CDimm::ServiceRequest in our map); ours reading matches the decompile"}
