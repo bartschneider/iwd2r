@@ -967,6 +967,13 @@ def parse_kept(text):
             continue
         m = KEPT_RE.match(cand)
         if not m:
+            # The same tolerance as parse_report and parse_undecided: prose
+            # that names no address and does not try to be a kept line
+            # ("None.", "every row was parked this round") is skipped; a
+            # mangled line still fails.
+            if not re.search(r'0[xX][0-9a-fA-F]+', cand) and \
+                    not cand.lower().startswith('kept'):
+                continue
             raise ReportError('line %d: malformed kept line: %r' % (n, raw))
         addr = '0x%X' % int(m.group(1), 16)
         if addr in out:
