@@ -5055,6 +5055,21 @@ class Driver:
         m = re.match(r'recompare: (\d+) new rows', text)
         return int(m.group(1)) if rc == 0 and m else 0
 
+    def _log_pending_coverage(self):
+        """Task 27: one line when `wave.py recompare` left candidates for a
+        coverage pass; the driver never launches that pass itself."""
+        path = os.path.join(os.path.dirname(self.disagreements_path),
+                            'coverage.pending.json')
+        try:
+            with open(path, encoding='utf-8') as f:
+                n = len(json.load(f))
+        except (OSError, ValueError, TypeError):
+            return
+        if n:
+            self.log('coverage: %d candidate(s) pending (run `python3 -I '
+                     'tools/wave.py coverage --pending`); their batches run '
+                     'every scenario until then' % n)
+
     def _base_key(self):
         """What the last green run is keyed on: the base's HEAD sha and the
         working-tree listing of tests/ and tools/ (status lines, with the
@@ -5672,6 +5687,7 @@ class Driver:
         cuts.  One thread per busy worker; this thread only assigns, under
         the lock, and collects the finished ones."""
         done = queue_mod.Queue()
+        self._log_pending_coverage()
         pending = list(resume)
         # A batch in flight at the last stop may also read as a cleared
         # exception (its status entry keeps outcome: exception after a
@@ -5807,6 +5823,7 @@ class Driver:
                 base_blocked = True
                 return False
             base_blocked = False
+            self._log_pending_coverage()
             batch_id, code = self._cut()
             if batch_id is None:
                 with self._lock:
