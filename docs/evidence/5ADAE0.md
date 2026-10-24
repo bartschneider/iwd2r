@@ -143,3 +143,7 @@ weapon set reach the action bar".
 
 No oracle case: it needs the object array, the selection and the world
 screen. Unmarshal calls it at every game load (`world_entry`).
+
+## WSO delta
+
+disagreed with WSO at e8dd16a750966af53f24daaf49dcb4fb13594c13: fork body is "TODO: Incomplete", drops the exe's tail world-panel-8 StopContainer on every path and calls SetCustomButtonTypes/SetQuickWeaponSlot/GetCustomButtonValue which our tree lacks, ours matches the exe decompile; case readout-5ADAE0 decides

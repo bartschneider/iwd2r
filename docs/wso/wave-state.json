@@ -7001,7 +7001,7 @@
     "b027": {
       "assigned_at": "2026-10-24T06:22:53+00:00",
       "branch": "p3/wso-b027",
-      "closed_at": null,
+      "closed_at": "2026-10-24T07:42:55+00:00",
       "files": [
         "src/CMessage.cpp",
         "src/CInfGame.cpp",
@@ -7029,24 +7029,6 @@
           "their_len": 1209
         },
         {
-          "address": "0x42CDA0",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CMessage.cpp",
-          "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
-          "our_len": 845,
-          "their_len": 1369
-        },
-        {
-          "address": "0x5007F0",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CMessage.cpp",
-          "name": "CMessageFireProjectile::Run",
-          "our_len": 1211,
-          "their_len": 994
-        },
-        {
           "address": "0x73C490",
           "category": "both_changed_differ",
           "class": "ambiguous",
@@ -7072,15 +7054,6 @@
           "name": "CGameSprite::SetTargetObject",
           "our_len": 1018,
           "their_len": 1124
-        },
-        {
-          "address": "0x4F7620",
-          "category": "both_changed_differ",
-          "class": "ambiguous",
-          "file": "src/CMessage.cpp",
-          "name": "CMessageHandler::Broadcast",
-          "our_len": 817,
-          "their_len": 1265
         },
         {
           "address": "0x71B9C0",
@@ -7191,11 +7164,104 @@
           "their_len": 697
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
+        "0x502570": {
+          "case": "readout-502570",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x502EB0": {
+          "case": "readout-502EB0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x507F70": {
+          "case": "readout-507F70",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5084C0": {
+          "case": "readout-5084C0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5ADAE0": {
+          "case": "readout-5ADAE0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
         "0x5BFC40": {
           "case": "triage-stub",
           "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6F50A0": {
+          "case": "readout-6F50A0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x718390": {
+          "case": "readout-718390",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x71B9C0": {
+          "case": "readout-71B9C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x723CC0": {
+          "case": "readout-723CC0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x723DB0": {
+          "case": "readout-723DB0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x733050": {
+          "case": "readout-733050",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x733660": {
+          "case": "readout-733660",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x73C490": {
+          "case": "readout-73C490",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x73CF10": {
+          "case": "readout-73CF10",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x73D080": {
+          "case": "readout-73D080",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x75F270": {
+          "case": "readout-75F270",
+          "losing_kind": "trace",
+          "measured": "frida",
           "side": "ours"
         }
       }
