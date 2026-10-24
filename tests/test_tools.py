@@ -14799,8 +14799,10 @@ class DriverTest(unittest.TestCase):
         # directly, so it must not see the variable (it did when the suite ran
         # as a driver's base check, 2026-10-24, and failed only there).
         env = {k: v for k, v in os.environ.items() if k != 'IWD2R_BASE_TESTS_CHILD'}
-        with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch.object(driver, '_run_group', return_value=killed), \
+        env_patch = mock.patch.dict(os.environ, env, clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        with mock.patch.object(driver, '_run_group', return_value=killed), \
                 mock.patch.object(driver, '_STOPPED', stopped):
             with self.assertRaises(driver._Stop):
                 driver.run_base_tests(self.root if hasattr(self, 'root') else '.', log)
