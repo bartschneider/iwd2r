@@ -1443,6 +1443,12 @@ PROMOTED_SCENARIOS = ('action_bar', 'equip_shots', 'inventory', 'save_load_scree
 FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk') + PROMOTED_SCENARIOS
 # UI-only scenarios (no world play): candidates when a row's file is a screen.
 FRIDA_UI_SCENARIOS = ('biography',)
+# Held out of the driver's phase (2026-10-23; Task 18 brings them back):
+# save_load_screens writes a save whose slot name grows with every run of the
+# shared game folder, so the dump guard refuses it; biography never loads the
+# world and the phase does not yet pass --no-loaded for it.  The coverage map
+# and scenarios_for keep both; driver.Driver.held_out applies the hold-out.
+PHASE_HELD_OUT = ('save_load_screens', 'biography')
 UI_FILE_PREFIXES = ('src/CScreen', 'src/CUI')
 
 

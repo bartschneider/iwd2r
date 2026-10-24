@@ -10352,6 +10352,7 @@ class DriverTest(unittest.TestCase):
         d.mechanical_checks = self._checks
         d.report_path = os.path.join(tmp, 'xrec-report.md')
         d.triage_path = os.path.join(tmp, 'no-triage.json')
+        d.held_out = ()                 # tests see every scenario; the real phase holds some out
         return d
 
     @staticmethod
@@ -11177,6 +11178,26 @@ class DriverTest(unittest.TestCase):
             pass
         self.assertEqual(seen, [list(driver._tool('truth').FRIDA_SCENARIOS)])
         self.assertIn('b011: frida: no usable coverage map; running every scenario', self.logs)
+
+    def test_driver_frida_phase_holds_out_the_scenarios_truth_names(self):
+        # the hotfix of 2026-10-23: save_load_screens (a save whose name grows
+        # across runs) and biography (needs --no-loaded) stay out of the phase
+        # until Task 18; the coverage map and scenarios_for keep them
+        d, batch = self._screen_driver()
+        truth = driver._tool('truth')
+        d.held_out = tuple(truth.PHASE_HELD_OUT)
+        self.assertEqual(set(d.held_out), {'save_load_screens', 'biography'})
+        self._coverage_map({'world_entry': {'0x401000': 4, '0x402000': 1, '0x403000': 1},
+                            'save_load_screens': {'0x401000': 1}})
+        self._add_ui_entry({'0x402000': 2})
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [['world_entry']])
+        self.assertIn('b011: frida: held out of the phase: save_load_screens, biography',
+                      '\n'.join(self.logs))
 
     def test_driver_frida_phase_adds_the_ui_scenarios_for_screen_rows(self):
         d, batch = self._import_phase_driver()

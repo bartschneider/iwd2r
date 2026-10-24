@@ -1791,6 +1791,7 @@ class Driver:
         truth = _tool('truth')
         self.frida = frida
         self.exports_dir = None
+        self.held_out = tuple(_tool('truth').PHASE_HELD_OUT)   # scenarios the phase skips for now
         self.frida_map = frida_map
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
@@ -2703,6 +2704,11 @@ class Driver:
         a usable map every candidate runs."""
         truth = _tool('truth')
         cands = list(truth.scenarios_for(rows, [r.get('file') for r in rows]))
+        if self.held_out:
+            held = [c for c in cands if c in self.held_out]
+            cands = [c for c in cands if c not in self.held_out]
+            if held:
+                self.log('%s: frida: held out of the phase: %s' % (batch_id, ', '.join(held)))
         self._frida_ran = (cands, [])
         self._frida_unhookable = set()
         try:
