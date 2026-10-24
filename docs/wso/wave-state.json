@@ -6054,7 +6054,7 @@
     "b022": {
       "assigned_at": "2026-10-24T02:28:26+00:00",
       "branch": "p3/wso-b022",
-      "closed_at": null,
+      "closed_at": "2026-10-24T06:22:51+00:00",
       "files": [
         "src/CMessage.cpp",
         "src/CGameAIBase.cpp",
@@ -6245,8 +6245,122 @@
           "their_len": 1709
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x433580": {
+          "case": "dump-433580",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x45C730": {
+          "case": "dump-45C730",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x45EDE0": {
+          "case": "dump-45EDE0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x460300": {
+          "case": "dump-460300",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4F7830": {
+          "case": "dump-4F7830",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4F9150": {
+          "case": "dump-4F9150",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x504CA0": {
+          "case": "dump-504CA0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5BD6B0": {
+          "case": "dump-5BD6B0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5C7B10": {
+          "case": "dump-5C7B10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6FBF10": {
+          "case": "dump-6FBF10",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x717FC0": {
+          "case": "dump-717FC0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x71D0B0": {
+          "case": "dump-71D0B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7238C0": {
+          "case": "dump-7238C0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x727720": {
+          "case": "dump-727720",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x734550": {
+          "case": "trace-734550-vfx-block-and-d0",
+          "losing_kind": null,
+          "measured": "frida",
+          "side": "neither"
+        },
+        "0x73CD00": {
+          "case": "trace-73CD00-strnicmp-fold",
+          "losing_kind": "oracle",
+          "measured": "frida",
+          "side": "fork"
+        },
+        "0x73D1B0": {
+          "case": "dump-73D1B0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x75DFD0": {
+          "case": "dump-75DFD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x75E150": {
+          "case": "dump-75E150",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x75E330": {
+          "case": "dump-75E330",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
     },
     "b023": {
       "assigned_at": "2026-10-24T02:28:26+00:00",
@@ -6700,6 +6814,96 @@
           "name": "CInfButtonArray::UpdateSelectedWeaponSet",
           "our_len": 91,
           "their_len": 48
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "b026": {
+      "assigned_at": "2026-10-24T06:13:21+00:00",
+      "branch": "p3/wso-b026",
+      "closed_at": null,
+      "files": [
+        "src/CScreenSpellbook.cpp",
+        "src/CStore.cpp",
+        "src/CItem.cpp",
+        "src/CVidPoly.cpp",
+        "src/CDerivedStats.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x66BB00",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::OnCancelButtonClick",
+          "our_len": 255,
+          "their_len": 231
+        },
+        {
+          "address": "0x54CA80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::IsItemAcceptable",
+          "our_len": 216,
+          "their_len": 216
+        },
+        {
+          "address": "0x54C1D0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::RemoveItemExt",
+          "our_len": 186,
+          "their_len": 215
+        },
+        {
+          "address": "0x4E9840",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CItem.cpp",
+          "name": "CItem::sub_4E9840",
+          "our_len": 187,
+          "their_len": 189
+        },
+        {
+          "address": "0x54C5B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CStore.cpp",
+          "name": "CStore::AddItemExt",
+          "our_len": 139,
+          "their_len": 153
+        },
+        {
+          "address": "0x7C0DB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::CVidPoly",
+          "our_len": 126,
+          "their_len": 111
+        },
+        {
+          "address": "0x447E30",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDamageReduction::GetEffectiveAmount",
+          "our_len": 81,
+          "their_len": 78
+        },
+        {
+          "address": "0x447F10",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDamageReduction::SetSource",
+          "our_len": 70,
+          "their_len": 72
         }
       ],
       "status": "assigned",
