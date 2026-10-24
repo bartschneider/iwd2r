@@ -450,169 +450,230 @@
         "src/CVidCell.cpp"
       ],
       "pool": "glm",
-      "rows": [
+      "rows": [],
+      "status": "closed",
+      "unparked": [
         {
           "address": "0x48C800",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameEffect.cpp",
           "name": "CGameEffect::DecodeEffect",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (sub_493400, SetSummonDelay, IcewindCGameEffectVisualSpellHit); exe decompile of 0x48C800 confirms our body",
           "our_len": 37169,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
           "their_len": 37179
         },
         {
-          "address": "0x615F50",
+          "address": "0x4D5070",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
-          "file": "src/CScreenCreateChar.cpp",
-          "name": "CScreenCreateChar::OnDoneButtonClick",
-          "our_len": 8771,
-          "their_len": 8773
+          "file": "src/CUIControlButton.cpp",
+          "name": "CUIControlButton::Render",
+          "needs": "fork body contradicts the exe: the original's only BKUnlock site is the common tail 0x4D5678 after CResCell::Release(), the Demand is unconditional after OffsetRect, and BKLock failure returns without unlock; his `if (m_cVidCell.pRes == NULL) { BKUnlock(); return FALSE; }` is absent from the exe",
+          "our_len": 2379,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2438
         },
         {
-          "address": "0x78F0E0",
+          "address": "0x4E52B0",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
-          "file": "src/CChitin.cpp",
-          "name": "CChitin::AsynchronousUpdate",
-          "our_len": 7405,
-          "their_len": 8012
+          "file": "src/CUIControlScrollBar.cpp",
+          "name": "CUIControlScrollBar::Render",
+          "needs": "fork body contradicts the exe: the original has exactly one Demand and one Release on m_cVidCell.pRes (in_ECX[0x34]) and dereferences the scroll buttons (in_ECX[0x4E]/in_ECX[0x4F]) unconditionally; his button-NULL early-out and per-button Demand/Release pairs are absent from the exe",
+          "our_len": 2561,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2721
+        },
+        {
+          "address": "0x518710",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::SetCharacterControlledByPlayer",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (sub_723BF0 = his SetHideState); exe decompile confirms our body",
+          "our_len": 2286,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2288
+        },
+        {
+          "address": "0x5FA9B0",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::EngineActivated",
+          "needs": "fork body contradicts the exe: the original writes m_bSaveScreen (game+0x366E) = 0 unconditionally (0x5FA9E3 via ebp zeroed at 0x5FA9D8, no NULL guard); the tail has no CVidMode/CursorUpdate pointer-update block; objdump 0x5FAB59-0x5FAB5B pushes ebp twice for SetCursor (0x5972E0), i.e. SetCursor(0, FALSE), not his SetCursor(0, TRUE)",
+          "our_len": 2036,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2342
         },
         {
           "address": "0x5FB3E0",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenConnection.cpp",
           "name": "CScreenConnection::TimerAsynchronousUpdate",
+          "needs": "fork body contradicts the exe: the original's 46-entry callee list has no OnLoadGameButtonClick/OnNewGameButtonClick and no Iwd2AutoLoad; the head is the field_FA6 PlayMovie/PlayMovieNext block; Iwd2AutoLoad is absent from our tree",
           "our_len": 4106,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
           "their_len": 4467
         },
         {
+          "address": "0x5FEE50",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::UpdateMainPanel",
+          "needs": "fork body contradicts the exe: objdump 0x5FF16D-0x5FF1A3 loads the game object once from g_pBaldurChitin+0x1C54 and calls SaveGameExists (0x5C0890) through it with no NULL test; his `pGame != NULL` guard is absent from the exe (the 0x5FF188 branch is nServiceProviderType vs SERV_PROV_NULL); our unguarded body matches",
+          "our_len": 3056,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 3067
+        },
+        {
+          "address": "0x60CA10",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::ResetFeatsPanel",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (sub_763A40 = his CanSelectFeat); exe decompile confirms our body",
+          "our_len": 2549,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2555
+        },
+        {
+          "address": "0x60CEB0",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::UpdatePopupPanel",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_1624 = his m_pActiveScrollBar); exe decompile confirms our body",
+          "our_len": 2578,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2602
+        },
+        {
+          "address": "0x615F50",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::OnDoneButtonClick",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_36 = his m_critSect in CUIManager); his only other delta is replacing our NOTE comment with a TODO; exe decompile confirms our body",
+          "our_len": 8771,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 8773
+        },
+        {
           "address": "0x660D00",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenSinglePlayer.cpp",
           "name": "CScreenSinglePlayer::TimerAsynchronousUpdate",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (field_45C = his m_nLobbyMode, sub_59FA00 = his WaitForEngine, field_36 = his m_critSect); his only other delta is a TODO comment downgrade; exe decompile confirms our body",
           "our_len": 3802,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
           "their_len": 3822
         },
         {
+          "address": "0x6664F0",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CUIControlButtonSinglePlayerModifyCharacterCreate::OnLButtonClick",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_36 = his m_critSect in CUIManager); exe decompile confirms our body",
+          "our_len": 2091,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2093
+        },
+        {
+          "address": "0x783E00",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::InternalDemand",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (field_40 = his m_nServiceCount on CRes, field_35C = his m_critSectResCache, field_110 = his m_nBusy on CResCache, field_CE = his m_pCurrentRes, field_314 = his m_critSectDimm, field_270 = his m_pNextRes, field_2FC = his m_critSectService); exe decompile confirms our body",
+          "our_len": 2692,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2840
+        },
+        {
+          "address": "0x787F20",
+          "at": "2026-10-24T05:56:36+00:00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::Request",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (field_44 = his m_nLockCount on CRes, field_40 = his m_nServiceCount, field_2FC = his m_critSectService, field_35C = his m_critSectResCache, field_110 = his m_nBusy on CResCache); exe decompile confirms our body",
+          "our_len": 1987,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2050
+        },
+        {
           "address": "0x788860",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
           "file": "src/CDimm.cpp",
           "name": "CDimm::ServiceRequest",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (field_CE = his m_pCurrentRes, field_D2 = his m_nServiceOffset, field_270 = his m_pNextRes, field_274 = his m_pLastRes, field_2FC = his m_critSectService); exe decompile confirms our body",
           "our_len": 3170,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
           "their_len": 3278
         },
         {
           "address": "0x788CF0",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
           "file": "src/CDimm.cpp",
           "name": "CDimm::Update",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (field_314 = his m_critSectDimm, field_CE = his m_pCurrentRes, field_274 = his m_pLastRes, field_D2 = his m_nServiceOffset, field_2FC = his m_critSectService); exe decompile confirms our body",
           "our_len": 3037,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
           "their_len": 3194
         },
         {
-          "address": "0x5FEE50",
+          "address": "0x78F0E0",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
-          "file": "src/CScreenConnection.cpp",
-          "name": "CScreenConnection::UpdateMainPanel",
-          "our_len": 3056,
-          "their_len": 3067
-        },
-        {
-          "address": "0x783E00",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CDimm.cpp",
-          "name": "CDimm::InternalDemand",
-          "our_len": 2692,
-          "their_len": 2840
-        },
-        {
-          "address": "0x4E52B0",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CUIControlScrollBar.cpp",
-          "name": "CUIControlScrollBar::Render",
-          "our_len": 2561,
-          "their_len": 2721
-        },
-        {
-          "address": "0x60CEB0",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CScreenCreateChar.cpp",
-          "name": "CScreenCreateChar::UpdatePopupPanel",
-          "our_len": 2578,
-          "their_len": 2602
-        },
-        {
-          "address": "0x60CA10",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CScreenCreateChar.cpp",
-          "name": "CScreenCreateChar::ResetFeatsPanel",
-          "our_len": 2549,
-          "their_len": 2555
-        },
-        {
-          "address": "0x4D5070",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CUIControlButton.cpp",
-          "name": "CUIControlButton::Render",
-          "our_len": 2379,
-          "their_len": 2438
-        },
-        {
-          "address": "0x7AB340",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CSoundMixer.cpp",
-          "name": "CSoundMixer::Initialize",
-          "our_len": 2396,
-          "their_len": 2390
-        },
-        {
-          "address": "0x518710",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CMultiplayerSettings.cpp",
-          "name": "CMultiplayerSettings::SetCharacterControlledByPlayer",
-          "our_len": 2286,
-          "their_len": 2288
+          "file": "src/CChitin.cpp",
+          "name": "CChitin::AsynchronousUpdate",
+          "needs": "fork body contradicts the exe: the original's tail makes exactly two engine vtable calls (+0x200, +0xC0) then CSingleLock::Unlock and return, and touches only globals 0x8BA31C/0x8BA31E; his s_*LogCount counters and Iwd2AutoUI::Tick() are absent from the exe, and Iwd2AutoUI is absent from our tree",
+          "our_len": 7405,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 8012
         },
         {
           "address": "0x7A94F0",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
           "file": "src/CSound.cpp",
           "name": "CSound::ExclusivePlay",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_3C = his m_bFrequencySet); exe decompile confirms our body",
           "our_len": 2242,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
           "their_len": 2256
         },
         {
-          "address": "0x5FA9B0",
+          "address": "0x7AB340",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
-          "file": "src/CScreenConnection.cpp",
-          "name": "CScreenConnection::EngineActivated",
-          "our_len": 2036,
-          "their_len": 2342
+          "file": "src/CSoundMixer.cpp",
+          "name": "CSoundMixer::Initialize",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (sub_799C90 = his CUnknown2::IsReady, sub_7C25B0 = his CUnknown2::CleanUp, byte-identical CUnknown2.h apart from those names); exe decompile confirms our body",
+          "our_len": 2396,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
+          "their_len": 2390
         },
         {
           "address": "0x7D0470",
+          "at": "2026-10-24T05:56:36+00:00",
           "category": "theirs_changed_ours_base",
           "file": "src/CVidCell.cpp",
           "name": "CVidCell::Blt8To32ClearShadow",
+          "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_24 = his m_dwColorKey); exe decompile confirms our body",
           "our_len": 2185,
+          "reason": "re-run as kept rows under Task 19: ours stays (matches the exe, or his body was refused) and the driver measures our body",
           "their_len": 2189
-        },
-        {
-          "address": "0x6664F0",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CScreenSinglePlayer.cpp",
-          "name": "CUIControlButtonSinglePlayerModifyCharacterCreate::OnLButtonClick",
-          "our_len": 2091,
-          "their_len": 2093
-        },
-        {
-          "address": "0x787F20",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CDimm.cpp",
-          "name": "CDimm::Request",
-          "our_len": 1987,
-          "their_len": 2050
         }
       ],
-      "status": "closed",
       "verdicts": {}
     },
     "i006": {
@@ -858,6 +919,193 @@
           "their_len": 1439
         }
       ],
+      "verdicts": {}
+    },
+    "i007": {
+      "assigned_at": "2026-10-24T05:56:10+00:00",
+      "branch": "p3/wso-i007",
+      "closed_at": null,
+      "files": [
+        "src/CResFile.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CMultiplayerSettings.cpp",
+        "src/CVideo.cpp",
+        "src/CVidInf.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CNetwork.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CUIControlSlider.cpp",
+        "src/CChitin.cpp",
+        "src/CUIControlEdit.cpp",
+        "src/CDimm.cpp",
+        "src/CScreenOptions.cpp",
+        "src/CAliasList.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x78A2F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResFile.cpp",
+          "name": "CResFile::OpenFile",
+          "our_len": 2876,
+          "their_len": 2877
+        },
+        {
+          "address": "0x6232A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlButtonCharGenFeatsPlusMinus::AdjustValue",
+          "our_len": 1920,
+          "their_len": 1935
+        },
+        {
+          "address": "0x625490",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::EngineGameInit",
+          "our_len": 1818,
+          "their_len": 1822
+        },
+        {
+          "address": "0x517610",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::InitializeSettings",
+          "our_len": 1688,
+          "their_len": 1703
+        },
+        {
+          "address": "0x7952C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVideo.cpp",
+          "name": "CVideo::Initialize",
+          "our_len": 1801,
+          "their_len": 1581
+        },
+        {
+          "address": "0x6070D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::EngineInitialized",
+          "our_len": 1577,
+          "their_len": 1581
+        },
+        {
+          "address": "0x79DB10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::FXUnlock",
+          "our_len": 1542,
+          "their_len": 1554
+        },
+        {
+          "address": "0x661F40",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::CheckCharacterButtons",
+          "our_len": 1487,
+          "their_len": 1490
+        },
+        {
+          "address": "0x7A2100",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::CheckIncomingQueue",
+          "our_len": 1415,
+          "their_len": 1439
+        },
+        {
+          "address": "0x5FADD0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::EngineInitialized",
+          "our_len": 1350,
+          "their_len": 1354
+        },
+        {
+          "address": "0x79C770",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::FXPrep",
+          "our_len": 1307,
+          "their_len": 1311
+        },
+        {
+          "address": "0x607620",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::OnMouseMove",
+          "our_len": 1228,
+          "their_len": 1324
+        },
+        {
+          "address": "0x4D5B90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlSlider.cpp",
+          "name": "CUIControlSlider::CUIControlSlider",
+          "our_len": 1272,
+          "their_len": 1276
+        },
+        {
+          "address": "0x791150",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CChitin.cpp",
+          "name": "CChitin::InitGraphics",
+          "our_len": 1195,
+          "their_len": 1307
+        },
+        {
+          "address": "0x4D6770",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlEdit.cpp",
+          "name": "CUIControlEdit::CUIControlEdit",
+          "our_len": 1223,
+          "their_len": 1229
+        },
+        {
+          "address": "0x7926B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CChitin.cpp",
+          "name": "CChitin::WinMain",
+          "our_len": 1067,
+          "their_len": 1326
+        },
+        {
+          "address": "0x787BA0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::Release",
+          "our_len": 1091,
+          "their_len": 1157
+        },
+        {
+          "address": "0x6541D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CScreenOptions::EngineInitialized",
+          "our_len": 1110,
+          "their_len": 1114
+        },
+        {
+          "address": "0x781AC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CAliasList.cpp",
+          "name": "CAliasList::ResolveFileName",
+          "our_len": 1108,
+          "their_len": 1112
+        },
+        {
+          "address": "0x607380",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::OnKeyDown",
+          "our_len": 1094,
+          "their_len": 1097
+        }
+      ],
+      "status": "assigned",
       "verdicts": {}
     }
   }
