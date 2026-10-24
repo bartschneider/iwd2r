@@ -1,0 +1,7 @@
+{
+  "address": "0x7A8C90",
+  "name": "CSound::CSound",
+  "file": "src/CSound.cpp",
+  "batch": "i016",
+  "needs": "world_entry: not measured (no Frida hook: ambiguous: 2 overloads of CSound::CSound in our map); ours reading matches the decompile"
+}
