@@ -148,5 +148,35 @@
     "reading": "fork",
     "reason": "\u2014 exe marshals the message and SendSpecificMessage's it (SEND_GUARANTEED|SEND_ALL_PLAYERS, flags 0x300) under a session-open gate where ours omits the send per ADR 0002; fork's body names m_bLocalControl (+0x6B, our field_6B), which our tree lacks, so it cannot be adopted as-is",
     "source": "worker"
+  },
+  {
+    "address": "0x5E56F0",
+    "at": "2026-10-24T10:55:27+00:00",
+    "batch": "b030",
+    "file": "src/CScreenCharacter.cpp",
+    "name": "CScreenCharacter::LevelUp",
+    "reading": "fork",
+    "reason": "the exe reads spell entry field_8 into the greater-rage button count and disabled gate (0x5e5fad-0x5e5fc5) where ours reads field_C; dump-5E56F0 decides only ours, no probe or replay case exists, and adoption needs src/CGameSprite.h renames that are not mine to edit",
+    "source": "worker"
+  },
+  {
+    "address": "0x5C1350",
+    "at": "2026-10-24T10:55:27+00:00",
+    "batch": "b030",
+    "file": "src/CInfGame.cpp",
+    "name": "CInfGame::RestPartyPrivate",
+    "reading": "fork",
+    "reason": "exe gates rest on CGameArea::CheckRestEncounter (0x46FEA0), which ours never calls (TODO at src/CInfGame.cpp:9006); no probe, replay or trace case can decide it, 0x46FEA0 is unported, and src/CGameArea.cpp is not mine to edit",
+    "source": "worker"
+  },
+  {
+    "address": "0x5C1E30",
+    "at": "2026-10-24T10:55:27+00:00",
+    "batch": "b030",
+    "file": "src/CInfGame.cpp",
+    "name": "CInfGame::CanRestParty",
+    "reading": "fork",
+    "reason": "the fork body ports CGameObjectArray 0x5C9300 (rest blocked while any sprite holds spell states 46/47) where ours leaves a TODO (src/CInfGame.cpp:9273); no probe, replay or trace case can decide it, 0x5C9300 is unported, and src/CGameObjectArray.h is not mine to edit",
+    "source": "worker"
   }
 ]

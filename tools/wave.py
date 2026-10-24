@@ -86,12 +86,13 @@ DEFAULT_SIZE = 20
 DEFAULT_CATEGORY = 'both_changed_differ'
 # The import queue's sources, in the order `next --queue import` draws
 # from them: rows where ours is a stub, then rows where ours is still the
-# base and his fork changed it.  IMPORT_CATEGORY (the first) stays as an
-# alias for what imports it.
-IMPORT_CATEGORIES = ('theirs_real_ours_stub', 'theirs_changed_ours_base')
+# base and his fork changed it, then (Task 22) rows only his tree has.
+# IMPORT_CATEGORY (the first) stays as an alias for what imports it.
+IMPORT_CATEGORIES = ('theirs_real_ours_stub', 'theirs_changed_ours_base', 'only_theirs')
 IMPORT_CATEGORY = IMPORT_CATEGORIES[0]
 CATEGORY_LABEL = {'theirs_real_ours_stub': 'ours is a stub',
-                  'theirs_changed_ours_base': 'ours is the base body'}
+                  'theirs_changed_ours_base': 'ours is the base body',
+                  'only_theirs': 'ours has no body'}
 IMPORT_STATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-state.json')
 IMPORT_TEMPLATE_PATH = os.path.join(ROOT, 'docs', 'wso', 'import-brief-template.md')
 # The two queues (ruling R11).  wave1 cuts the both_changed_differ rows,
@@ -645,7 +646,7 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
 
     queue='import' (ruling R11) takes the rows of the import categories
     (`theirs_real_ours_stub` first; once none of those is undecided,
-    `theirs_changed_ours_base`) plus the import list's entries (completed
+    `theirs_changed_ours_base`, then `only_theirs`) plus the import list's entries (completed
     from disagreements.json by address), applies no triage, cuts ids
     i<NNN> and still cuts the worktree.  Files held by the assigned
     batches of the other queue's state file, beside this one, are skipped
@@ -1019,7 +1020,9 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
              .replace('{{rows}}', rows)
              .replace('{{bundle}}', bundle))
     base_rows = any(r.get('category') == 'theirs_changed_ours_base' for r in batch['rows'])
-    brief = (brief.replace('{{base_body}}', BASE_BODY_PARAGRAPH.replace('{{id}}', batch_id)
+    only_rows = any(r.get('category') == 'only_theirs' for r in batch['rows'])
+    brief = (brief.replace('{{only_theirs}}', ONLY_THEIRS_PARAGRAPH if only_rows else '')
+             .replace('{{base_body}}', BASE_BODY_PARAGRAPH.replace('{{id}}', batch_id)
                                 if base_rows else '')
              .replace('{{kept_report}}', KEPT_REPORT_PARAGRAPH if base_rows else '')
              .replace('{{kept_refusal}}', KEPT_REFUSAL if base_rows else '')
@@ -1594,7 +1597,8 @@ def _write_rows(path, rows):
 
 def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
               repo=ROOT, tip=FORK_REMOTE + '/main', fetch=True,
-              base=COMMON_BASE, ours='first', category=DEFAULT_CATEGORY):
+              base=COMMON_BASE, ours='first', category=DEFAULT_CATEGORY,
+              triage_path=None, triage_show=None):
     """Compare our tree with the fork's tip and queue what is new.
 
     Fetches the fork remote (fetch=True), resolves tip, runs xrec
@@ -1605,7 +1609,13 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
     <tip7> (M already queued, K decided)`: N rows were not in the file,
     M were already queued (a row in the file or in an assigned batch
     without a verdict), K are decided.  Exit 0, 2 when the tip does not
-    resolve.  Nothing is written then.  The fork is only read."""
+    resolve.  Nothing is written then.  The fork is only read.
+
+    Task 23: when triage.json exists (triage_path, default beside the
+    disagreements file) it is regenerated through triage.regen_triage at the
+    new fork_base: closed rows keep their classes, an open row of a class
+    the calibration now disables becomes ambiguous.  The calibration and the
+    demotions are appended to the message; the caller commits the file."""
     if fetch:
         r = subprocess.run(['git', '-C', repo, 'fetch', '--quiet', FORK_REMOTE],
                            capture_output=True, text=True)
@@ -1688,6 +1698,23 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
                 else:
                     new += 1
                 rows[i] = r
+        tri_out, tri_lines = None, []
+        tri_path = triage_path or os.path.join(
+            os.path.dirname(os.path.abspath(disagreements_path)), 'triage.json')
+        if os.path.isfile(tri_path):
+            tri = _triage()
+            show = triage_show or (lambda ref, path: _git_show(repo, ref, path))
+            try:
+                with open(tri_path, encoding='utf-8') as f:
+                    committed = json.load(f)
+                cal = tri.calibrate(state, tri.calibration_triage(
+                    state, rows, sha, show=show))
+                tri_out = tri.regen_triage(
+                    state, rows, committed, sha, ours, cal, show=show,
+                    log=tri_lines.append)
+            except (OSError, ValueError, KeyError) as e:
+                return 2, f'recompare: triage regeneration failed: {e}\n'
+            tri_lines = [tri.calibration_text(cal)] + tri_lines
         # Batches in flight keep the pin their rows were compared at.
         for b in state['batches'].values():
             if b.get('status') != 'closed':
@@ -1697,8 +1724,21 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
         _write_rows(disagreements_path, rows)
         state['fork_base'] = sha
         save_state(state_path, state)
-    return 0, (f'recompare: {new} new rows at {sha[:7]} '
-               f'({queued} already queued, {done} decided)\n')
+        if tri_out is not None:
+            tri._write_atomic(tri_path, tri_out)
+    text = (f'recompare: {new} new rows at {sha[:7]} '
+            f'({queued} already queued, {done} decided)\n')
+    if tri_out is not None:
+        text += (f'triage: regenerated {os.path.basename(tri_path)} at '
+                 f'{sha[:7]} ({len(tri_out)} rows)\n'
+                 + '\n'.join(tri_lines) + '\n')
+    return 0, text
+
+
+def _git_show(repo, ref, path):
+    r = subprocess.run(['git', '-C', repo, 'show', f'{ref}:{path}'],
+                       capture_output=True, text=True, errors='replace')
+    return r.stdout if r.returncode == 0 else ''
 
 
 # -- resolve -------------------------------------------------------------
@@ -1939,6 +1979,23 @@ REFUSAL_MIXED = (" A row whose body you leave as ours because you refused his bo
                  "   and the row goes under `## Kept` with the reason (`fork body\n"
                  "   contradicts the exe: <what differs>`), never parked by you.")
 
+# Rendered only for batches that hold rows his tree alone has (Task 22).
+ONLY_THEIRS_PARAGRAPH = (
+    "For a row where ours has no body, the function does not exist in our tree:\n"
+    "add it. Read his through `git show <fork sha>:<path>` (git plumbing only; his\n"
+    "tree is untrusted), put it in the same `src/<file>.cpp` his tree has it in, at\n"
+    "the position the address order of the file implies, with the `// 0x<ADDRESS>`\n"
+    "header comment our files use. Declare it in the class's header under `src/`\n"
+    "when the class exists there (a declaration is the only header edit allowed,\n"
+    "and only in `src/`). The commit carries the `Imported-From:` trailer. Write\n"
+    "`docs/evidence/<ADDRESS>.md` with `kind: read-only` and an `exemption:` giving\n"
+    "your reading (for 0x78A2F0 the file is `docs/evidence/78A2F0.md`); never write\n"
+    "a frida line. Parking such a row means REMOVING the function you added (and\n"
+    "its declaration), so the file is back to the merge base's text for it; delete\n"
+    "the evidence file and write the parked JSON. If the exe contradicts his body,\n"
+    "park the row with `needs` of `\"fork body contradicts the exe: <what\n"
+    "differs>\"`. An only-theirs row is never kept: it never goes under `## Kept`.\n\n")
+
 KEPT_REPORT_PARAGRAPH = (
     "Base-body rows you keep as ours go under a section headed `## Kept`, one line\n"
     "per row, never also under `## Imported`:\n"
@@ -1966,13 +2023,18 @@ def _import_tally(state, import_state=None, parked=None):
                 seen[(bid, _addr_key(r.get('address')))] = r
     if not seen:
         return None
-    n = {'stubs': [0, 0, 0], 'base-body': [0, 0, 0]}
+    n = {'stubs': [0, 0, 0], 'base-body': [0, 0, 0], 'only-theirs': [0, 0, 0]}
     for (bid, key), r in seen.items():
         which = ('base-body' if r.get('category') == 'theirs_changed_ours_base'
-                 else 'stubs')
+                 else 'only-theirs' if r.get('category') == 'only_theirs' else 'stubs')
         n[which][2 if key in parked else 1 if r.get('outcome') == 'kept' else 0] += 1
-    return ('imports: stubs %d imported / %d kept / %d parked; '
+    text = ('imports: stubs %d imported / %d kept / %d parked; '
             'base-body %d imported / %d kept / %d parked' % (*n['stubs'], *n['base-body']))
+    if any(n['only-theirs']):
+        # never kept; the clause appears once such a row has closed, so the
+        # line of a stub / base-body history reads as it always did
+        text += '; only-theirs %d imported / %d parked' % (n['only-theirs'][0], n['only-theirs'][2])
+    return text
 
 
 def scorecard_text(state, import_state=None, parked=None):
@@ -2403,6 +2465,8 @@ def main(argv=None):
         return _driver().main(rest)
     elif cmd == 'remeasure':
         return _driver().remeasure_main(rest)
+    elif cmd == 'selfcheck':
+        return _driver().selfcheck_main(rest)
     else:
         print(f'wave.py: unknown command {cmd}', file=sys.stderr)
         return 2
