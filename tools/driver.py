@@ -1250,7 +1250,7 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         rel = '%s/%s.md' % (wave.EVIDENCE_DIR, k.upper())
         text, err = wave._read_evidence(worktree, batch['branch'], r['address'])
         if text is None:
-            problems.append('%s: missing; write it and commit it' % rel)
+            problems.append('%s: missing; write %s (caps, no 0x) and commit it' % (rel, rel))
             continue
         side, case = verdicts[given[k]][0], str(verdicts[given[k]][1])
         if side == 'fork' and not wave.KIND_RE.search(text):
@@ -1413,10 +1413,10 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
                                 % (a, base, KEPT_EDITED_NEEDS, park_text(
                                     a, mb, KEPT_EDITED_NEEDS, kept=True)))
             if not os.path.isfile(os.path.join(worktree, wave._evidence_rel(k))):
-                problems.append('%s: listed under ## Kept but %s does not exist; write it '
-                                '(kind read-only, an exemption: giving your reading of why '
-                                'ours matches; no verdict phrase, no frida line) and commit '
-                                'it' % (a, wave._evidence_rel(k)))
+                problems.append('%s: listed under ## Kept but %s does not exist; write %s (caps, '
+                                'no 0x) (kind read-only, an exemption: giving your reading of '
+                                'why ours matches; no verdict phrase, no frida line) and '
+                                'commit it' % (a, wave._evidence_rel(k), wave._evidence_rel(k)))
     return problems
 
 
@@ -2372,16 +2372,68 @@ class Driver:
                 del listed[addr]
         self._undecided = {} if self.kind == 'import' else dict(listed)
         try:
+            spelling = self._canonical_evidence_names(batch_id, worktree, batch, verdicts,
+                                                      listed)
             kw = {'kind': 'import'} if self.kind == 'import' else {}
             kw['probe'] = sorted(self._probe)
             kw['undecided'] = sorted(listed)
             if self.kind == 'import':
                 kw['frida_lines'] = self._frida_lines(batch_id)
                 kw['kept'] = sorted(self._kept)
-            return verdicts, self.mechanical_checks(
+            return verdicts, spelling + self.mechanical_checks(
                 dict(batch, id=batch_id), worktree, verdicts, **kw)
         except OSError as e:
             raise _launch_failed('the mechanical checks', worktree, e) from None
+
+    def _canonical_evidence_names(self, batch_id, worktree, batch, verdicts, listed):
+        """Rename the evidence files of the batch's rows (and the dependencies
+        the report names) that carry a misspelt name (`0x78A2F0.md`, lower
+        case) to `docs/evidence/<ADDR>.md`, one commit for all of them, and
+        return the problems: both spellings present is never resolved here.
+        Runs before any evidence-existence rule."""
+        ce = _tool('check_evidence')
+        key = _tool('wave')._addr_key
+        addrs = {}
+        for a in ([r['address'] for r in batch.get('rows', [])] + list(verdicts)
+                  + list(listed) + list(self._kept) + list(batch.get('measured_deps') or {})):
+            addrs.setdefault(key(a), a)
+        problems, moves = [], []
+        for k in sorted(addrs):
+            rel, old = ce.canonical_evidence(worktree, k)
+            odd = ce.misspelt_evidence(worktree, k)
+            have = os.path.isfile(os.path.join(worktree, rel))
+            if (have and odd) or len(odd) > 1:
+                first = [rel] if have else []
+                problems.append('two evidence files for 0x%s: %s; keep one, delete the other'
+                                % (k.upper(), ' and '.join(first + odd) if len(first + odd) < 3
+                                   else ', '.join(first + odd)))
+            elif old:
+                moves.append((old, rel))
+        if not moves:
+            return problems
+
+        def git(*args):
+            return subprocess.run(['git', '-C', worktree, *args], capture_output=True, text=True)
+        done = []
+        for old, new in moves:
+            r = git('mv', '--', old, new)
+            if r.returncode != 0:
+                try:
+                    os.rename(os.path.join(worktree, old), os.path.join(worktree, new))
+                    git('add', '-A', '--', old, new)
+                except OSError as e:
+                    problems.append('cannot rename %s to %s (%s); rename it' % (old, new, e))
+                    continue
+            done.append((old, new))
+            self.log('%s: evidence spelling: %s -> %s' % (batch_id, old, os.path.basename(new)))
+        if done:
+            paths = [p for pair in done for p in pair]
+            r = git('commit', '-q', '-m', 'evidence: canonical file names for %d row(s)'
+                    % len(done), '--', *paths)
+            if r.returncode != 0:
+                problems.append('evidence file names not committed: %s'
+                                % _one_line((r.stderr or '') + (r.stdout or '')))
+        return problems
 
     # -- measurement (tools/truth.py) -----------------------------------
 
