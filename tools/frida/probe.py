@@ -40,6 +40,7 @@ everything else stays under runs/.
 """
 import argparse
 import datetime
+import contextlib
 import json
 import os
 import shutil
@@ -214,14 +215,7 @@ def _finish_cmd(args, timeout):
         winsandbox.BOX_RESULTS)
 
 
-def _reset_saves(game_win):
-    """The save-reset step (winsandbox.save_reset_command) with its `& `, or
-    '' without a game folder: a run starts without the saves an earlier run
-    of a scenario made."""
-    return winsandbox.save_reset_command(game_win) + ' & ' if game_win else ''
-
-
-def original_logon(python_win, timeout, args, game_win=None):
+def original_logon(python_win, timeout, args):
     """The box's logon command: the Frida sidecar in the background (start
     /b returns at once), the replay driver in front -- the driver injects,
     drives and quits the game exactly as in a recording (its config has
@@ -231,8 +225,8 @@ def original_logon(python_win, timeout, args, game_win=None):
     where start, & and redirection do not exist."""
     sidecar = ['start', '""', '/b'] + sidecar_argv(
         'original', python_win, None, timeout, args)
-    return 'cmd.exe /c %s%s & %s & %s' % (
-        _reset_saves(game_win), _cmdline(sidecar), winsandbox.replay_logon_command(),
+    return 'cmd.exe /c %s & %s & %s' % (
+        _cmdline(sidecar), winsandbox.replay_logon_command(),
         _finish_cmd(args, timeout))
 
 
@@ -264,8 +258,7 @@ def ours_logon(python_win, game_win, env, timeout, args):
     sandbox -- cmd's & runs on regardless of exit codes.  Wrapped in
     cmd /c like original_logon (no shell at LogonCommand)."""
     env = dict(env, IWD2_DATA=game_win)
-    return 'cmd.exe /c %s%s & %s' % (
-        _reset_saves(game_win),
+    return 'cmd.exe /c %s & %s' % (
         _cmdline(sidecar_argv('ours', python_win, env, timeout, args)),
         _finish_cmd(args, timeout))
 
@@ -306,6 +299,24 @@ def wait_for_result_file(path, seconds):
         if time.time() >= end:
             return False
         time.sleep(2)
+
+
+@contextlib.contextmanager
+def saves_of_its_own(game, out_dir, dry):
+    """Every probe run starts with the empty save folder a replay record
+    gives (oracle.prepared_saves, mode empty, the copy's own saves aside and
+    put back afterwards, the run's saves moved into out_dir/saves): a
+    scenario that saves (save_load_screens) sees the same state on both
+    sides and every run, and no player save is touched.  A plan-only run
+    changes nothing.  Inside the replay and sandbox locks, as record_original
+    holds them."""
+    if dry:
+        yield {}
+        return
+    with oracle.prepared_saves(oracle.mpsave_dir(game),
+                               {'mode': 'empty', 'load': None}, out_dir,
+                               oracle.save_aside(game)) as report:
+        yield report
 
 
 def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
@@ -458,7 +469,7 @@ def run(ns):
                             '%s-%s' % (stamp, ns.target))
     args = sidecar_args(ns, ns.out, status_name)
     if ns.target == 'original':
-        logon_cmd = original_logon(box_python, timeout, args, game_win)
+        logon_cmd = original_logon(box_python, timeout, args)
     else:
         logon_cmd = ours_logon(box_python, game_win,
                                ours_env(game_win, ns.seed, ns.dump_every), timeout, args)
@@ -481,7 +492,8 @@ def run(ns):
     rc = 2
     try:
         with filelock.hold(oracle.REPLAY_LOCK, 'replay'), \
-                filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
+                filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'), \
+                saves_of_its_own(game, out_dir, dry):
             result = run_side(ns.target, script, folders, logon_cmd, timeout,
                               host_run, out_dir, ns.probe, ns.seed,
                               ns.dump_every, dry, status_name)

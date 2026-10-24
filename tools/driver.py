@@ -1017,16 +1017,10 @@ def _map_checkout(map_path):
 
 
 def _infrastructure_failure(traces):
-    """The failures of a Frida run in which every scenario failed with no
-    status file on either side (nothing measured anything: an infrastructure
-    failure, the batch's exception, not its rows' park), else ''."""
-    runs = [(sc, t) for sc, t in sorted(traces.items()) if isinstance(t, dict)]
-    truth = _tool('truth')
-    if not runs or len(runs) != len(traces) or not all(
-            t.get('failed') and (not any((t.get('result') or {}).values())
-                                 or truth.uninformative_reason(t)) for _sc, t in runs):
-        return ''
-    return '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs)
+    """truth.infrastructure_failure: why the Frida run's traces are the
+    batch's exception (a missing loaded RVA, or every scenario failed with no
+    status or alike on both sides), else ''."""
+    return _tool('truth').infrastructure_failure(traces)
 
 
 def _schema_failure(traces):
@@ -2487,9 +2481,8 @@ class Driver:
             self.log('%s: frida: %s measured nothing (%s) and is left out' % (batch_id, sc, why))
         dead = _infrastructure_failure(traces)
         if dead:
-            raise _StageError('frida', 'every Frida scenario failed on infrastructure (no side '
-                                       'produced a status): %s; no row was measured, parked or '
-                                       'rewritten; fix it and clear this exception' % dead)
+            raise _StageError('frida', '%s; no row was measured, parked or rewritten; fix it '
+                                       'and clear this exception' % dead)
         refused = _schema_failure(traces)
         if refused:
             raise _StageError('frida', 'the state dumps of a Frida run fail the replay schema '
@@ -3150,12 +3143,27 @@ class Driver:
                 self._stop_deferred = None
                 raise _Stop()
 
+    def _close_sandbox_after_stop(self):
+        """A probe killed mid-run leaves its Windows Sandbox open (it ends on
+        its in-box timeout): taskkill the sandbox processes so a restart does
+        not hit "already running"."""
+        try:
+            ws = _tool('winsandbox')
+            for name in ws.TASKKILL_NAMES:
+                subprocess.run([ws.CMD_EXE, '/c', 'taskkill', '/IM', name, '/F'],
+                               capture_output=True, cwd='/mnt/c', timeout=15)
+            self.log('stop: killed the live process groups and taskkilled the sandbox (%s)'
+                     % ', '.join(ws.TASKKILL_NAMES))
+        except Exception:
+            pass
+
     def _on_stop(self, signum, _frame):
         """SIGTERM/SIGINT: kill the workers, let a git write in progress
         finish (bounded), then raise _Stop.  Only locks that are re-entrant
         are taken here: the signal may land while this thread holds them."""
         self._stopping = True
-        kill_live_groups()
+        if kill_live_groups():
+            self._close_sandbox_after_stop()
         with self._write_cv:
             if threading.get_ident() in self._writers:
                 # Raised on this thread when its write ends (the main

@@ -953,6 +953,27 @@ SCHEMA_HINTS = {
 }
 
 
+NO_LOADED_RVA = 'ours cannot signal loaded'
+
+
+def infrastructure_failure(traces):
+    """'' or why a frida_run's traces are an infrastructure failure, not a
+    verdict on the rows: any scenario that could not run for want of our
+    loaded RVA (a build property), or every scenario failed with no status on
+    either side or failed the same way on both (uninformative_reason)."""
+    runs = [(sc, t) for sc, t in sorted(traces.items()) if isinstance(t, dict)]
+    missing = [(sc, t) for sc, t in runs if NO_LOADED_RVA in str(t.get('failed') or '')]
+    if missing:
+        return 'a build property, not the rows: %s' % '; '.join(
+            '%s: %s' % (sc, t['failed']) for sc, t in missing)
+    if not runs or len(runs) != len(traces) or not all(
+            t.get('failed') and (not any((t.get('result') or {}).values())
+                                 or uninformative_reason(t)) for _sc, t in runs):
+        return ''
+    return ('every Frida scenario failed on infrastructure (no side produced a status or '
+            'both sides failed alike): ' + '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs))
+
+
 def _schema_failures(oracle, folder):
     """(invalid dump count, dump count, first 'file: error') of a replay
     folder under oracle.check_dumps and schema.json, the check replay record
@@ -1059,11 +1080,13 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     whose dumps do not match, and the driver writes trace evidence only from
     one whose dumps match.
 
-    Ours must pass --loaded-rva, else orig.py would hook the original's
-    EngineActivated address inside iwd2r.exe: loaded_rva (or the table's
-    ours_loaded_rva, read from the map) names CScreenWorld::EngineActivated in
-    our build. With neither, every scenario fails with that reason and nothing
-    is run. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
+    Ours must pass --loaded-rva for a world scenario, else orig.py would
+    hook the original's EngineActivated address inside iwd2r.exe: loaded_rva
+    (or the table's ours_loaded_rva, read from the map) names
+    CScreenWorld::EngineActivated in our build. With neither, every world
+    scenario fails with that reason and nothing is run (infrastructure_failure
+    calls it an infrastructure failure). A UI scenario runs --no-loaded on
+    both sides: orig.py then installs no loaded hook at all. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
     default --new-attempt text. build_checkout (a WSL path) is the Windows
     checkout both sides run from (probe.py --build-checkout): ours its x86
     exe, the batch worktree's, so the bodies under test are the ones the
@@ -1092,8 +1115,8 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                                     'orig_exit': None, 'ours_exit': None,
                                     'result': {'orig': None, 'ours': None},
                                     'hits': {'orig': None, 'ours': None}, 'measured': False,
-                                    'failed': 'no %s in our map: ours cannot signal loaded '
-                                              '(pass loaded_rva)' % LOADED_NAME}
+                                    'failed': ('no %s in our map: %s (pass loaded_rva)'
+                                               % (LOADED_NAME, NO_LOADED_RVA))}
                 continue
             own = table.get('clicks', clicks)
             n_clicks = own.get(scenario, clicks) if isinstance(own, dict) else own
@@ -1214,13 +1237,14 @@ def uninformative_reason(t):
     did not fail): it failed on BOTH sides with the same non-crash outcome
     (the same RESULT word, both NOT-LOADED or both the same OBSERVER-ERROR,
     or both no status, and the same exit code), and neither side logged a
-    crash.  A one-sided failure (the original CLEAN and ours exited, ours
+    crash.  Both exit codes must be non-zero (a side that exited 0 but left
+    no trace file is a one-sided failure).  A one-sided failure (the original CLEAN and ours exited, ours
     crashed) is evidence and is not uninformative."""
     if not isinstance(t, dict) or not t.get('failed'):
         return ''
     result = t.get('result') or {}
     a, b = result.get('orig'), result.get('ours')
-    if a != b or str(a).upper() == 'CRASH' or t.get('orig_exit') is None \
+    if a != b or str(a).upper() == 'CRASH' or not t.get('orig_exit') \
             or t.get('orig_exit') != t.get('ours_exit'):
         return ''
     if any(str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS
@@ -1482,11 +1506,11 @@ FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk') + PROMOTED_SCE
 # UI-only scenarios (no world play): candidates when a row's file is a screen.
 FRIDA_UI_SCENARIOS = ('biography',)
 # Scenarios held out of the driver's phase (driver.Driver.held_out applies it).
-# Empty since Task 18: biography runs with --no-loaded on both sides, and the
-# sandbox start script deletes save_load_screens' own saves before every run
-# (winsandbox.SAVE_RESET_GLOBS).  Hold a scenario out here when its runs
-# cannot agree for a reason not yet fixed.
-PHASE_HELD_OUT = ()
+# biography returned with Task 18 (--no-loaded on both sides).  save_load_screens
+# stays out until one real original/ours pair confirms matching dumps now that
+# every probe run starts from an empty save folder (probe.saves_of_its_own);
+# the coordinator runs that pair, then removes it from this tuple.
+PHASE_HELD_OUT = ('save_load_screens',)
 UI_FILE_PREFIXES = ('src/CScreen', 'src/CUI')
 
 
@@ -1866,7 +1890,10 @@ def _calibrate_frida(rows, read_evidence, map_path):
         with open(map_path, encoding='utf-8', errors='replace') as f:
             map_text = f.read()
         got = frida_batch('cal', rows, sigs, map_text, run_frida=run_frida, info=info)
-        error = None
+        error = infrastructure_failure(captured) or None
+        if error:
+            got = {}
+            error = error[:300]
     except Exception as e:
         got, error = {}, repr(e)[:300]
     got = {_key(a): v for a, v in got.items()}

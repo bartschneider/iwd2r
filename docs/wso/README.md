@@ -483,12 +483,16 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   row (`info['uninformative']`, one driver log line each) and, if every
   scenario is such, the phase's infrastructure exception fires; a one-sided
   failure still reads `scenario failed`. A scenario must not depend on state
-  it wrote in an earlier run: the shared game folder keeps what a run
-  saves, so each probe sandbox's start command deletes the
-  `mpsave\*Quick-Save*` folders (`winsandbox.SAVE_RESET_GLOBS`) before the
-  game starts, on both sides and in the coverage pass; a scenario that
-  writes anything else must clean it up the same way. The driver's stop
-  (SIGTERM, SIGINT) also kills the running `probe.py` launches.
+  it wrote in an earlier run: every probe run (both sides, the coverage pass
+  too) starts with the empty save folder a replay record gives
+  (`probe.saves_of_its_own`, `oracle.prepared_saves` mode empty: the copy's
+  own saves wait aside and are put back, the run's saves go to
+  `runs/<stamp>/replay/saves`), so a saving scenario sees the same state on
+  both sides every time; a scenario that needs a save goes through
+  `--load`. `save_load_screens` stays in `truth.PHASE_HELD_OUT` until one
+  real original/ours pair confirms matching dumps. The driver's stop
+  (SIGTERM, SIGINT) also kills the running `probe.py` launches and taskkills
+  the sandbox processes.
 
 **Pools and threads.** Pools share the batches: a batch goes to the first
 pool that has a free worker, is not parked and is under its budget, and
