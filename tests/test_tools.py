@@ -10863,10 +10863,9 @@ class DriverTest(unittest.TestCase):
 
     # -- Task 20 part A: wave-1 equal rows get trace evidence --------------
 
-    def _wave_frida_driver(self, report, ours_ret=3, dumps=True, kind='read-only', stem='402000',
-                           worker=None):
-        """A measured driver whose 0x402000 evidence is `kind` and whose Frida run
-        returns file-backed traces (dumps match unless `dumps` is False)."""
+    def _frida_file_run(self, ours_ret=3, dumps=True):
+        """A frida_run whose traces are file-backed, fn_402000 returning 3 in the
+        original and `ours_ret` in ours; the dumps match unless `dumps` is False."""
         trace = TruthTest._trace
         files = os.path.join(tempfile.mkdtemp(), 'traces')
         self.addCleanup(shutil.rmtree, os.path.dirname(files), True)
@@ -10885,6 +10884,13 @@ class DriverTest(unittest.TestCase):
                            'ours_path': paths['ours'], 'failed': None,
                            'dumps': {'match': dumps, 'detail': 'fixture'}}
             return out
+        return frida_run
+
+    def _wave_frida_driver(self, report, ours_ret=3, dumps=True, kind='read-only', stem='402000',
+                           worker=None):
+        """A measured driver whose 0x402000 evidence is `kind` and whose Frida run
+        returns file-backed traces (dumps match unless `dumps` is False)."""
+        frida_run = self._frida_file_run(ours_ret, dumps)
         d = self._measured_driver(worker=worker or _SeqWorker(report), frida=True,
                                   frida_build=self._frida_builder()[0], frida_run=frida_run,
                                   oracle_run=lambda *a: {})
@@ -10971,6 +10977,177 @@ class DriverTest(unittest.TestCase):
             foreign = driver._foreign_frida_lines(self.wt, ['docs/evidence/402000.md'], {})
         self.assertEqual(mine, [])
         self.assertEqual(len(foreign), 1)
+
+    # -- Task 20 part B: wave.py remeasure ---------------------------------
+
+    def _closed_wave_state(self, measured402=True):
+        """The driver's state with b011 closed: 0x401000 dump-decided and
+        unmeasured, 0x402000 dump-decided and measured frida, 0x403000 a triage
+        row; evidence on `first`: 401000 and 402000 read-only, 403000 oracle."""
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches']['b011']
+        b['status'] = 'closed'
+        b['verdicts'] = {
+            '0x401000': {'side': 'ours', 'case': 'dump-401000'},
+            '0x402000': dict({'side': 'ours', 'case': 'dump-402000'},
+                             **({'measured': 'frida'} if measured402 else {})),
+            '0x403000': {'side': 'ours', 'case': 'triage-x'}}
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        for stem in ('401000', '402000'):
+            _write(os.path.join(self.root, 'docs', 'evidence', stem + '.md'),
+                   '---\naddress: 0x%s\nname: fn\nkind: read-only\nexemption: "thin"\n---\n\n'
+                   '## WSO delta\n\ncorroborated by WSO at e8dd16a7; case dump-%s decides\n\n'
+                   '## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n'
+                   % (stem, stem))
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'closed b011 evidence')
+
+    def _remeasure_driver(self, ours_ret=3, dumps=True):
+        d = self._measured_driver(frida=True, frida_build=self._frida_builder()[0],
+                                  frida_run=self._frida_file_run(ours_ret, dumps),
+                                  oracle_run=lambda *a: self.fail('no oracle in a remeasure'))
+        self._closed_wave_state()
+        d.record_verdict = lambda *a, **k: self.fail('remeasure never records a verdict')
+        return d
+
+    def test_remeasure_select_three_selectors_and_the_skips(self):
+        d = self._remeasure_driver()
+        wave = driver._tool('wave')
+        sel = lambda mode, *a, **k: wave.remeasure_select(self.state_path, self.root, mode, *a, **k)
+        picked, skipped = sel('read-only-measured')
+        self.assertEqual([p['row']['address'] for p in picked], ['0x402000'])
+        self.assertEqual(skipped, [])
+        picked, skipped = sel('dump-decided')
+        self.assertEqual([p['row']['address'] for p in picked], ['0x401000'])   # 402000 is measured
+        self.assertEqual([p['row']['address'] for p in sel('dump-decided', batch='b011')[0]], ['0x401000'])
+        self.assertEqual(sel('dump-decided', batch='b999'), ([], []))
+        picked, skipped = sel('rows', ['0x401000', '0x403000', '0x999999'])
+        self.assertEqual([p['row']['address'] for p in picked], ['0x401000'])
+        self.assertEqual([a for a, _w in skipped], ['0x403000', '0x999999'])
+        self.assertIn('evidence is oracle; it stands', dict(skipped)['0x403000'])
+        self.assertIn('not a row of a closed wave-1 batch', dict(skipped)['0x999999'])
+        # a neither verdict has no body of ours on the base
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['verdicts']['0x401000']['side'] = 'neither'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        picked, skipped = sel('dump-decided')
+        self.assertEqual((picked, [a for a, _w in skipped]), ([], ['0x401000']))
+        # an open batch's rows are never selected
+        state['batches']['b011']['status'] = 'assigned'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self.assertEqual(sel('rows', ['0x402000']), ([], [('0x402000', 'not a row of a closed wave-1 batch')]))
+
+    def test_remeasure_chunks_and_the_dry_plan_launches_nothing(self):
+        d = self._remeasure_driver()
+        self.assertEqual(driver.Driver.remeasure_chunks(list(range(5)), 2), [[0, 1], [2, 3], [4]])
+        d.frida_run = lambda *a, **k: self.fail('--dry launches nothing')
+        d.frida_build = lambda *a, **k: self.fail('--dry builds nothing')
+        wave = driver._tool('wave')
+        picked, skipped = wave.remeasure_select(self.state_path, self.root, 'rows',
+                                                ['0x401000', '0x402000', '0x403000'])
+        before = _slurp(self.state_path)
+        text = d.remeasure_plan(picked, skipped, 1, 'rows')
+        self.assertIn('remeasure plan (rows): 2 row(s) in 2 chunk(s) of at most 1', text)
+        self.assertIn('chunk 1 of 2: 1 row(s); scenarios: ', text)
+        self.assertIn('  0x401000 Rules::Render (b011, verdict ours dump-401000)', text)
+        self.assertIn('skipped 0x403000: evidence is oracle; it stands', text)
+        self.assertIn('nothing launched', text)
+        self.assertEqual(_slurp(self.state_path), before)
+        self.assertFalse(os.path.exists(os.path.join(self.root + '-worktrees', 'p3-remeasure-x')))
+
+    def test_remeasure_dry_through_the_command_line(self):
+        d = self._remeasure_driver()
+        out = io.StringIO()
+        with mock.patch('sys.stdout', out):
+            rc = driver.remeasure_main(['--dump-decided', '--dry', '--chunk', '5', '--state',
+                                        self.state_path], repo=self.root)
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertIn('remeasure plan (dump-decided): 1 row(s) in 1 chunk(s) of at most 5', out.getvalue())
+        with mock.patch('sys.stderr', io.StringIO()):
+            self.assertEqual(driver.remeasure_main(['--rows'], repo=self.root), 2)
+            self.assertEqual(driver.remeasure_main(['--read-only-measured', '--batch', 'b011',
+                                                    '--dry'], repo=self.root), 2)
+
+    def test_remeasure_equal_row_gets_trace_evidence_on_its_own_branch(self):
+        d = self._remeasure_driver()
+        wave = driver._tool('wave')
+        picked, skipped = wave.remeasure_select(self.state_path, self.root, 'rows',
+                                                ['0x401000', '0x402000'])
+        first = self.git('rev-parse', 'first').stdout.strip()
+        state_before = _slurp(self.state_path)
+        rc, out = d.remeasure(picked, skipped, chunk=40, mode='rows', stamp='20261024-0300')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.git('rev-parse', 'first').stdout.strip(), first)   # never lands
+        wt = driver._tool('wave').worktree_for(self.root, 'p3/remeasure-20261024-0300')
+        self.assertTrue(wt, out)
+        fields = load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(wt, 'docs', 'evidence', '402000.md')))
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('frida remeasure-20261024-0300-', fields['trace_source'])
+        self.assertNotIn('exemption', fields)
+        self.assertIn('case dump-402000 decides', _slurp(os.path.join(wt, 'docs', 'evidence', '402000.md')))
+        # 0x401000 has no hook in the map: nothing written, listed in the summary
+        self.assertEqual(load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(wt, 'docs', 'evidence', '401000.md')))['kind'], 'read-only')
+        self.assertIn('0x401000 skipped', out)
+        subjects = self.git('log', '--format=%s', first + '..p3/remeasure-20261024-0300').stdout.splitlines()
+        self.assertEqual(len(subjects), 1)
+        self.assertRegex(subjects[0], r'^remeasure: trace evidence for 1 row\(s\) \(\w+\); 0 finding\(s\)$')
+        log = json.loads(_slurp(os.path.join(wt, 'docs', 'wso', 'remeasure-log.json')))
+        self.assertEqual([(e['stamp'], e['asked'], e['measured'], e['equal'], e['different'],
+                           e['not_exercised'], e['other']) for e in log],
+                         [('20261024-0300', 2, 1, 1, 0, 0, 1)])
+        self.assertFalse(os.path.exists(os.path.join(wt, 'docs', 'wso', 'engine-gaps.json')))
+        self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+        self.assertEqual(_slurp(self.state_path), state_before)   # the closed rows stay closed
+        self.assertIn('branch: p3/remeasure-20261024-0300', out)
+
+    def test_remeasure_different_row_is_an_engine_gap_and_no_evidence_change(self):
+        d = self._remeasure_driver(ours_ret=4)
+        wave = driver._tool('wave')
+        picked, skipped = wave.remeasure_select(self.state_path, self.root, 'rows', ['0x402000'])
+        first = self.git('rev-parse', 'first').stdout.strip()
+        # an engine-gaps file that exists already is appended to
+        _write(os.path.join(self.root, 'docs', 'wso', 'engine-gaps.json'),
+               json.dumps([{'address': '0x1', 'name': 'old'}]))
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'gaps')
+        first = self.git('rev-parse', 'first').stdout.strip()
+        rc, out = d.remeasure(picked, skipped, chunk=40, mode='rows', stamp='20261024-0301')
+        self.assertEqual(rc, 0, out)
+        wt = driver._tool('wave').worktree_for(self.root, 'p3/remeasure-20261024-0301')
+        self.assertEqual(load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(wt, 'docs', 'evidence', '402000.md')))['kind'], 'read-only')
+        gaps = json.loads(_slurp(os.path.join(wt, 'docs', 'wso', 'engine-gaps.json')))
+        self.assertEqual([g['address'] for g in gaps], ['0x1', '0x402000'])
+        self.assertEqual(sorted(gaps[1]), ['address', 'at', 'detail', 'found_by', 'name', 'scenario'])
+        self.assertEqual(gaps[1]['found_by'], 'remeasure-20261024-0301')
+        self.assertEqual(gaps[1]['scenario'], 'world_entry')
+        self.assertEqual(gaps[1]['name'], 'IcewindMisc::Roll')
+        subjects = self.git('log', '--format=%s', first + '..p3/remeasure-20261024-0301').stdout.splitlines()
+        self.assertEqual(subjects, ['remeasure: trace evidence for 0 row(s) (none); 1 finding(s)'])
+        log = json.loads(_slurp(os.path.join(wt, 'docs', 'wso', 'remeasure-log.json')))
+        self.assertEqual((log[0]['measured'], log[0]['equal'], log[0]['different']), (1, 0, 1))
+
+    def test_remeasure_one_commit_per_chunk(self):
+        d = self._remeasure_driver()
+        wave = driver._tool('wave')
+        picked, skipped = wave.remeasure_select(self.state_path, self.root, 'rows',
+                                                ['0x401000', '0x402000'])
+        first = self.git('rev-parse', 'first').stdout.strip()
+        rc, out = d.remeasure(picked, skipped, chunk=1, mode='rows', stamp='20261024-0302')
+        self.assertEqual(rc, 0, out)
+        n = self.git('rev-list', '--count', first + '..p3/remeasure-20261024-0302').stdout.strip()
+        self.assertEqual(n, '2')
+        wt = driver._tool('wave').worktree_for(self.root, 'p3/remeasure-20261024-0302')
+        log = json.loads(_slurp(os.path.join(wt, 'docs', 'wso', 'remeasure-log.json')))
+        self.assertEqual(len(log), 1)               # one entry per pass, updated per chunk
+        self.assertEqual(log[0]['chunks_done'], 2)
 
     def test_driver_frida_phase_types_tables_from_the_batch_worktrees_headers(self):
         trace = TruthTest._trace

@@ -2559,7 +2559,7 @@ class Driver:
         except OSError as e:
             self.log('%s: oracle files left as they are: %r' % (batch_id, e))
 
-    def _frida_phase(self, batch_id, batch, worktree, verdicts):
+    def _frida_phase(self, batch_id, batch, worktree, verdicts, rows=None, commit=None):
         """After the worker, with --frida: one batched Frida differential run
         (the scenarios the coverage map picks for the batch, see
         _coverage_scenarios) of an x86 build of the batch worktree
@@ -2595,7 +2595,7 @@ class Driver:
             mb_sha = wave.merge_base_sha(worktree, self.base)
             mb = mb_sha[:12] if mb_sha else self.base
             rows = self._import_rows(batch_id, batch, worktree, mb_sha)
-        else:
+        elif rows is None:   # `rows` given: a remeasure pass names its own (closed) rows
             rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
         if not rows:
             return []
@@ -2610,7 +2610,7 @@ class Driver:
                 if key(r['address']) in self._frida_unhookable else ('not-exercised', hit_text))
                 for r in rows}
             return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
-                                        {}, {}, verdicts, importing, mb)
+                                        {}, {}, verdicts, importing, mb, commit)
         sigs = {}
         for r in rows:
             text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
@@ -2695,7 +2695,7 @@ class Driver:
         self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
         exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
         return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
-                                    verdicts, importing, mb)
+                                    verdicts, importing, mb, commit)
 
     @staticmethod
     def _file_sha(path):
@@ -2855,7 +2855,7 @@ class Driver:
             self.log('%s: frida: results not cached (%s)' % (batch_id, _one_line(repr(e), 120)))
 
     def _frida_findings(self, batch_id, worktree, rows, got, traces, info, exact, verdicts,
-                        importing, mb):
+                        importing, mb, commit=None):
         """The per-row outcomes of a Frida phase (or of a coverage skip): the
         log lines, the import findings, the trace evidence written."""
         key = _tool('wave')._addr_key
@@ -2905,7 +2905,11 @@ class Driver:
                 findings.append('%s: the Frida trace diff shows the body on the branch (verdict %s) '
                                 'different from the original (%s); recheck it' % (
                                     r['address'], side, detail))
-        if written:
+        if written and commit is not None:
+            # a caller that commits the rewritten files itself (remeasure: with
+            # its own files, in one commit)
+            commit(written, cites, findings)
+        elif written:
             self._commit_trace_evidence(batch_id, worktree, written, None if importing else (
                 'frida: trace evidence for %d row(s) measured equal (%s)' % (
                     len(written), ', '.join(sorted(set(cites))))))
@@ -3330,6 +3334,159 @@ class Driver:
         if r.returncode != 0:
             self.log('%s: trace evidence not committed: %s' % (
                 batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
+
+    # -- remeasure: a Frida-only pass over closed rows (Task 20 part B) ----
+
+    ENGINE_GAPS_REL = 'docs/wso/engine-gaps.json'
+    REMEASURE_LOG_REL = 'docs/wso/remeasure-log.json'
+
+    @staticmethod
+    def remeasure_chunks(picked, size):
+        """`picked` in slices of at most `size` rows."""
+        size = max(1, int(size))
+        return [picked[i:i + size] for i in range(0, len(picked), size)]
+
+    def remeasure_plan(self, picked, skipped, chunk, mode='', stamp=None):
+        """The text of `wave.py remeasure --dry`: the rows, the chunks and the
+        scenarios the coverage map picks for each; nothing is launched or
+        written."""
+        chunks = self.remeasure_chunks(picked, chunk)
+        out = ['remeasure plan%s: %d row(s) in %d chunk(s) of at most %d' % (
+            ' (%s)' % mode if mode else '', len(picked), len(chunks), chunk)]
+        for i, part in enumerate(chunks, 1):
+            rows = [p['row'] for p in part]
+            scenarios, skip = self._coverage_scenarios('remeasure-plan', rows)
+            out.append('chunk %d of %d: %d row(s); scenarios: %s' % (
+                i, len(chunks), len(rows),
+                'none (coverage says no scenario exercises any row)' if skip
+                else ', '.join(scenarios)))
+            for p in part:
+                out.append('  %s %s (%s, verdict %s %s)' % (
+                    p['row']['address'], p['row'].get('name', ''), p['batch'], p['side'], p['case']))
+        for a, why in skipped:
+            out.append('skipped %s: %s' % (a, why))
+        out.append('nothing launched; the verdicts and the wave state are never touched')
+        return '\n'.join(out) + '\n'
+
+    def _remeasure_json_list(self, worktree, rel):
+        path = os.path.join(worktree, rel)
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return path, []
+        if not isinstance(data, list):
+            raise ValueError('%s is not a JSON list' % rel)
+        return path, data
+
+    def remeasure(self, picked, skipped, chunk=40, branch=None, mode='', stamp=None):
+        """(exit code, summary text).  Measures the picked closed rows with
+        the Frida phase (_frida_phase over the rows it is given: the coverage
+        map's scenarios, the x86 build of the worktree, frida_run under
+        probe.py's locks, frida_verdicts, the dump guard) on a new branch
+        p3/remeasure-<stamp> cut from the base, chunk by chunk.  Per row:
+        equal -> evidence rewritten to kind: trace (Part A's writer), different
+        -> an entry in docs/wso/engine-gaps.json, anything else listed in the
+        summary.  One commit per chunk; docs/wso/remeasure-log.json carries the
+        pass.  No verdict, state or ledger is written."""
+        wave = _tool('wave')
+        key = wave._addr_key
+        now = datetime.datetime.now()
+        stamp = stamp or now.strftime('%Y%m%d-%H%M')
+        branch = branch or 'p3/remeasure-%s' % stamp
+        pid = 'remeasure-%s' % stamp
+        if not picked:
+            return 0, 'remeasure: no row to measure\n' + ''.join(
+                'skipped %s: %s\n' % s for s in skipped)
+        worktree, how = self.cut_worktree(self.repo, branch, self.base)
+        if worktree is None:
+            return 1, 'remeasure: %s\n' % how
+        self.log('%s: worktree %s on %s (%s)' % (pid, worktree, branch, how))
+        self.log('%s: the sandbox and capture locks serialise this pass with any other driver '
+                 'using them; it may wait' % pid)
+        chunks = self.remeasure_chunks(picked, chunk)
+        tot = {'asked': len(picked), 'measured': 0, 'equal': 0, 'different': 0,
+               'not_exercised': 0, 'other': 0, 'trace_evidence': 0, 'chunks': len(chunks),
+               'chunks_done': 0}
+        listed, stopped = [], None
+        for i, part in enumerate(chunks, 1):
+            rows = [p['row'] for p in part]
+            verdicts = {p['row']['address']: (p['side'], p['case']) for p in part}
+            self._probe = {}
+            got_written = {}
+
+            def commit(written, cites, findings, got_written=got_written):
+                got_written['rows'] = list(written)
+                got_written['cites'] = list(cites)
+            self.log('%s: chunk %d of %d: %d row(s)' % (pid, i, len(chunks), len(rows)))
+            try:
+                self._frida_phase(pid, {'branch': branch, 'rows': rows}, worktree, verdicts,
+                                  rows=rows, commit=commit)
+            except _StageError as e:
+                stopped = 'chunk %d: %s' % (i, e.problem)
+                self.log('%s: %s' % (pid, stopped))
+                break
+            written = got_written.get('rows', [])
+            wkeys = {key(a) for a in written}
+            gaps_path, gaps = self._remeasure_json_list(worktree, self.ENGINE_GAPS_REL)
+            found = 0
+            for r in rows:
+                status, detail = self._frida_got.get(key(r['address']), ('skipped', 'no result'))
+                if status in ('equal', 'different'):
+                    tot['measured'] += 1
+                if status == 'equal':
+                    tot['equal'] += 1
+                    if key(r['address']) not in wkeys:
+                        listed.append('%s equal in no run with matching dumps; no trace evidence '
+                                      'written (%s)' % (r['address'], detail))
+                elif status == 'different':
+                    tot['different'] += 1
+                    found += 1
+                    m = re.search(r'differs in ([A-Za-z0-9_]+)', detail)
+                    gaps.append({'address': r['address'], 'name': r.get('name', ''),
+                                 'scenario': m.group(1) if m else '', 'detail': detail,
+                                 'found_by': pid, 'at': _now()})
+                elif status == 'not-exercised':
+                    tot['not_exercised'] += 1
+                    listed.append('%s not exercised (%s)' % (r['address'], detail))
+                else:
+                    tot['other'] += 1
+                    listed.append('%s %s (%s)' % (r['address'], status, detail))
+            tot['trace_evidence'] += len(written)
+            tot['chunks_done'] = i
+            if found:
+                wave._save_json(gaps_path, gaps)
+            log_path, log = self._remeasure_json_list(worktree, self.REMEASURE_LOG_REL)
+            entry = dict(tot, stamp=stamp, mode=mode, branch=branch,
+                         at=_now())
+            log = [e for e in log if not (isinstance(e, dict) and e.get('stamp') == stamp)]
+            log.append(entry)
+            wave._save_json(log_path, log)
+            rels = [wave._evidence_rel(a) for a in written] + [self.REMEASURE_LOG_REL] + (
+                [self.ENGINE_GAPS_REL] if found else [])
+            msg = 'remeasure: trace evidence for %d row(s) (%s); %d finding(s)' % (
+                len(written), ', '.join(sorted(set(got_written.get('cites', [])))) or 'none', found)
+            self._git_in(worktree, 'add', '--', *rels)
+            r = self._git_in(worktree, 'commit', '-q', '-m', msg, '--', *rels)
+            if r.returncode != 0:
+                self.log('%s: chunk %d not committed: %s' % (
+                    pid, i, _one_line((r.stderr or '') + (r.stdout or ''))))
+        lines = ['remeasure %s: %d asked, %d measured (%d equal, %d different), %d not exercised, '
+                 '%d other; %d trace evidence file(s) written in %d of %d chunk(s)' % (
+                     stamp, tot['asked'], tot['measured'], tot['equal'], tot['different'],
+                     tot['not_exercised'], tot['other'], tot['trace_evidence'],
+                     tot['chunks_done'], tot['chunks'])]
+        lines += ['  ' + l for l in listed]
+        lines += ['skipped %s: %s' % s for s in skipped]
+        if stopped:
+            lines.append('STOPPED: %s' % stopped)
+        lines.append('branch: %s (worktree %s); gate it (tools/gates.sh --base %s) and land it' % (
+            branch, worktree, self.base))
+        return (1 if stopped else 0), '\n'.join(lines) + '\n'
+
+    @staticmethod
+    def _git_in(worktree, *args):
+        return subprocess.run(['git', '-C', worktree, *args], capture_output=True, text=True)
 
     def _merged(self, batch_id, verdicts):
         """The state's verdicts plus the report's, as (side, case)."""
@@ -5007,6 +5164,51 @@ def _clear(batch_id, repo, queue='wave1'):
     print('removed the exception for %s from %s: %s' % (
         batch_id, path, json.dumps(entry, sort_keys=True)))
     return 0
+
+
+def remeasure_main(argv=None, repo=None):
+    """`wave.py remeasure`: see Driver.remeasure."""
+    wave = _tool('wave')
+    wave._line_buffer()
+    repo = repo or wave.ROOT
+    ap = argparse.ArgumentParser(prog='wave.py remeasure', description=(
+        'A Frida-only pass over closed wave-1 rows: trace evidence for the ones that measure equal '
+        '(on a p3/remeasure-<stamp> branch), docs/wso/engine-gaps.json entries for the ones that differ.'))
+    sel = ap.add_mutually_exclusive_group(required=True)
+    sel.add_argument('--rows', nargs='+', metavar='ADDR')
+    sel.add_argument('--read-only-measured', action='store_true')
+    sel.add_argument('--dump-decided', action='store_true')
+    ap.add_argument('--batch', default=None)
+    ap.add_argument('--chunk', type=int, default=40)
+    ap.add_argument('--dry', action='store_true')
+    ap.add_argument('--branch', default=None)
+    ap.add_argument('--state', default=None, help=argparse.SUPPRESS)
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit as e:
+        return 2 if e.code else 0
+    if args.chunk < 1 or (args.batch and not args.dump_decided):
+        print('wave.py remeasure: --chunk is at least 1; --batch goes with --dump-decided',
+              file=sys.stderr)
+        return 2
+    mode = ('rows' if args.rows else 'read-only-measured' if args.read_only_measured
+            else 'dump-decided')
+    state = os.path.abspath(args.state) if args.state else os.path.join(repo, 'docs', 'wso', 'wave-state.json')
+    picked, skipped = wave.remeasure_select(state, repo, mode, args.rows or (), args.batch)
+    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M')
+    status = os.path.join(repo, DRIVER_REL, 'remeasure-%s' % stamp, 'status.json')
+    try:
+        d = Driver(repo, state, None, None, os.path.join(os.path.dirname(status), 'progress.md'),
+                   status, dry_run=False, frida=True, frida_cache=False, queue='wave1')
+    except (StatusError, ValueError) as e:
+        print('wave.py remeasure: %s' % e, file=sys.stderr)
+        return 1
+    if args.dry:
+        sys.stdout.write(d.remeasure_plan(picked, skipped, args.chunk, mode))
+        return 0
+    rc, out = d.remeasure(picked, skipped, args.chunk, args.branch, mode, stamp)
+    sys.stdout.write(out)
+    return rc
 
 
 def main(argv=None, repo=None):

@@ -12,6 +12,10 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py unpark 0x5152C0 [--reason TEXT]     # a parked import row back to the queue
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
+    python3 tools/wave.py remeasure (--rows 0xA 0xB .. | --read-only-measured |
+        --dump-decided [--batch bNNN]) [--chunk 40] [--dry] [--branch NAME]
+                                                # Frida-only pass over closed rows: trace
+                                                # evidence on a p3/remeasure-<stamp> branch
     python3 tools/wave.py status
     python3 tools/wave.py recompare [--tip SHA] [--no-fetch]   # queue what Will's tip adds
     python3 tools/wave.py run [--queue wave1|import] [--pool SPEC]... [--budget C] [--seed S]   # the driver
@@ -1462,6 +1466,66 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
 
 # -- recompare ------------------------------------------------------------
 
+def remeasure_select(state_path=STATE_PATH, repo=ROOT, mode='rows', addresses=(),
+                     batch=None, base='first'):
+    """(picked, skipped) for `wave.py remeasure`: the closed wave-1 rows to
+    measure again, and (address, why) for the ones asked for or considered
+    and left out.  Never writes anything.
+
+    mode 'rows': the addresses named; 'read-only-measured': closed rows whose
+    verdict says measured frida but whose evidence on `base` is kind:
+    read-only; 'dump-decided': closed rows whose verdict case starts dump-,
+    with no `measured`, evidence read-only (optionally one batch).  Only a
+    verdict whose body is on the base is measured (side ours, or fork, whose
+    adopted body landed with the close); `neither` is skipped; evidence that
+    is oracle, replay or trace stands and is listed.  A picked entry is
+    {row, side, case, batch, measured, kind}."""
+    state = load_state(state_path)
+    want = {_addr_key(a): a for a in addresses}
+    closed = {}
+    for bid in sorted(state['batches']):
+        b = state['batches'][bid]
+        if b.get('status') != 'closed' or (batch and bid != batch):
+            continue
+        verdicts = b.get('verdicts') or {}
+        vkeys = {_addr_key(a): v for a, v in verdicts.items()}
+        for r in b.get('rows', []):
+            v = vkeys.get(_addr_key(r['address']))
+            if v is not None:
+                closed[_addr_key(r['address'])] = (bid, r, v)
+    picked, skipped = [], []
+    for k, (bid, r, v) in sorted(closed.items()):
+        side, case = v.get('side'), v.get('case') or ''
+        measured = v.get('measured')
+        if mode == 'rows':
+            if k not in want:
+                continue
+        elif mode == 'read-only-measured':
+            if measured != 'frida':
+                continue
+        elif mode == 'dump-decided':
+            if not case.startswith('dump-') or measured not in (None, '', 'none'):
+                continue
+        else:
+            raise ValueError('unknown remeasure mode %r' % mode)
+        if side not in ('ours', 'fork'):
+            skipped.append((r['address'], 'verdict %s: no body of ours on the base to measure' % side))
+            continue
+        kind, _err = _evidence_kind(repo, base, r['address'])
+        if kind != 'read-only':
+            skipped.append((r['address'], 'evidence is %s' % (kind or 'missing')
+                            + ('; it stands' if kind else '')))
+            continue
+        picked.append({'row': dict(r), 'side': side, 'case': case, 'batch': bid,
+                       'measured': measured, 'kind': kind})
+    if mode == 'rows':
+        found = set(closed)
+        skipped += [(a, 'not a row of a closed wave-1 batch%s' % (
+            ' (batch %s)' % batch if batch else '')) for k, a in sorted(want.items())
+            if k not in found]
+    return picked, skipped
+
+
 def _resolve_tip(repo, tip):
     """The full sha of `tip` in repo, or None."""
     r = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', '--quiet',
@@ -2313,6 +2377,8 @@ def main(argv=None):
         rc, out = status()
     elif cmd == 'run':
         return _driver().main(rest)
+    elif cmd == 'remeasure':
+        return _driver().remeasure_main(rest)
     else:
         print(f'wave.py: unknown command {cmd}', file=sys.stderr)
         return 2
