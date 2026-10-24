@@ -14788,12 +14788,16 @@ class DriverTest(unittest.TestCase):
         log = os.path.join(tempfile.mkdtemp(), 'x.log')
         self.addCleanup(shutil.rmtree, os.path.dirname(log), True)
         killed = subprocess.CompletedProcess([], -9, '', '')
-        with mock.patch.object(driver, '_run_group', return_value=killed):
-            driver._STOPPED.set()
-            self.addCleanup(driver._STOPPED.clear)
+        # A private stop flag: the module-level _STOPPED is shared with driver
+        # threads other tests leave finishing, which can clear it between the
+        # set() and the call (seen once as a red base suite on first, 2026-10-24).
+        stopped = threading.Event()
+        stopped.set()
+        with mock.patch.object(driver, '_run_group', return_value=killed), \
+                mock.patch.object(driver, '_STOPPED', stopped):
             with self.assertRaises(driver._Stop):
                 driver.run_base_tests(self.root if hasattr(self, 'root') else '.', log)
-            driver._STOPPED.clear()
+            stopped.clear()
             self.assertEqual(driver.run_base_tests('.', log)[0], False)   # not stopped: red
         with mock.patch.object(driver, '_run_group', side_effect=subprocess.TimeoutExpired('x', 600)):
             ok, detail = driver.run_base_tests('.', log)
