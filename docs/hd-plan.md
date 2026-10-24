@@ -158,6 +158,20 @@ resources. None of these changes the simulation.
 - No OpenGL, and no reconstruction of IWD2EE's unfinished OpenGL renderer; its notes are read
   for ideas and credited where an idea is taken.
 
+### Reference material (read-only)
+
+- IEexLoader, Bubb13's LuaJIT branch of mrfearless's loader:
+  <https://github.com/Bubb13/IEexLoader/tree/LuaJIT/IEex>, pinned at
+  `099eac77f03bdd332524daac35adade0178ecfdc` (2020-12-11). RadASM assembly: `IEex/` builds the
+  `IEex.exe` loader, `IEexDLL/` the injected `IEex.dll` hosting Lua 5.1/5.2 and SDL2; it
+  targets IWD2 2.0.1.0 among BG, BG2, IWD and PST. Neither the fork nor the upstream carries a
+  LICENSE file, so it is read for ideas only: no code and no binaries from it enter this tree.
+  Read it with `git show` at the pinned sha, never checked out or executed, the same rule as
+  the WSO fork.
+- The IEex core and the IWD2EE helper (the part the renderer ideas come from) are not public;
+  Bubb13 has offered a newer version. When it arrives: pin its sha, check its license, same
+  read-only rule.
+
 ## 6. Open questions, to settle when phase 1 is specified
 
 - Atlas layout for areas larger than the maximum texture size on older GPUs (tiling the

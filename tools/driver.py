@@ -717,7 +717,8 @@ def _split_unquoted(text, seps):
 def _history_rewrite(args, covered=(), tracked=None):
     """True when the arguments of a `git` command (after the command word)
     rewrite or discard history or work: reset, rebase, revert, restore,
-    clean, stash, filter-repo, push, update-ref, commit --amend, branch
+    clean, stash (except the read-only `stash list` / `stash show`),
+    filter-repo, push, update-ref, commit --amend, branch
     -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
     branch switch (`--`, -f, -B, `.`, a path after a start point, or one
     argument that names a covered file, looks like a path or starts with a
@@ -732,6 +733,12 @@ def _history_rewrite(args, covered=(), tracked=None):
     if not rest:
         return False
     sub, rest = rest[0], rest[1:]
+    if sub == 'stash':
+        # `git stash list` / `git stash show` only read the stash; every
+        # other form (push, pop, apply, drop, clear, a bare `git stash`)
+        # moves work around
+        pos = [a for a in rest if not a.startswith('-')]
+        return not (pos and pos[0] in ('list', 'show'))
     if sub in _HISTORY_VERBS:
         return True
     if sub == 'commit':
@@ -925,6 +932,7 @@ def park_text(address, mb, needs):
 
 
 UNMEASURED_NEEDS = FRIDA_SCENARIOS_TEXT + ': not exercised'
+COVERAGE_NOT_HIT = 'coverage: no scenario hits it'
 UNMEASURED = '%s: exercised by no scenario (' + FRIDA_SCENARIOS_TEXT + '); park it: %s'
 
 
@@ -1142,14 +1150,27 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         driver_probe = k in probe_keys or (
             side == 'ours' and batch.get('id') is not None
             and case.startswith('probe-%s-' % batch['id']))
-        if driver_probe:
+        paras = wave.evidence_paragraphs(text)
+        probe_msg = driver_probe and not any(
+            wave.EVIDENCE_PHRASES[1] in para for para in paras)
+        if probe_msg:
             # A probe pass says ours matches the original (ruling R57).
-            if wave.EVIDENCE_PHRASES[1] not in text:
-                problems.append("%s: its verdict case is a probe; add the exact "
-                                "phrase 'corroborated by WSO at <sha>'" % rel)
-        elif not any(p in text for p in wave.EVIDENCE_PHRASES):
-            problems.append("%s: no 'disagreed with WSO' or 'corroborated by "
-                            "WSO' phrase; add one of the exact phrases" % rel)
+            problems.append("%s: its verdict case is a probe; write the "
+                            "sentence 'corroborated by WSO at <sha>: ...; "
+                            "case %s decides' in the ## WSO delta section"
+                            % (rel, case))
+        if not probe_msg and not wave._evidence_decided_by(text, case):
+            problems.append(
+                '%s: docs/evidence/%s.md has no sentence reading "disagreed '
+                'with WSO at <sha>: ...; case %s decides" (or "corroborated '
+                'by WSO ..."); write it in the ## WSO delta section'
+                % (r['address'], k.upper(), case))
+        if batch.get('fork_base') and not wave._cites_pin(
+                text, batch['fork_base']):
+            problems.append(
+                '%s: no "disagreed with WSO at <sha>" / "corroborated by WSO '
+                'at <sha>" line names this batch\'s pin %s'
+                % (rel, batch['fork_base'][:7]))
     dirty, bad = _git_paths(run, worktree, ('status', '--porcelain', '-uall'),
                             lambda l: l[3:].split(' -> ')[-1].strip('"'))
     if bad:
@@ -2203,7 +2224,7 @@ class Driver:
             if not carried:
                 return again
             return again + ('## Measured before you started\n\nThe oracle probe passed these rows earlier '
-                    '(the driver records each as `ours`; cite `corroborated by WSO at <sha>`):\n'
+                    '(the driver records each as `ours`; write the ## WSO delta sentence `corroborated by WSO at <sha>: ...; case probe-<batch>-<ADDR> decides`, the exact case shown):\n'
                     + ''.join('- 0x%s: case %s\n' % (k.upper(), self._probe[k][1]) for k in sorted(carried))
                     + '\n')
 
@@ -2242,8 +2263,9 @@ class Driver:
         if passed:
             lines.append('The oracle probe passed these rows (ours matches the original over a '
                          'swept domain). The driver records each as `ours`, with the case shown; '
-                         'write the evidence file with the exact phrase '
-                         '`corroborated by WSO at <sha>` and cite that case:')
+                         'write the evidence file with the sentence '
+                         '`corroborated by WSO at <sha>: ...; case probe-<batch>-<ADDR> decides` '
+                         'in the ## WSO delta section, with the exact case shown:')
             lines += ['- %s: case %s (%s)' % p for p in passed]
         if failed:
             lines.append('The oracle probe FAILED these rows (ours and the original disagree). '
@@ -2357,6 +2379,14 @@ class Driver:
             rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
         if not rows:
             return []
+        if self._coverage_skips(batch_id, rows):
+            # No scenario of the phase hits any row (the coverage map of the
+            # original): no build, no launch; the same shape the run's
+            # verdicts have, read by the loop below.
+            self._frida_got = {key(r['address']): ('not-exercised', COVERAGE_NOT_HIT)
+                               for r in rows}
+            return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
+                                        {}, {}, verdicts, importing, mb)
         checkout, map_path, why = self._frida_target(batch_id, worktree)
         sigs = {}
         for r in rows:
@@ -2411,6 +2441,15 @@ class Driver:
         # _land, never a finding or a verdict (the final review's ruling).
         self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
         exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
+        return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
+                                    verdicts, importing, mb)
+
+    def _frida_findings(self, batch_id, worktree, rows, got, traces, info, exact, verdicts,
+                        importing, mb):
+        """The per-row outcomes of a Frida phase (or of a coverage skip): the
+        log lines, the import findings, the trace evidence written."""
+        key = _tool('wave')._addr_key
+        truth = _tool('truth')
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
         findings, written = [], []
         for r in rows:
@@ -2445,6 +2484,29 @@ class Driver:
         if written:
             self._commit_trace_evidence(batch_id, worktree, written)
         return findings
+
+    def _coverage_skips(self, batch_id, rows):
+        """True when a usable coverage map exists and every row (a dependency
+        included) was measured by every scenario the phase runs and hit by
+        none; a row nobody measured is unknown and keeps the phase."""
+        try:
+            cov_mod = _tool('coverage')
+            path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
+            cov, why = cov_mod.check(path, self.repo)
+            if cov is None:
+                if os.path.exists(path):
+                    self.log('%s: frida: coverage map not used (%s); running as usual'
+                             % (batch_id, why))
+                return False
+            phase = _tool('truth').FRIDA_SCENARIOS
+            if any(cov_mod.status_of(cov, r['address'], phase) != 'dead' for r in rows):
+                return False
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            self.log('%s: frida: coverage map unreadable (%s); running as usual'
+                     % (batch_id, _one_line(repr(e), 200)))
+            return False
+        self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
+        return True
 
     def _import_rows(self, batch_id, batch, worktree, mb_sha):
         """The functions an import batch's Frida phase measures: its rows
@@ -2513,7 +2575,9 @@ class Driver:
                     'original (%s); the phase does not run again in this batch, so park it: %s'
                     % (a, detail, park_text(a, mb, 'frida different: %s' % detail)))
         elif status == 'not-exercised':
-            text = UNMEASURED % (a, park_text(a, mb, UNMEASURED_NEEDS))
+            needs = ('not-exercised (%s)' % detail if detail == COVERAGE_NOT_HIT
+                     else UNMEASURED_NEEDS)
+            text = UNMEASURED % (a, park_text(a, mb, needs))
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
                 a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
@@ -3901,6 +3965,7 @@ class Driver:
         adopt = self._adoptable([b for b, _w, _n in pending] + retries)
         capped = False        # --max-batches reached
         crash = None          # an exception that escaped a batch thread
+        launched = set()      # every batch this run started (no second pickup)
 
         threads = self._threads = []
 
@@ -3919,6 +3984,7 @@ class Driver:
             nonlocal running
             running += 1
             self._began += 1
+            launched.add(batch_id)
             self._start(lambda: body(batch_id, why, name))
 
         def reap(block):
@@ -3978,6 +4044,17 @@ class Driver:
                     self._busy[name] += 1
             if name is None:
                 return False
+            if not retries:
+                # An exception cleared while the driver runs (`wave.py run
+                # --clear`): outside the lock, as at the start.
+                live = set(self._read_status()['running'])
+                skip = launched | live | {b for b, _w, _n in pending}
+                for bid in self._cleared():
+                    if bid not in skip:
+                        retries.append(bid)
+                        self.log('%s: exception cleared while running; '
+                                 'retrying at its %s stage'
+                                 % (bid, self._retry_stage.get(bid)))
             if retries:
                 bid = retries.pop(0)
                 why = self._retry_why(bid)

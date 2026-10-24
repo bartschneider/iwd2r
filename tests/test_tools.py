@@ -129,6 +129,7 @@ gltrace = load_tool('gltrace')
 truth = load_tool('truth')
 triage = load_tool('triage')
 driver = load_tool('driver')
+coverage = load_tool('coverage')
 
 
 def load_ghidra_tool(name):
@@ -8070,6 +8071,9 @@ class WaveTest(unittest.TestCase):
         self.assertIn('case ', brief)
         self.assertIn('disagreed with WSO', brief)
         self.assertIn('corroborated by WSO', brief)
+        self.assertIn('; case <id> decides', brief)
+        self.assertIn("the driver's checks refuse a verdict row whose "
+                      "evidence lacks it", brief)
         self.assertIn('Imported-From', brief)
         self.assertIn('WIP', brief)
         self.assertIn('parity_waiver', brief)
@@ -9813,6 +9817,73 @@ class _DirtyWorker(_SeqWorker):
         return super().run(brief, cwd)
 
 
+class EvidenceParagraphsTest(unittest.TestCase):
+    FIXTURE = ('---\nkind: oracle\n---\n\n# 0x401000\n\n## WSO delta\n\n'
+               'disagreed with WSO at e8dd16a7: the guard differs; the\n'
+               'clamp is the same in both builds; the oracle sweep\n'
+               'agrees on every sampled argument; the trace shows one\n'
+               'path; nothing else reads the result; the other callers\n'
+               'only forward it; the replay confirms it;\n'
+               'case probe-9 decides.\n\n'
+               '```c\nint f(int a)\n{\n  return a;\n}\n```\n\n'
+               'first paragraph\nsecond line\n\nlast paragraph\n')
+
+    def setUp(self):
+        self.wave = load_tool('wave')
+
+    def test_paragraphs(self):
+        self.assertEqual(self.wave.evidence_paragraphs(self.FIXTURE), [
+            '---', 'kind: oracle', '---',
+            '# 0x401000', '## WSO delta',
+            'disagreed with WSO at e8dd16a7: the guard differs; the clamp is the '
+            'same in both builds; the oracle sweep agrees on every sampled '
+            'argument; the trace shows one path; nothing else reads the result; '
+            'the other callers only forward it; the replay confirms it; '
+            'case probe-9 decides.',
+            '```c', 'int f(int a)', '{', '  return a;', '}', '```',
+            'first paragraph second line', 'last paragraph'])
+
+    def test_a_single_line_is_unchanged(self):
+        self.assertEqual(self.wave.evidence_paragraphs('one line\n'), ['one line'])
+        self.assertEqual(self.wave.evidence_paragraphs(''), [])
+
+    def test_decided_by_reads_the_wrapped_sentence(self):
+        w = self.wave
+        self.assertTrue(w._evidence_decided_by(self.FIXTURE, 'probe-9'))
+        self.assertFalse(w._evidence_decided_by(self.FIXTURE, 'probe-8'))
+        self.assertFalse(w._evidence_decided_by(
+            self.FIXTURE.replace('disagreed with WSO', 'disagreed with us'), 'probe-9'))
+        self.assertTrue(w._evidence_decided_by(
+            'corroborated by WSO at abc1234; case c decides', 'c'))
+
+    def test_decided_by_keeps_the_physical_line_reading(self):
+        w = self.wave
+        text = ('- disagreed with WSO at abc1234: x; case c decides\n'
+                '- another bullet\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        text = ('disagreed with WSO at abc1234: x; case c decides.\n'
+                'more prose right after it\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        self.assertFalse(w._evidence_decided_by(text, 'd'))
+
+    def test_front_matter_does_not_join_the_body(self):
+        paras = self.wave.evidence_paragraphs('---\nkind: oracle\n---\nbody a\nbody b\n')
+        self.assertEqual(paras, ['---', 'kind: oracle', '---', 'body a body b'])
+
+    def test_decided_by_does_not_join_across_a_blank_line_or_fence(self):
+        w = self.wave
+        text = 'disagreed with WSO at abc1234: x\n\ncase c decides\n'
+        self.assertFalse(w._evidence_decided_by(text, 'c'))
+
+    def test_cites_pin_across_a_wrap(self):
+        w = self.wave
+        self.assertTrue(w._cites_pin(self.FIXTURE, 'e8dd16a7' + '0' * 32))
+        wrapped = 'disagreed with WSO\nat e8dd16a7: x;\ncase c decides\n'
+        self.assertTrue(w._cites_pin(wrapped, 'e8dd16a7'))
+        self.assertFalse(w._cites_pin(wrapped, '1234567'))
+        self.assertFalse(w._cites_pin('disagreed with WSO\n\nat e8dd16a7', 'e8dd16a7'))
+
+
 class DriverTest(unittest.TestCase):
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
@@ -9997,6 +10068,12 @@ class DriverTest(unittest.TestCase):
         g('init', '-q', '-b', 'p3/wso-b011')
         os.makedirs(os.path.join(d, 'docs', 'evidence'))
         for addr, text in evidence.items():
+            phrase = next((p for p in ('disagreed with WSO', 'corroborated by WSO') if p in text), None)
+            if phrase:
+                # every case id the tests below give a verdict decides
+                text += ''.join('\n\n%s at abc; case %s decides' % (phrase, c) for c in (
+                    'c', 'dump-3', 'probe-3', 'probe-4', 'probe-17', 'x',
+                    'probe-b011-76D370', 'readout-401000'))
             with open(os.path.join(d, 'docs', 'evidence', addr + '.md'), 'w') as f:
                 f.write(text)
         return d
@@ -10069,7 +10146,7 @@ class DriverTest(unittest.TestCase):
         self.assertNotIn('docs/plan.md', outside[0])
 
     def test_mechanical_checks_flags_missing_and_foreign_verdicts(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         calls = []
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             probs = driver.mechanical_checks(
@@ -10084,7 +10161,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(all(c[1] == d for c in calls))
 
     def test_mechanical_checks_accept_undecided_in_place_of_a_verdict(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
                 mock.patch.object(driver._tool('check_evidence'), 'touched',
@@ -10107,7 +10184,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x999999:') and 'outside' in p for p in probs))
 
     def test_mechanical_checks_undecided_row_must_keep_our_body(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         ce = driver._tool('check_evidence')
         args = (batch, d, {'0x76D370': ('ours', 'c')})
@@ -10162,7 +10239,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('76D370.md', probs[0])
 
     def test_mechanical_checks_subprocess_steps(self):
-        d = self._mc_repo({'76D370': 'disagreed with WSO at x'})
+        d = self._mc_repo({'76D370': 'disagreed with WSO at x; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
         exe = os.path.join(d, 'iwd2.exe')
@@ -10238,8 +10315,13 @@ class DriverTest(unittest.TestCase):
         self.git('worktree', 'add', '-q', '-b', 'p3/wso-b011', self.wt, 'first')
         lines = {'403000': self.AUTO_LINE}
         if phrases:
-            lines['401000'] = 'disagreed with WSO at e8dd16a7: the guard; case probe-1 decides'
-            lines['402000'] = 'corroborated by WSO at e8dd16a7'
+            lines['401000'] = ('disagreed with WSO at e8dd16a7: the guard; case dump-401000 decides\n\n'
+                               'disagreed with WSO at e8dd16a7: the guard; case probe-b011-401000 decides\n\n'
+                               'disagreed with WSO at e8dd16a7: the guard; case dry-0x401000 decides')
+            lines['402000'] = ('corroborated by WSO at e8dd16a7; case dump-402000 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case probe-b011-402000 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case probe-12 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case dry-0x402000 decides')
         for stem, line in lines.items():
             with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'), 'a') as f:
                 f.write('\n' + line + '\n')
@@ -10331,7 +10413,7 @@ class DriverTest(unittest.TestCase):
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
         with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'a') as f:
-            f.write('\ncorroborated by WSO at e8dd16a7\n' + self.PURE_EVIDENCE)
+            f.write('\ncorroborated by WSO at e8dd16a7; case dump-401000 decides\n' + self.PURE_EVIDENCE)
         with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
             f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
         self.git('commit', '-qam', 'decompiled', cwd=self.wt)
@@ -10680,7 +10762,9 @@ class DriverTest(unittest.TestCase):
             d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(cm.exception.stage, 'frida')
         self.assertIn('every Frida scenario failed on infrastructure (no side produced a status): '
-                      'first_fight: original side exited 2', cm.exception.problem)
+                      + '; '.join('%s: original side exited 2' % sc
+                                  for sc in sorted(driver._tool('truth').FRIDA_SCENARIOS)),
+                      cm.exception.problem)
         self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
         # the run itself raising is the same exception
         d.frida_run = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('sandbox gone'))
@@ -10802,6 +10886,94 @@ class DriverTest(unittest.TestCase):
                 {'address': '0x402000', 'name': 'IcewindMisc::Roll'},
                 {'address': '0x403000', 'name': 'Rules::Tick'}]
         return d, {'branch': 'p3/wso-b011', 'rows': rows}
+
+    def _coverage_map(self, hits, hooked=('0x401000', '0x402000', '0x403000')):
+        phase = driver._tool('truth').FRIDA_SCENARIOS
+        cov = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.root),
+               'at': '2026-10-24T00:00:00Z',
+               'scenarios': {sc: {'hooks': 3, 'refused': [], 'failed_chunks': [],
+                                  'measured': len(hooked), 'hooked': list(hooked),
+                                  'hits': hits.get(sc, {})} for sc in phase}}
+        _write(os.path.join(self.root, 'docs', 'wso', 'coverage.json'), json.dumps(cov))
+
+    def test_driver_frida_phase_skips_launches_when_coverage_hits_no_row(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
+        d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        text = 'coverage: no scenario hits it'
+        self.assertEqual(len(findings), len(d._frida_got))
+        self.assertTrue(findings)
+        self.assertEqual(set(d._frida_got.values()), {('not-exercised', text)})
+        for f in findings:
+            self.assertIn('"not-exercised (%s)"' % text, f)
+        self.assertIn('b011: frida: skipped, coverage says no scenario exercises any row',
+                      self.logs)
+
+    def test_driver_frida_phase_runs_as_today_when_one_row_is_covered(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'first_fight': {'0x402000': 4}})
+        built = []
+        inner = d.frida_build
+        d.frida_build = lambda *a, **kw: built.append(1) or inner(*a, **kw)
+        ran = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            ran.append(sorted(h['name'] for h in table['original']['hooks']))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(built, [1])
+        self.assertEqual(len(ran), 1)
+        self.assertTrue(len(ran[0]) >= 2)   # uncovered rows stay in the table
+        self.assertNotIn('b011: frida: skipped, coverage says no scenario exercises any row',
+                         self.logs)
+
+    def test_driver_frida_phase_runs_when_a_row_was_not_measured(self):
+        # an unmeasured row is unknown, not dead: the phase runs
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}}, hooked=('0x401000', '0x402000'))
+        built = []
+        d.frida_build = lambda *a, **kw: built.append(1) or (_ for _ in ()).throw(
+            SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(built, [1])
+
+    def test_driver_frida_phase_ignores_an_incomplete_coverage_map(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
+        cov = json.loads(_slurp(path))
+        cov['scenarios']['first_fight']['failed_chunks'] = [2]
+        _write(path, json.dumps(cov))
+        d.frida_build = lambda *a, **kw: (_ for _ in ()).throw(SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('map has failed chunk(s) in first_fight', '\n'.join(self.logs))
+        del cov['scenarios']['first_fight']
+        _write(path, json.dumps(cov))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        _write(path, json.dumps({'scenarios': 5}))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+
+    def test_driver_frida_phase_ignores_a_stale_coverage_map(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        _write(os.path.join(self.root, 'scenarios', 'new.txt'), 'quit\n')
+        built = []
+        d.frida_build = lambda *a, **kw: built.append(1) or (_ for _ in ()).throw(
+            SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(built, [1])
 
     def test_driver_frida_phase_falls_back_to_the_ghidra_export_signature(self):
         d, batch = self._import_phase_driver()
@@ -11362,6 +11534,88 @@ class DriverTest(unittest.TestCase):
         self.assertIn('0x401000: no verdict line', w.briefs[1])
         self.assertIn('BRIEF b011', w.briefs[1])
 
+    WRAPPED = ('corroborated by WSO at e8dd16a7: the guard and the clamp are\n'
+               'the same in both builds, the oracle sweep agrees on every\n'
+               'sampled argument and the trace shows one path, so the\n'
+               'original and ours cannot differ on the swept domain,\n'
+               'which is what the replay needs, and nothing else reads the\n'
+               'result; the other callers only forward it to the renderer;\n'
+               'case %s decides.\n')
+
+    def _set_evidence(self, stem, body):
+        path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+        with open(path, 'w') as f:
+            f.write('---\naddress: 0x%s\nname: F\nkind: oracle\n---\n\n%s' % (stem, body))
+        self.git('commit', '-qam', 'evidence ' + stem, cwd=self.wt)
+
+    def test_check_flags_evidence_without_the_deciding_sentence(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        self._set_evidence('401000', 'disagreed with WSO at e8dd16a7: the guard; case other decides\n')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        _verdicts, probs = d._check('b011', self.wt, self.REPORT)
+        self.assertEqual(probs, [
+            '0x401000: docs/evidence/401000.md has no sentence reading "disagreed '
+            'with WSO at <sha>: ...; case dump-401000 decides" (or "corroborated '
+            'by WSO ..."); write it in the ## WSO delta section'])
+
+    def test_check_probe_row_needs_the_deciding_sentence_too(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        case = 'probe-b011-402000'
+        self._set_evidence('401000', self.WRAPPED % 'dump-401000')
+        self._set_evidence('402000', 'corroborated by WSO at e8dd16a7: same\n')
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [
+            '0x402000: docs/evidence/402000.md has no sentence reading "disagreed '
+            'with WSO at <sha>: ...; case %s decides" (or "corroborated by WSO '
+            '..."); write it in the ## WSO delta section' % case])
+        self._set_evidence('402000', self.WRAPPED % case)
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [])
+
+    def test_check_flags_a_pin_the_evidence_does_not_cite(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['fork_base'] = 'e8dd16a7'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self._set_evidence('401000', 'disagreed with WSO at 1234567: the guard; case dump-401000 decides\n')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        _verdicts, probs = d._check('b011', self.wt, self.REPORT)
+        self.assertEqual(probs, [
+            'docs/evidence/401000.md: no "disagreed with WSO at <sha>" / '
+            '"corroborated by WSO at <sha>" line names this batch\'s pin e8dd16a'])
+
+    def test_check_does_not_read_evidence_of_triage_decided_rows(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        self._set_evidence('401000', self.WRAPPED % 'dump-401000')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        self._set_evidence('403000', 'disagreed with WSO at e8dd16a7: x; case nothing decides\n')
+        report = self.REPORT + 'verdict 0x403000 fork case probe-x\n'
+        verdicts, probs = d._check('b011', self.wt, report)
+        self.assertEqual(probs, [])
+        self.assertNotIn('0x403000', verdicts)
+        self.assertIn('0x403000', d._ignored)
+
+    def test_check_fix_round_carries_the_evidence_problem_to_the_worker(self):
+        outer = self
+
+        class Fixer(_SeqWorker):
+            def run(self, brief, cwd):
+                res = super().run(brief, cwd)
+                if len(self.briefs) == 2:
+                    outer._set_evidence('401000', outer.WRAPPED % 'dump-401000')
+                return res
+        w = Fixer(self.REPORT)
+        d = self._driver(worker=w)
+        self._set_evidence('401000', 'disagreed with WSO at e8dd16a7: the guard; case other decides\n')
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertEqual(len(w.briefs), 2)
+        self.assertIn('docs/evidence/401000.md has no sentence reading "disagreed '
+                      'with WSO at <sha>: ...; case dump-401000 decides"', w.briefs[1])
+
     def test_malformed_report_is_a_check_failure(self):
         w = _SeqWorker('## Verdicts\nI think 0x401000 is ours.\n', self.REPORT)
         d = self._driver(worker=w)
@@ -11394,7 +11648,7 @@ class DriverTest(unittest.TestCase):
         diff = os.path.join(os.path.dirname(d.status_path), 'b011', 'review.diff')
         self.assertIn(diff, r.briefs[0])
         with open(diff) as f:
-            self.assertIn('probe-1 decides', f.read())
+            self.assertIn('dump-401000 decides', f.read())
         self.assertEqual(self._state()['status'], 'assigned')
         self.assertEqual(self.pushes, [])
         self.assertEqual(len(self.sent), 1)
@@ -11514,6 +11768,82 @@ class DriverTest(unittest.TestCase):
         d.next_batch = lambda *a, **kw: self.NOTHING
         self.assertEqual(d.run(), 0)
         self.assertEqual(ran, [])
+
+    def _live_clear_driver(self):
+        """The first cut (b011) runs and blocks on `release`; b012 is
+        assigned with an exception entry; the next cut would be b013."""
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b012'] = dict(state['batches']['b011'], branch='p3/wso-b012')
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {'b012': {'stage': 'checks'}}, 'running': {},
+                       'batches': {'b012': {'outcome': 'exception',
+                                            'stage': 'checks'}}}, f)
+        d = self._reload(d)
+        inside, release = threading.Event(), threading.Event()
+        events = []
+
+        def run_batch(bid, resume=None):
+            events.append('run ' + bid)
+            if bid == 'b011':
+                inside.set()
+                self.assertTrue(release.wait(10))
+            return 'closed'
+        d.run_batch = run_batch
+        cuts = iter([(0, self.CUT), (0, self.CUT.replace('b011', 'b013')),
+                     self.NOTHING])
+
+        def cut(*a, **kw):
+            events.append('cut')
+            return next(cuts)
+        d.next_batch = cut
+        return d, inside, release, events
+
+    def _edit_status(self, d, fn):
+        with open(d.status_path) as f:
+            status = json.load(f)
+        fn(status)
+        with open(d.status_path, 'w') as f:
+            json.dump(status, f)
+
+    def _run_with_clear(self, d, inside, release, edit):
+        codes = []
+        t = threading.Thread(target=lambda: codes.append(d.run()))
+        t.start()
+        try:
+            self.assertTrue(inside.wait(10))
+            self._edit_status(d, edit)
+        finally:
+            release.set()
+            t.join(20)
+        return codes
+
+    def test_run_picks_up_an_exception_cleared_while_running(self):
+        d, inside, release, events = self._live_clear_driver()
+        codes = self._run_with_clear(
+            d, inside, release, lambda s: s.__setitem__('exceptions', {}))
+        self.assertEqual(codes, [0])
+        # The cleared batch goes before the next cut, and only once.
+        self.assertEqual(events, ['cut', 'run b011', 'run b012', 'cut',
+                                  'run b013', 'cut'])
+        line = ('b012: exception cleared while running; retrying at its '
+                'checks stage')
+        self.assertEqual(self.logs.count(line), 1)
+
+    def test_live_clear_skips_a_batch_that_is_still_running(self):
+        d, inside, release, events = self._live_clear_driver()
+
+        def edit(s):
+            s['exceptions'] = {}
+            s['running'] = {'b012': {'at': 't'}}   # stale: its own retry
+        codes = self._run_with_clear(d, inside, release, edit)
+        self.assertEqual(codes, [0])
+        self.assertNotIn('run b012', events)
+        self.assertEqual([l for l in self.logs if 'cleared while running' in l], [])
 
     def _reload(self, d):
         """A fresh Driver over the same paths, reading the status file again."""
@@ -12421,7 +12751,7 @@ class DriverTest(unittest.TestCase):
             self.git('worktree', 'add', '-q', '-b', 'p3/wso-' + bid, wt, 'first')
             _write(os.path.join(wt, 'docs', 'evidence', addr[2:] + '.md'),
                    f'---\naddress: {addr}\nname: F{n}\nkind: oracle\n---\n\n'
-                   'corroborated by WSO at e8dd16a7\n')
+                   f'corroborated by WSO at e8dd16a7; case dump-{bid} decides\n')
             if on_branch:
                 on_branch(wt, bid)
             self.git('add', '-A', cwd=wt)
@@ -12837,6 +13167,14 @@ class DriverTest(unittest.TestCase):
             self.assertFalse(driver._history_rewrite(args, ['src/A.cpp']), q)
         # and the checker notices a forbidden quote
         self.assertTrue(driver._history_rewrite(['checkout', 'first', '--', 'x']))
+        # i003's worker ran `git stash list --format='%H %gs'`: reading the
+        # stash is not a rewrite; every other stash form still is
+        self.assertFalse(driver._history_rewrite(['stash', 'list', "--format=%H %gs"]))
+        self.assertFalse(driver._history_rewrite(['stash', 'show', '-p', 'stash@{0}']))
+        for form in (['stash'], ['stash', 'push', '-m', 'x'], ['stash', 'pop'],
+                     ['stash', 'apply'], ['stash', 'drop'], ['stash', 'clear'],
+                     ['stash', '--include-untracked']):
+            self.assertTrue(driver._history_rewrite(form), form)
         # The prose remedies too (first's 021a6cb0): no worker-facing text tells
         # a worker to revert or restore, and none puts a whole file back except
         # the out-of-scope-path check, whose files hold no batch row.
@@ -13026,7 +13364,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('could not be read', probs[0])
 
     def test_mechanical_checks_include_transcript_problems(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
         path = self._tcalls(('Bash', {'command': 'git show wso/main:src/A.cpp'}))
@@ -13118,8 +13456,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(self._bash('cat src/A.cpp | head -300')), 1)
 
     def test_mechanical_checks_refuse_dump_decided_fork_or_neither(self):
-        d = self._mc_repo({'76D370': 'kind: oracle\ncorroborated by WSO at abc',
-                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'kind: oracle\ncorroborated by WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
@@ -13213,8 +13551,8 @@ class DriverTest(unittest.TestCase):
         b011 has a second row triage moves to the import list."""
         evidence = {'docs/evidence/%X.md' % a: (
             '---\naddress: 0x%X\nname: F\nkind: oracle\n---\n\n'
-            'corroborated by WSO at e8dd16a7\n' % a)
-            for a in (0x40B000, 0x40C000)}
+            'corroborated by WSO at e8dd16a7; case dump-%s decides\n' % (a, b))
+            for a, b in ((0x40B000, 'b011'), (0x40C000, 'b012'))}
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w},
                               ids=('b011', 'b012'), base_files=evidence, **kw)
@@ -13584,8 +13922,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.sent, ['driver: b011 exception at worker; see %s' % d.status_path])
 
     def test_probe_phrase_applies_only_to_driver_recorded_probe_passes(self):
-        d = self._mc_repo({'76D370': 'kind: oracle\ndisagreed with WSO at abc',
-                           '401000': 'kind: oracle\ndisagreed with WSO at abc'})
+        d = self._mc_repo({'76D370': 'kind: oracle\ndisagreed with WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ndisagreed with WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         ok = self._mc_run(0, [])
@@ -13599,7 +13937,7 @@ class DriverTest(unittest.TestCase):
                 batch, d, {'0x76D370': ('ours', 'probe-b011-76D370'), '0x401000': ('ours', 'x')},
                 run=ok)
             self.assertEqual(len(probs), 1)
-            self.assertIn("'corroborated by WSO at <sha>'", probs[0])
+            self.assertIn("'corroborated by WSO at <sha>: ...; case probe-b011-76D370 decides'", probs[0])
             # The driver's probe set decides whatever the case says.
             probs = driver.mechanical_checks(
                 batch, d, {'0x76D370': ('ours', 'x'), '0x401000': ('ours', 'x')},
@@ -13608,8 +13946,8 @@ class DriverTest(unittest.TestCase):
             self.assertIn('401000.md', probs[0])
 
     def test_a_fork_verdict_needs_a_kind_line_in_the_evidence(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc',
-                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
@@ -14082,7 +14420,7 @@ class DriverTest(unittest.TestCase):
         self.assertNotEqual(res.returncode, 0)
 
     def test_mechanical_checks_leave_the_map_to_the_close(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         calls = []
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             driver.mechanical_checks(self._mc_batch(), d, {'0x76d370': ('ours', 'c')},
@@ -16214,7 +16552,8 @@ class WaveResolveTest(unittest.TestCase):
         with open(report) as f:
             text = f.read()
         with open(self.state) as f:
-            self.assertEqual(text, self.wave.scorecard_text(json.load(f)))
+            self.assertEqual(text, self.wave.scorecard_text(json.load(f))
+                             + '\nCoverage: not measured\n')
         self.assertNotIn('Audit sample', text)
 
     def test_scorecard_rejects_malformed_audit(self):
@@ -16285,6 +16624,18 @@ class WaveCloseRulesTest(unittest.TestCase):
         rc, out = self.close()
         self.assertEqual(rc, 1, out)
         self.assertIn('a fork/neither verdict decided by a dump reading (readout-643CD0)', out)
+
+    def test_close_passes_a_wrapped_deciding_sentence(self):
+        self.ready()
+        wrapped = ('---\nkind: replay\n---\n\n## WSO delta\n\n'
+                   'disagreed with\nWSO at e8dd16a: the guard\ndiffers in both\n'
+                   'builds and the replay\nshows it; case probe-9\ndecides.\n')
+        for stem in ('643CC0', '643CD0'):
+            with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'), 'w') as f:
+                f.write(wrapped)
+        self.commit_worktree('wrap')
+        rc, out = self.close()
+        self.assertEqual(rc, 0, out)
 
     def test_close_dump_decided_ours_verdict_passes(self):
         self.ready(render=('ours', 'dump-1'))
@@ -17027,6 +17378,493 @@ class ClaimsTest(unittest.TestCase):
         for bad in ('../x.cpp', '/etc/passwd', '.'):
             with self.assertRaises(self.claims.ClaimError):
                 self.claims.claim('s2', 'me', [bad], **self.kw)
+
+
+class CoverageTest(unittest.TestCase):
+    """tools/coverage.py, the count-only hook table, and the wave.py
+    consumers (next --queue import, scorecard); nothing here launches."""
+    ROWS = [
+        {'address': '0x401000', 'category': 'theirs_real_ours_stub', 'file': 'src/A.cpp',
+         'name': 'A', 'their_len': 90, 'our_len': 2},
+        {'address': '0x00402000', 'category': 'only_theirs', 'file': 'src/B.cpp',
+         'name': 'B', 'their_len': 80, 'our_len': 0},
+        {'address': '0x401000', 'category': 'both_stub_diff', 'file': 'src/A.cpp',
+         'name': 'A', 'their_len': 1, 'our_len': 1},
+        {'address': '0x403000', 'category': 'theirs_real_ours_stub', 'file': 'src/C.cpp',
+         'name': 'C', 'their_len': 70, 'our_len': 2},
+        {'address': '0x404000', 'category': 'identical', 'file': 'src/D.cpp',
+         'name': 'D', 'their_len': 5, 'our_len': 5},
+        {'address': '0x405000', 'category': 'theirs_changed_ours_base', 'file': 'src/E.cpp',
+         'name': 'E', 'their_len': 5, 'our_len': 5},
+        {'address': '0x406000', 'category': 'both_changed_differ', 'file': 'src/F.cpp',
+         'name': 'F', 'their_len': 5, 'our_len': 5},
+        {'address': '0x407000', 'category': 'theirs_real_ours_stub', 'file': 'src/G.cpp',
+         'name': 'G', 'their_len': 5, 'our_len': 5},
+        {'address': '0x8C', 'category': 'only_theirs', 'file': 'src/H.cpp',
+         'name': 'H', 'their_len': 5, 'our_len': 0},
+        {'name': 'noaddr', 'category': 'only_theirs'}]
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.wave = load_tool('wave')
+        self.dp = os.path.join(self.tmp, 'docs', 'wso', 'disagreements.json')
+        _write(self.dp, json.dumps(self.ROWS))
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), '# timeout: 99\nquit\n')
+        _write(os.path.join(self.tmp, 'scenarios', 'first_fight.txt'), 'quit\n')
+
+    def cov(self, hits, hooked=None, **kw):
+        phase = truth.FRIDA_SCENARIOS
+        hooked = coverage.candidates(self.dp) if hooked is None else list(hooked)
+        data = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.tmp),
+                'at': '2026-10-24T01:02:03Z',
+                'scenarios': {sc: {'hooks': 6, 'refused': [], 'failed_chunks': [],
+                                   'measured': len(hooked), 'hooked': hooked,
+                                   'hits': hits.get(sc, {})} for sc in phase}}
+        data.update(kw)
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
+        return data
+
+    def test_candidates_are_the_sorted_unique_addresses_of_five_categories(self):
+        self.assertEqual(coverage.split_candidates(self.dp)[1], ['0x8C'])
+        self.assertEqual(coverage.candidates(self.dp), [
+            '0x401000', '0x402000', '0x403000', '0x405000', '0x406000', '0x407000'])
+        f = os.path.join(self.tmp, 'addrs.txt')
+        _write(f, '0x500000\n\n# c\n0x4ff000 # x\n0x500000\n')
+        self.assertEqual(coverage.read_addresses(f), ['0x4FF000', '0x500000'])
+
+    def test_table_is_count_only_original_hooks(self):
+        self.assertEqual(coverage.table(['0x401000', '0x4ff0a0']), {
+            'original': {'hooks': [{'name': 'fn_401000', 'addr': '0x401000'},
+                                   {'name': 'fn_4FF0A0', 'addr': '0x4FF0A0'}]},
+            'count_only': True})
+
+    def test_count_only_script_sends_nothing_per_call(self):
+        orig = load_tool('frida/orig')
+        spec = coverage.table(['0x401000', '0x402000'])
+        spec['original']['hooks'][1].update(conv='cdecl', args=['u32'], ret='u32')
+        js = orig.build_js(dict(spec['original'], count_only=True))
+        self.assertNotIn("send({ tag: 'fn_", js)
+        self.assertNotIn('onLeave', js)
+        self.assertIn('onEnter(args) { ++cnt0; }', js)
+        self.assertIn('onEnter(args) { ++cnt1; }', js)
+        self.assertIn('hitCounts', js)
+        self.assertIn('finalHits', js)
+        self.assertIn("tag: 'unhooked', name: 'fn_401000'", js)
+        self.assertIn("'TerminateProcess'", js)
+        # without the flag the same table logs per call
+        self.assertIn("send({ tag: 'fn_", orig.build_js(spec['original']))
+
+    def _status_fake(self, root, per_chunk):
+        """A probe fake: per_chunk[(scenario, chunk)] is a list of status
+        texts (one per launch of that chunk, the last repeated)."""
+        import subprocess as sp
+        calls, seen = [], {}
+
+        def fake(cmd, **kw):
+            calls.append(cmd)
+            out = cmd[cmd.index('--out') + 1]
+            _, scenario, rest = out.split('-', 2)
+            chunk = int(rest.split('.')[0])
+            n = seen[(scenario, chunk)] = seen.get((scenario, chunk), 0) + 1
+            texts = per_chunk[(scenario, chunk)]
+            text = texts[min(n, len(texts)) - 1]
+            d = os.path.join(root, 'runs', 'r%d' % len(calls), 'replay')
+            os.makedirs(d, exist_ok=True)
+            open(os.path.join(d, out), 'w').close()
+            if text is not None:
+                with open(os.path.join(d, out + '.status'), 'w') as f:
+                    f.write(text)
+            return sp.CompletedProcess(cmd, 0 if text else 2,
+                                       stdout='probe: runs/r%d\n' % len(calls), stderr='')
+        fake.calls = calls
+        return fake
+
+    def test_run_collects_hits_refusals_and_retries_a_chunk_without_status(self):
+        addrs = ['0x401000', '0x402000', '0x403000']
+        clean = lambda body: body + 'HITS-FINAL yes\nRESULT: CLEAN\n'
+        fake = self._status_fake(self.tmp, {
+            ('world_entry', 1): [clean('HITS fn_401000 5\nHITS fn_402000 0\nUNHOOKED fn_402000 at 0x402000: boom\n')],
+            ('world_entry', 2): [clean('HITS fn_403000 2\nHITS loaded 1\n')],
+            ('first_fight', 1): [None, clean('HITS fn_401000 1\n')],      # exit 2, then a retry
+            ('first_fight', 2): [None, None]})                             # failed twice
+        res = coverage.run(['world_entry', 'first_fight'], chunk=2, run=fake, root=self.tmp,
+                           addresses=addrs)
+        self.assertEqual(res['world_entry'], {
+            'hooks': 3, 'refused': ['fn_402000'], 'failed_chunks': [],
+            'hits': {'0x401000': 5, '0x403000': 2}, 'hooked': ['0x401000', '0x403000']})
+        self.assertEqual(res['first_fight'], {
+            'hooks': 3, 'refused': [], 'failed_chunks': [2], 'hits': {'0x401000': 1},
+            'hooked': ['0x401000', '0x402000']})
+        cmds = [c for c in fake.calls]
+        self.assertEqual(len(cmds), 2 + 2 + 2)
+        first = cmds[0]
+        self.assertEqual(first[first.index('--target') + 1], 'original')
+        self.assertNotIn('--loaded-rva', first)
+        self.assertEqual(first[first.index('--new-attempt') + 1],
+                         'coverage world_entry chunk 1/2: 2 hooks')
+        self.assertEqual(first[first.index('--timeout') + 1], '99')
+        self.assertEqual(first[first.index('--out') + 1], 'coverage-world_entry-1.jsonl')
+        retry = [c for c in cmds if 'retry' in c[c.index('--new-attempt') + 1]]
+        self.assertEqual(len(retry), 2)
+        path = os.path.join(self.tmp, 'out', 'coverage.json')
+        data = coverage.write(path, res, root=self.tmp, exe='abc')
+        self.assertEqual(coverage.read(path), data)
+        self.assertEqual(data['exe'], 'abc')
+        self.assertEqual(data['scenarios']['world_entry']['hits'],
+                         {'0x401000': 5, '0x403000': 2})
+        self.assertEqual(data['scenarios']['world_entry']['measured'], 2)
+        self.assertEqual(coverage.measured(data, '0x402000'), ['first_fight'])
+        self.assertEqual(coverage.measured(data, '0x401000'), ['first_fight', 'world_entry'])
+        self.assertEqual(coverage.covered(data, '0x401000'), ['first_fight', 'world_entry'])
+        self.assertEqual(coverage.covered(data, '0x402000'), [])
+        self.assertIsNone(coverage.read(os.path.join(self.tmp, 'nope.json')))
+
+    def test_stale_follows_the_scenario_set(self):
+        data = self.cov({'world_entry': {}})
+        self.assertFalse(coverage.stale(data, self.tmp))
+        _write(os.path.join(self.tmp, 'scenarios', 'extra.txt'), 'quit\n')
+        self.assertTrue(coverage.stale(data, self.tmp))
+        self.assertIsNone(coverage.usable(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'),
+                                          self.tmp))
+
+    def test_usable_needs_every_phase_scenario_complete(self):
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        self.assertIsNotNone(coverage.usable(path, self.tmp))
+        data['scenarios']['walk_and_talk']['failed_chunks'] = [3]
+        _write(path, json.dumps(data))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+        self.assertIn('failed chunk(s) in walk_and_talk', coverage.check(path, self.tmp)[1])
+        del data['scenarios']['walk_and_talk']
+        _write(path, json.dumps(data))
+        self.assertIn('lacks scenario(s) walk_and_talk', coverage.check(path, self.tmp)[1])
+        _write(path, json.dumps({'scenarios': {'world_entry': 3}, 'scenarios_sha': 1}))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        data['scenarios']['first_fight']['hits'] = 7
+        _write(path, json.dumps(data))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+
+    def test_status_of_separates_hit_dead_and_unknown(self):
+        data = self.cov({'first_fight': {'0x401000': 1}}, hooked=['0x401000', '0x402000'])
+        phase = truth.FRIDA_SCENARIOS
+        self.assertEqual(coverage.status_of(data, '0x401000', phase), 'hit')
+        self.assertEqual(coverage.status_of(data, '0x402000', phase), 'dead')
+        self.assertEqual(coverage.status_of(data, '0x403000', phase), 'unknown')
+
+    def test_the_table_file_is_what_probe_and_orig_read(self):
+        probe = load_tool('frida/probe')
+        orig = load_tool('frida/orig')
+        seen = []
+
+        def fake(cmd, **kw):
+            import subprocess as sp
+            spec = probe.load_probe(cmd[cmd.index('--probe') + 1])   # SystemExit if no hooks
+            seen.append(orig.build_js(spec))
+            return sp.CompletedProcess(cmd, 2, stdout='', stderr='')
+        coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                     addresses=['0x401000', '0x402000'])
+        js = seen[0]
+        self.assertNotIn("send({ tag: 'fn_", js)
+        self.assertIn('hitCounts', js)
+        self.assertIn('finalHits', js)
+        self.assertIn("send({ tag: 'loaded'", js)
+        self.assertIn('onEnter(args) { ++cnt0; }', js)
+
+    def test_incomplete_chunks_fail_and_a_failed_pass_writes_no_map(self):
+        import io
+        for bad in ('HITS fn_401000 3\nHITS-FINAL yes\nRESULT: CRASH\n',
+                    'HITS fn_401000 3\nHITS-FINAL no\nRESULT: CLEAN\n',
+                    'HITS fn_401000 3\nHITS-FINAL yes\nRESULT: NOT-LOADED\n'):
+            fake = self._status_fake(self.tmp, {(sc, 1): [bad] for sc in truth.FRIDA_SCENARIOS})
+            res = coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                               addresses=['0x401000'])
+            self.assertEqual(res['world_entry']['failed_chunks'], [1])
+            self.assertEqual(res['world_entry']['hits'], {'0x401000': 3})   # kept
+            self.assertEqual(res['world_entry']['hooked'], [])
+            self.assertEqual(len(fake.calls), 2)                            # one retry
+        fake = self._status_fake(self.tmp, {(sc, 1): [None] for sc in truth.FRIDA_SCENARIOS})
+        out = io.StringIO()
+        _write(os.path.join(self.tmp, 'addrs.txt'), '0x401000\n')
+        rc = coverage.main(['--addresses', os.path.join(self.tmp, 'addrs.txt')],
+                           root=self.tmp, run_=fake, out=out)
+        self.assertEqual(rc, 1)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.failed.json')))
+        self.assertIn('failed chunk(s): ' + '; '.join('%s 1' % sc for sc in sorted(truth.FRIDA_SCENARIOS)),
+                      out.getvalue())
+
+    def test_cli_dry_prints_the_launches_and_writes_nothing(self):
+        import io
+        out = io.StringIO()
+        rc = coverage.main(['--dry', '--chunk', '2', '--scenarios', 'world_entry'],
+                           root=self.tmp, out=out)
+        self.assertEqual(rc, 0)
+        lines = out.getvalue().splitlines()
+        self.assertTrue(lines[2].startswith('coverage: injector and recorder'), lines[2])
+        del lines[2]
+        self.assertEqual(lines, [
+            'coverage: 6 candidate function(s), 3 launch(es)',
+            'coverage: dropped 1 address(es) outside .text [0x401000, 0x8468F1): 0x8C',
+            'coverage world_entry chunk 1/3: 2 hooks',
+            'coverage world_entry chunk 2/3: 2 hooks',
+            'coverage world_entry chunk 3/3: 2 hooks'])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
+
+    def next_import(self, **kw):
+        imp = os.path.join(self.tmp, 'import-state.json')
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, imp, 2, queue='import', repo=self.tmp,
+                import_path=os.path.join(self.tmp, 'import-list.json'), base='first',
+                coverage_root=self.tmp, claims_path=os.path.join(self.tmp, 'claims.json'), **kw)
+        return rc, out
+
+    def rows_of(self, out):
+        return re.findall(r'^\s*\d+\. (0x\w+)', out, re.M)
+
+    def test_next_import_offers_covered_rows_first_and_leaves_the_rest_out(self):
+        self.cov({'world_entry': {'0x403000': 3, '0x401000': 1},
+                  'first_fight': {'0x403000': 2}, 'walk_and_talk': {}})
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        rc, out = self.next_import(include_uncovered=True)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertNotIn('left out', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        self.cov({'world_entry': {'0x403000': 3}})
+        rc, out = self.next_import(include_uncovered=True)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+
+    def test_next_import_keeps_rows_nobody_measured(self):
+        cands = [a for a in coverage.candidates(self.dp) if a != '0x407000']
+        self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
+        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        self.cov({'world_entry': {'0x403000': 3}}, hooked=['0x403000'])
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, os.path.join(self.tmp, 'import-state.json'), 5, queue='import',
+                repo=self.tmp, import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first', coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000', '0x407000'])
+        self.assertIn('coverage: 0 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 2 row(s) kept that no scenario measured (unknown)', out)
+
+    def test_next_include_uncovered_needs_the_import_queue(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.wave.main(['next', '--include-uncovered']), 2)
+        self.assertIn('--include-uncovered only applies to --queue import', err.getvalue())
+
+    def test_next_import_without_a_fresh_map_is_unchanged(self):
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])  # biggest rows first
+        self.assertIn('coverage: no map', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        self.cov({'world_entry': {'0x406000': 9}})
+        _write(os.path.join(self.tmp, 'scenarios', 'extra.txt'), 'quit\n')
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])
+        self.assertIn('coverage: map is stale', out)
+
+    def test_scorecard_carries_the_coverage_line(self):
+        state = os.path.join(self.tmp, 'docs', 'wso', 'wave-state.json')
+        report = os.path.join(self.tmp, 'report.md')
+        args = (state, report, os.path.join(self.tmp, 'no-triage.json'), None,
+                os.path.join(self.tmp, 'no-audit.json'))
+        rc, out = self.wave.write_scorecard(*args)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Coverage: not measured', _slurp(report))
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 2}, 'first_fight': {'0x403000': 1}})
+        rc, out = self.wave.write_scorecard(*args)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Coverage: 2 of 6 candidate functions exercised by %d scenarios (2026-10-24)' % len(truth.FRIDA_SCENARIOS) + '',
+                      _slurp(report))
+
+
+class ReStatusTest(unittest.TestCase):
+    TOOL = os.path.join(ROOT, 'tools', 're_status.py')
+    REAL = ('int Foo::Bar(int x)\n{\n    int total = x * 2 + 1;\n    total += x;\n'
+            '    return total + 12345;\n}\n')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = os.path.join(self._tmp.name, 'repo')
+        self.exports = os.path.join(self._tmp.name, 'exports')
+        self.write(self.exports, 'functions.tsv',
+                   '401000\tFoo::Bar\t100\n401100\tFoo::Baz\t200\n'
+                   '401200\tFoo::Stub\t50\n401300\tUnwind@401300\t10\n'
+                   '401400\tthunk_FUN_00401400\t5\n')
+        self.write(self.repo, 'src/Foo.cpp',
+                   '// 0x401000\n' + self.REAL + '\n// 0x401100\n'
+                   + self.REAL.replace('Bar', 'Baz') + '\n// 0x401200\n'
+                   'void Foo::Stub()\n{\n    // TODO: Incomplete\n}\n')
+        self.write(self.repo, 'docs/evidence/401000.md', '---\nkind: oracle\n---\nx\n')
+        self.write(self.repo, 'docs/evidence/401100.md', '---\nkind: read-only\n---\nx\n')
+        self.write(self.repo, 'scenarios/a.txt', 'x\n')
+        self.write(self.repo, 'scenarios/a.expect.json', '{}\n')
+        self.write(self.repo, 'scenarios/pending/p.txt', 'x\n')
+        self.write(self.repo, 'scenarios/pending/p.expect.json', '{}\n')
+        self.write(self.repo, 'README.md',
+                   '## Status\n\ntable\n\n### Roadmap\n\nsteps\n')
+
+    def write(self, base, rel, text):
+        path = os.path.join(base, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def run_tool(self, *args):
+        return subprocess.run([sys.executable, '-I', self.TOOL, '--repo', self.repo,
+                               *args], capture_output=True, text=True)
+
+    def compute(self):
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def snap(self):
+        with open(os.path.join(self.repo, 'docs', 're-status.json')) as f:
+            return json.load(f)
+
+    def test_numbers(self):
+        self.compute()
+        s = self.snap()
+        self.assertRegex(s['at'], r'^\d{4}-\d\d-\d\d$')
+        self.assertEqual(s['ghidra'], {'functions': 3, 'bytes': 350,
+                         'excluded': {'seh_funclets': 1, 'thunks': 1}})
+        self.assertEqual(s['recovered'], {'functions': 2, 'bytes': 300})
+        self.assertEqual(s['verified'], {'functions': 1, 'bytes': 100,
+                         'by_kind': {'oracle': 1, 'replay': 0, 'trace': 0}})
+        self.assertEqual(s['scenarios'], ['a'])
+
+    def test_block_rendered_into_readme(self):
+        self.compute()
+        with open(os.path.join(self.repo, 'README.md')) as f:
+            text = f.read()
+        self.assertLess(text.index('table'), text.index('### Recovery status'))
+        self.assertLess(text.index('### Recovery status'), text.index('### Roadmap'))
+        self.assertIn('| `.text` code recovered | **85.7%** (300 / 350 bytes) |', text)
+        self.assertIn('| Functions recovered | **66.7%** (2 / 3) |', text)
+        self.assertIn('| Verified against the original | **33.3%** (1 / 3; 100 bytes) |', text)
+        self.assertIn('| Scenarios matched | 1 | `a`:', text)
+        md = self.run_tool('--markdown')
+        self.assertEqual(md.returncode, 0)
+        self.assertIn(md.stdout.strip(), text)
+        self.compute()  # idempotent: one block only
+        with open(os.path.join(self.repo, 'README.md')) as f:
+            self.assertEqual(f.read().count('re-status:begin'), 1)
+
+    def test_check_passes_then_fails_when_stale(self):
+        self.compute()
+        self.assertEqual(self.run_tool('--check').returncode, 0)
+        path = os.path.join(self.repo, 'README.md')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(text.replace('85.7%', '99.9%'))
+        r = self.run_tool('--check')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('README.md', r.stderr)
+
+    def test_check_without_snapshot_fails(self):
+        r = self.run_tool('--check')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('re-status.json', r.stderr)
+
+    def test_compute_without_table_is_one_line_error(self):
+        os.remove(os.path.join(self.exports, 'functions.tsv'))
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('functions.tsv', r.stderr)
+        self.assertNotIn('Traceback', r.stderr)
+
+    def test_marker_parser(self):
+        rs = load_tool('re_status')
+        stubby = load_tool('xrec').stubby
+        body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
+        src = (
+            '// 0x1000\nint A::F(int x)\n{\n    ' + body + '}\n'
+            '// 0x1001\nint A::F(char x)\n{\n    ' + body + '}\n'
+            '// 0x1002\nstatic int ReadBand_Fmt20(int x)\n{\n    ' + body + '}\n'
+            '// 0x1003\nB::B(int a)\n    : Base(a), m_x(0)\n{\n    ' + body + '}\n'
+            '// 0x1004\nint g_table[] = {1, 2, 3};\n'
+            '// 0x1005\n// 0x1006\nint C::G()\n{\n    ' + body + '}\n'
+            '// 0x1007).\n// see above\n'
+            '// 0x1008\n\n// note\nint D::H()\n{\n    ' + body + '}\n'
+            '// 0x1009\nbool E::Caps() const { return m_bCapsLockKeyOn; }\n'
+            '// 0x100A\nvoid E::T()\n{\n    // TODO: Incomplete\n}\n'
+            '// 0x100B\nvoid E::U() const;\n'
+            '// 0x100C\nvoid E::V()\n{\n    assert(false);\n}\n'
+            '// 0x100D\nvoid E::W()\n{\n}\n')
+        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        real = {a for a, (n, s) in got.items() if not s}
+        self.assertEqual(real, {'0x1000', '0x1001', '0x1002', '0x1003', '0x1006',
+                                '0x1008', '0x1009'})
+        self.assertEqual(got['0x1000'][0], 'A::F')
+        self.assertEqual(got['0x1002'][0], 'ReadBand_Fmt20')
+        self.assertEqual(got['0x1003'][0], 'B::B')
+        self.assertEqual(got['0x1009'][0], 'E::Caps')
+        for a in ('0x1004', '0x1005', '0x1007', '0x100B'):
+            self.assertNotIn(a, got)
+        for a in ('0x100A', '0x100C', '0x100D'):
+            self.assertTrue(got[a][1], a)
+
+    def test_operator_definitions_and_brace_initializers(self):
+        rs = load_tool('re_status')
+        stubby = load_tool('xrec').stubby
+        body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
+        src = (
+            '// 0x2000\nA& A::operator=(const A& o)\n{\n    ' + body + '}\n'
+            '// 0x2001\nbool A::operator==(const A& o) const\n{\n    ' + body + '}\n'
+            '// 0x2002\nint g_val = 3;\n'
+            '// 0x2003\nB::B(int a)\n    : m_x{0}, m_y{a}\n{\n    ' + body + '}\n'
+            '// 0x2004\nint A::operator()(int i)\n{\n    ' + body + '}\n')
+        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        self.assertEqual({a for a, (n, s) in got.items() if not s},
+                         {'0x2000', '0x2001', '0x2003', '0x2004'})
+        self.assertNotIn('0x2002', got)
+        self.assertEqual(got['0x2000'][0], 'A::operator=')
+
+    def test_header_inline_body_counts_and_name_mismatch_warns(self):
+        self.write(self.repo, 'src/Foo.h',
+                   '// 0x401400\nint Foo::Inl(int x)\n{\n    int t = x * 2 + 1;\n'
+                   '    t += x;\n    return t + 12345;\n}\n')
+        self.write(self.exports, 'functions.tsv',
+                   '401000\tOther::Name\t100\n401100\tFoo::Baz\t200\n'
+                   '401200\tFoo::Stub\t50\n401400\tFoo::Inl\t40\n')
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.snap()['recovered']['functions'], 3)
+        self.assertIn('0x401000  Foo::Bar  Other::Name', r.stderr)
+        self.assertNotIn('Foo::Baz', r.stderr)
+
+    def test_trace_counts_only_with_a_frida_source(self):
+        self.write(self.repo, 'docs/evidence/401100.md',
+                   '---\nkind: trace\ntrace_source: wso fork note\n---\nx\n')
+        self.compute()
+        self.assertEqual(self.snap()['verified']['functions'], 1)
+        self.write(self.repo, 'docs/evidence/401100.md',
+                   '---\nkind: trace\ntrace_source: frida probe orig:ab\n---\nx\n')
+        self.compute()
+        self.assertEqual(self.snap()['verified']['by_kind']['trace'], 1)
+
+    def test_gate_runs_the_check_next_to_the_map(self):
+        with open(os.path.join(ROOT, 'tools', 'gates.sh')) as f:
+            gates = f.read()
+        self.assertIn('step "recovery status" python3 -I tools/re_status.py --check', gates)
+        self.assertLess(gates.index('step "subsystem map"'),
+                        gates.index('step "recovery status"'))
 
 
 if __name__ == '__main__':
