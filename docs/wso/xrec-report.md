@@ -103,7 +103,7 @@ Deciding evidence across all 468 verdicts: oracle probe 0, replay checkpoint 41,
 
 Batches: b001 closed (20 rows), b002 closed (20 rows), b003 closed (20 rows), b004 closed (20 rows), b005 closed (20 rows), b006 closed (20 rows), b007 closed (20 rows), b008 closed (20 rows), b009 closed (20 rows), b010 closed (20 rows), b011 closed (20 rows, pool claude), b012 closed (20 rows, pool claude), b013 closed (18 rows, pool glm), b014 closed (18 rows, pool glm), b015 closed (20 rows, pool glm), b016 closed (18 rows, pool glm), b017 closed (20 rows, pool glm), b018 closed (19 rows, pool glm), b019 closed (17 rows, pool glm), b020 closed (18 rows, pool glm), b021 closed (20 rows, pool glm), b022 closed (20 rows, pool glm), b023 closed (20 rows, pool glm), b024 closed (3 rows, pool glm), b025 closed (8 rows, pool glm), b026 closed (8 rows, pool glm), b027 assigned (20 rows, pool glm)
 
-imports: stubs 5 imported / 27 parked; base-body 0 imported / 2 parked
+imports: stubs 5 imported / 0 kept / 27 parked; base-body 0 imported / 0 kept / 2 parked
 
 Coverage: 667 of 1348 candidate functions exercised by 10 scenarios (2026-10-24)
 
