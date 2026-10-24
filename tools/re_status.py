@@ -66,6 +66,8 @@ def read_table(path):
 
 
 MARKER = re.compile(r'^\s*//\s*(0x[0-9A-Fa-f]+)\s*$')
+OPERATOR = re.compile(r'operator\s*(?:\(\)|[-+*/%^&|!<>=\[\]~,]+)')
+INIT = re.compile(r'(?<!:)[:,]\s*[\w:<>]+\s*$')
 ASSIGN = re.compile(r'[^=!<>]=[^=]')
 
 
@@ -90,7 +92,7 @@ def is_stub(body, stubby):
 def _name(head):
     """Our function name from a definition head (text up to its `{`)."""
     head = head.split('(', 1)[0]
-    m = re.search(r'(operator\s*\S+|[~\w:]+)\s*$', head.strip())
+    m = re.search(r'((?:[~\w]+::)*operator\s*\S+|[~\w:]+)\s*$', head.strip())
     return m.group(1).replace(' ', '') if m else ''
 
 
@@ -106,6 +108,7 @@ def markers(text, stubby):
         starts.append(pos)
         pos += len(ln) + 1
     mlines = masked.split('\n')
+    scan = OPERATOR.sub(lambda m: 'operator' + ' ' * (len(m.group(0)) - 8), masked)
     out = []
     for i, ln in enumerate(lines):
         m = MARKER.match(ln)
@@ -119,7 +122,7 @@ def markers(text, stubby):
         k, paren = starts[j], 0
         end = len(masked)
         while k < end:
-            c = masked[k]
+            c = scan[k]
             if c == '(':
                 paren += 1
             elif c == ')':
@@ -128,7 +131,15 @@ def markers(text, stubby):
                 k = -1
                 break
             elif paren == 0 and c == '{':
-                break
+                if INIT.search(scan[starts[j]:k]):  # member initializer {..}
+                    d = 0
+                    while k < end:
+                        d += (scan[k] == '{') - (scan[k] == '}')
+                        if d == 0:
+                            break
+                        k += 1
+                else:
+                    break
             k += 1
         if k < 0 or k >= end:
             continue
@@ -243,7 +254,7 @@ def render(s):
         f"SEH funclets and {ex['thunks']:,} thunks. |",
         f"| Functions recovered | **{_pct(r['functions'], g['functions'])}** "
         f"({r['functions']:,} / {g['functions']:,}) | By count, same "
-        "denominator; a function counts once its body is more than a stub (a TODO, an empty or assert(false) body). |",
+        "denominator; a function counts once its body is more than a stub (a TODO, an empty or assert(false) body); a one-line body with a return or an assignment counts. |",
         f"| Verified against the original | "
         f"**{_pct(v['functions'], g['functions'])}** ({v['functions']:,} / "
         f"{g['functions']:,}; {v['bytes']:,} bytes) | Recovered functions whose "

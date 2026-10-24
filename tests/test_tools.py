@@ -17809,6 +17809,22 @@ class ReStatusTest(unittest.TestCase):
         for a in ('0x100A', '0x100C', '0x100D'):
             self.assertTrue(got[a][1], a)
 
+    def test_operator_definitions_and_brace_initializers(self):
+        rs = load_tool('re_status')
+        stubby = load_tool('xrec').stubby
+        body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
+        src = (
+            '// 0x2000\nA& A::operator=(const A& o)\n{\n    ' + body + '}\n'
+            '// 0x2001\nbool A::operator==(const A& o) const\n{\n    ' + body + '}\n'
+            '// 0x2002\nint g_val = 3;\n'
+            '// 0x2003\nB::B(int a)\n    : m_x{0}, m_y{a}\n{\n    ' + body + '}\n'
+            '// 0x2004\nint A::operator()(int i)\n{\n    ' + body + '}\n')
+        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        self.assertEqual({a for a, (n, s) in got.items() if not s},
+                         {'0x2000', '0x2001', '0x2003', '0x2004'})
+        self.assertNotIn('0x2002', got)
+        self.assertEqual(got['0x2000'][0], 'A::operator=')
+
     def test_header_inline_body_counts_and_name_mismatch_warns(self):
         self.write(self.repo, 'src/Foo.h',
                    '// 0x401400\nint Foo::Inl(int x)\n{\n    int t = x * 2 + 1;\n'

@@ -9,8 +9,8 @@
     }
   },
   "recovered": {
-    "functions": 6502,
-    "bytes": 3159216
+    "functions": 6530,
+    "bytes": 3165581
   },
   "verified": {
     "functions": 332,
