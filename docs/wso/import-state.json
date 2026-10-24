@@ -1554,7 +1554,7 @@
     "i011": {
       "assigned_at": "2026-10-24T16:25:08+00:00",
       "branch": "p3/wso-i011",
-      "closed_at": null,
+      "closed_at": "2026-10-24T23:38:05+00:00",
       "files": [
         "src/CGameSprite.cpp",
         "src/CVariableHash.cpp",
@@ -1568,6 +1568,7 @@
         "src/CGameObject.cpp",
         "src/CButtonData.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -1758,7 +1759,7 @@
           "their_len": 278
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i012": {
