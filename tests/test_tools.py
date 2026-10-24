@@ -8139,7 +8139,7 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(self.wave.record_verdict(
             self.state, self.root, 'b001', '0x643CC0', 'ours', 'probe-11')[0], 0)
 
-    def gates(self, rc):
+    def gates(self, rc, summary=None):
         """Patch subprocess.run so the `bash tools/gates.sh` run exits rc;
         record its calls.  Git calls pass through -- including close's
         diff, whose pathspec names tools/gates.sh without invoking it."""
@@ -8150,7 +8150,7 @@ class WaveTest(unittest.TestCase):
         def run(cmd, **kw):
             if cmd[0] == 'bash':
                 calls.append(cmd)
-                stdout = 'gates: all passed\n' if rc == 0 else \
+                stdout = (summary or 'gates: all passed\n') if rc == 0 else \
                     'gates: FAILED: linux-gcc build and tests\n'
                 return subprocess.CompletedProcess(cmd, rc, stdout=stdout,
                                                    stderr='')
@@ -8651,6 +8651,22 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(self.batches()['b001']['status'], 'assigned')
         self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_records_the_gate_kind(self):
+        for summary, kind in (('gates: docs-only fast path\ngates: all passed\n', 'docs-only'),
+                              ('gates: full gate\ngates: all passed\n', 'full')):
+            with self.subTest(kind=kind):
+                self.setUp()
+                self.init_repo()
+                self.write_evidence()
+                self.commit_worktree()
+                self.verdicts()
+                ctx, _calls = self.gates(0, summary)
+                with ctx:
+                    rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+                self.assertEqual(rc, 0, out)
+                self.assertIn('(gate: %s)' % kind, out)
+                self.assertEqual(self.batches()['b001']['gate'], kind)
 
     def test_wave_close_fast_forwards(self):
         self.init_repo()
@@ -16128,6 +16144,19 @@ class DriverTest(unittest.TestCase):
         self.assertIn('- pool a\n', driver.ledger_entry(
             {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None, pool='a'))
 
+    def test_ledger_entry_records_the_gate_kind(self):
+        wave = driver._tool('wave')
+        self.assertIn('- gate: docs-only\n', driver.ledger_entry(
+            {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None, gate='docs-only'))
+        self.assertIn('- gate: full\n', driver.ledger_entry(
+            {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None, gate='full'))
+        self.assertNotIn('- gate:', driver.ledger_entry(
+            {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None))
+        self.assertEqual(wave.gate_kind_of('gates: docs-only fast path\ngates: all passed\n'),
+                         'docs-only')
+        self.assertEqual(wave.gate_kind_of('gates: full gate\ngates: all passed\n'), 'full')
+        self.assertEqual(wave.gate_kind_of('gates: all passed\n'), 'unknown')
+
     def test_state_mutations_hold_the_driver_lock(self):
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
@@ -21876,6 +21905,8 @@ class ClaimsTest(unittest.TestCase):
 
     def lock_repo(self):
         root = os.path.join(self.tmp, 'repo')
+        while os.path.exists(root):
+            root += 'x'
         os.makedirs(os.path.join(root, 'tools'))
         subprocess.run(['git', 'init', '-q', root], check=True)
         shutil.copy(os.path.join(ROOT, 'tools', 'gates.sh'),
@@ -21889,6 +21920,133 @@ class ClaimsTest(unittest.TestCase):
         fcntl.flock(fd, fcntl.LOCK_EX)
         os.write(fd, ('held by pid %d\n' % os.getpid()).encode())
         return fd
+
+    # -- the docs-only fast path -------------------------------------------
+
+    SKIPPED = ('linux-gcc build and tests', 'linux-clang build and tests',
+               'structural parity (base first)')
+
+    def fast_repo(self, changed, ancestor=True):
+        """A temp repo with branch `first`, then a commit touching `changed`
+        (paths -> text) on top of it; with ancestor=False the base is a
+        sibling branch instead."""
+        root = self.lock_repo()
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t')
+
+        def git(*a):
+            subprocess.run(['git', '-C', root, *a], check=True, env=env,
+                           capture_output=True)
+        git('checkout', '-q', '-b', 'first')
+        _write(os.path.join(root, 'README.md'), 'x\n')
+        git('add', '-A')
+        git('commit', '-q', '-m', 'base')
+        if not ancestor:
+            git('checkout', '-q', '-b', 'work')
+            _write(os.path.join(root, 'other.txt'), 'y\n')
+            git('add', '-A')
+            git('commit', '-q', '-m', 'sibling')
+            git('checkout', '-q', 'first')
+            git('checkout', '-q', '-b', 'work2')
+        else:
+            git('checkout', '-q', '-b', 'work')
+        for rel, text in changed.items():
+            _write(os.path.join(root, rel), text)
+        git('add', '-A')
+        git('commit', '-q', '--allow-empty', '-m', 'change')
+        return root
+
+    def run_gate(self, root, *args):
+        r = subprocess.run(['bash', os.path.join(root, 'tools', 'gates.sh'),
+                            *args, '--summary-fixture'], capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def assert_full(self, out, base='first'):
+        self.assertNotIn('skipped (docs-only', out)
+        self.assertNotIn('docs-only fast path', out)
+        self.assertRegex(out, r'(?m)^gates: full gate$')
+        for name in self.SKIPPED:
+            name = name.replace('base first', 'base ' + base)
+            self.assertRegex(out, r'(?m)^--- %s: ok$' % re.escape(name))
+
+    def test_gate_docs_only_skips_the_engine_steps(self):
+        root = self.fast_repo({'docs/wso/notes.md': 'n\n', 'tools/other.py': 'p\n',
+                               'tests/test_tools.py': 't\n'})
+        out = self.run_gate(root, '--base', 'first')
+        for name in self.SKIPPED:
+            self.assertIn('=== %s: skipped (docs-only change against first)' % name, out)
+            self.assertNotIn('--- %s: ok' % name, out)
+        self.assertRegex(out, r'(?m)^gates: docs-only fast path$')
+        self.assertRegex(out, r'(?m)^--- fixture one: ok$')
+        self.assertRegex(out, r'(?m)^--- fixture two: ok$')
+
+    def test_gate_src_change_runs_the_full_gate(self):
+        for rel in ('src/a.cpp', 'scenarios/start.txt', 'stray.h', 'CMakeUserPresets.json',
+                    'newdir/x.txt', 'tools/check_evidence.py', 'tools/oracle.py',
+                    'tests/test_x.cpp', 'tests/fixtures/a.bin',
+                    'CMakeLists.txt', 'platform/p.cpp', 'tools/dataview_rules.json'):
+            with self.subTest(rel=rel):
+                root = self.fast_repo({rel: 'z\n'})
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_parity_or_gate_change_runs_the_full_gate(self):
+        for rel in ('tools/parity/run.py', 'tools/gates.sh'):
+            with self.subTest(rel=rel):
+                # gates.sh is the script under test: append, never replace.
+                root = self.fast_repo({} if rel.endswith('.sh') else {rel: 'x\n'})
+                if rel.endswith('.sh'):
+                    with open(os.path.join(root, rel), 'a') as f:
+                        f.write('\n# changed\n')
+                    subprocess.run(['git', '-C', root, '-c', 'user.name=t',
+                                    '-c', 'user.email=t@t', 'commit', '-q', '-am',
+                                    'edit the gate'], check=True)
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_uncommitted_engine_edit_runs_the_full_gate(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'})
+        _write(os.path.join(root, 'src', 'new.cpp'), 'int x;\n')
+        self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_renaming_an_engine_file_into_docs_runs_the_full_gate(self):
+        for rel in ('scenarios/x.txt', 'src/a.cpp', 'tests/fixtures/a.json',
+                    'tools/dataview_rules.json'):
+            with self.subTest(rel=rel):
+                root = self.lock_repo()
+                git = lambda *a: subprocess.run(
+                    ['git', '-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', *a],
+                    check=True, capture_output=True)
+                git('checkout', '-q', '-b', 'first')
+                _write(os.path.join(root, rel), 'content that stays identical\n' * 5)
+                git('add', '-A')
+                git('commit', '-q', '-m', 'base')
+                git('checkout', '-q', '-b', 'work')
+                os.makedirs(os.path.join(root, 'docs'), exist_ok=True)
+                git('mv', rel, 'docs/moved.txt')
+                git('commit', '-q', '-m', 'move')
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+                # the same move left uncommitted
+                git('reset', '-q', '--hard', 'HEAD~1')
+                os.makedirs(os.path.join(root, 'docs'), exist_ok=True)
+                git('mv', rel, 'docs/moved.txt')
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_full_flag_forces_the_full_gate(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'})
+        self.assert_full(self.run_gate(root, '--base', 'first', '--full'))
+
+    def test_gate_without_base_is_always_full(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'})
+        out = self.run_gate(root)
+        self.assertRegex(out, r'(?m)^gates: full gate$')
+        self.assertNotIn('skipped (docs-only', out)
+        self.assertNotIn('docs-only fast path', out)
+
+    def test_gate_base_not_an_ancestor_runs_the_full_gate(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'}, ancestor=False)
+        self.assert_full(self.run_gate(root, '--base', 'work'), 'work')
+        self.assert_full(self.run_gate(root, '--base', 'no-such-rev'), 'no-such-rev')
 
     def test_gate_lock_serializes(self):
         root = self.lock_repo()
