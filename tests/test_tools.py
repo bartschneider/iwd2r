@@ -11,6 +11,7 @@ checker as a subprocess with cwd set to that repository, and removes the
 directory afterwards.
 """
 
+import argparse
 import contextlib
 import datetime
 import fcntl
@@ -6925,6 +6926,111 @@ class ProbePlanTest(unittest.TestCase):
         self.assertIn('& echo done > ', ours)
         self.assertTrue(ours.endswith('shutdown /s /t 0'), ours)
 
+    def test_probe_run_gives_the_side_an_empty_save_folder_and_restores_it(self):
+        # Task 18 fix round: the mechanism of record_original (prepared_saves,
+        # mode empty, the copy's saves aside), around run_side, for both sides
+        game = os.path.join(tempfile.mkdtemp(), 'game')
+        self.addCleanup(shutil.rmtree, os.path.dirname(game), True)
+        mpsave = os.path.join(game, 'mpsave')
+        make_save(mpsave, '000000002-Player-Save')
+        make_save(mpsave, 'default')
+        out = os.path.join(os.path.dirname(game), 'out')
+        seen = {}
+        with probe.saves_of_its_own(game, out, False):
+            seen['inside'] = sorted(os.listdir(mpsave))
+            make_save(mpsave, '000000001-Quick-Save-Probe One')
+        self.assertEqual(seen['inside'], ['default'])
+        self.assertEqual(sorted(os.listdir(mpsave)), ['000000002-Player-Save', 'default'])
+        self.assertEqual(os.listdir(os.path.join(out, 'saves')), ['000000001-Quick-Save-Probe One'])
+        # a plan-only run touches nothing
+        with probe.saves_of_its_own(game, out, True):
+            self.assertEqual(sorted(os.listdir(mpsave)), ['000000002-Player-Save', 'default'])
+        # it is the one prepared_saves plan record_original uses, and run() holds it
+        # inside the replay and sandbox locks around run_side
+        with mock.patch.object(probe.oracle, 'prepared_saves') as prep:
+            prep.return_value.__enter__.return_value = {}
+            with probe.saves_of_its_own(game, out, False):
+                pass
+        prep.assert_called_once_with(probe.oracle.mpsave_dir(game),
+                                     {'mode': 'empty', 'load': None}, out,
+                                     probe.oracle.save_aside(game))
+        self.assertFalse(hasattr(winsandbox, 'save_reset_command'))
+        self.assertFalse(hasattr(winsandbox, 'SAVE_RESET_GLOBS'))
+
+
+    def test_probe_run_takes_the_locks_then_the_empty_saves_then_runs_the_side(self):
+        # probe.run itself, with its collaborators mocked: the order of entry
+        # (replay lock, sandbox lock, prepared_saves empty, run_side) and the
+        # reverse order of exit
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        game = os.path.join(tmp, 'game')
+        os.makedirs(game)
+        run_dir = os.path.join(tmp, 'runs', 'stamp')
+        os.makedirs(os.path.join(run_dir, 'replay'))
+        events = []
+
+        def ctx(name):
+            @contextlib.contextmanager
+            def cm(*a, **kw):
+                events.append(('enter', name, a))
+                try:
+                    yield {}
+                finally:
+                    events.append(('exit', name))
+            return cm
+        builddir = os.path.join(tmp, 'build')
+        os.makedirs(builddir)
+        open(os.path.join(builddir, probe.oracle.INJECTOR), 'w').close()
+        ns = argparse.Namespace(
+            dry=False, command='run', probe='hooks.json', scenario='s', timeout=1000,
+            post_load=None, target='original', build_checkout=None, out='t.jsonl',
+            seed=1, dump_every=0, clicks=0)
+        script = os.path.join(tmp, 's.txt')
+
+        def run_side(*a, **kw):
+            events.append(('run_side',))
+            return {'error': None, 'seconds': 1.0}
+        patches = [
+            mock.patch.object(probe, 'load_probe'),
+            mock.patch.object(probe, 'venv_python', return_value=('h', 'v', 'b')),
+            mock.patch.object(probe.oracle, 'scenario_path', return_value=script),
+            mock.patch.object(probe.oracle, 'replay_timeout', return_value=1000),
+            mock.patch.object(probe, 'resolve_post_load', return_value=0),
+            mock.patch.object(probe.winsandbox, 'available', return_value=True),
+            mock.patch.object(probe.oracle, 'ensure_vanilla', return_value=game),
+            mock.patch.object(probe.oracle, 'prepare_replay_ini'),
+            mock.patch.object(probe, 'ours_build', return_value=builddir),
+            mock.patch.object(probe.winsandbox, 'deploy_runtime'),
+            mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
+            mock.patch.object(probe, 'prepare_scenario', return_value=script),
+            mock.patch.object(probe.oracle, 'load_actions', return_value=[]),
+            mock.patch.object(probe, 'sidecar_args', return_value=[]),
+            mock.patch.object(probe, 'original_logon', return_value='cmd'),
+            mock.patch.object(probe.winsandbox, 'wslpath_w', side_effect=lambda x: x),
+            mock.patch.object(probe, 'report', return_value=0),
+            mock.patch.object(probe, 'run_side', run_side),
+            mock.patch.object(probe.filelock, 'hold',
+                              lambda path, what, **kw: ctx(what)(path)),
+            mock.patch.object(probe.oracle, 'prepared_saves', ctx('saves')),
+            mock.patch.object(probe.shutil, 'rmtree'),
+        ]
+        for pt in patches:
+            pt.start()
+            self.addCleanup(pt.stop)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = probe.run(ns)
+        self.assertEqual(rc, 0)
+        self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
+            ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
+            ('run_side',),
+            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay')])
+        saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
+        self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
+                                    {'mode': 'empty', 'load': None},
+                                    os.path.join(run_dir, 'replay'),
+                                    probe.oracle.save_aside(game)))
+
 
 class FridaProbeTest(unittest.TestCase):
     """The sandbox run completes with a verdict: the sidecar command parses
@@ -9884,7 +9990,22 @@ class EvidenceParagraphsTest(unittest.TestCase):
         self.assertFalse(w._cites_pin('disagreed with WSO\n\nat e8dd16a7', 'e8dd16a7'))
 
 
+_REAL_TASKKILL = driver._tool('winsandbox').taskkill_sandbox
+
+
 class DriverTest(unittest.TestCase):
+    def setUp(self):
+        # By construction no DriverTest can reach the host's real taskkill (it
+        # ends every Windows Sandbox on the machine): every Driver built in
+        # this class gets this recorder as its `_taskkill`.
+        self.taskkills = []
+        ws = driver._tool('winsandbox')
+        p = mock.patch.object(ws, 'taskkill_sandbox',
+                              lambda *a, **kw: self.taskkills.append((a, kw)) or [])
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(driver._PROBE_PIDS.clear)
+
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
 
@@ -9914,20 +10035,125 @@ class DriverTest(unittest.TestCase):
     def test_parse_undecided_rejects_malformed_and_duplicates(self):
         h = '## Undecided\n'
         for bad in ('undecided 0x1 ours no\n', 'undecided 0x1 fork\n',
-                    'undecided 0x1\n', 'I could not decide.\n',
-                    'verdict 0x1 fork case x\n'):
+                    'undecided 0x1\n', 'Undecided: none\n',
+                    'verdict 0x1 fork case x\n', 'I could not decide 0x401000.\n'):
             with self.assertRaises(driver.ReportError, msg=bad):
                 driver.parse_undecided(h + bad)
         with self.assertRaises(driver.ReportError) as cm:
-            driver.parse_undecided(h + '\nsome note\n')
+            driver.parse_undecided(h + '\nnote on 0x401000\n')
         self.assertIn('line 3', str(cm.exception))
         with self.assertRaises(driver.ReportError):
             driver.parse_undecided(h + 'undecided 0x401000 fork a\nundecided 0x0401000 neither b\n')
+
+    def test_parse_undecided_skips_address_free_prose(self):
+        # b022 (2026-10-24): Flash wrote a placeholder under ## Undecided twice
+        # ('(none)', then '(no rows — all 20 decided)') and the checks raised
+        # each time; the same tolerance parse_report has applies here.
+        h = '## Undecided\n'
+        for prose in ('(none)\n', '(no rows — all 20 decided)\n', 'some note\n',
+                      'I could not decide.\n', 'All rows carry a verdict.\n'):
+            self.assertEqual(driver.parse_undecided(h + prose), {}, prose)
+        text = h + '(none yet)\nundecided 0x401000 fork the exe skips it\nThat is all.\n'
+        self.assertEqual(driver.parse_undecided(text),
+                         {'0x401000': ('fork', 'the exe skips it')})
 
     def test_parse_undecided_skips_code_fences(self):
         text = '## Undecided\n```text\nundecided 0x401000 fork a\n```\n```\nundecided 0x2 neither b\n```\n'
         self.assertEqual(driver.parse_undecided(text),
                          {'0x401000': ('fork', 'a'), '0x2': ('neither', 'b')})
+
+    def test_parse_kept(self):
+        text = ('## Imported\nimported 0x1 trace\n\n## Kept\n'
+                'kept 0x716e80 ours matches: the exe skips the ability too\n'
+                '- `Kept 0X02 the base guard is right`\n3. kept 0x0403000  x y \n'
+                '\n## Notes\nkept nonsense here\n')
+        self.assertEqual(driver.parse_kept(text), {
+            '0x716E80': 'ours matches: the exe skips the ability too',
+            '0x2': 'the base guard is right', '0x403000': 'x y'})
+        self.assertEqual(driver.parse_kept(self.REPORT), {})
+        self.assertEqual(driver.parse_kept('## Kept\n```text\nkept 0x1 r\n```\n'), {'0x1': 'r'})
+
+    def test_parse_kept_rejects_malformed_duplicate_and_imported_rows(self):
+        for bad in ('kept 0x1\n', 'kept 0x1 \n', 'ours is right\n', 'imported 0x1 trace\n'):
+            with self.assertRaises(driver.ReportError, msg=bad):
+                driver.parse_kept('## Kept\n' + bad)
+        with self.assertRaises(driver.ReportError) as cm:
+            driver.parse_kept('## Kept\nkept 0x401000 a\nkept 0x0401000 b\n')
+        self.assertIn('duplicate kept line', str(cm.exception))
+        with self.assertRaises(driver.ReportError) as cm:
+            driver.parse_kept('## Imported\nimported 0x401000 trace\n## Kept\nkept 0x401000 a\n')
+        self.assertIn('both ## Imported and ## Kept', str(cm.exception))
+
+    def test_mechanical_checks_kept_and_parked_rows(self):
+        d = self._mc_repo({'401000': 'kind: read-only', '402000': 'x'})
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'theirs_changed_ours_base'},
+            {'address': '0x402000', 'category': 'theirs_real_ours_stub'},
+            {'address': '0x403000', 'category': 'theirs_changed_ours_base'}]}
+        wave = driver._tool('wave')
+        ce = driver._tool('check_evidence')
+
+        def run(**kw):
+            with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
+                    mock.patch.object(ce, 'touched', return_value=kw.pop('touched', [])):
+                return [p for p in driver.mechanical_checks(
+                    batch, d, {}, run=self._mc_run(0, []), kind='import', **kw)
+                    if 'first' not in p.split(':')[0] and not p.startswith('git ')]
+        # a parked row whose evidence still exists: close's exact wording
+        _write(os.path.join(d, 'docs', 'wso', 'import-parked', '402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        self.assertEqual(run(), [
+            '0x402000: parked (docs/wso/import-parked/402000.json) but '
+            'docs/evidence/402000.md still exists; delete it'])
+        os.unlink(os.path.join(d, 'docs', 'evidence', '402000.md'))
+        self.assertEqual(run(), [])
+        # kept: fine with evidence and the base body; each misuse is a problem
+        self.assertEqual(run(kept=['0x401000']), [])
+        probs = run(kept=['0x401000', '0x402000', '0x403000', '0x999000'],
+                    touched=[('src/A.cpp', 0x401000, 'F')])
+        self.assertEqual(len(probs), 4, probs)
+        self.assertTrue(any(p.startswith('0x401000: listed under ## Kept but its body changed '
+                                         'against first') for p in probs), probs)
+        self.assertTrue(any(p.startswith('0x402000: listed under ## Kept but ours is a stub')
+                            for p in probs), probs)
+        self.assertTrue(any('0x402000: both kept and parked' not in p and
+                            p.startswith('0x403000: listed under ## Kept but '
+                                         'docs/evidence/403000.md does not exist') for p in probs))
+        self.assertTrue(any(p.startswith('0x999000: kept line for an address outside') for p in probs))
+        # a base-body row both kept and parked
+        _write(os.path.join(d, 'docs', 'wso', 'import-parked', '401000.json'), json.dumps(
+            {'address': '0x401000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        probs = run(kept=['0x401000'])
+        self.assertTrue(any(p.startswith('0x401000: parked') for p in probs), probs)
+        self.assertTrue(any(p.startswith('0x401000: both kept and parked') for p in probs), probs)
+
+    def test_parked_evidence_check_covers_the_batch_and_what_the_branch_changed(self):
+        d = self._mc_repo({'401000': 'kind: read-only', '405000': 'stray'})
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'theirs_changed_ours_base'}]}
+        key = driver._tool('wave')._addr_key
+        wave = driver._tool('wave')
+        # a parked file `first` already carried, for a row outside the batch,
+        # with stray evidence: not this batch's problem
+        _write(os.path.join(d, wave.parked_rel('0x405000')), json.dumps(
+            {'address': '0x405000', 'name': 'n', 'file': 'f', 'batch': 'i001', 'needs': 'x'}))
+        self.assertEqual(driver._kept_and_parked_problems(batch, d, 'first', (), key, []), [])
+        # the same file changed on the branch is
+        probs = driver._kept_and_parked_problems(
+            batch, d, 'first', (), key, [wave.parked_rel('0x405000')])
+        self.assertEqual(probs, ['0x405000: parked (docs/wso/import-parked/405000.json) but '
+                                 'docs/evidence/405000.md still exists; delete it'])
+        # and a batch row's own parked file always is
+        _write(os.path.join(d, wave.parked_rel('0x401000')), json.dumps(
+            {'address': '0x401000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        probs = driver._kept_and_parked_problems(batch, d, 'first', (), key, [])
+        self.assertEqual(probs, ['0x401000: parked (docs/wso/import-parked/401000.json) but '
+                                 'docs/evidence/401000.md still exists; delete it'])
+
+    def test_fix_round_rule_for_imports_names_kept(self):
+        imp = driver.fix_prompt('i005', 'checks', 'p3/wso-i005', 'BRIEF', ['p'], 'import')
+        self.assertIn('`## Kept`', imp)
+        self.assertIn('kept <0xADDR> <one-line reason>', imp)
 
     def test_credits_of_uses_both_formulas(self):
         lines = [json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
@@ -10762,7 +10988,8 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(driver._StageError) as cm:
             d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(cm.exception.stage, 'frida')
-        self.assertIn('every Frida scenario failed on infrastructure (no side produced a status): '
+        self.assertIn('every Frida scenario failed on infrastructure (no side produced a status '
+                      'or both sides failed alike): '
                       + '; '.join('%s: original side exited 2' % sc
                                   for sc in sorted(driver._tool('truth').FRIDA_SCENARIOS)),
                       cm.exception.problem)
@@ -10782,6 +11009,139 @@ class DriverTest(unittest.TestCase):
         findings = d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(d._frida_got['401000'][0], 'scenario failed')
         self.assertTrue(any(f.startswith('0x401000:') and 'park it' in f for f in findings), findings)
+
+    def test_driver_frida_both_sides_failure_is_left_out_not_poisoning(self):
+        d, batch = self._import_phase_driver()
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        nothing = {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                   'orig_exit': 2, 'ours_exit': 2, 'failed': 'original side exited 2 (NOT-LOADED)',
+                   'result': {'orig': 'NOT-LOADED', 'ours': 'NOT-LOADED'},
+                   'hits': {'orig': None, 'ours': None}, 'dumps': None}
+        out['biography'] = dict(nothing)
+        d.frida_run = lambda *a, **kw: dict(out)
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'][0], 'equal')
+        self.assertIn('b011: frida: biography measured nothing (both sides NOT-LOADED) '
+                      'and is left out', self.logs)
+        # every scenario uninformative: the infrastructure exception
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda *a, **kw: {'biography': dict(nothing), 'world_entry': dict(nothing)}
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn('every Frida scenario failed on infrastructure', cm.exception.problem)
+
+    def test_probe_runs_are_live_groups_and_a_stop_ends_them(self):
+        # a long-running probe.py launch (frida_run's `run`) is a live process
+        # group: the stop path kills it and its batch thread gets _Stop
+        self.addCleanup(driver._STOPPED.clear)
+        outcome = []
+
+        def launch():
+            try:
+                outcome.append(driver._run_probe(['sleep', '60'], capture_output=True, text=True))
+            except BaseException as e:
+                outcome.append(e)
+        t = threading.Thread(target=launch, daemon=True)
+        t.start()
+        end = time.monotonic() + 5
+        while not driver._LIVE and time.monotonic() < end:
+            time.sleep(0.02)
+        self.assertTrue(driver._LIVE, 'the probe launch was not registered as a live group')
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.STOP_WAIT = 0.2
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        t.join(10)
+        self.assertFalse(t.is_alive(), 'the probe was still running after the stop')
+        self.assertIsInstance(outcome[0], driver._Stop)
+        self.assertFalse(driver._LIVE)
+        self.assertEqual(len(self.taskkills), 1)     # the recorder, never the host's
+
+    def _live_sleeper(self, probe):
+        self.addCleanup(driver._STOPPED.clear)
+        sleeper = subprocess.Popen(['sleep', '60'], start_new_session=True)
+        self.addCleanup(lambda: sleeper.poll() is None and sleeper.kill())
+        driver._LIVE.add(sleeper.pid)
+        self.addCleanup(driver._LIVE.discard, sleeper.pid)
+        if probe:
+            driver._PROBE_PIDS.add(sleeper.pid)
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.STOP_WAIT = 0.2
+        return d
+
+    def test_stop_taskkills_the_sandbox_after_killing_the_probe(self):
+        d = self._live_sleeper(True)
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        self.assertEqual(len(self.taskkills), 1)
+        self.assertTrue(any('taskkilled the sandbox' in m for m in self.logs), self.logs)
+
+    def test_stop_with_only_workers_live_never_taskkills(self):
+        d = self._live_sleeper(False)
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        self.assertEqual(self.taskkills, [])
+
+    def test_run_probe_records_its_pid_and_a_plain_run_does_not(self):
+        driver._run_group([sys.executable, '-c', 'pass'], capture_output=True)
+        self.assertFalse(driver._PROBE_PIDS)
+        driver._run_probe([sys.executable, '-c', 'pass'], capture_output=True)
+        self.assertFalse(driver._PROBE_PIDS, 'a finished probe leaves no pid behind')
+
+    def test_the_fixture_driver_has_no_route_to_the_real_taskkill(self):
+        # guard: a later fixture edit cannot drop the recorder
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        self.assertIsNot(d._taskkill, _REAL_TASKKILL)
+        d._taskkill()
+        self.assertEqual(len(self.taskkills), 1)
+        d2 = self._driver(self._BatchWorker(credits=0.0))
+        self.assertIsNot(d2._taskkill, _REAL_TASKKILL)
+        self.assertIsNot(driver.Driver.__init__.__globals__['_tool']('winsandbox').taskkill_sandbox,
+                         _REAL_TASKKILL)
+
+    def test_taskkill_sandbox_runs_each_name_in_its_own_try(self):
+        ws = driver._tool('winsandbox')
+        names = ws.TASKKILL_NAMES
+        calls = []
+
+        def run(argv, **kw):
+            name = argv[argv.index('/IM') + 1]
+            calls.append(name)
+            if name == names[0]:
+                raise subprocess.TimeoutExpired(argv, 15)
+            if name == names[1]:
+                raise OSError('no cmd.exe')
+            return subprocess.CompletedProcess(argv, 0, b'', b'')
+        done = _REAL_TASKKILL(run=run)
+        self.assertEqual(calls, list(names))
+        self.assertEqual(done, [(names[0], None), (names[1], None), (names[2], 0)])
+
+    def test_stop_log_names_the_killed_and_the_failed(self):
+        ws = driver._tool('winsandbox')
+        n = ws.TASKKILL_NAMES
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d._taskkill = lambda: [(n[0], None), (n[1], 128), (n[2], 0)]
+        d._close_sandbox_after_stop()
+        line = [m for m in self.logs if 'taskkilled the sandbox' in m][0]
+        self.assertIn('killed: %s;' % n[2], line)
+        self.assertIn('failed: %s)' % n[0], line)
+
+    def test_close_sandbox_kills_even_when_the_log_pipe_is_dead(self):
+        ws = driver._tool('winsandbox')
+
+        def log(message):
+            raise BrokenPipeError(32, 'Broken pipe')
+        kills = []
+        with mock.patch.object(ws, 'sandbox_running', return_value=True), \
+                mock.patch.object(ws.time, 'sleep'):
+            ws.close_sandbox(log, timeout=0, kill=lambda: kills.append(1))
+        self.assertEqual(kills, [1])
+        # and probe.log itself swallows a dead pipe
+        with mock.patch('builtins.print', side_effect=BrokenPipeError(32, 'x')):
+            probe.log('still going')
 
     def test_driver_frida_dumps_the_schema_refuses_are_an_exception(self):
         # a recorder (or our dumper) out of step with schema.json makes every
@@ -11180,15 +11540,19 @@ class DriverTest(unittest.TestCase):
         self.assertIn('b011: frida: no usable coverage map; running every scenario', self.logs)
 
     def test_driver_frida_phase_holds_out_the_scenarios_truth_names(self):
-        # the hotfix of 2026-10-23: save_load_screens (a save whose name grows
-        # across runs) and biography (needs --no-loaded) stay out of the phase
-        # until Task 18; the coverage map and scenarios_for keep them
+        # Driver.held_out (truth.PHASE_HELD_OUT) keeps
+        # the scenarios it names out of the phase; the coverage map and
+        # scenarios_for keep them
         d, batch = self._screen_driver()
         truth = driver._tool('truth')
-        d.held_out = tuple(truth.PHASE_HELD_OUT)
-        self.assertEqual(set(d.held_out), {'save_load_screens', 'biography'})
-        self._coverage_map({'world_entry': {'0x401000': 4, '0x402000': 1, '0x403000': 1},
-                            'save_load_screens': {'0x401000': 1}})
+        # save_load_screens stays out until a real pair confirms its dumps
+        self.assertEqual(tuple(truth.PHASE_HELD_OUT), ('save_load_screens',))
+        d.held_out = ('save_load_screens', 'biography')       # the mechanism still works
+        # 0x403000 is hit ONLY by save_load_screens, 0x402000 only by biography:
+        # without the hold-out both would run; with it neither does and the
+        # two rows are simply not covered (0bbf4e66)
+        self._coverage_map({'world_entry': {'0x401000': 4},
+                            'save_load_screens': {'0x403000': 1}})
         self._add_ui_entry({'0x402000': 2})
         seen = self._scenario_recorder(d)
         try:
@@ -11196,8 +11560,9 @@ class DriverTest(unittest.TestCase):
         except driver._StageError:
             pass
         self.assertEqual(seen, [['world_entry']])
-        self.assertIn('b011: frida: held out of the phase: save_load_screens, biography',
-                      '\n'.join(self.logs))
+        logs = '\n'.join(self.logs)
+        self.assertIn('b011: frida: held out of the phase: save_load_screens, biography', logs)
+        self.assertIn('scenarios by coverage: world_entry (cover 1 of 3 rows', logs)
 
     def test_driver_frida_phase_adds_the_ui_scenarios_for_screen_rows(self):
         d, batch = self._import_phase_driver()
@@ -11456,6 +11821,629 @@ class DriverTest(unittest.TestCase):
                            ('0x403000', 'Rules::Tick')):
             self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
                 os.path.join(ev, addr[2:] + '.md'))), addr)
+
+    BASE_CAT = 'theirs_changed_ours_base'
+
+    def _kept_phase_driver(self, kept=('0x401000', '0x402000', '0x403000'), category=None):
+        """The import phase driver with `kept` listed under ## Kept, every row
+        a base-body row (or `category`) in the batch and in the import state."""
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[dict(r, category=category or self.BASE_CAT)
+                                  for r in batch['rows']])
+        d._kept = {a: 'ours matches' for a in kept}
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in batch['rows']]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        return d, batch
+
+    def _outcomes(self):
+        with open(self.state_path) as f:
+            return {r['address']: r.get('outcome')
+                    for r in json.load(f)['batches']['b011']['rows']}
+
+    def test_driver_frida_phase_measures_kept_rows_and_records_them(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_phase_driver()
+        seen = []
+
+        def frida_run(b, table, scenarios, **kw):
+            seen.append(sorted(h['name'] for h in table['original']['hooks']))
+            return self._file_traces(scenarios, trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+                                     trace(('fn_401000', 7, 3), ('fn_402000', 7, 4)))
+        d.frida_run = frida_run
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(seen, [['fn_401000', 'fn_402000', 'fn_403000']])
+        # equal: trace evidence for our body
+        fields = load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
+        # every measured kept row is recorded kept; close lets only a row with
+        # this batch's trace close as kept
+        self.assertEqual(self._outcomes(),
+                         {'0x401000': 'kept', '0x402000': 'kept', '0x403000': 'kept'})
+        # different: the finding parks it with the difference, edit nothing back
+        diff = [f for f in findings if f.startswith('0x402000:')]
+        self.assertEqual(len(diff), 1, findings)
+        self.assertIn('our body differs from the original (differs in ', diff[0])
+        self.assertIn('edit nothing back', diff[0])
+        self.assertIn('cannot be measured', diff[0])
+        self.assertIn('docs/wso/import-parked/402000.json', diff[0])
+        self.assertIn('needs "ours differs from the exe (', diff[0])
+        self.assertIn('; import his body in a later batch", and commit the two', diff[0])
+        self.assertNotIn('edit that function back', diff[0])
+        # M7: the needs names the scenarios that showed the difference (all nine here)
+        self.assertIn('needs "ours differs from the exe (world_entry, first_fight', diff[0])
+        self.assertNotIn('import his body if it is the one', diff[0])
+        # not exercised: parked with the stated needs
+        idle = [f for f in findings if f.startswith('0x403000:')]
+        self.assertEqual(len(idle), 1, findings)
+        self.assertIn('docs/wso/import-parked/403000.json', idle[0])
+        self.assertIn('needs "not exercised; ours reading matches the decompile"', idle[0])
+        self.assertEqual(len(findings), 2)
+
+    def test_kept_needs_wording(self):
+        self.assertEqual(driver.kept_needs(['a', 'b']), driver.KEPT_UNMEASURED)
+        self.assertEqual(driver.kept_needs(['a', 'b'], 'no final HITS totals'),
+                         'a, b: not measured (no final HITS totals); '
+                         'ours reading matches the decompile')
+        self.assertEqual(driver.kept_needs('world_entry', 'dumps not shown to match'),
+                         'world_entry: not measured (dumps not shown to match); '
+                         'ours reading matches the decompile')
+
+    def test_driver_kept_row_scenario_failed_gets_the_kept_needs(self):
+        d, batch = self._kept_phase_driver(kept=('0x402000',))
+        truth_mod = driver._tool('truth')
+        got = {'0x401000': ('not measured', 'no final HITS totals in world_entry'),
+               '0x402000': ('scenario failed', 'first_fight: ours side exited 2'),
+               '0x403000': ('not measured', 'x')}
+        with mock.patch.object(truth_mod, 'frida_batch', lambda *a, **kw: dict(got)):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        by = {f[:9]: f for f in findings}
+        # the kept row: the kept needs; the rows that are not kept keep the generic text
+        self.assertIn('not measured (scenario failed: first_fight: ours side exited 2); '
+                      'ours reading matches the decompile', by['0x402000:'])
+        self.assertNotIn('ours reading matches', by['0x401000:'])
+
+    def test_driver_kept_row_dumps_mismatch_gets_the_kept_needs(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3)), trace(('fn_401000', 7, 3)),
+            dumps={'match': False, 'detail': 'heap differs'})
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        mine = [f for f in findings if f.startswith('0x401000:')]
+        self.assertEqual(len(mine), 1, findings)
+        # frida_run's dump guard makes the row 'not measured' (dumps differ)
+        self.assertIn('not measured (dumps differ in world_entry (heap differs)', mine[0])
+        self.assertIn('); ours reading matches the decompile"', mine[0])
+        self.assertEqual(self._outcomes()['0x401000'], 'kept')   # close then refuses it
+
+    BASE_R = '// 0x401000\nint Rules::Render(int a, int b)\n{\n  return a;\n}\n'
+
+    def _body_phase(self, kept, body_edit='return b;'):
+        """A batch whose 0x401000 body (src/R.cpp) the worker changed to
+        `body_edit` and committed; the phase has run (equal everywhere), the
+        batch rows carry the base-body category.  (driver, batch)."""
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[dict(r, category=self.BASE_CAT) for r in batch['rows']])
+        _write(os.path.join(self.root, 'src', 'R.cpp'), self.BASE_R)
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base body')
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), self.BASE_R.replace('return a;', body_edit))
+        self.git('commit', '-qam', 'edit', cwd=self.wt)
+        d._kept = {'0x401000': 'ours matches'} if kept else {}
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in batch['rows']
+                                            if r['address'] == '0x401000']
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        batch = dict(batch, rows=state['batches']['b011']['rows'])
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3)), trace(('fn_401000', 7, 3)))
+        d._frida_phase('b011', batch, self.wt, {})
+        return d, batch
+
+    def _close_import(self):
+        return load_tool('wave').close_batch(self.state_path, self.root, 'b011', kind='import',
+                                             gate=False)
+
+    def test_driver_touched_kept_row_is_measured_as_an_import_without_the_mark(self):
+        d, batch = self._body_phase(kept=True)
+        self.assertIsNone(self._outcomes()['0x401000'])
+        # measured like an import: trace evidence for the CHANGED body
+        self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
+        # the check tells the worker what to do
+        _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x401000 ours matches\n')
+        mine = [p for p in probs if p.startswith('0x401000: listed under ## Kept but its body changed '
+                                                  'against first')]
+        self.assertEqual(len(mine), 1, probs)
+        self.assertIn('keep the change and move the row to ## Imported', mine[0])
+        self.assertIn('edit it back and park it (`needs`: `kept row edited then put back; '
+                      'not measured`)', mine[0])
+        self.assertTrue(mine[0].count('kept row edited then put back; not measured') >= 2)
+        self.assertIn('and take the row off `## Kept`', mine[0])
+        self.assertNotIn('and commit,', mine[0])
+        # the fix round edits it back: close refuses (the body is not the measured one),
+        # never as kept
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), self.BASE_R)
+        self.git('commit', '-qam', 'edit back', cwd=self.wt)
+        rc, out = self._close_import()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x401000: body changed after the Frida phase; park it or edit it back '
+                      'to the measured body', out)
+        self.assertNotIn('kept but not measured', out)
+        self.assertIsNone(self._outcomes()['0x401000'])
+
+    def test_driver_body_changed_after_the_phase_is_refused_by_check_and_close(self):
+        d, batch = self._body_phase(kept=False)
+        with open(self.state_path) as f:
+            self.assertTrue(json.load(f)['batches']['b011']['rows'][0]['measured_body'])
+        text = '0x401000: body changed after the Frida phase; park it or edit it back to the ' \
+               'measured body'
+        # changed in the fix round: both refuse
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), self.BASE_R.replace('return a;', 'return c;'))
+        self.git('commit', '-qam', 'fix round edit', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x401000 trace\n')
+        self.assertIn(text, probs)
+        rc, out = self._close_import()
+        self.assertEqual(rc, 1, out)
+        self.assertIn(text, out)
+
+    def test_driver_body_unchanged_since_the_phase_closes(self):
+        d, batch = self._body_phase(kept=False)
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x401000 trace\n')
+        self.assertFalse([p for p in probs if 'after the Frida phase' in p], probs)
+        rc, out = self._close_import()
+        self.assertEqual(rc, 0, out)
+
+    T_SRC = '// 0x404000\nint Rules::Tick(int a, int b)\n{\n  return a + b;\n}\n'
+    T_EVIDENCE = ('---\naddress: 0x404000\nname: Rules::Tick\nkind: read-only\n'
+                  'exemption: "read against the disassembly: ours matches"\n---\n\n'
+                  '## Decompiled (Ghidra)\n\n```c\nint Tick(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
+
+    def _kept_without_evidence_at_the_merge_base(self):
+        """Row 0x404000: the labelled base body on first, NO evidence file at
+        the merge base; the worker keeps the body and writes the read-only file."""
+        d, batch = self._import_phase_driver()
+        _write(os.path.join(self.root, 'src', 'T.cpp'), self.T_SRC)
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base body T')
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        mb = self.git('merge-base', 'first', 'HEAD', cwd=self.wt).stdout.strip()
+        self.assertNotEqual(subprocess.run(
+            ['git', 'cat-file', '-e', '%s:docs/evidence/404000.md' % mb], cwd=self.wt,
+            capture_output=True).returncode, 0)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '404000.md'), self.T_EVIDENCE)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'kept 404000 evidence', cwd=self.wt)
+        rows = [{'address': '0x404000', 'name': 'Rules::Tick', 'file': 'src/T.cpp',
+                 'category': self.BASE_CAT}]
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in rows]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        d._kept = {'0x404000': 'ours matches the exe'}
+        return d, dict(batch, rows=rows)
+
+    def test_driver_kept_row_with_no_evidence_at_the_merge_base_closes_as_kept(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_without_evidence_at_the_merge_base()
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_404000', 7, 3)), trace(('fn_404000', 7, 3)))
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+        fields = driver._tool('check_evidence').front_matter(_slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '404000.md')))
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertTrue(fields['trace_source'].startswith('frida b011-'))
+        self.assertEqual(self._outcomes()['0x404000'], 'kept')
+        rc, out = self._close_import()
+        self.assertEqual(rc, 0, out)
+
+    def test_driver_parked_kept_row_must_leave_the_kept_section(self):
+        d, batch = self._kept_without_evidence_at_the_merge_base()
+        trace = TruthTest._trace
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3)), trace(('fn_401000', 7, 3)))
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn('take the row off `## Kept`', findings[0])
+        self.assertIn('not exercised; ours reading matches the decompile', findings[0])
+        prompt = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', findings, 'import')
+        self.assertIn('take the row off `## Kept`', prompt)
+        self.assertIn('repeat `## Kept` for the kept rows you did not park, a parked row '
+                      'leaves it', prompt)
+        # the worker parks it as told and drops it from ## Kept: the second check passes;
+        # still listed, it is the old "both kept and parked" problem
+        self.git('rm', '-q', 'docs/evidence/404000.md', cwd=self.wt)
+        _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked', '404000.json'), json.dumps(
+            {'address': '0x404000', 'name': 'Rules::Tick', 'file': 'src/T.cpp', 'batch': 'b011',
+             'needs': driver.KEPT_UNMEASURED}))
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'park 404000', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, '## Imported\n\nParked: 0x404000\n')
+        self.assertFalse([p for p in probs if '404000' in p], probs)
+        _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x404000 ours matches\n')
+        self.assertTrue([p for p in probs if p.startswith('0x404000: both kept and parked')], probs)
+
+    def test_driver_kept_row_with_standing_evidence_is_not_measured_and_closes(self):
+        d, batch = self._kept_without_evidence_at_the_merge_base()
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+               'ORACLE_CASE("rules/tick", Tick);\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '404000.md'),
+               '---\naddress: 0x404000\nname: Rules::Tick\nkind: oracle\n'
+               'oracle_case: rules/tick\n---\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'oracle evidence', cwd=self.wt)
+        d.frida_build = lambda *a, **kw: self.fail('nothing to measure: no build')
+        d.frida_run = lambda *a, **kw: self.fail('nothing to measure')
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+        self.assertEqual(self._outcomes()['0x404000'], 'kept')
+        self.assertIn('kind: oracle', _slurp(os.path.join(self.wt, 'docs', 'evidence', '404000.md')))
+        rc, out = self._close_import()
+        self.assertEqual(rc, 0, out)
+
+    T_OLD_TRACE = ('---\naddress: 0x404000\nname: Rules::Tick\nkind: trace\n'
+                   'trace_source: frida i003-world_entry orig:%s ours:%s compare=0\n---\n\n'
+                   '## Decompiled (Ghidra)\n\n```c\nint Tick(int a, int b)\n\n{\n  return g_x;\n'
+                   '}\n```\n' % ('a' * 64, 'b' * 64))
+
+    def _kept_tick(self, d, batch):
+        """Row 0x404000 (src/T.cpp, base body) the batch's only row, in the
+        import state, listed under ## Kept.  (driver, batch)."""
+        rows = [{'address': '0x404000', 'name': 'Rules::Tick', 'file': 'src/T.cpp',
+                 'category': self.BASE_CAT}]
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in rows]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        d._kept = {'0x404000': 'ours matches the exe'}
+        return d, dict(batch, rows=rows)
+
+    def _kept_on_first_with(self, evidence, extra=()):
+        """Row 0x404000: the labelled base body on first with `evidence` (and
+        the `extra` (rel, text) files) at the merge base, the branch identical
+        there; the worker keeps the row."""
+        d, batch = self._import_phase_driver()
+        _write(os.path.join(self.root, 'src', 'T.cpp'), self.T_SRC)
+        _write(os.path.join(self.root, 'docs', 'evidence', '404000.md'), evidence)
+        for rel, text in extra:
+            _write(os.path.join(self.root, rel), text)
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'an earlier batch: 0x404000 and its evidence')
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        mb = self.git('merge-base', 'first', 'HEAD', cwd=self.wt).stdout.strip()
+        self.assertEqual(subprocess.run(
+            ['git', 'show', '%s:docs/evidence/404000.md' % mb], cwd=self.wt,
+            capture_output=True, text=True).stdout, evidence)
+        self.assertEqual(_slurp(os.path.join(self.wt, 'docs', 'evidence', '404000.md')), evidence)
+        return self._kept_tick(d, batch)
+
+    def test_driver_kept_row_on_another_batchs_frida_trace_is_measured_and_closes(self):
+        # I-1 (round 4): an older batch's frida trace measured some body of the
+        # row, maybe not this one: the phase measures it again
+        trace = TruthTest._trace
+        d, batch = self._kept_on_first_with(self.T_OLD_TRACE)
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_404000', 7, 3)), trace(('fn_404000', 7, 3)))
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+        self.assertFalse([l for l in self.logs if '0x404000 kept as written' in l], self.logs)
+        self.assertIn("b011: frida 0x404000 kept on another batch's frida trace "
+                      "(i003-world_entry); measured again", self.logs)
+        fields = driver._tool('check_evidence').front_matter(_slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '404000.md')))
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertTrue(fields['trace_source'].startswith('frida b011-world_entry orig:'),
+                        fields['trace_source'])
+        self.assertEqual(self._outcomes()['0x404000'], 'kept')
+        rc, out = self._close_import()
+        self.assertEqual(rc, 0, out)
+
+    def test_driver_kept_row_on_another_batchs_trace_the_phase_skipped_is_refused(self):
+        d, batch = self._kept_on_first_with(self.T_OLD_TRACE)
+        self._coverage_map({'world_entry': {'0x999000': 4}}, hooked=('0x404000',))
+        d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
+        d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].startswith('0x404000: '), findings)
+        self.assertIn('take the row off `## Kept`', findings[0])
+        self.assertIn('frida i003-world_entry', _slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '404000.md')))
+        self.assertEqual(self._outcomes()['0x404000'], 'kept')
+        rc, out = self._close_import()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x404000: kept but not measured; park it or import it', out)
+        # the other batch's trace stands only for a body this batch's phase
+        # recorded (measured_body) and the branch still has
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'][0]['measured_body'] = driver._tool(
+            'check_evidence').body_digest(self.wt, '0x404000', 'src/T.cpp')
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        rc, out = self._close_import()
+        self.assertEqual(rc, 0, out)
+
+    def test_driver_kept_row_on_oracle_evidence_at_the_merge_base_is_not_measured_and_closes(self):
+        oracle = ('---\naddress: 0x404000\nname: Rules::Tick\nkind: oracle\n'
+                  'oracle_case: rules/tick\n---\n')
+        d, batch = self._kept_on_first_with(oracle, (
+            ('oracle/cases/rules.cpp', 'ORACLE_CASE("rules/tick", Tick);\n'),
+            ('oracle/CMakeLists.txt', 'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')))
+        d.frida_build = lambda *a, **kw: self.fail('nothing to measure: no build')
+        d.frida_run = lambda *a, **kw: self.fail('nothing to measure')
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+        self.assertIn('b011: frida 0x404000 kept as written (oracle case rules/tick); not measured',
+                      self.logs)
+        self.assertEqual(self._outcomes()['0x404000'], 'kept')
+        self.assertEqual(_slurp(os.path.join(self.wt, 'docs', 'evidence', '404000.md')), oracle)
+        rc, out = self._close_import()
+        self.assertEqual(rc, 0, out)
+
+    def test_driver_measured_dependency_edited_back_to_the_merge_base_is_not_held_to_it(self):
+        # Minor (round 4): like close, the check holds only a dependency the
+        # batch still changes to its measured body
+        trace = TruthTest._trace
+        base_t = '// 0x403000\nint Rules::Tick(int a, int b)\n{\n  return a;\n}\n'
+        d, batch = self._import_phase_driver()
+        _write(os.path.join(self.root, 'src', 'T.cpp'), base_t)
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'base T on first')
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        batch = dict(batch, rows=[r for r in batch['rows'] if r['address'] != '0x403000'])
+        _write(os.path.join(self.wt, 'src', 'T.cpp'), base_t.replace('return a;', 'return a + 1;'))
+        self.git('commit', '-qam', 'dependency imported', cwd=self.wt)
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in batch['rows']]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        events = (('fn_401000', 7, 3), ('fn_402000', 7, 3), ('fn_403000', 7, 3))
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(*events), trace(*events))
+        d._frida_phase('b011', batch, self.wt, {})
+        with open(self.state_path) as f:
+            self.assertEqual(list(json.load(f)['batches']['b011'].get('measured_deps') or {}),
+                             ['403000'])
+        # the fix round edits the dependency back to the merge base's body
+        _write(os.path.join(self.wt, 'src', 'T.cpp'), base_t)
+        self.git('commit', '-qam', 'dependency edited back', cwd=self.wt)
+        self.assertNotIn(0x403000, [a for _p, a, _n in
+                                    driver._tool('check_evidence').touched(self.wt, 'first')])
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x401000 trace\n')
+        self.assertFalse([p for p in probs if 'body changed after the Frida phase' in p], probs)
+        # still changed (another body than the measured one), it is held to it
+        _write(os.path.join(self.wt, 'src', 'T.cpp'), base_t.replace('return a;', 'return b;'))
+        self.git('commit', '-qam', 'dependency changed again', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x401000 trace\n')
+        self.assertIn('0x403000: body changed after the Frida phase; park it or edit it back to '
+                      'the measured body', probs)
+
+    def test_driver_worker_reentry_clears_the_phase_records(self):
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        b = state['batches']['b011']
+        b['measured_deps'] = {'403000': 'abc'}
+        for r in b['rows']:
+            r['outcome'] = 'kept'
+            r['measured_body'] = 'abc'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        d._clear_measured('b011')
+        with open(self.state_path) as f:
+            b = json.load(f)['batches']['b011']
+        self.assertNotIn('measured_deps', b)
+        self.assertFalse([r for r in b['rows'] if 'outcome' in r or 'measured_body' in r])
+        # _run_batch calls it before the worker, but not on a record/close retry
+        seen = []
+        d._clear_measured = lambda bid: seen.append(bid)
+        d._retry_stage['b011'] = 'close'
+        d.run_batch('b011')
+        self.assertEqual(seen, [])
+        d.run_batch('b011')
+        self.assertEqual(seen, ['b011'])
+
+    def test_driver_dependencies_get_a_measured_body_too(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[r for r in batch['rows'] if r['address'] != '0x403000'])
+        _write(os.path.join(self.wt, 'src', 'T.cpp'),
+               '// 0x403000\nint Rules::Tick(int a, int b)\n{\n  return a;\n}\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'dependency', cwd=self.wt)
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in batch['rows']]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        events = (('fn_401000', 7, 3), ('fn_402000', 7, 3), ('fn_403000', 7, 3))
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(*events), trace(*events))
+        d._frida_phase('b011', batch, self.wt, {})
+        with open(self.state_path) as f:
+            deps = json.load(f)['batches']['b011'].get('measured_deps')
+        self.assertEqual(list(deps), ['403000'])
+        text = '0x403000: body changed after the Frida phase; park it or edit it back to the ' \
+               'measured body'
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x401000 trace\n')
+        self.assertNotIn(text, probs)
+        _write(os.path.join(self.wt, 'src', 'T.cpp'),
+               '// 0x403000\nint Rules::Tick(int a, int b)\n{\n  return b;\n}\n')
+        self.git('commit', '-qam', 'dependency changed after the phase', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x401000 trace\n')
+        self.assertIn(text, probs)
+        rc, out = self._close_import()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('body changed after the Frida phase', out)
+
+    def test_driver_kept_row_the_worker_wrote_evidence_for_end_to_end(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[dict(r, category=self.BASE_CAT) for r in batch['rows']
+                                  if r['address'] == '0x401000'])
+        d._kept = {'0x401000': 'ours matches'}
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in batch['rows']]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        # the worker's read-only file, committed (the fixture wrote it): the check is quiet
+        _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x401000 ours matches\n')
+        self.assertFalse([p for p in probs if 'Kept' in p], probs)
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3)), trace(('fn_401000', 7, 3)))
+        self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
+        self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
+        self.assertEqual(self._outcomes()['0x401000'], 'kept')
+        rc, out = self._close_import()
+        self.assertEqual(rc, 0, out)
+
+    def test_driver_check_reports_a_kept_row_without_any_evidence_file(self):
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
+        self.git('rm', '-q', 'docs/evidence/401000.md', cwd=self.wt)
+        self.git('commit', '-qm', 'no evidence', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x401000 ours matches\n')
+        mine = [p for p in probs if p.startswith('0x401000: listed under ## Kept')]
+        self.assertEqual(mine, ['0x401000: listed under ## Kept but docs/evidence/401000.md does '
+                                'not exist; write it (kind read-only, an exemption: giving your '
+                                'reading of why ours matches; no verdict phrase, no frida line) '
+                                'and commit it'])
+        self.assertNotIn('WSO delta', mine[0])
+
+    def test_driver_kept_row_with_no_frida_hook_gets_the_kept_needs(self):
+        d, batch = self._kept_phase_driver(kept=('0x402000',))
+        truth_mod = driver._tool('truth')
+        got = {'0x401000': ('skipped', 'no symbol'), '0x402000': ('skipped', 'no symbol'),
+               '0x403000': ('skipped', 'no symbol')}
+        with mock.patch.object(truth_mod, 'frida_batch', lambda *a, **kw: dict(got)):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        by = {f[:9]: f for f in findings}
+        self.assertIn('not measured (no Frida hook: no symbol); ours reading matches the '
+                      'decompile', by['0x402000:'])
+        self.assertIn('"no Frida hook: no symbol"', by['0x401000:'])
+        # a kept row's park has nothing to edit back
+        self.assertIn('edit nothing back', by['0x402000:'])
+        self.assertNotIn('edit nothing back', by['0x401000:'])
+
+    def test_driver_unhookable_kept_row_edits_nothing_back_and_leaves_the_kept_section(self):
+        d, batch = self._kept_phase_driver(kept=('0x402000',))
+        truth_mod = driver._tool('truth')
+        got = {k: ('not measured', driver.COVERAGE_UNHOOKABLE)
+               for k in ('0x401000', '0x402000', '0x403000')}
+        with mock.patch.object(truth_mod, 'frida_batch', lambda *a, **kw: dict(got)):
+            findings = d._frida_phase('b011', batch, self.wt, {})
+        by = {f[:9]: f for f in findings}
+        mine = by['0x402000:']
+        self.assertTrue(mine.startswith('0x402000: not measured (Frida refuses the hook; '
+                                        'coverage); the phase does not run again in this '
+                                        'batch, so park it: the body was never changed, so '
+                                        'edit nothing back: delete docs/evidence/402000.md, '
+                                        'write docs/wso/import-parked/402000.json'), mine)
+        self.assertIn(': not measured (Frida refuses the hook; coverage); ours reading matches '
+                      'the decompile"', mine)
+        self.assertTrue(mine.endswith(', and commit the two together, and take the row off '
+                                      '`## Kept`'), mine)
+        self.assertNotIn('edit that function back', mine)
+        # a row that is not kept: edited back, the plain needs, not off ## Kept
+        other = by['0x401000:']
+        self.assertIn('needs "not measured (Frida refuses the hook; coverage)"', other)
+        self.assertIn('edit that function back', other)
+        self.assertNotIn('## Kept', other)
+
+    def test_parked_file_spellings_share_one_key(self):
+        wave = driver._tool('wave')
+        for name in ('401000.json', '0x401000.json', '0X401000.JSON', '0x401000.JSON'):
+            self.assertEqual(wave.parked_stem_key(name), '401000', name)
+        self.assertEqual(wave.parked_path_key('docs/wso/import-parked/0x40abcd.json'), '40abcd')
+        self.assertIsNone(wave.parked_path_key('docs/evidence/401000.md'))
+        d = self._mc_repo({'405000': 'stray'})
+        _write(os.path.join(d, 'docs', 'wso', 'import-parked', '0x405000.json'), json.dumps(
+            {'address': '0x405000', 'name': 'n', 'file': 'f', 'batch': 'i001', 'needs': 'x'}))
+        batch = {'id': 'i009', 'rows': []}
+        probs = driver._kept_and_parked_problems(
+            batch, d, 'first', (), wave._addr_key, ['docs/wso/import-parked/0x405000.json'])
+        self.assertEqual(len(probs), 1, probs)
+        self.assertEqual(driver._kept_and_parked_problems(batch, d, 'first', (), wave._addr_key, []), [])
+
+    def test_driver_kept_mark_needs_the_base_body_category(self):
+        d, batch = self._kept_phase_driver(category='theirs_real_ours_stub')
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertEqual({r.get('kept') for r in rows}, {None})
+
+    def test_driver_check_parses_kept_and_import_rows_carry_the_mark(self):
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertEqual({r['address']: r.get('kept') for r in rows},
+                         {'0x401000': True, '0x402000': None, '0x403000': None})
+        # evidence unchanged since the merge base stands for an imported row,
+        # and for a kept row too: it is not measured or rewritten
+        _write(os.path.join(self.wt, 'docs', 'evidence', '403000.md'),
+               self.git('show', 'first:docs/evidence/403000.md').stdout)
+        self.git('commit', '-qam', 'as at the merge base', cwd=self.wt)
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertEqual(sorted(r['address'] for r in rows), ['0x401000', '0x402000'])
+        d._kept = {'0x403000': 'x'}
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertNotIn('0x403000', [r['address'] for r in rows])
+        # the check parses the section: a malformed line is the report's problem
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x402000 trace\n\n'
+                             '## Kept\nkept 0x401000\n')
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('report: line 5: malformed kept line', probs[0])
+        self.assertIn('fix that line under ## Kept (one "kept <0xADDR> <one-line reason>" '
+                      'per row', probs[0])
+
+    def test_driver_check_clears_the_kept_outcome_of_a_row_off_the_section(self):
+        d, batch = self._kept_phase_driver(kept=('0x401000',))
+        wave = driver._tool('wave')
+        with open(self.state_path) as f:
+            state = json.load(f)
+        for r in state['batches']['b011']['rows']:
+            r['outcome'] = 'kept'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        d._check('b011', self.wt, '## Imported\nimported 0x402000 trace\n\n'
+                 '## Kept\nkept 0x401000 ours is right\n')
+        self.assertEqual(self._outcomes(),
+                         {'0x401000': 'kept', '0x402000': None, '0x403000': None})
+
+    def test_driver_parked_evidence_problem_runs_through_the_fix_round(self):
+        d, batch = self._kept_phase_driver(kept=())
+        _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked', '402000.json'),
+               json.dumps({'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'b011',
+                           'needs': 'x'}))
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'park with evidence left', cwd=self.wt)
+        report = '## Imported\nimported 0x401000 trace\n'
+        text = ('0x402000: parked (docs/wso/import-parked/402000.json) but '
+                'docs/evidence/402000.md still exists; delete it')
+        _v, probs = d._check('b011', self.wt, report)
+        self.assertIn(text, probs)
+        prompt = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', probs, 'import')
+        self.assertIn('- ' + text, prompt)
+        # the worker deletes the file; the second check passes
+        self.git('rm', '-q', 'docs/evidence/402000.md', cwd=self.wt)
+        self.git('commit', '-qm', 'delete the parked row evidence', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, report)
+        self.assertNotIn(text, probs)
+        self.assertFalse([p for p in probs if 'parked' in p], probs)
 
     def test_driver_frida_phase_hooks_dependencies_imported_with_a_row(self):
         trace = TruthTest._trace
@@ -14771,6 +15759,7 @@ class DriverTest(unittest.TestCase):
             self.fail('not stopped')
         w.run = run
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        self.addCleanup(lambda: self.assertEqual(self.taskkills, []))   # a worker only: no taskkill
         before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self.assertEqual(d.run(), 1)
@@ -16236,6 +17225,124 @@ class TruthTest(unittest.TestCase):
                               for c in fake.calls],
                              ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
 
+    def test_frida_run_ui_scenarios_pass_no_loaded_on_both_sides(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a', 'b'])
+            truth.frida_run('b011', table, ['world_entry', 'biography'], run=fake, root=root,
+                            loaded_rva='0x330E60')
+            by = {}
+            for c in fake.calls:
+                by.setdefault(c[c.index('--scenario') + 1], {})[c[c.index('--target') + 1]] = c
+            for side in ('original', 'ours'):
+                self.assertIn('--no-loaded', by['biography'][side])
+                self.assertNotIn('--loaded-rva', by['biography'][side])
+                self.assertNotIn('--no-loaded', by['world_entry'][side])
+            self.assertIn('--loaded-rva', by['world_entry']['ours'])
+            self.assertNotIn('--loaded-rva', by['world_entry']['original'])
+            # a UI scenario needs no loaded rva at all; a world one still fails without it
+            fake.calls.clear()
+            got = truth.frida_run('b011', dict(table, ours_loaded_rva=None),
+                                  ['world_entry', 'biography'], run=fake, root=root)
+            self.assertIn('no ', got['world_entry']['failed'])
+            self.assertIsNone(got['biography']['failed'])
+            self.assertEqual(len(fake.calls), 2)
+
+    def test_status_without_a_loaded_line_is_complete(self):
+        # --no-loaded: orig.py's verdict is CLEAN at exit with no `loaded:` line
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.status')
+            _write(path, 'HITS fn_401000 2\nHITS-FINAL yes\nRESULT: CLEAN  (no hits)\n')
+            self.assertEqual(truth._read_status(path), ('CLEAN', {'fn_401000': 2}, True))
+
+    def test_phase_hold_out_keeps_save_load_screens_and_biography_returns_for_screens(self):
+        self.assertEqual(tuple(truth.PHASE_HELD_OUT), ('save_load_screens',))
+        got = truth.scenarios_for([{'file': 'src/CScreenBio.cpp'}], [])
+        self.assertIn('biography', got)
+        self.assertNotIn('biography', truth.scenarios_for([{'file': 'src/CInfGame.cpp'}], []))
+
+    def test_no_loaded_installs_no_loaded_hook(self):
+        orig = load_tool('frida/orig')
+        spec = {'hooks': [{'addr': '0x401000', 'name': 'fn_401000', 'conv': 'thiscall', 'max': 1}]}
+        default = orig.build_js(spec)
+        self.assertIn('0x6869c0', default.lower())
+        bare = orig.build_js(spec, require_loaded=False)
+        self.assertNotIn('0x6869c0', bare.lower())
+        self.assertNotIn("name: 'loaded'", bare)
+        self.assertNotIn("'loaded'", bare)
+        self.assertIn('fn_401000', bare)
+
+    def test_a_missing_loaded_rva_is_an_infrastructure_failure(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a'])
+            got = truth.frida_run('b011', dict(table, ours_loaded_rva=None),
+                                  ['world_entry', 'biography'], run=self._frida_fake(root), root=root)
+        why = truth.infrastructure_failure(got)
+        self.assertIn('a build property', why)
+        self.assertIn('world_entry: no ', why)
+        # even next to a UI scenario that ran: not every row parked as scenario failed
+        self.assertNotEqual(why, '')
+        self.assertEqual(truth.infrastructure_failure({'a': {'failed': None}}), '')
+
+    def test_both_clean_with_a_missing_trace_is_one_sided(self):
+        t = {'orig': [], 'ours': [], 'failed': 'ours side left no trace file',
+             'orig_exit': 0, 'ours_exit': 0, 'result': {'orig': 'CLEAN', 'ours': 'CLEAN'}}
+        self.assertEqual(truth.uninformative_reason(t), '')
+        v = truth.frida_verdicts({'a': t, 'b': {'orig': self._trace(('fn_5845D0', 7, 3)),
+                                                'ours': self._trace(('fn_5845D0', 7, 3)),
+                                                'failed': None}}, self.ROWS)
+        self.assertEqual(v['0x5845D0'][0], 'scenario failed')
+
+    def test_calibrate_frida_all_uninformative_is_an_error(self):
+        dead = {'orig': [], 'ours': [], 'failed': 'x', 'orig_exit': 2, 'ours_exit': 2,
+                'result': {'orig': 'NOT-LOADED', 'ours': 'NOT-LOADED'}}
+        self.assertIn('both sides failed alike', truth.infrastructure_failure({'a': dead}))
+        with tempfile.TemporaryDirectory() as d:
+            mp = os.path.join(d, 'map.txt')
+            _write(mp, '')
+            rows = [{'address': '0x5845D0'}]
+            with mock.patch.object(truth, 'frida_run', lambda *a, **kw: {'a': dead}), \
+                    mock.patch.object(truth, 'frida_batch',
+                                      lambda bid, rows_, sigs, mt, run_frida=None, info=None, **kw:
+                                      (run_frida(bid, {}, ['a']), {})[1]):
+                got, meta = truth._calibrate_frida(rows, lambda a: '', mp)
+        self.assertIn('both sides failed alike', meta['error'])
+        self.assertEqual(got['0x5845D0'][0], 'not measured')
+
+    def test_frida_verdicts_a_both_sides_failure_is_uninformative(self):
+        rows = self.ROWS
+        t = self._trace(('fn_5845D0', 7, 3))
+        good = {'orig': t, 'ours': t, 'failed': None}
+
+        def failed(orig_result, ours_result, orig_exit=2, ours_exit=2, why='original side exited 2'):
+            return {'orig': [], 'ours': [], 'failed': why, 'orig_exit': orig_exit,
+                    'ours_exit': ours_exit, 'result': {'orig': orig_result, 'ours': ours_result},
+                    'hits': {'orig': None, 'ours': None}}
+        for both in (failed('NOT-LOADED', 'NOT-LOADED'), failed(None, None),
+                     failed('OBSERVER-ERROR', 'OBSERVER-ERROR')):
+            info = {}
+            v = truth.frida_verdicts({'first_fight': good, 'biography': both}, rows, info=info)
+            self.assertEqual(v['0x5845D0'], ('equal', 'identical in first_fight'), both)
+            self.assertEqual(list(info['uninformative']), ['biography'])
+            self.assertEqual(v['0x777777'][0], 'not-exercised')
+        info = {}
+        truth.frida_verdicts({'a': failed('NOT-LOADED', 'NOT-LOADED')}, rows, info=info)
+        self.assertEqual(info['uninformative'], {'a': 'both sides NOT-LOADED'})
+        truth.frida_verdicts({'a': failed(None, None)}, rows, info=info)
+        self.assertEqual(info['uninformative'], {'a': 'both sides exited 2 with no status'})
+        # one-sided failures keep poisoning: that asymmetry is evidence
+        for one in (failed('CLEAN', None, orig_exit=0, ours_exit=2),
+                    failed('NOT-LOADED', 'OBSERVER-ERROR'),
+                    failed('CRASH', 'CRASH', orig_exit=1, ours_exit=1)):
+            info = {}
+            v = truth.frida_verdicts({'first_fight': good, 'biography': one}, rows, info=info)
+            self.assertEqual(v['0x5845D0'][0], 'scenario failed', one)
+            self.assertEqual(info['uninformative'], {})
+        crashed = dict(failed('NOT-LOADED', 'NOT-LOADED'), ours=[{'tag': 'crash'}])
+        self.assertEqual(truth.uninformative_reason(crashed), '')
+
     def test_map_matches_constructors_and_destructors(self):
         publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,
                    '??1CMessageHandler@@QAE@XZ': 0x222d20,
@@ -17315,6 +18422,63 @@ class WaveCloseRulesTest(unittest.TestCase):
 
     PARKED = [{'address': '0x643CD0', 'name': 'Draw', 'file': 'src/A.cpp', 'batch': 'b001',
                'needs': 'world_entry, first_fight, walk_and_talk'}]
+
+    def _kept_ready(self, evidence_kind='trace', category='theirs_changed_ours_base',
+                    outcome='kept'):
+        """Draw (0x643CD0) kept: no body change, evidence trace (or not), the
+        state row marked kept; Render imported."""
+        self._import_ready(trace=('0x643CC0', '0x643CD0') if evidence_kind == 'trace' else ('0x643CC0',),
+                           evidence=() if evidence_kind == 'trace' else ('0x643CD0',))
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            if r['address'] == '0x643CD0':
+                r['category'] = category
+                r['outcome'] = outcome
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_import_close_accepts_a_kept_row_measured_trace(self):
+        self._kept_ready()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_refuses_a_kept_row_without_trace(self):
+        self._kept_ready(evidence_kind='replay')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
+        # a trace the driver did not write does not measure it either
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: fn\nkind: trace\n'
+               'trace_source: WillScarlettOhara/iwd2-re@abc docs/x-recovery.md\n---\n')
+        self.commit_worktree('trace not from frida')
+        rc, out = self.close(kind='import')
+        self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
+
+    def test_import_close_refuses_a_kept_row_whose_trace_is_another_batchs(self):
+        self._kept_ready()
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: fn\nkind: trace\ntrace_source: %s\n---\n'
+               % self.FRIDA.replace('b001-', 'b000-'))
+        self.commit_worktree('an older batch trace')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
+
+    def test_import_close_never_keeps_a_stub_row(self):
+        self._kept_ready(category='theirs_real_ours_stub')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('row 0x643CD0 not imported: body unchanged', out)
+        self.assertNotIn('kept but not measured', out)
+
+    def test_import_close_still_refuses_an_unmarked_untouched_row(self):
+        self._kept_ready(outcome=None)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('row 0x643CD0 not imported: body unchanged', out)
 
     def test_import_close_accepts_parked_rows(self):
         self._import_ready(parked=self.PARKED)
@@ -18830,8 +19994,86 @@ class ImportSecondSourceTest(unittest.TestCase):
                 bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
             self.assertEqual(rc, 0, text)
             self.assertIn('; ' + label + ')', text)
-            self.assertIn('ours already matches the exe: <what you checked>', text)
+            self.assertEqual('ours is the base body' in text.split('Context bundles')[0]
+                             and 'do NOT park the row' in text, bid == 'i002')
             self.assertNotIn('{{', text)
+
+    def test_scorecard_counts_kept_rows_apart(self):
+        wave = self.wave
+        st = {'batches': {'i001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'category': self.BASE, 'outcome': 'kept'},
+            {'address': '0x2', 'category': self.BASE},
+            {'address': '0x3', 'category': self.BASE, 'outcome': 'kept'},
+            {'address': '0x4'}]}}}
+        self.assertEqual(
+            wave._import_tally(st, None, {'3': {}}),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 1 imported / 1 kept / 1 parked')
+
+    def test_brief_renders_the_kept_instructions_for_base_body_rows_only(self):
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
+        self.next_import()
+        self.next_import()
+        texts = {}
+        for bid in ('i001', 'i002'):
+            rc, texts[bid] = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, texts[bid])
+            self.assertNotIn('{{', texts[bid])
+        for needle in ('kept <0xADDR> <one-line reason>', 'do NOT park the row',
+                       'A stub row is never kept'):
+            self.assertIn(needle, texts['i002'])
+            self.assertNotIn(needle, texts['i001'])
+        # the base-body paragraph: the worker writes the read-only file, no frida line
+        flat = lambda t: t.replace('\n   ', ' ').replace('\n', ' ')
+        self.assertIn('write (or keep) `docs/evidence/<ADDRESS>.md` (`kind: read-only`, with an '
+                      '`exemption:` that gives your reading', flat(texts['i002']))
+        self.assertIn('no verdict phrase and no frida line', flat(texts['i002']))
+        self.assertNotIn('Write no evidence file', texts['i002'])
+        self.assertNotIn('WSO delta', texts['i002'].split('## The rules')[0])
+        for text in texts.values():
+            self.assertNotIn('case\nkept-', text)
+            self.assertNotIn('kept-i002', text)
+        # the `## Kept` pieces of the rules render for base-body batches only
+        for needle in ('except a base-body row you list under `## Kept`',
+                       'for a STUB row (ours is a stub) refusing still parks it',
+                       'for a BASE-BODY row, refusing his body means ours stays',
+                       'ours differs from the exe (<scenario>): <difference>; import his body',
+                       'For a base-body row that refusal is a `## Kept` line with that reason',
+                       'or parked, or kept (measured by the driver, or standing on '
+                       'oracle/replay evidence))',
+                       'A base-body row you imported that comes back different parks'):
+            self.assertIn(needle, flat(texts['i002']), needle)
+            self.assertNotIn(needle, flat(texts['i001']), needle)
+        self.assertNotIn('## Kept', texts['i001'])
+        # a refused base-body row keeps (or writes) its read-only evidence; only a
+        # stub row deletes it
+        self.assertIn('keep or write its `docs/evidence/<ADDR>.md` (`kind: read-only`, '
+                      '`exemption:` with what the exe shows); do not delete it',
+                      flat(texts['i002']))
+        self.assertIn('an existing oracle, replay or trace file stays untouched',
+                      flat(texts['i002']))
+        self.assertNotIn('do not delete it', flat(texts['i001']))
+        self.assertIn("delete the row's evidence file", flat(texts['i001']))
+        self.assertIn('is parked too, with `needs` saying why', flat(texts['i001']))
+        # round 4: an outside dependency parks a row you would import, never a
+        # kept one; rule 5 names both ways a kept row closes; the i002 count
+        # follows the refusal it counts, before the base-body carve-out
+        self.assertIn('Park the row only when ours is wrong too (`needs` says what), when his '
+                      'body is the one to import but it depends on a function outside the '
+                      'batch (a kept row imports nothing, so what ours calls never parks it), '
+                      'or when you cannot settle it.', flat(texts['i002']))
+        self.assertNotIn('kept and measured', flat(texts['i002']))
+        self.assertIn('which requires every row imported and at trace or better (or parked), '
+                      'and every', flat(texts['i001']))
+        refusal = '`"fork body contradicts the exe: <what differs>"`. Three of seven fork ' \
+                  'bodies in batch i002 did.'
+        self.assertIn(refusal + ' 2. **Every commit', flat(texts['i001']))
+        self.assertIn(refusal + ' For a base-body row that refusal is a `## Kept` line',
+                      flat(texts['i002']))
+        self.assertIn('(the delete instruction above is for stub rows only). 2. **Every commit',
+                      flat(texts['i002']))
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')
@@ -18862,7 +20104,7 @@ class ImportSecondSourceTest(unittest.TestCase):
             os.path.join(self.tmp, 'no-triage.json'), None, os.path.join(self.tmp, 'no-audit'),
             repo=self.tmp)
         self.assertEqual(rc, 0, out)
-        self.assertIn('imports: stubs 1 imported / 1 parked; base-body 2 imported / 1 parked',
+        self.assertIn('imports: stubs 1 imported / 0 kept / 1 parked; base-body 2 imported / 0 kept / 1 parked',
                       _slurp(report))
         # the import state itself as the state file counts once
         rc, out = self.wave.write_scorecard(
@@ -18870,7 +20112,7 @@ class ImportSecondSourceTest(unittest.TestCase):
             os.path.join(self.tmp, 'no-triage.json'), None, os.path.join(self.tmp, 'no-audit'),
             repo=self.tmp)
         self.assertEqual(rc, 0, out)
-        self.assertIn('imports: stubs 1 imported / 1 parked; base-body 2 imported / 1 parked',
+        self.assertIn('imports: stubs 1 imported / 0 kept / 1 parked; base-body 2 imported / 0 kept / 1 parked',
                       _slurp(report))
 
 
