@@ -10286,6 +10286,252 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(probs, ['0x401000: parked (docs/wso/import-parked/401000.json) but '
                                  'docs/evidence/401000.md still exists; delete it'])
 
+    # -- Task 24: wave.py selfcheck ------------------------------------------
+
+    SC_DECIDED = ('---\nkind: read-only\n---\n\n## WSO delta\n\ncorroborated by WSO at abc: '
+                  'x; case dump-%s decides\n')
+
+    def _sc_repo(self, kind='verdicts', evidence=None):
+        """A real git repo on branch first, then the batch branch with the
+        state file, for the worker's selfcheck."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+
+        def g(*a):
+            return subprocess.run(['git', '-C', d, '-c', 'user.name=T', '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a],
+                                  check=True, capture_output=True, text=True)
+        self.sc_git = g
+        g('init', '-q', '-b', 'first')
+        imp = kind == 'import'
+        bid = 'i009' if imp else 'b011'
+        rows = [{'address': '0x401000', 'category': 'theirs_real_ours_stub'},
+                {'address': '0x402000', 'category': 'theirs_real_ours_stub'}] if imp else [
+            {'address': '0x401000', 'class': 'ambiguous'},
+            {'address': '0x402000', 'class': 'ambiguous'}]
+        state = {'batches': {bid: {'branch': 'p3/wso-' + bid, 'rows': rows}}}
+        _write(os.path.join(d, 'docs/wso/%s-state.json' % ('import' if imp else 'wave')),
+               json.dumps(state))
+        _write(os.path.join(d, 'src/a.cpp'), 'a\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        g('checkout', '-q', '-b', 'p3/wso-' + bid)
+        for k in ('401000', '402000') if evidence is None else evidence:
+            _write(os.path.join(d, 'docs/evidence/%s.md' % k), self.SC_DECIDED % k)
+        g('add', '-A')
+        g('commit', '-q', '-m', 'evidence')
+        return d
+
+    def _sc_report(self, extra=''):
+        return ('## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                'verdict 0x402000 ours case dump-402000\n\n## Undecided\n\n(none)\n' + extra)
+
+    IMPORT_REPORT = '## Imported\n\nimported 0x401000 trace\nimported 0x402000 trace\n'
+
+    def test_selfcheck_good_reports_are_ok(self):
+        d = self._sc_repo()
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report()), [])
+        d = self._sc_repo('import')
+        self.assertEqual(driver.selfcheck('i009', d, self.IMPORT_REPORT), [])
+        # parked and kept rows are accounted for
+        _write(os.path.join(d, 'docs/wso/import-parked/402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        os.unlink(os.path.join(d, 'docs/evidence/402000.md'))
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'park')
+        self.assertEqual(driver.selfcheck(
+            'i009', d, '## Imported\n\nimported 0x401000 trace\n\n## Kept\n\nNone.\n'), [])
+
+    def test_selfcheck_report_format_problems(self):
+        d = self._sc_repo()
+        # a chat note instead of the report
+        probs = driver.selfcheck('b011', d, 'I decided both rows ours; evidence written.\n')
+        self.assertTrue(probs[0].startswith('report: no ## Verdicts section'), probs)
+        self.assertEqual(len([p for p in probs if 'no verdict line in the report' in p]), 2, probs)
+        # a mangled verdict line and a mangled undecided line: the driver's wording
+        probs = driver.selfcheck('b011', d, '## Verdicts\nverdict 0x401000 maybe case x\n')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('malformed verdict line', probs[0])
+        self.assertIn('fix that line under ## Verdicts', probs[0])
+        probs = driver.selfcheck('b011', d, self._sc_report('undecided 0x401000 ours no\n'))
+        self.assertIn('fix that line under ## Undecided', probs[0])
+        # a row with neither a verdict nor an undecided line
+        probs = driver.selfcheck('b011', d, '## Verdicts\nverdict 0x401000 ours case dump-401000\n')
+        self.assertEqual(probs, [
+            '0x402000: no verdict line in the report; add "verdict <addr> ours|fork|neither case '
+            '<id>" under ## Verdicts (or, if no probe, replay or trace case you can run decides a '
+            'fork or neither reading, list it under ## Undecided)'])
+
+    def test_selfcheck_import_report_problems(self):
+        d = self._sc_repo('import')
+        probs = driver.selfcheck('i009', d, self.IMPORT_REPORT + '\n## Verdicts\n\n(none)\n')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('no ## Verdicts section', probs[0])
+        probs = driver.selfcheck('i009', d, '## Imported\n\nimported 0x401000 trace\n')
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith('0x402000: not accounted for in the report'), probs)
+        # Kept lines parse as the driver parses them
+        probs = driver.selfcheck('i009', d, self.IMPORT_REPORT + '\n## Kept\nkept 0x401000\n')
+        self.assertIn('malformed kept line', probs[0])
+
+    def test_selfcheck_parked_row_with_evidence_left_behind(self):
+        d = self._sc_repo('import')
+        _write(os.path.join(d, 'docs/wso/import-parked/402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'park')
+        probs = driver.selfcheck('i009', d, '## Imported\n\nimported 0x401000 trace\n')
+        self.assertEqual(probs, ['0x402000: parked (docs/wso/import-parked/402000.json) but '
+                                 'docs/evidence/402000.md still exists; delete it'])
+
+    def test_selfcheck_misspelt_evidence_gets_a_rename_instruction(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/0x402000.md'), self.SC_DECIDED % '402000')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'misspelt')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(probs, ['docs/evidence/0x402000.md: misspelt evidence file name; rename '
+                                 'it to docs/evidence/402000.md (caps, no 0x): `git mv '
+                                 'docs/evidence/0x402000.md docs/evidence/402000.md` and commit'])
+        # nothing was renamed
+        self.assertTrue(os.path.isfile(os.path.join(d, 'docs/evidence/0x402000.md')))
+        self.assertFalse(os.path.exists(os.path.join(d, 'docs/evidence/402000.md')))
+
+    def test_selfcheck_deciding_sentence_and_frida_line(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/402000.md'),
+               '---\nkind: read-only\ntrace_source: frida scn orig:%s ours:%s compare=0\n' % ('a' * 64, 'b' * 64) + '---\n\n## WSO delta\n\n'
+               'corroborated by WSO at abc: x; case other decides\n')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'worker evidence')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertTrue(any(p.startswith('0x402000: docs/evidence/402000.md has no sentence reading '
+                                         '"disagreed with WSO at <sha>: ...; case dump-402000 decides"')
+                            for p in probs), probs)
+        self.assertTrue(any(p.startswith('docs/evidence/402000.md: a frida trace_source the driver '
+                                         'did not write') for p in probs), probs)
+        # a frida line the driver's own commit wrote (a fix round) is not the worker's
+        self.sc_git('commit', '-q', '--amend', '-m', 'frida: trace evidence for 1 rows of b011')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # the worker then edits that file's prose: the driver's line stays legitimate
+        path = os.path.join(d, 'docs/evidence/402000.md')
+        _write(path, _slurp(path) + '\nmore reading, case dump-402000 decides\n')
+        self.sc_git('commit', '-q', '-am', 'worker adds a sentence')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # a worker line under a non-frida subject is still flagged
+        _write(os.path.join(d, 'docs/evidence/401000.md'),
+               _slurp(path).replace('402000', '401000'))
+        self.sc_git('commit', '-q', '-am', 'worker evidence with a frida line')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertTrue(any(p.startswith('docs/evidence/401000.md: a frida trace_source')
+                            for p in probs), probs)
+
+    def test_selfcheck_edits_outside_the_allowed_paths_and_uncommitted_paths(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, 'docs/wso/triage.json'), '{}')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'oops')
+        _write(os.path.join(d, 'src/b.cpp'), 'untracked\n')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(len(probs), 2, probs)
+        self.assertTrue(any(p.startswith('uncommitted paths in the worktree; commit or delete: '
+                                         'src/b.cpp') for p in probs), probs)
+        self.assertTrue(any(p.startswith('changed outside the paths a batch may touch (') and
+                            'docs/wso/triage.json' in p for p in probs), probs)
+
+    def test_report_draft_is_never_an_uncommitted_path(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report()), [])
+        probs = driver.mechanical_checks(
+            dict(driver._tool('wave').load_state(
+                os.path.join(d, 'docs/wso/wave-state.json'))['batches']['b011'], id='b011'),
+            d, driver.parse_report(self._sc_report()), tests=False)
+        self.assertFalse(any('uncommitted' in p for p in probs), probs)
+        self.assertIn('.report.md', _slurp(os.path.join(ROOT, '.gitignore')).splitlines())
+
+    def test_selfcheck_cli(self):
+        d = self._sc_repo()
+        wave_py = os.path.join(ROOT, 'tools', 'wave.py')
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
+                           cwd=d, capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout), (0, 'selfcheck: OK\n'), r.stderr)
+        # no draft: exit 2 without reading stdin; stdin by `--report -`, a file by --report
+        os.unlink(os.path.join(d, '.report.md'))
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
+                           cwd=d, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('no report: write .report.md first or pass --report', r.stderr)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', '-'],
+                           cwd=d, input='chat note\n', capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('report: no ## Verdicts section', r.stdout)
+        self.assertEqual(len(r.stdout.strip().splitlines()), 3, r.stdout)
+        other = os.path.join(tempfile.mkdtemp(), 'elsewhere.txt')
+        self.addCleanup(shutil.rmtree, os.path.dirname(other), True)
+        _write(other, self._sc_report())
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', other], cwd=d, capture_output=True, text=True)
+        self.assertEqual(r.stdout, 'selfcheck: OK\n', r.stdout)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck'], cwd=d,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b999',
+                            '--report', other], cwd=d, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('batch b999 is not in docs/wso/wave-state.json', r.stdout)
+
+    def test_selfcheck_cli_excludes_the_draft_untracked(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        exclude = os.path.join(d, '.git', 'info', 'exclude')
+        self.assertNotIn('.report.md', _slurp(exclude) if os.path.exists(exclude) else '')
+        status = self.sc_git('status', '--porcelain', '-uall').stdout
+        head = self.sc_git('rev-parse', 'HEAD').stdout
+        for _ in range(2):
+            r = subprocess.run(['python3', '-I', os.path.join(ROOT, 'tools', 'wave.py'),
+                                'selfcheck', '--batch', 'b011'], cwd=d,
+                               capture_output=True, text=True)
+            self.assertEqual(r.stdout, 'selfcheck: OK\n', r.stdout)
+        self.assertEqual(_slurp(exclude).splitlines().count('.report.md'), 1)
+        self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+        self.assertEqual(self.sc_git('status', '--porcelain', '-uall').stdout, '')
+        self.assertIn('?? .report.md', status)
+
+    def test_selfcheck_never_edits(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/0x402000.md'), self.SC_DECIDED % '402000')
+        before = subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
+                                capture_output=True, text=True).stdout
+        head = self.sc_git('rev-parse', 'HEAD').stdout
+        driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
+                                        capture_output=True, text=True).stdout, before)
+        self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+
+    def test_selfcheck_rule_is_pinned_in_the_briefs_and_the_fix_prompt(self):
+        for name, n in (('brief-template.md', 15), ('import-brief-template.md', 10)):
+            text = _slurp(os.path.join(ROOT, 'docs', 'wso', name))
+            m = re.search(r'\n(\d+)\. \*\*Selfcheck last\.\*\*', text)
+            n = int(m.group(1))
+            rule = text.split(m.group(0))[1].split('\n\n')[0]
+            for need in ('`.report.md`', 'python3 -I tools/wave.py selfcheck --batch {{id}}',
+                         'selfcheck: OK', 'same text as your report'):
+                self.assertIn(need, rule, name)
+            back = text.split('## Report back')[1]
+            self.assertIn('python3 -I tools/wave.py selfcheck --batch {{id}}', back, name)
+            self.assertTrue(back.rstrip().endswith('as the report.'), name)
+            # the selfcheck rule is the last numbered rule
+            self.assertNotIn('\n%d. **' % (n + 1), text, name)
+        for kind in ('verdicts', 'import'):
+            p = driver.fix_prompt('b011', 'checks', 'br', 'BRIEF', ['x'], kind)
+            self.assertIn('python3 -I tools/wave.py selfcheck --batch b011', p)
+            self.assertIn('`selfcheck: OK`', p)
+
     def test_fix_round_rule_for_imports_names_kept(self):
         imp = driver.fix_prompt('i005', 'checks', 'p3/wso-i005', 'BRIEF', ['p'], 'import')
         self.assertIn('`## Kept`', imp)
