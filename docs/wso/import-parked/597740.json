@@ -1,0 +1,1 @@
+{"address": "0x597740", "name": "CInfCursor::SetToolTip", "file": "src/CInfCursor.cpp", "batch": "i010", "needs": "world_entry: not measured (no Frida hook: ambiguous: 2 overloads of CInfCursor::SetToolTip in our map); ours reading matches the decompile"}
