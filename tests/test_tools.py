@@ -10891,7 +10891,7 @@ class DriverTest(unittest.TestCase):
         phase = driver._tool('truth').FRIDA_SCENARIOS
         cov = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.root),
                'at': '2026-10-24T00:00:00Z',
-               'scenarios': {sc: {'hooks': 3, 'refused': [], 'failed_chunks': [],
+               'scenarios': {sc: {'sha': coverage.entry_sha(sc, self.root), 'hooks': 3, 'refused': [], 'failed_chunks': [],
                                   'measured': len(hooked), 'hooked': list(hooked),
                                   'hits': hits.get(sc, {})} for sc in phase}}
         _write(os.path.join(self.root, 'docs', 'wso', 'coverage.json'), json.dumps(cov))
@@ -10902,7 +10902,8 @@ class DriverTest(unittest.TestCase):
         d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
         d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
         findings = d._frida_phase('b011', batch, self.wt, {})
-        text = 'coverage: no scenario hits it'
+        text = ('coverage: no scenario hits it; consulted '
+                + ', '.join(driver._tool('truth').FRIDA_SCENARIOS))
         self.assertEqual(len(findings), len(d._frida_got))
         self.assertTrue(findings)
         self.assertEqual(set(d._frida_got.values()), {('not-exercised', text)})
@@ -10911,15 +10912,16 @@ class DriverTest(unittest.TestCase):
         self.assertIn('b011: frida: skipped, coverage says no scenario exercises any row',
                       self.logs)
 
-    def test_driver_frida_phase_runs_as_today_when_one_row_is_covered(self):
+    def test_driver_frida_phase_runs_only_the_covering_scenario_and_keeps_uncovered_rows_in_the_table(self):
         d, batch = self._import_phase_driver()
         self._coverage_map({'first_fight': {'0x402000': 4}})
         built = []
         inner = d.frida_build
         d.frida_build = lambda *a, **kw: built.append(1) or inner(*a, **kw)
-        ran = []
+        ran, seen = [], []
 
         def frida_run(batch_id, table, scenarios, **kw):
+            seen.append(list(scenarios))
             ran.append(sorted(h['name'] for h in table['original']['hooks']))
             return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
                          'failed': 'x', 'dumps': None} for sc in scenarios}
@@ -10930,9 +10932,136 @@ class DriverTest(unittest.TestCase):
             pass
         self.assertEqual(built, [1])
         self.assertEqual(len(ran), 1)
+        self.assertEqual(seen, [['first_fight']])   # the six others are dead for every row
         self.assertTrue(len(ran[0]) >= 2)   # uncovered rows stay in the table
         self.assertNotIn('b011: frida: skipped, coverage says no scenario exercises any row',
                          self.logs)
+
+    def _scenario_recorder(self, d):
+        seen = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            seen.append(list(scenarios))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        return seen
+
+    def test_driver_frida_phase_runs_the_scenarios_coverage_picks(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x401000': 4}})
+        path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
+        cov = json.loads(_slurp(path))
+        # first_fight: measured everywhere, hits nothing; walk_and_talk: 0x402000 not measured
+        cov['scenarios']['walk_and_talk']['hooked'] = ['0x401000', '0x403000']
+        _write(path, json.dumps(cov))
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [['world_entry', 'walk_and_talk']])
+        left = [s for s in driver._tool('truth').FRIDA_SCENARIOS
+                if s not in ('world_entry', 'walk_and_talk')]
+        self.assertIn('b011: frida: scenarios by coverage: world_entry, walk_and_talk '
+                      '(left out: %s)' % ', '.join(left), self.logs)
+
+    def _screen_driver(self):
+        d, batch = self._import_phase_driver()
+        rows = [dict(r, file='src/CScreenBio.cpp') for r in batch['rows']]
+        d._import_rows = lambda *a, **kw: [dict(r) for r in rows]
+        return d, batch
+
+    def _add_ui_entry(self, hits):
+        path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
+        cov = json.loads(_slurp(path))
+        cov['scenarios']['biography'] = {
+            'sha': coverage.entry_sha('biography', self.root), 'hooks': 3, 'refused': [],
+            'failed_chunks': [], 'measured': 3, 'hooked': ['0x401000', '0x402000', '0x403000'],
+            'hits': hits}
+        _write(path, json.dumps(cov))
+
+    def test_driver_frida_phase_leaves_out_a_ui_candidate_that_is_dead(self):
+        d, batch = self._screen_driver()
+        self._coverage_map({'world_entry': {'0x401000': 4, '0x402000': 1, '0x403000': 1}})
+        self._add_ui_entry({})
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [['world_entry']])
+        self.assertIn('(left out: %s, biography)' % ', '.join(
+            s for s in driver._tool('truth').FRIDA_SCENARIOS if s != 'world_entry'), '\n'.join(self.logs))
+
+    def test_driver_frida_phase_an_unknown_ui_candidate_blocks_the_skip(self):
+        d, batch = self._screen_driver()
+        self._coverage_map({})                  # every world scenario: dead for every row
+        d.frida_build = lambda *a, **kw: (_ for _ in ()).throw(SystemExit('stop here'))
+        seen = self._scenario_recorder(d)
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertNotIn('b011: frida: skipped, coverage says no scenario exercises any row',
+                         self.logs)
+        self.assertIn('b011: frida: scenarios by coverage: biography (left out: %s)' % ', '.join(
+            driver._tool('truth').FRIDA_SCENARIOS), self.logs)
+
+    def test_driver_frida_phase_a_ui_scenario_that_hits_a_row_joins_for_any_file(self):
+        d, batch = self._import_phase_driver()          # rows carry no screen file
+        self._coverage_map({})
+        self._add_ui_entry({'0x402000': 3})
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [['biography']])
+
+    def test_driver_frida_phase_a_stale_entry_reads_unknown_and_its_scenario_runs(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'first_fight': {'0x401000': 4}})
+        _write(os.path.join(self.root, 'scenarios', 'world_entry.txt'), 'changed\nquit\n')
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [['world_entry', 'first_fight']])
+
+    def test_park_needs_name_the_scenarios_that_ran_and_the_ones_left_out(self):
+        self.assertEqual(driver.unmeasured_needs(['a', 'b']), 'a, b: not exercised')
+        self.assertEqual(driver.unmeasured_needs(['a'], ['b', 'c']),
+                         'a: not exercised; not hit per coverage: b, c')
+        self.assertIn('exercised by no scenario (a, biography); park it: x',
+                      driver.unmeasured('0x1', ['a', 'biography'], 'x'))
+        d, batch = self._import_phase_driver()
+        d._frida_ran = (['world_entry', 'biography'], ['first_fight'])
+        text = d._import_outcome('b011', self.wt, batch['rows'][2], 'not-exercised',
+                                 'no scenario hit it: world_entry', {}, 'abc', None)
+        self.assertIn('exercised by no scenario (world_entry, biography)', text)
+        self.assertIn('world_entry, biography: not exercised; not hit per coverage: first_fight', text)
+
+    def test_driver_frida_phase_runs_the_full_set_without_a_usable_map(self):
+        d, batch = self._import_phase_driver()
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [list(driver._tool('truth').FRIDA_SCENARIOS)])
+        self.assertIn('b011: frida: no usable coverage map; running every scenario', self.logs)
+
+    def test_driver_frida_phase_adds_the_ui_scenarios_for_screen_rows(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x401000': 4}})   # no biography entry: unknown
+        batch['rows'][0]['file'] = 'src/CScreenBio.cpp'
+        d._import_rows = lambda *a, **kw: [dict(r, file='src/CScreenBio.cpp') for r in batch['rows']]
+        seen = self._scenario_recorder(d)
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(seen, [['world_entry', 'biography']])
 
     def test_driver_frida_phase_runs_when_a_row_was_not_measured(self):
         # an unmeasured row is unknown, not dead: the phase runs
@@ -10964,10 +11093,14 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(driver._StageError):
             d._frida_phase('b011', batch, self.wt, {})
 
-    def test_driver_frida_phase_ignores_a_stale_coverage_map(self):
+    def test_driver_frida_phase_ignores_a_map_with_no_fresh_entry(self):
         d, batch = self._import_phase_driver()
         self._coverage_map({'world_entry': {'0x999000': 4}})
-        _write(os.path.join(self.root, 'scenarios', 'new.txt'), 'quit\n')
+        path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
+        cov = json.loads(_slurp(path))
+        for r in cov['scenarios'].values():
+            r['sha'] = 'old'
+        _write(path, json.dumps(cov))
         built = []
         d.frida_build = lambda *a, **kw: built.append(1) or (_ for _ in ()).throw(
             SystemExit('stop here'))
@@ -11063,13 +11196,15 @@ class DriverTest(unittest.TestCase):
                             for f in findings), findings)
         # never exercised: the exact message, naming the merge base and the row's parked file
         mb = self.git('merge-base', 'first', 'HEAD', cwd=self.wt).stdout.strip()[:12]
-        self.assertIn('0x403000: exercised by no scenario (world_entry, first_fight, walk_and_talk); '
+        names = ', '.join(driver._tool('truth').FRIDA_SCENARIOS)
+        self.assertIn('0x403000: exercised by no scenario (%s); '
                       "park it: edit that function back to the merge base's body (`git show "
                       '%s:<path>` shows it), delete docs/evidence/403000.md, write '
                       'docs/wso/import-parked/403000.json {"address", "name", "file", "batch", '
-                      '"needs"} with needs "world_entry, first_fight, walk_and_talk: not exercised", '
+                      '"needs"} with needs "%s: not exercised", '
                       'and commit the three together; '
-                      "do not replace a file that holds other rows' changes" % mb, findings)
+                      "do not replace a file that holds other rows' changes" % (names, mb, names),
+                      findings)
         self.assertIn('kind: read-only', open(os.path.join(self.wt, 'docs', 'evidence', '403000.md')).read())
         self.assertEqual(len(findings), 2)
 
@@ -17418,7 +17553,8 @@ class CoverageTest(unittest.TestCase):
         hooked = coverage.candidates(self.dp) if hooked is None else list(hooked)
         data = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.tmp),
                 'at': '2026-10-24T01:02:03Z',
-                'scenarios': {sc: {'hooks': 6, 'refused': [], 'failed_chunks': [],
+                'scenarios': {sc: {'sha': coverage.entry_sha(sc, self.tmp), 'hooks': 6,
+                                   'refused': [], 'failed_chunks': [],
                                    'measured': len(hooked), 'hooked': hooked,
                                    'hits': hits.get(sc, {})} for sc in phase}}
         data.update(kw)
@@ -17490,6 +17626,10 @@ class CoverageTest(unittest.TestCase):
             ('first_fight', 2): [None, None]})                             # failed twice
         res = coverage.run(['world_entry', 'first_fight'], chunk=2, run=fake, root=self.tmp,
                            addresses=addrs)
+        self.assertEqual(res['world_entry'].pop('sha'), coverage.entry_sha('world_entry', self.tmp))
+        self.assertEqual(res['first_fight'].pop('sha'), coverage.entry_sha('first_fight', self.tmp))
+        for r in res.values():
+            r.pop('scenarios_sha')
         self.assertEqual(res['world_entry'], {
             'hooks': 3, 'refused': ['fn_402000'], 'failed_chunks': [],
             'hits': {'0x401000': 5, '0x403000': 2}, 'hooked': ['0x401000', '0x403000']})
@@ -17522,11 +17662,30 @@ class CoverageTest(unittest.TestCase):
 
     def test_stale_follows_the_scenario_set(self):
         data = self.cov({'world_entry': {}})
-        self.assertFalse(coverage.stale(data, self.tmp))
+        self.assertEqual(data['scenarios_sha'], coverage.scenarios_sha(self.tmp))
         _write(os.path.join(self.tmp, 'scenarios', 'extra.txt'), 'quit\n')
-        self.assertTrue(coverage.stale(data, self.tmp))
-        self.assertIsNone(coverage.usable(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'),
-                                          self.tmp))
+        self.assertNotEqual(data['scenarios_sha'], coverage.scenarios_sha(self.tmp))   # information only
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        cov, _why = coverage.check(path, self.tmp)
+        self.assertEqual(cov['stale'], [])                  # another scenario's file: not stale
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'quit\n')
+        cov, _why = coverage.check(path, self.tmp)
+        self.assertEqual(cov['stale'], ['world_entry'])
+        self.assertEqual(coverage.status_of(cov, '0x401000', ['world_entry']), 'unknown')
+        self.assertEqual(coverage.status_of(cov, '0x401000', ['first_fight']), 'dead')
+        # the expect file is part of the entry's sha
+        _write(os.path.join(self.tmp, 'scenarios', 'first_fight.expect.json'), '{}')
+        self.assertEqual(coverage.check(path, self.tmp)[0]['stale'], ['first_fight', 'world_entry'])
+
+    def test_stale_entry_hits_are_not_hits_and_options_edits_do_not_matter(self):
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        _write(os.path.join(self.tmp, 'scenarios', 'options.txt'), 'x\n')   # not a scenario's file
+        self.assertEqual(coverage.check(path, self.tmp)[0]['stale'], [])
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'changed\n')
+        cov = coverage.check(path, self.tmp)[0]
+        self.assertEqual(coverage.covered(cov, '0x401000'), [])
+        self.assertEqual(coverage.measured(cov, '0x401000', ['world_entry']), [])
 
     def test_usable_needs_every_phase_scenario_complete(self):
         path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
@@ -17538,7 +17697,15 @@ class CoverageTest(unittest.TestCase):
         self.assertIn('failed chunk(s) in walk_and_talk', coverage.check(path, self.tmp)[1])
         del data['scenarios']['walk_and_talk']
         _write(path, json.dumps(data))
-        self.assertIn('lacks scenario(s) walk_and_talk', coverage.check(path, self.tmp)[1])
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        for r in data['scenarios'].values():
+            r['sha'] = 'old'
+        _write(path, json.dumps(data))
+        self.assertIn('no fresh phase scenario', coverage.check(path, self.tmp)[1])
+        del data['scenarios']['walk_and_talk']
+        data['scenarios']['first_fight']['sha'] = coverage.entry_sha('first_fight', self.tmp)
+        _write(path, json.dumps(data))
+        self.assertIsNotNone(coverage.usable(path, self.tmp))      # one fresh entry is enough
         _write(path, json.dumps({'scenarios': {'world_entry': 3}, 'scenarios_sha': 1}))
         self.assertIsNone(coverage.usable(path, self.tmp))
         data = self.cov({'world_entry': {'0x401000': 1}})
@@ -17584,7 +17751,8 @@ class CoverageTest(unittest.TestCase):
             self.assertEqual(res['world_entry']['hits'], {'0x401000': 3})   # kept
             self.assertEqual(res['world_entry']['hooked'], [])
             self.assertEqual(len(fake.calls), 2)                            # one retry
-        fake = self._status_fake(self.tmp, {(sc, 1): [None] for sc in truth.FRIDA_SCENARIOS})
+        both = truth.FRIDA_SCENARIOS + truth.FRIDA_UI_SCENARIOS
+        fake = self._status_fake(self.tmp, {(sc, 1): [None] for sc in both})
         out = io.StringIO()
         _write(os.path.join(self.tmp, 'addrs.txt'), '0x401000\n')
         rc = coverage.main(['--addresses', os.path.join(self.tmp, 'addrs.txt')],
@@ -17592,8 +17760,192 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
         self.assertTrue(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.failed.json')))
-        self.assertIn('failed chunk(s): ' + '; '.join('%s 1' % sc for sc in sorted(truth.FRIDA_SCENARIOS)),
+        self.assertIn('failed chunk(s): ' + '; '.join('%s 1' % sc for sc in sorted(both)),
                       out.getvalue())
+
+    def test_scenarios_for_adds_the_ui_scenarios_for_screen_rows(self):
+        world = truth.scenarios_for([{'address': '0x1', 'file': 'src/CGame.cpp'}], [])
+        self.assertEqual(world, tuple(truth.FRIDA_SCENARIOS))
+        self.assertEqual(len(world), 9)
+        self.assertEqual(world[:3], ('world_entry', 'first_fight', 'walk_and_talk'))
+        for rows, files in (([{'address': '0x1', 'file': 'src/CScreenBio.cpp'}], []),
+                            ([], ['src/CUIPanel.cpp']),
+                            ([{'address': '0x1', 'file': 'src/CGame.cpp'}], ['src/CScreenX.cpp'])):
+            self.assertEqual(truth.scenarios_for(rows, files),
+                             tuple(truth.FRIDA_SCENARIOS) + tuple(truth.FRIDA_UI_SCENARIOS))
+
+    def test_a_partial_pass_merges_into_the_existing_map(self):
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        old = self.cov({'world_entry': {'0x401000': 1}, 'first_fight': {'0x402000': 2},
+                        'walk_and_talk': {'0x403000': 3}})
+        old['scenarios_sha'] = 'old'
+        old['at'] = '2020-01-01T00:00:00Z'
+        old['exe'] = 'keep-me'
+        _write(path, json.dumps(old))
+        res = {s: {'hooks': 1, 'refused': [], 'failed_chunks': [], 'hooked': ['0x401000'],
+                   'hits': {'0x401000': 9}} for s in ('world_entry', 'extra')}
+        data = coverage.write(path, res, self.tmp)
+        self.assertEqual(sorted(data['scenarios']),
+                         sorted(set(old['scenarios']) | {'extra'}))
+        self.assertEqual(data['scenarios']['first_fight'], old['scenarios']['first_fight'])
+        self.assertEqual(data['scenarios']['walk_and_talk'], old['scenarios']['walk_and_talk'])
+        self.assertEqual(data['scenarios']['world_entry']['hits'], {'0x401000': 9})
+        self.assertEqual(data['scenarios']['extra']['measured'], 1)
+        self.assertEqual(data['exe'], 'keep-me')
+        self.assertEqual(data['scenarios_sha'], coverage.scenarios_sha(self.tmp))
+        self.assertNotEqual(data['at'], '2020-01-01T00:00:00Z')
+        self.assertEqual(coverage.read(path), data)
+        # without an existing map (or with merge off) only the pass's scenarios
+        fresh = coverage.write(os.path.join(self.tmp, 'x', 'c.json'), res, self.tmp, exe='e')
+        self.assertEqual(sorted(fresh['scenarios']), ['extra', 'world_entry'])
+        self.assertEqual(sorted(coverage.write(path, res, self.tmp, merge=False)['scenarios']),
+                         ['extra', 'world_entry'])
+
+    def test_dry_names_the_scenarios_it_would_keep(self):
+        import io
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        _write(path, json.dumps(self.cov({})))
+        out = io.StringIO()
+        self.assertEqual(coverage.main(['--dry', '--scenarios', 'world_entry,first_fight'],
+                                       root=self.tmp, out=out), 0)
+        kept = [l for l in out.getvalue().splitlines() if 'would keep' in l]
+        self.assertEqual(kept, ['coverage: would keep from the existing map: '
+                                + ', '.join(sorted(set(truth.FRIDA_SCENARIOS)
+                                                   - {'world_entry', 'first_fight'}))])
+
+    def test_usable_needs_the_world_scenarios_not_the_ui_ones(self):
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        data = self.cov({})
+        self.assertNotIn('biography', data['scenarios'])
+        _write(path, json.dumps(data))
+        self.assertIsNotNone(coverage.usable(path, self.tmp))
+        data['scenarios']['biography'] = dict(data['scenarios']['world_entry'])
+        _write(path, json.dumps(data))
+        self.assertIsNotNone(coverage.usable(path, self.tmp))
+        for r in data['scenarios'].values():
+            r['sha'] = 'old'
+        _write(path, json.dumps(data))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+
+    def test_dry_and_a_real_run_warn_about_stale_kept_entries(self):
+        import io
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        self.cov({})
+        _write(os.path.join(self.tmp, 'scenarios', 'inventory.txt'), 'changed\n')
+        out = io.StringIO()
+        coverage.main(['--dry', '--scenarios', 'world_entry'], root=self.tmp, out=out)
+        self.assertIn('coverage: stale entry (scenario files changed since; read as unknown '
+                      'until re-run): inventory', out.getvalue())
+        # a pass over the stale one itself is not warned about
+        out = io.StringIO()
+        coverage.main(['--dry', '--scenarios', 'inventory'], root=self.tmp, out=out)
+        self.assertNotIn('stale', out.getvalue())
+        # a real pass keeps the stale entry's old sha, and says so
+        fake = self._status_fake(self.tmp, {('world_entry', 1): [
+            'HITS fn_401000 1\nHITS-FINAL yes\nRESULT: CLEAN\n']})
+        out = io.StringIO()
+        _write(os.path.join(self.tmp, 'addrs.txt'), '0x401000\n')
+        rc = coverage.main(['--scenarios', 'world_entry', '--addresses',
+                            os.path.join(self.tmp, 'addrs.txt')], root=self.tmp, run_=fake, out=out)
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertIn('stale entry', out.getvalue())
+        cov = coverage.check(path, self.tmp)[0]
+        self.assertEqual(cov['stale'], ['inventory'])
+
+    def _old_format_map(self, hits=None):
+        data = self.cov(hits or {})
+        for r in data['scenarios'].values():
+            del r['sha']
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        _write(path, json.dumps(data))
+        return path, data
+
+    def test_restamp_stamps_an_old_map_only_when_the_files_are_unchanged(self):
+        import io
+        path, data = self._old_format_map()
+        self.assertEqual(coverage.check(path, self.tmp)[1][:19], 'map has no fresh ph')
+        out = io.StringIO()
+        self.assertEqual(coverage.main(['--restamp'], root=self.tmp, out=out), 0)
+        self.assertIn('stamped', out.getvalue())
+        cov = coverage.usable(path, self.tmp)
+        self.assertIsNotNone(cov)
+        self.assertEqual(cov['stale'], [])
+        self.assertEqual(coverage.read(path)['at'], data['at'])
+        # a second call: nothing to stamp
+        self.assertEqual(coverage.restamp(path, self.tmp)[0], 0)
+        # a mismatch is refused and the map left untouched
+        path, data = self._old_format_map()
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'changed\nquit\n')
+        before = _slurp(path)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(coverage.main(['--restamp'], root=self.tmp, out=io.StringIO()), 1)
+        self.assertIn('re-run the pass', err.getvalue())
+        self.assertEqual(_slurp(path), before)
+        # an entry that already carries a sha is left alone
+        path, data = self._old_format_map()
+        data['scenarios']['inventory']['sha'] = 'keep'
+        _write(path, json.dumps(data))
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'quit\n')
+        data['scenarios_sha'] = coverage.scenarios_sha(self.tmp)
+        _write(path, json.dumps(data))
+        self.assertEqual(coverage.restamp(path, self.tmp)[0], 0)
+        self.assertEqual(coverage.read(path)['scenarios']['inventory']['sha'], 'keep')
+
+    def test_a_scenario_edited_mid_pass_is_not_stamped_fresh(self):
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        inner = self._status_fake(self.tmp, {('world_entry', 1): [
+            'HITS fn_401000 1\nHITS-FINAL yes\nRESULT: CLEAN\n']})
+        before = coverage.entry_sha('world_entry', self.tmp)
+
+        def fake(cmd, **kw):
+            _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'edited during\nquit\n')
+            return inner(cmd, **kw)
+        res = coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                           addresses=['0x401000'])
+        data = coverage.write(path, res, self.tmp)
+        self.assertEqual(data['scenarios']['world_entry']['sha'], before)
+        self.assertNotEqual(before, coverage.entry_sha('world_entry', self.tmp))
+        self.assertEqual(coverage.stale_entries(coverage.read(path), self.tmp), ['world_entry'])
+
+    def test_stale_hits_rank_between_fresh_hits_and_unknown_but_never_decide(self):
+        data = self.cov({'first_fight': {'0x403000': 1}, 'world_entry': {'0x401000': 5}},
+                        hooked=['0x401000', '0x403000'])
+        # 0x401000 hit only by world_entry, which goes stale; 0x403000 hit fresh;
+        # 0x405000/6/7 unknown (not hooked anywhere)
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'changed\nquit\n')
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        got = self.rows_of(out)
+        self.assertEqual(got[:2], ['0x403000', '0x401000'])
+        # a row whose only hit is stale is not left out as dead
+        self.assertIn('0x401000', got)
+
+    def test_a_stale_ui_entry_still_makes_its_scenario_a_candidate(self):
+        data = self.cov({})
+        data['scenarios']['biography'] = dict(data['scenarios']['world_entry'], sha='old',
+                                              hits={'0x402000': 2})
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
+        cov = coverage.check(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), self.tmp)[0]
+        self.assertEqual(cov['stale'], ['biography'])
+        rows = [{'address': '0x402000', 'file': 'src/CGameSprite.cpp'}]
+        self.assertEqual(coverage.row_scenarios(cov, rows),
+                         list(truth.FRIDA_SCENARIOS) + ['biography'])
+        self.assertEqual(coverage.covered(cov, '0x402000', ['biography']), [])
+        self.assertEqual(coverage.covered(cov, '0x402000', ['biography'], include_stale=True),
+                         ['biography'])
+        # and it reads unknown (it runs), not dead
+        self.assertEqual(coverage.status_of(cov, '0x402000', ['biography']), 'unknown')
+
+    def test_next_offers_a_screen_row_only_the_ui_scenario_hits(self):
+        data = self.cov({})
+        data['scenarios']['biography'] = dict(data['scenarios']['world_entry'],
+                                              sha=coverage.entry_sha('biography', self.tmp),
+                                              hits={'0x407000': 2})
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x407000'])
 
     def test_cli_dry_prints_the_launches_and_writes_nothing(self):
         import io
@@ -17671,11 +18023,13 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])  # biggest rows first
         self.assertIn('coverage: no map', out)
         os.unlink(os.path.join(self.tmp, 'import-state.json'))
-        self.cov({'world_entry': {'0x406000': 9}})
-        _write(os.path.join(self.tmp, 'scenarios', 'extra.txt'), 'quit\n')
+        data = self.cov({'world_entry': {'0x406000': 9}})
+        for r in data['scenarios'].values():
+            r['sha'] = 'old'
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])
-        self.assertIn('coverage: map is stale', out)
+        self.assertIn('coverage: map has no fresh phase scenario', out)
 
     def test_scorecard_carries_the_coverage_line(self):
         state = os.path.join(self.tmp, 'docs', 'wso', 'wave-state.json')
@@ -17690,6 +18044,10 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('Coverage: 2 of 6 candidate functions exercised by %d scenarios (2026-10-24)' % len(truth.FRIDA_SCENARIOS) + '',
                       _slurp(report))
+        _write(os.path.join(self.tmp, 'scenarios', 'inventory.txt'), 'changed\n')
+        self.wave.write_scorecard(*args)
+        self.assertIn('exercised by %d scenarios (1 stale) (2026-10-24)'
+                      % (len(truth.FRIDA_SCENARIOS) - 1), _slurp(report))
 
 
 class ReStatusTest(unittest.TestCase):

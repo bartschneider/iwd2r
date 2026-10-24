@@ -76,8 +76,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    Rules math (attack rolls, saving throws, damage, effect application)
    never accepts a trace: those functions need `kind: oracle`.
    **Measured rows.** After your first report the driver builds the batch
-   worktree for x86 and runs the Frida phase (`world_entry`, `first_fight`,
-   `walk_and_talk`) over every imported function whose evidence does not
+   worktree for x86 and runs the Frida phase (the scenarios the coverage map picks for this batch;
+   the driver log names them) over every imported function whose evidence does not
    stand as written (the two forms above, or a file unchanged since the
    merge base): a function that behaves like the original in a run whose
    state dumps match gets its evidence rewritten to `kind: trace` by the
@@ -94,7 +94,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    list):
 
        {"address": "0x...", "name": "...", "file": "src/...", "batch": "{{id}}",
-        "needs": "world_entry, first_fight, walk_and_talk: not exercised"}
+        "needs": "<the scenarios that ran>: not exercised"}
 
    `needs` names what was tried. Commit all three changes together. Every
    row you do not park must be imported: its body changed against the merge

@@ -1435,14 +1435,26 @@ trace_source_line = trace_source
 # ---- the oracle path, end to end -------------------------------------------------
 
 CMAKE_ANCHOR = 'cases/store_spell.cpp'   # the last case file of oracle/CMakeLists.txt's runner
-FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk')
-# Promoted on 2026-10-23 (MATCH at every checkpoint); they join the phase once
-# the coverage map includes them and the phase picks scenarios by coverage
-# (Task 12), so a batch does not pay 18 launches where 6 did.
+# The six scenarios promoted on 2026-10-23 (MATCH at every checkpoint).
 PROMOTED_SCENARIOS = ('action_bar', 'equip_shots', 'inventory', 'save_load_screens',
                       'level_up', 'world_map')
-# UI-only scenarios (no world play): used when a row's file is a CScreen*.
+# The world scenarios of the Frida phase.  The phase does not run all nine per
+# batch: driver._frida_phase picks the ones the coverage map says hit a row.
+FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk') + PROMOTED_SCENARIOS
+# UI-only scenarios (no world play): candidates when a row's file is a screen.
 FRIDA_UI_SCENARIOS = ('biography',)
+UI_FILE_PREFIXES = ('src/CScreen', 'src/CUI')
+
+
+def scenarios_for(rows, files):
+    """The Frida phase's candidate scenarios for a batch: FRIDA_SCENARIOS,
+    plus FRIDA_UI_SCENARIOS when any file name (files: the rows' file names;
+    a row's own 'file' counts too) is a UI screen (src/CScreen*, src/CUI*)."""
+    names = list(files or ())
+    names += [r.get('file') for r in (rows or ()) if isinstance(r, dict)]
+    ui = any(isinstance(n, str) and n.replace('\\', '/').startswith(UI_FILE_PREFIXES)
+             for n in names)
+    return tuple(FRIDA_SCENARIOS) + (tuple(FRIDA_UI_SCENARIOS) if ui else ())
 
 
 class OracleError(RuntimeError):
