@@ -1,0 +1,1 @@
+{"address": "0x763150", "name": "CGameSprite::sub_763150", "file": "src/CGameSprite.cpp", "batch": "i011", "needs": "ours differs from the exe (world_entry): differs in world_entry: event 267: original {\"a0_u32\": 12, \"tag\": \"fn_763150\", \"this\": \"<ptr>\"}, ours {\"a0_u32\": 47, \"tag\": \"fn_763150\", \"this\": \"<ptr>\"}; import his body in a later batch"}
