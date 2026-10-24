@@ -4321,7 +4321,7 @@
     "b016": {
       "assigned_at": "2026-10-23T18:24:03+00:00",
       "branch": "p3/wso-b016",
-      "closed_at": null,
+      "closed_at": "2026-10-24T01:53:55+00:00",
       "files": [
         "src/CVidImage.cpp",
         "src/CScreenLoad.cpp",
@@ -4501,7 +4501,7 @@
           "their_len": 315
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
         "0x443B30": {
           "case": "triage-stub",
@@ -5881,7 +5881,117 @@
         }
       ],
       "status": "assigned",
-      "verdicts": {}
+      "verdicts": {
+        "0x40E0C0": {
+          "case": "dump-40E0C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x481A10": {
+          "case": "dump-481A10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x48B2C0": {
+          "case": "dump-48B2C0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4B4BD0": {
+          "case": "dump-4B4BD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x51E9B0": {
+          "case": "dump-51E9B0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x56A5A0": {
+          "case": "dump-56A5A0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x56AF80": {
+          "case": "dump-56AF80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x586D60": {
+          "case": "dump-586D60",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x586F20": {
+          "case": "dump-586F20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7A4440": {
+          "case": "dump-7A4440",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7A5340": {
+          "case": "dump-7A5340",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7A5600": {
+          "case": "dump-7A5600",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7A5D00": {
+          "case": "dump-7A5D00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7A6270": {
+          "case": "dump-7A6270",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7A66E0": {
+          "case": "dump-7A66E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7A6960": {
+          "case": "dump-7A6960",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7A6F80": {
+          "case": "dump-7A6F80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7AD520": {
+          "case": "dump-7AD520",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7AD800": {
+          "case": "dump-7AD800",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7B0980": {
+          "case": "dump-7B0980",
+          "losing_kind": "trace",
+          "side": "ours"
+        }
+      }
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
