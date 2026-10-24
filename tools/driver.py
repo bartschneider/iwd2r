@@ -925,6 +925,7 @@ def park_text(address, mb, needs):
 
 
 UNMEASURED_NEEDS = FRIDA_SCENARIOS_TEXT + ': not exercised'
+COVERAGE_NOT_HIT = 'coverage: no scenario hits it'
 UNMEASURED = '%s: exercised by no scenario (' + FRIDA_SCENARIOS_TEXT + '); park it: %s'
 
 
@@ -2371,6 +2372,14 @@ class Driver:
             rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
         if not rows:
             return []
+        if self._coverage_skips(batch_id, rows):
+            # No scenario of the phase hits any row (the coverage map of the
+            # original): no build, no launch; the same shape the run's
+            # verdicts have, read by the loop below.
+            self._frida_got = {key(r['address']): ('not-exercised', COVERAGE_NOT_HIT)
+                               for r in rows}
+            return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
+                                        {}, {}, verdicts, importing, mb)
         checkout, map_path, why = self._frida_target(batch_id, worktree)
         sigs = {}
         for r in rows:
@@ -2425,6 +2434,15 @@ class Driver:
         # _land, never a finding or a verdict (the final review's ruling).
         self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
         exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
+        return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
+                                    verdicts, importing, mb)
+
+    def _frida_findings(self, batch_id, worktree, rows, got, traces, info, exact, verdicts,
+                        importing, mb):
+        """The per-row outcomes of a Frida phase (or of a coverage skip): the
+        log lines, the import findings, the trace evidence written."""
+        key = _tool('wave')._addr_key
+        truth = _tool('truth')
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
         findings, written = [], []
         for r in rows:
@@ -2459,6 +2477,29 @@ class Driver:
         if written:
             self._commit_trace_evidence(batch_id, worktree, written)
         return findings
+
+    def _coverage_skips(self, batch_id, rows):
+        """True when a usable coverage map exists and every row (a dependency
+        included) was measured by every scenario the phase runs and hit by
+        none; a row nobody measured is unknown and keeps the phase."""
+        try:
+            cov_mod = _tool('coverage')
+            path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
+            cov, why = cov_mod.check(path, self.repo)
+            if cov is None:
+                if os.path.exists(path):
+                    self.log('%s: frida: coverage map not used (%s); running as usual'
+                             % (batch_id, why))
+                return False
+            phase = _tool('truth').FRIDA_SCENARIOS
+            if any(cov_mod.status_of(cov, r['address'], phase) != 'dead' for r in rows):
+                return False
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            self.log('%s: frida: coverage map unreadable (%s); running as usual'
+                     % (batch_id, _one_line(repr(e), 200)))
+            return False
+        self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
+        return True
 
     def _import_rows(self, batch_id, batch, worktree, mb_sha):
         """The functions an import batch's Frida phase measures: its rows
@@ -2527,7 +2568,9 @@ class Driver:
                     'original (%s); the phase does not run again in this batch, so park it: %s'
                     % (a, detail, park_text(a, mb, 'frida different: %s' % detail)))
         elif status == 'not-exercised':
-            text = UNMEASURED % (a, park_text(a, mb, UNMEASURED_NEEDS))
+            needs = ('not-exercised (%s)' % detail if detail == COVERAGE_NOT_HIT
+                     else UNMEASURED_NEEDS)
+            text = UNMEASURED % (a, park_text(a, mb, needs))
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
                 a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
