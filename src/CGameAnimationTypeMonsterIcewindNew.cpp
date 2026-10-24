@@ -1222,7 +1222,8 @@ void CGameAnimationTypeMonsterIcewindNew::Render(CInfinity* pInfinity, CVidMode*
 
     pInfinity->FXPrep(rFXRect, dwRenderFlags, nSurface, ptPos, ptReference);
 
-    if (pInfinity->FXLock(rFXRect, dwRenderFlags)) {
+    BOOL bLocked = pInfinity->FXLock(rFXRect, dwRenderFlags);
+    if (bLocked) {
         m_currentVidCell->SetTintColor(rgbTintColor);
 
         if (m_renderWeapons
@@ -1231,6 +1232,9 @@ void CGameAnimationTypeMonsterIcewindNew::Render(CInfinity* pInfinity, CVidMode*
             m_currentVidCellWeapon->SetTintColor(rgbTintColor);
         }
 
+        // 0x6EECA8: alpha-blend flag 0x2 only when the sprite is actually
+        // transparent -- forcing it with transparency 0 alpha-blends the BAM
+        // at alpha 0 and the creature renders fully invisible.
         if (transparency != 0) {
             dwRenderFlags |= 0x2;
         }
@@ -1238,7 +1242,7 @@ void CGameAnimationTypeMonsterIcewindNew::Render(CInfinity* pInfinity, CVidMode*
         pInfinity->FXRender(m_currentVidCell,
             ptReference.x,
             ptReference.y,
-            dwRenderFlags | 0x2,
+            dwRenderFlags,
             transparency);
 
         if (m_renderWeapons
@@ -1247,7 +1251,7 @@ void CGameAnimationTypeMonsterIcewindNew::Render(CInfinity* pInfinity, CVidMode*
             pInfinity->FXRender(m_currentVidCellWeapon,
                 ptReference.x,
                 ptReference.y,
-                dwRenderFlags | 0x2,
+                dwRenderFlags,
                 transparency);
         }
 
