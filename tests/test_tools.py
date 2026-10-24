@@ -6925,6 +6925,26 @@ class ProbePlanTest(unittest.TestCase):
         self.assertIn('& echo done > ', ours)
         self.assertTrue(ours.endswith('shutdown /s /t 0'), ours)
 
+    def test_logon_commands_reset_the_scenarios_saves_on_both_sides(self):
+        # save_load_screens saves into the shared game folder's mpsave: both
+        # sides' start command deletes those slots first (Task 18)
+        ns = types.SimpleNamespace(hit='MTP', hit_min=1, attach_timeout=None,
+                                   loaded_addr=None, loaded_rva='0x330000',
+                                   module=None, no_loaded=False)
+        args = probe.sidecar_args(ns, 't.jsonl', 't.jsonl.status')
+        game = 'C:\\Games\\Icewind Dale II'
+        py = 'C:\\v\\python.exe'
+        orig = probe.original_logon(py, 120, args, game)
+        ours = probe.ours_logon(py, game, probe.ours_env(game, 1), 120, args)
+        for cmd in (orig, ours):
+            self.assertTrue(cmd.startswith('cmd.exe /c powershell -NoProfile -Command '), cmd)
+            self.assertIn("'*Quick-Save*'", cmd)
+            self.assertIn(game + '\\mpsave', cmd)
+            self.assertIn('Remove-Item -Recurse -Force', cmd)
+            self.assertLess(cmd.index('Remove-Item'), cmd.index('orig.py'))
+        self.assertLess(orig.index('Remove-Item'), orig.index('replay-driver.ps1'))
+        self.assertEqual(winsandbox.SAVE_RESET_GLOBS, ('*Quick-Save*',))
+
 
 class FridaProbeTest(unittest.TestCase):
     """The sandbox run completes with a verdict: the sidecar command parses
@@ -10783,6 +10803,55 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d._frida_got['401000'][0], 'scenario failed')
         self.assertTrue(any(f.startswith('0x401000:') and 'park it' in f for f in findings), findings)
 
+    def test_driver_frida_both_sides_failure_is_left_out_not_poisoning(self):
+        d, batch = self._import_phase_driver()
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        nothing = {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                   'orig_exit': 2, 'ours_exit': 2, 'failed': 'original side exited 2 (NOT-LOADED)',
+                   'result': {'orig': 'NOT-LOADED', 'ours': 'NOT-LOADED'},
+                   'hits': {'orig': None, 'ours': None}, 'dumps': None}
+        out['biography'] = dict(nothing)
+        d.frida_run = lambda *a, **kw: dict(out)
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'][0], 'equal')
+        self.assertIn('b011: frida: biography measured nothing (both sides NOT-LOADED) '
+                      'and is left out', self.logs)
+        # every scenario uninformative: the infrastructure exception
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda *a, **kw: {'biography': dict(nothing), 'world_entry': dict(nothing)}
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn('every Frida scenario failed on infrastructure', cm.exception.problem)
+
+    def test_probe_runs_are_live_groups_and_a_stop_ends_them(self):
+        # a long-running probe.py launch (frida_run's `run`) is a live process
+        # group: the stop path kills it and its batch thread gets _Stop
+        self.addCleanup(driver._STOPPED.clear)
+        outcome = []
+
+        def launch():
+            try:
+                outcome.append(driver._run_probe(['sleep', '60'], capture_output=True, text=True))
+            except BaseException as e:
+                outcome.append(e)
+        t = threading.Thread(target=launch, daemon=True)
+        t.start()
+        end = time.monotonic() + 5
+        while not driver._LIVE and time.monotonic() < end:
+            time.sleep(0.02)
+        self.assertTrue(driver._LIVE, 'the probe launch was not registered as a live group')
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.STOP_WAIT = 0.2
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        t.join(10)
+        self.assertFalse(t.is_alive(), 'the probe was still running after the stop')
+        self.assertIsInstance(outcome[0], driver._Stop)
+        self.assertFalse(driver._LIVE)
+
     def test_driver_frida_dumps_the_schema_refuses_are_an_exception(self):
         # a recorder (or our dumper) out of step with schema.json makes every
         # scenario's dumps uncomparable: tooling, not the rows; nothing parks
@@ -11180,13 +11249,13 @@ class DriverTest(unittest.TestCase):
         self.assertIn('b011: frida: no usable coverage map; running every scenario', self.logs)
 
     def test_driver_frida_phase_holds_out_the_scenarios_truth_names(self):
-        # the hotfix of 2026-10-23: save_load_screens (a save whose name grows
-        # across runs) and biography (needs --no-loaded) stay out of the phase
-        # until Task 18; the coverage map and scenarios_for keep them
+        # Driver.held_out (truth.PHASE_HELD_OUT, empty since Task 18) keeps
+        # the scenarios it names out of the phase; the coverage map and
+        # scenarios_for keep them
         d, batch = self._screen_driver()
         truth = driver._tool('truth')
-        d.held_out = tuple(truth.PHASE_HELD_OUT)
-        self.assertEqual(set(d.held_out), {'save_load_screens', 'biography'})
+        self.assertEqual(tuple(truth.PHASE_HELD_OUT), ())    # Task 18: nothing is held out now
+        d.held_out = ('save_load_screens', 'biography')       # the mechanism still works
         self._coverage_map({'world_entry': {'0x401000': 4, '0x402000': 1, '0x403000': 1},
                             'save_load_screens': {'0x401000': 1}})
         self._add_ui_entry({'0x402000': 2})
@@ -16235,6 +16304,75 @@ class TruthTest(unittest.TestCase):
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
                              ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_frida_run_ui_scenarios_pass_no_loaded_on_both_sides(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a', 'b'])
+            truth.frida_run('b011', table, ['world_entry', 'biography'], run=fake, root=root,
+                            loaded_rva='0x330E60')
+            by = {}
+            for c in fake.calls:
+                by.setdefault(c[c.index('--scenario') + 1], {})[c[c.index('--target') + 1]] = c
+            for side in ('original', 'ours'):
+                self.assertIn('--no-loaded', by['biography'][side])
+                self.assertNotIn('--loaded-rva', by['biography'][side])
+                self.assertNotIn('--no-loaded', by['world_entry'][side])
+            self.assertIn('--loaded-rva', by['world_entry']['ours'])
+            self.assertNotIn('--loaded-rva', by['world_entry']['original'])
+            # a UI scenario needs no loaded rva at all; a world one still fails without it
+            fake.calls.clear()
+            got = truth.frida_run('b011', dict(table, ours_loaded_rva=None),
+                                  ['world_entry', 'biography'], run=fake, root=root)
+            self.assertIn('no ', got['world_entry']['failed'])
+            self.assertIsNone(got['biography']['failed'])
+            self.assertEqual(len(fake.calls), 2)
+
+    def test_status_without_a_loaded_line_is_complete(self):
+        # --no-loaded: orig.py's verdict is CLEAN at exit with no `loaded:` line
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.status')
+            _write(path, 'HITS fn_401000 2\nHITS-FINAL yes\nRESULT: CLEAN  (no hits)\n')
+            self.assertEqual(truth._read_status(path), ('CLEAN', {'fn_401000': 2}, True))
+
+    def test_phase_hold_out_is_empty_and_biography_returns_for_screens(self):
+        self.assertEqual(tuple(truth.PHASE_HELD_OUT), ())
+        got = truth.scenarios_for([{'file': 'src/CScreenBio.cpp'}], [])
+        self.assertIn('biography', got)
+        self.assertNotIn('biography', truth.scenarios_for([{'file': 'src/CInfGame.cpp'}], []))
+
+    def test_frida_verdicts_a_both_sides_failure_is_uninformative(self):
+        rows = self.ROWS
+        t = self._trace(('fn_5845D0', 7, 3))
+        good = {'orig': t, 'ours': t, 'failed': None}
+
+        def failed(orig_result, ours_result, orig_exit=2, ours_exit=2, why='original side exited 2'):
+            return {'orig': [], 'ours': [], 'failed': why, 'orig_exit': orig_exit,
+                    'ours_exit': ours_exit, 'result': {'orig': orig_result, 'ours': ours_result},
+                    'hits': {'orig': None, 'ours': None}}
+        for both in (failed('NOT-LOADED', 'NOT-LOADED'), failed(None, None),
+                     failed('OBSERVER-ERROR', 'OBSERVER-ERROR')):
+            info = {}
+            v = truth.frida_verdicts({'first_fight': good, 'biography': both}, rows, info=info)
+            self.assertEqual(v['0x5845D0'], ('equal', 'identical in first_fight'), both)
+            self.assertEqual(list(info['uninformative']), ['biography'])
+            self.assertEqual(v['0x777777'][0], 'not-exercised')
+        info = {}
+        truth.frida_verdicts({'a': failed('NOT-LOADED', 'NOT-LOADED')}, rows, info=info)
+        self.assertEqual(info['uninformative'], {'a': 'both sides NOT-LOADED'})
+        truth.frida_verdicts({'a': failed(None, None)}, rows, info=info)
+        self.assertEqual(info['uninformative'], {'a': 'both sides exited 2 with no status'})
+        # one-sided failures keep poisoning: that asymmetry is evidence
+        for one in (failed('CLEAN', None, orig_exit=0, ours_exit=2),
+                    failed('NOT-LOADED', 'OBSERVER-ERROR'),
+                    failed('CRASH', 'CRASH', orig_exit=1, ours_exit=1)):
+            info = {}
+            v = truth.frida_verdicts({'first_fight': good, 'biography': one}, rows, info=info)
+            self.assertEqual(v['0x5845D0'][0], 'scenario failed', one)
+            self.assertEqual(info['uninformative'], {})
+        crashed = dict(failed('NOT-LOADED', 'NOT-LOADED'), ours=[{'tag': 'crash'}])
+        self.assertEqual(truth.uninformative_reason(crashed), '')
 
     def test_map_matches_constructors_and_destructors(self):
         publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,

@@ -409,6 +409,18 @@ def _run_group(argv, timeout=None, **kw):
     return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
+def _run_probe(argv, timeout=None, **kw):
+    """frida_run's `run` in the real driver: a probe.py launch is a live
+    process group like a worker's, so a stop (kill_live_groups) ends it; a
+    probe killed by the stop raises _Stop in its batch thread instead of
+    coming home as a failed scenario.  The sandbox the probe started shuts
+    itself down on its in-box timeout."""
+    done = _run_group(argv, timeout=timeout, **kw)
+    if _STOPPED.is_set() and done.returncode < 0:
+        raise _Stop()
+    return done
+
+
 class HeadlessWorker:
     def __init__(self, model='glm-5.3-flash[1m]', max_turns=400,
                  wrapper='claude-glm', config_dir=None, run=None,
@@ -1009,8 +1021,10 @@ def _infrastructure_failure(traces):
     status file on either side (nothing measured anything: an infrastructure
     failure, the batch's exception, not its rows' park), else ''."""
     runs = [(sc, t) for sc, t in sorted(traces.items()) if isinstance(t, dict)]
+    truth = _tool('truth')
     if not runs or len(runs) != len(traces) or not all(
-            t.get('failed') and not any((t.get('result') or {}).values()) for _sc, t in runs):
+            t.get('failed') and (not any((t.get('result') or {}).values())
+                                 or truth.uninformative_reason(t)) for _sc, t in runs):
         return ''
     return '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs)
 
@@ -2445,8 +2459,9 @@ class Driver:
 
             def run_frida(batch_id, table, scenarios):
                 # Ours runs the batch worktree's own build (the map's RVAs).
+                extra = {'run': _run_probe} if self.frida_run is truth.frida_run else {}
                 traces.update(self.frida_run(batch_id, table, scenarios,
-                                             build_checkout=checkout))
+                                             build_checkout=checkout, **extra))
                 return traces
             # A phase-wide failure (no build, the run raised, every scenario
             # failed on infrastructure) is an exception for the human at stage
@@ -2468,6 +2483,8 @@ class Driver:
                 raise _StageError('frida', 'the Frida run raised %s; no row was measured, parked '
                                            'or rewritten; fix it and clear this exception'
                                   % _one_line(repr(e), 300)) from None
+        for sc, why in sorted((info.get('uninformative') or {}).items()):
+            self.log('%s: frida: %s measured nothing (%s) and is left out' % (batch_id, sc, why))
         dead = _infrastructure_failure(traces)
         if dead:
             raise _StageError('frida', 'every Frida scenario failed on infrastructure (no side '

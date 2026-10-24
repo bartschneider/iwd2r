@@ -568,6 +568,25 @@ DIRECTPLAY_FILES = ('dplayx.dll', 'dpmodemx.dll', 'dpwsockx.dll',
                     'dpnsvr.exe')
 
 
+# Saves a scenario writes into the shared game folder (mpsave\<NNNNNNNNN>-<name>):
+# the Frida probe's start script deletes the folders matching these before the
+# game starts, on both sides, so a run never sees a save an earlier run made
+# (save_load_screens' Quick-Save slot name grew with every run).
+SAVE_RESET_DIR = 'mpsave'
+SAVE_RESET_GLOBS = ('*Quick-Save*',)
+
+
+def save_reset_command(game_win):
+    """A cmd.exe-safe command line (no shell is needed beyond cmd /c) that
+    removes the save folders of SAVE_RESET_GLOBS from game_win\\mpsave; it
+    succeeds when there is nothing to remove."""
+    folder = game_win.rstrip('\\') + '\\' + SAVE_RESET_DIR
+    filters = ','.join("'%s'" % g for g in SAVE_RESET_GLOBS)
+    return ('powershell -NoProfile -Command "foreach($f in %s){ '
+            "Get-ChildItem -LiteralPath '%s' -Directory -Filter $f -ErrorAction SilentlyContinue "
+            '| Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }"' % (filters, folder))
+
+
 def replay_folders(build_win, game_win, results_win, tools_win):
     """The .wsb mapped folders of a replay: (host, sandbox, read_only)."""
     return [(build_win, BOX_ORACLE, True),
