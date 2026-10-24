@@ -11882,6 +11882,24 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._status(d)['exceptions']['b013']['stage'], 'cut')
         self.assertEqual(len(self.sent), 1)
 
+    def test_a_batch_in_flight_that_also_reads_cleared_resumes_once(self):
+        # b019 (2026-10-23): in flight at the stop AND listed by _cleared()
+        # (its status entry kept outcome: exception after a --clear); it must
+        # resume once, never also launch as a retry while it runs
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {},
+                       'batches': {'b011': {'outcome': 'exception', 'stage': 'checks'}},
+                       'running': {'b011': {'stage': 'reviewer', 'pool': 'a',
+                                            'at': '2026-10-23T20:00:00+00:00'}}}, f)
+        d = self._reload(d)
+        ran = []
+        d.run_batch = lambda bid, resume=None: ran.append((bid, resume is not None)) or 'closed'
+        d.next_batch = lambda *a, **kw: self.NOTHING
+        self.assertEqual(d.run(), 0)
+        self.assertEqual([b for b, _r in ran], ['b011'])
+
     def test_run_retries_a_cleared_exception_first(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
         os.makedirs(os.path.dirname(d.status_path))

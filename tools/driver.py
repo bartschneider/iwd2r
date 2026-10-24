@@ -3990,7 +3990,11 @@ class Driver:
         the lock, and collects the finished ones."""
         done = queue_mod.Queue()
         pending = list(resume)
-        retries = list(retries)
+        # A batch in flight at the last stop may also read as a cleared
+        # exception (its status entry keeps outcome: exception after a
+        # --clear); it resumes once, never also as a retry (b019, 2026-10-23).
+        in_flight = {b for b, _w, _n in pending}
+        retries = [b for b in retries if b not in in_flight]
         running = 0
         exhausted = None      # the exit code once a cut finds nothing
         cut_blocked = False   # stalled while batches run: retry after one ends
