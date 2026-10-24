@@ -667,6 +667,16 @@ def _main_pending(scenarios, chunk, dry, root, run_, out):
     if not pending:
         out.write('coverage: nothing pending\n')
         return 0
+    cov = read(mpath)
+    bad = sorted(s for s in scenarios if cov is None or s not in cov['scenarios'])
+    bad += stale_entries(cov, root, set(scenarios)) if cov is not None else []
+    if bad:
+        out.write('coverage --pending: refused: %s %s in the map; run a full '
+                  '`wave.py coverage` for %s first\n' % (
+                      ', '.join(sorted(set(bad))),
+                      'is stale or absent' if len(set(bad)) == 1 else 'are stale or absent',
+                      ','.join(sorted(set(bad)))))
+        return 1
     launches = plan(scenarios, addresses, chunk)
     if dry:
         out.write('coverage: %d pending candidate(s), %d launch(es)\n'
@@ -689,7 +699,9 @@ def _main_pending(scenarios, chunk, dry, root, run_, out):
     with open(ppath, 'w', encoding='utf-8', newline='\n') as f:
         f.write('[]\n')
     err = commit_paths(root, [COVERAGE_REL, PENDING_REL],
-                       'coverage: %d pending candidates measured' % len(pending))
+                       'coverage: %d pending candidates measured\n\n'
+                       'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'
+                       % len(pending))
     if err:
         out.write('coverage: merged, but %s\n' % err)
         return 1

@@ -768,10 +768,13 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     for i, r in enumerate(chosen, 1):
         lines.append(f'{i:2}. {r["address"]}  {r["name"]}  {r["file"]}  '
                      f'theirs {r["their_len"]} / ours {r["our_len"]}')
+    global _NOADDR_LOGGED
     if no_addr:
         lines.append(f'(skipped {len(no_addr)} row'
                      f'{"s" if len(no_addr) != 1 else ""} without an address)')
-        lines.append(unaddressed_text(no_addr).rstrip('\n'))
+        if not _NOADDR_LOGGED:      # the list once per process, the count every cut
+            _NOADDR_LOGGED = True
+            lines.append(unaddressed_text(no_addr).rstrip('\n'))
     if triage_path is None and not importing:
         return 0, '\n'.join(lines) + '\n'
     lines.append(f'worktree {wt} ({how})')
@@ -1599,6 +1602,7 @@ def _write_rows(path, rows):
 
 
 _labels_module = None
+_NOADDR_LOGGED = False      # `next` has listed the address-less rows in this process
 
 
 def _labels():
@@ -1619,8 +1623,13 @@ def address_from_header(source_text, name):
     """'0x<ADDR>' of the function `name` (qualified) defined in
     source_text under a `// 0x<ADDR>` header comment, or None when it is
     not there or two definitions carry the name (an overload: ambiguous)."""
-    found = {a for _, _, a, n in _labels().definitions(source_text.splitlines())
-             if n == name}
+    lines = source_text.splitlines()
+    lab = _labels()
+    found = {a for _, _, a, n in lab.definitions(lines) if n == name}
+    # an overload without a header comment makes the one that has one
+    # ambiguous: count every definition of the name, commented or not
+    if sum(1 for l in lines if lab._definition_name(l) == name) > 1:
+        return None
     return '0x%X' % found.pop() if len(found) == 1 else None
 
 
@@ -1833,10 +1842,12 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
             try:
                 with open(tri_path, encoding='utf-8') as f:
                     committed = json.load(f)
+                # a row without an address cannot be classified
+                rows_a = [r for r in rows if r.get('address')]
                 cal = tri.calibrate(state, tri.calibration_triage(
-                    state, rows, sha, show=show))
+                    state, rows_a, sha, show=show))
                 tri_out = tri.regen_triage(
-                    state, rows, committed, sha, ours, cal, show=show,
+                    state, rows_a, committed, sha, ours, cal, show=show,
                     log=tri_lines.append)
             except (OSError, ValueError, KeyError) as e:
                 return 2, f'recompare: triage regeneration failed: {e}\n'

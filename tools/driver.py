@@ -4550,7 +4550,9 @@ class Driver:
         if self.kind == 'verdicts':
             # disagreements.json too: add and diff --cached skip it unchanged
             paths = [self.state_path, self.report_path, self.probe_path,
-                     self.disagreements_path, self.triage_path]
+                     self.disagreements_path, self.triage_path,
+                     os.path.join(os.path.dirname(self.disagreements_path),
+                                  'coverage.pending.json')]
         else:    # the import queue: its state (never a scorecard)
             paths = [self.state_path]
         paths.append(self.import_list_path)   # ours-stub rows leave wave 1 for it
@@ -5142,6 +5144,7 @@ class Driver:
 
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
+        self._log_pending_coverage()
         triage = (self.triage_path
                   if _tool('wave').QUEUES[self.queue]['triage'] else None)
         try:
@@ -5823,7 +5826,6 @@ class Driver:
                 base_blocked = True
                 return False
             base_blocked = False
-            self._log_pending_coverage()
             batch_id, code = self._cut()
             if batch_id is None:
                 with self._lock:
