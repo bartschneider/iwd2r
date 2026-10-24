@@ -11,6 +11,7 @@ checker as a subprocess with cwd set to that repository, and removes the
 directory afterwards.
 """
 
+import argparse
 import contextlib
 import datetime
 import fcntl
@@ -6953,12 +6954,82 @@ class ProbePlanTest(unittest.TestCase):
         prep.assert_called_once_with(probe.oracle.mpsave_dir(game),
                                      {'mode': 'empty', 'load': None}, out,
                                      probe.oracle.save_aside(game))
-        src = _slurp(os.path.join(ROOT, 'tools', 'frida', 'probe.py'))
-        run_body = src[src.index('def run(ns)'):]
-        self.assertLess(run_body.index('SANDBOX_LOCK'), run_body.index('saves_of_its_own(game'))
-        self.assertLess(run_body.index('saves_of_its_own(game'), run_body.index('run_side('))
         self.assertFalse(hasattr(winsandbox, 'save_reset_command'))
         self.assertFalse(hasattr(winsandbox, 'SAVE_RESET_GLOBS'))
+
+
+    def test_probe_run_takes_the_locks_then_the_empty_saves_then_runs_the_side(self):
+        # probe.run itself, with its collaborators mocked: the order of entry
+        # (replay lock, sandbox lock, prepared_saves empty, run_side) and the
+        # reverse order of exit
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        game = os.path.join(tmp, 'game')
+        os.makedirs(game)
+        run_dir = os.path.join(tmp, 'runs', 'stamp')
+        os.makedirs(os.path.join(run_dir, 'replay'))
+        events = []
+
+        def ctx(name):
+            @contextlib.contextmanager
+            def cm(*a, **kw):
+                events.append(('enter', name, a))
+                try:
+                    yield {}
+                finally:
+                    events.append(('exit', name))
+            return cm
+        builddir = os.path.join(tmp, 'build')
+        os.makedirs(builddir)
+        open(os.path.join(builddir, probe.oracle.INJECTOR), 'w').close()
+        ns = argparse.Namespace(
+            dry=False, command='run', probe='hooks.json', scenario='s', timeout=1000,
+            post_load=None, target='original', build_checkout=None, out='t.jsonl',
+            seed=1, dump_every=0, clicks=0)
+        script = os.path.join(tmp, 's.txt')
+
+        def run_side(*a, **kw):
+            events.append(('run_side',))
+            return {'error': None, 'seconds': 1.0}
+        patches = [
+            mock.patch.object(probe, 'load_probe'),
+            mock.patch.object(probe, 'venv_python', return_value=('h', 'v', 'b')),
+            mock.patch.object(probe.oracle, 'scenario_path', return_value=script),
+            mock.patch.object(probe.oracle, 'replay_timeout', return_value=1000),
+            mock.patch.object(probe, 'resolve_post_load', return_value=0),
+            mock.patch.object(probe.winsandbox, 'available', return_value=True),
+            mock.patch.object(probe.oracle, 'ensure_vanilla', return_value=game),
+            mock.patch.object(probe.oracle, 'prepare_replay_ini'),
+            mock.patch.object(probe, 'ours_build', return_value=builddir),
+            mock.patch.object(probe.winsandbox, 'deploy_runtime'),
+            mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
+            mock.patch.object(probe, 'prepare_scenario', return_value=script),
+            mock.patch.object(probe.oracle, 'load_actions', return_value=[]),
+            mock.patch.object(probe, 'sidecar_args', return_value=[]),
+            mock.patch.object(probe, 'original_logon', return_value='cmd'),
+            mock.patch.object(probe.winsandbox, 'wslpath_w', side_effect=lambda x: x),
+            mock.patch.object(probe, 'report', return_value=0),
+            mock.patch.object(probe, 'run_side', run_side),
+            mock.patch.object(probe.filelock, 'hold',
+                              lambda path, what, **kw: ctx(what)(path)),
+            mock.patch.object(probe.oracle, 'prepared_saves', ctx('saves')),
+            mock.patch.object(probe.shutil, 'rmtree'),
+        ]
+        for pt in patches:
+            pt.start()
+            self.addCleanup(pt.stop)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = probe.run(ns)
+        self.assertEqual(rc, 0)
+        self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
+            ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
+            ('run_side',),
+            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay')])
+        saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
+        self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
+                                    {'mode': 'empty', 'load': None},
+                                    os.path.join(run_dir, 'replay'),
+                                    probe.oracle.save_aside(game)))
 
 
 class FridaProbeTest(unittest.TestCase):
@@ -9919,7 +9990,22 @@ class EvidenceParagraphsTest(unittest.TestCase):
         self.assertFalse(w._cites_pin('disagreed with WSO\n\nat e8dd16a7', 'e8dd16a7'))
 
 
+_REAL_TASKKILL = driver._tool('winsandbox').taskkill_sandbox
+
+
 class DriverTest(unittest.TestCase):
+    def setUp(self):
+        # By construction no DriverTest can reach the host's real taskkill (it
+        # ends every Windows Sandbox on the machine): every Driver built in
+        # this class gets this recorder as its `_taskkill`.
+        self.taskkills = []
+        ws = driver._tool('winsandbox')
+        p = mock.patch.object(ws, 'taskkill_sandbox',
+                              lambda *a, **kw: self.taskkills.append((a, kw)) or [])
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(driver._PROBE_PIDS.clear)
+
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
 
@@ -10867,29 +10953,90 @@ class DriverTest(unittest.TestCase):
         self.assertFalse(t.is_alive(), 'the probe was still running after the stop')
         self.assertIsInstance(outcome[0], driver._Stop)
         self.assertFalse(driver._LIVE)
+        self.assertEqual(len(self.taskkills), 1)     # the recorder, never the host's
 
-    def test_stop_taskkills_the_sandbox_after_killing_the_probe(self):
+    def _live_sleeper(self, probe):
         self.addCleanup(driver._STOPPED.clear)
         sleeper = subprocess.Popen(['sleep', '60'], start_new_session=True)
         self.addCleanup(lambda: sleeper.poll() is None and sleeper.kill())
         driver._LIVE.add(sleeper.pid)
         self.addCleanup(driver._LIVE.discard, sleeper.pid)
+        if probe:
+            driver._PROBE_PIDS.add(sleeper.pid)
         d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
         d.STOP_WAIT = 0.2
-        ws = driver._tool('winsandbox')
-        calls = []
-        real_run = subprocess.run
+        return d
 
-        def fake_run(argv, **kw):
-            if 'taskkill' in argv:
-                calls.append(argv)
-                return subprocess.CompletedProcess(argv, 0, b'', b'')
-            return real_run(argv, **kw)
-        with mock.patch.object(driver.subprocess, 'run', fake_run), \
-                self.assertRaises(driver._Stop):
+    def test_stop_taskkills_the_sandbox_after_killing_the_probe(self):
+        d = self._live_sleeper(True)
+        with self.assertRaises(driver._Stop):
             d._on_stop(signal.SIGTERM, None)
-        self.assertEqual([c[c.index('/IM') + 1] for c in calls], list(ws.TASKKILL_NAMES))
+        self.assertEqual(len(self.taskkills), 1)
         self.assertTrue(any('taskkilled the sandbox' in m for m in self.logs), self.logs)
+
+    def test_stop_with_only_workers_live_never_taskkills(self):
+        d = self._live_sleeper(False)
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        self.assertEqual(self.taskkills, [])
+
+    def test_run_probe_records_its_pid_and_a_plain_run_does_not(self):
+        driver._run_group([sys.executable, '-c', 'pass'], capture_output=True)
+        self.assertFalse(driver._PROBE_PIDS)
+        driver._run_probe([sys.executable, '-c', 'pass'], capture_output=True)
+        self.assertFalse(driver._PROBE_PIDS, 'a finished probe leaves no pid behind')
+
+    def test_the_fixture_driver_has_no_route_to_the_real_taskkill(self):
+        # guard: a later fixture edit cannot drop the recorder
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        self.assertIsNot(d._taskkill, _REAL_TASKKILL)
+        d._taskkill()
+        self.assertEqual(len(self.taskkills), 1)
+        d2 = self._driver(self._BatchWorker(credits=0.0))
+        self.assertIsNot(d2._taskkill, _REAL_TASKKILL)
+        self.assertIsNot(driver.Driver.__init__.__globals__['_tool']('winsandbox').taskkill_sandbox,
+                         _REAL_TASKKILL)
+
+    def test_taskkill_sandbox_runs_each_name_in_its_own_try(self):
+        ws = driver._tool('winsandbox')
+        names = ws.TASKKILL_NAMES
+        calls = []
+
+        def run(argv, **kw):
+            name = argv[argv.index('/IM') + 1]
+            calls.append(name)
+            if name == names[0]:
+                raise subprocess.TimeoutExpired(argv, 15)
+            if name == names[1]:
+                raise OSError('no cmd.exe')
+            return subprocess.CompletedProcess(argv, 0, b'', b'')
+        done = _REAL_TASKKILL(run=run)
+        self.assertEqual(calls, list(names))
+        self.assertEqual(done, [(names[0], None), (names[1], None), (names[2], 0)])
+
+    def test_stop_log_names_the_killed_and_the_failed(self):
+        ws = driver._tool('winsandbox')
+        n = ws.TASKKILL_NAMES
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d._taskkill = lambda: [(n[0], None), (n[1], 128), (n[2], 0)]
+        d._close_sandbox_after_stop()
+        line = [m for m in self.logs if 'taskkilled the sandbox' in m][0]
+        self.assertIn('killed: %s;' % n[2], line)
+        self.assertIn('failed: %s)' % n[0], line)
+
+    def test_close_sandbox_kills_even_when_the_log_pipe_is_dead(self):
+        ws = driver._tool('winsandbox')
+
+        def log(message):
+            raise BrokenPipeError(32, 'Broken pipe')
+        kills = []
+        with mock.patch.object(ws, 'sandbox_running', return_value=True), \
+                mock.patch.object(ws.time, 'sleep'):
+            ws.close_sandbox(log, timeout=0, kill=lambda: kills.append(1))
+        self.assertEqual(kills, [1])
+        # and probe.log itself swallows a dead pipe
+        with mock.patch('builtins.print', side_effect=BrokenPipeError(32, 'x')):
+            probe.log('still going')
 
     def test_driver_frida_dumps_the_schema_refuses_are_an_exception(self):
         # a recorder (or our dumper) out of step with schema.json makes every
@@ -14880,6 +15027,7 @@ class DriverTest(unittest.TestCase):
             self.fail('not stopped')
         w.run = run
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        self.addCleanup(lambda: self.assertEqual(self.taskkills, []))   # a worker only: no taskkill
         before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self.assertEqual(d.run(), 1)

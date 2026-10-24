@@ -397,18 +397,46 @@ def sandbox_running():
     return any(n.lower() in out for n in TASKKILL_NAMES)
 
 
-def close_sandbox(log, timeout=CLOSE_TIMEOUT):
+def taskkill_sandbox(names=TASKKILL_NAMES, run=subprocess.run):
+    """The one place the host `taskkill` of the sandbox processes runs: every
+    name in its own try, so one failure skips no other.  Returns
+    [(name, returncode)], returncode None for a name whose taskkill timed out
+    or could not start (taskkill's own 128 is "not running")."""
+    done = []
+    for name in names:
+        try:
+            r = run([CMD_EXE, '/c', 'taskkill', '/IM', name, '/F'],
+                    capture_output=True, cwd='/mnt/c', timeout=15)
+            done.append((name, r.returncode))
+        except (subprocess.TimeoutExpired, OSError):
+            done.append((name, None))
+    return done
+
+
+def _quiet(log):
+    """log, but a dead pipe or closed stream (the parent died) must not stop
+    the caller's cleanup."""
+    def say(message):
+        try:
+            log(message)
+        except (BrokenPipeError, OSError, ValueError):
+            pass
+    return say
+
+
+def close_sandbox(log, timeout=CLOSE_TIMEOUT, kill=None):
     """Waits up to timeout seconds for the sandbox to close itself (the
-    driver shuts it down), then kills it."""
+    driver shuts it down), then kills it.  A log that fails (the parent's
+    pipe is gone) never skips the kill."""
+    kill = taskkill_sandbox if kill is None else kill
+    say = _quiet(log)
     end = time.time() + timeout
     while time.time() < end:
         if not sandbox_running():
             return
         time.sleep(1)
-    log('sandbox still open: taskkill')
-    for name in TASKKILL_NAMES:
-        subprocess.run([CMD_EXE, '/c', 'taskkill', '/IM', name, '/F'],
-                       capture_output=True, cwd='/mnt/c')
+    say('sandbox still open: taskkill')
+    kill()
 
 
 # The launch limit (ruling R67).  Every sandbox launch goes through

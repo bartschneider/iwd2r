@@ -74,7 +74,10 @@ POST_LOAD_FALLBACK = 180             # --post-load when the scenario has no head
 
 
 def log(message):
-    print('sandbox: %s' % message, flush=True)
+    try:
+        print('sandbox: %s' % message, flush=True)
+    except (BrokenPipeError, OSError):
+        pass      # the parent is gone: the cleanup that logs must still run
 
 
 def venv_python():

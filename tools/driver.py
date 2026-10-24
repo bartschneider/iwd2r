@@ -348,6 +348,9 @@ DEFAULT_TIMEOUT = 10800   # seconds a worker or reviewer run may take (R71)
 _LIVE = set()
 # Re-entrant: the stop handler runs on a thread that may hold it already.
 _LIVE_LOCK = threading.RLock()
+# The pids of the probe.py launches among them (under _LIVE_LOCK); once a stop
+# has set _STOPPED they are kept, so the stop can tell a probe was killed.
+_PROBE_PIDS = set()
 
 
 # Set (under _LIVE_LOCK) once a stop has killed the live groups: a worker
@@ -372,16 +375,18 @@ def kill_live_groups():
     return groups
 
 
-def _run_group(argv, timeout=None, **kw):
+def _run_group(argv, timeout=None, probe=False, **kw):
     """subprocess.run in a session of its own, so that a timeout kills the
     whole process group (the worker's children too), then raises
-    TimeoutExpired."""
+    TimeoutExpired.  probe=True records the pid in _PROBE_PIDS."""
     proc = subprocess.Popen(argv, start_new_session=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             **{k: v for k, v in kw.items()
                                if k not in ('capture_output',)})
     with _LIVE_LOCK:
         _LIVE.add(proc.pid)
+        if probe:
+            _PROBE_PIDS.add(proc.pid)
         if _STOPPED.is_set():      # forked after the stop's kill: not missed
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -406,6 +411,8 @@ def _run_group(argv, timeout=None, **kw):
     finally:
         with _LIVE_LOCK:
             _LIVE.discard(proc.pid)
+            if not _STOPPED.is_set():
+                _PROBE_PIDS.discard(proc.pid)
     return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
@@ -413,9 +420,11 @@ def _run_probe(argv, timeout=None, **kw):
     """frida_run's `run` in the real driver: a probe.py launch is a live
     process group like a worker's, so a stop (kill_live_groups) ends it; a
     probe killed by the stop raises _Stop in its batch thread instead of
-    coming home as a failed scenario.  The sandbox the probe started shuts
-    itself down on its in-box timeout."""
-    done = _run_group(argv, timeout=timeout, **kw)
+    coming home as a failed scenario.  Killing the group does not close the
+    Windows Sandbox the probe started (the box runs to its in-box timeout);
+    the stop taskkills it (Driver._close_sandbox_after_stop), and only when
+    a probe was among the groups it killed (_PROBE_PIDS)."""
+    done = _run_group(argv, timeout=timeout, probe=True, **kw)
     if _STOPPED.is_set() and done.returncode < 0:
         raise _Stop()
     return done
@@ -1799,6 +1808,8 @@ class Driver:
         truth = _tool('truth')
         self.frida = frida
         self.exports_dir = None
+        # The host taskkill of the sandbox, behind one seam: tests replace it.
+        self._taskkill = _tool('winsandbox').taskkill_sandbox
         self.held_out = tuple(_tool('truth').PHASE_HELD_OUT)   # scenarios the phase skips for now
         self.frida_map = frida_map
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
@@ -3146,14 +3157,15 @@ class Driver:
     def _close_sandbox_after_stop(self):
         """A probe killed mid-run leaves its Windows Sandbox open (it ends on
         its in-box timeout): taskkill the sandbox processes so a restart does
-        not hit "already running"."""
+        not hit "already running".  One line names what was killed and what
+        failed; one failing name skips neither the rest nor the line."""
         try:
-            ws = _tool('winsandbox')
-            for name in ws.TASKKILL_NAMES:
-                subprocess.run([ws.CMD_EXE, '/c', 'taskkill', '/IM', name, '/F'],
-                               capture_output=True, cwd='/mnt/c', timeout=15)
-            self.log('stop: killed the live process groups and taskkilled the sandbox (%s)'
-                     % ', '.join(ws.TASKKILL_NAMES))
+            done = self._taskkill()
+            killed = [n for n, rc in done if rc == 0]
+            failed = [n for n, rc in done if rc is None]
+            self.log('stop: killed the live process groups and taskkilled the '
+                     'sandbox (killed: %s; failed: %s)'
+                     % (', '.join(killed) or 'none', ', '.join(failed) or 'none'))
         except Exception:
             pass
 
@@ -3162,7 +3174,10 @@ class Driver:
         finish (bounded), then raise _Stop.  Only locks that are re-entrant
         are taken here: the signal may land while this thread holds them."""
         self._stopping = True
-        if kill_live_groups():
+        killed = kill_live_groups()
+        with _LIVE_LOCK:
+            probe_killed = bool(set(killed) & _PROBE_PIDS)
+        if probe_killed:               # a stop with only Claude workers live leaves boxes alone
             self._close_sandbox_after_stop()
         with self._write_cv:
             if threading.get_ident() in self._writers:
