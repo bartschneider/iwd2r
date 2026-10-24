@@ -560,6 +560,29 @@ def next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                            claims_path=claims_path, **kw)
 
 
+def _probe_reoffer(row, disagreements_path, coverage_path, coverage_root, repo):
+    """Whether a probe row a closed batch released may be cut again: the
+    entry was stamped by the phase (`probed`: batch, scenarios, pin) and either
+    its pin moved or the coverage map now gives it a scenario that stamp lacks.
+    An unstamped row, or one with no usable map and the same pin, is not."""
+    stamp = (row or {}).get('probed')
+    if not isinstance(stamp, dict) or not stamp:
+        return False
+    if stamp.get('pin') != row.get('fork_base'):
+        return True
+    cov_mod = _coverage()
+    cpath = coverage_path or os.path.join(
+        os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
+    cov, _why = cov_mod.check(cpath, coverage_root or repo or ROOT)
+    if cov is None:
+        return False
+    try:
+        now = cov_mod.covered(cov, row['address'], cov_mod.row_scenarios(cov, [row]))
+    except (TypeError, AttributeError, ValueError, KeyError):
+        return False
+    return any(sc not in (stamp.get('scenarios') or ()) for sc in now)
+
+
 def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                  coverage_path, coverage_root, repo, include_uncovered):
     """(eligible rows, rows without an address, coverage note, None) for one
@@ -708,16 +731,18 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
             rows.append(full)
     if probing:
         # The probe list's entries, completed from disagreements.json by
-        # address (the sizes the pool sorts by); a row a probe batch already
-        # held (open or closed) is not cut again: a row kept on the list
-        # waits for its oracle case, not for the next `next`.
+        # address (the sizes the pool sorts by); a row a probe batch holds is
+        # not cut again.  A closed batch releases the rows it left on the
+        # list (`released`); a released row is offered again only when a
+        # scenario the coverage map now gives it was not among the ones
+        # that measured it (the entry's `probed` stamp), or its pin moved.
         if probe_path is None:
             probe_path = os.path.join(repo, PROBE_LIST_REL)
         probes, err = _load_list(probe_path, 'probe list', missing_ok=True)
         if err:
             return 2, err
         known = {_addr_key(r.get('address')): r for r in rows if r.get('address')}
-        wave_state = {}
+        wave_state = {'batches': {}}
         try:
             wave_state = load_state(os.path.join(
                 os.path.dirname(os.path.abspath(state_path)),
@@ -728,19 +753,33 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
         for e in probes:
             full = dict(known.get(_addr_key(e['address']), {}))
             full.update({k: e[k] for k in ('address', 'file', 'name', 'reading',
-                                           'reason', 'at', 'source') if k in e})
+                                           'reason', 'at', 'source', 'probed') if k in e})
             full.setdefault('their_len', 0)
             full.setdefault('our_len', 0)
             full['origin'] = e.get('batch')
-            origin = (wave_state['batches'].get(e.get('batch') or '') or {})
-            pin = origin.get('fork_base') or wave_state.get('fork_base')
-            if pin:
-                full['fork_base'] = pin
+            origin = (wave_state.get('batches', {}).get(e.get('batch') or '') or {})
+            # the pin the row was compared at: its batch's, else the one the
+            # early batches were cut at (never the state's current pin)
+            full['fork_base'] = (origin.get('fork_base') if isinstance(origin, dict)
+                                 else None) or DEFAULT_FORK_BASE
             full['category'] = q['category']
             rows.append(full)
+        probe_rows = {_addr_key(r['address']): r for r in rows}
+        reoffer_cache = {}
+
+        def reoffer(k):
+            if k not in reoffer_cache:
+                reoffer_cache[k] = _probe_reoffer(
+                    probe_rows.get(k), disagreements_path, coverage_path,
+                    coverage_root, repo)
+            return reoffer_cache[k]
     for b in state['batches'].values():
         for r in b['rows']:
             if r.get('address'):
+                if (probing and b['status'] == 'closed' and r.get('released')
+                        and _addr_key(r['address']) in probe_rows
+                        and reoffer(_addr_key(r['address']))):
+                    continue
                 decided.add(_addr_key(r['address']))
         if b['status'] == 'assigned':
             owned.update(b['files'])
@@ -1234,6 +1273,10 @@ def _probe_close_problems(batch, batch_id, repo, wt, base, state_path):
                 text = f.read()
         if row.get('outcome') == 'found':
             tally['findings'] += 1
+        if k in on_list and row.get('outcome') == 'fork-equal':
+            problems.append(f'{addr}: decided (case {row.get("case")}) but not recorded; retry '
+                            f'at the record stage')
+            continue
         if k not in on_list:
             v = verdicts.get(k) or {}
             if not (v.get('side') == 'fork'
@@ -1644,6 +1687,15 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
         return 1, f'batch {batch_id} not closed:\n  - {err}\n'
     batch['status'] = 'closed'
     batch['closed_at'] = _now()
+    if kind == 'probes':
+        # the rows left on the list are released: `next` offers them again
+        # only for a scenario the entry's probed stamp lacks (_probe_reoffer)
+        left, _err = _load_list(os.path.join(repo, PROBE_LIST_REL), 'probe list',
+                                missing_ok=True)
+        still = {_addr_key(e['address']) for e in left or ()}
+        for r in batch['rows']:
+            if _addr_key(r['address']) in still:
+                r['released'] = True
     save_state(state_path, state)
     new = subprocess.run(['git', '-C', repo, 'rev-parse', base],
                          capture_output=True, text=True).stdout.strip()
@@ -1951,6 +2003,8 @@ def resolve_probe(address, side, case, state_path=STATE_PATH, repo=ROOT,
         return 2, f'side must be one of {"|".join(SIDES)}\n'
     if not case:
         return 2, 'the deciding case id is required\n'
+    if measured != 'none' and measured not in MEASURED_ORDER[:-1]:
+        return 2, f'measured must be one of none|{"|".join(MEASURED_ORDER[:-1])}\n'
     probe_path = os.path.join(repo, PROBE_LIST_REL)
     probes, err = _load_list(probe_path, 'probe list', missing_ok=True)
     if err:

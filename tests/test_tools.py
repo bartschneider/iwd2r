@@ -18521,6 +18521,76 @@ class DriverTest(unittest.TestCase):
         files = self.git('show', '--name-only', '--format=%s', 'first').stdout.split('\n')
         self.assertEqual(files[0], 'probe-state: close p001 (resolved 1, kept on list 0)')
 
+    def test_probe_equal_row_is_only_fork_equal_until_the_review_passes(self):
+        d = self._probe_driver(reviewer=driver.FakeWorker('# review\n\nBLOCKING: 0x402000 src/B.cpp wrong\n'))
+        out = d.run_batch('p001')
+        self.assertEqual(out, 'exception', self._status(d)['exceptions'])
+        self.assertEqual(self._status(d)['exceptions']['p001']['stage'], 'review')
+        row = self._probe_state()['rows'][0]
+        self.assertEqual((row['outcome'], row['case'], row['losing_kind']),
+                         ('fork-equal', 'frida-p001-world_entry', 'oracle'))
+        self.assertRegex(row['measured_body'], r'^[0-9a-f]{64}$')
+        # the phase touched neither the wave state nor the probe list
+        self.assertEqual(self._wave_state()['batches']['b009']['verdicts'], {})
+        self.assertEqual([e['address'] for e in self._probe_list()], ['0x402000'])
+        self.assertEqual(self._wave_fields()[0]['kind'], 'trace')
+        # the review was mandatory (a fork row) and was shown the fork verdict
+        self.assertEqual(d._merged('p001', {}), {'402000': ('fork', 'frida-p001-world_entry')})
+        review = _slurp(os.path.join(os.path.dirname(d.status_path), 'p001', 'reviewer.brief.md'))
+        self.assertIn('verdict 0x402000 fork case frida-p001-world_entry', review)
+        # a retry of the checks keeps the decided row: the driver's own sentence is not a problem
+        _v, probs = d._check('p001', self.wt, self.PROBE_REPORT)
+        self.assertEqual(probs, [])
+
+    def test_probe_record_stage_is_idempotent_and_refuses_a_moved_body(self):
+        d = self._probe_driver()
+        d.close_batch = lambda *a, **k: (1, 'boom')
+        self.assertEqual(d.run_batch('p001'), 'exception')
+        self.assertEqual(self._status(d)['exceptions']['p001']['stage'], 'close')
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'resolved')
+        first = self._wave_state()
+        # the retry arrives with the row still fork-equal (a crash between the two writes)
+        d._probe_outcomes('p001', {'0x402000': {'outcome': 'fork-equal'}})
+        self.assertEqual(d._record_probe_rows('p001', self.wt), [])
+        self.assertEqual(self._wave_state(), first)
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'resolved')
+        self.assertEqual(len(first['batches']['b009']['rows']), 1)
+        # a body that moved since the phase measured it is not recorded
+        d._probe_outcomes('p001', {'0x402000': {'outcome': 'fork-equal'}})
+        _write(os.path.join(self.wt, 'src', 'B.cpp'),
+               '// 0x402000\nint IcewindMisc::Roll(int a, int b)\n{\n    return 1;\n}\n')
+        self.git('commit', '-qam', 'moved', cwd=self.wt)
+        probs = d._record_probe_rows('p001', self.wt)
+        self.assertEqual(len(probs), 1)
+        self.assertIn('0x402000: body changed after the Frida phase; not recorded', probs[0])
+
+    def test_probe_fork_candidates_need_read_only_evidence_and_a_fork_reading(self):
+        d = self._probe_driver(extra_row=True)
+        batch = dict(self._probe_state(), id='p001')
+        key = driver._tool('wave')._addr_key
+        run = lambda c: driver._probe_candidate_problems(batch, self.wt, 'first', c, key)
+        path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
+        text = _slurp(path)
+        _write(path, text.replace('kind: read-only', 'kind: replay'))
+        probs = run({'0x402000': ('fork', 'r'), '0x401000': ('neither', 'r')})
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('evidence is kind replay; a fork candidate needs kind: read-only', probs[0])
+        self.assertIn('candidate 0x402000 neither evidence is kind replay; needs a hand ruling', probs[0])
+        _write(path, text)
+        # the phase leaves such a row alone (no measurement of replay evidence)
+        probs = run({'0x402000': ('fork', 'r'), '0x401000': ('fork', 'r')})
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('0x401000: its reading is `neither`', probs[0])
+
+    def test_probe_pool_short_forms_and_resume_preamble(self):
+        for name in ('glm', 'claude'):
+            self.assertEqual(driver.parse_pool(name, queue='probes').name, name)
+        d = self._probe_driver()
+        text = d._resume_preamble('p001', d.load_state(d.state_path)['batches']['p001'], 'a retry', self.wt)
+        self.assertIn('## Candidates', text)
+        self.assertNotIn('## Verdicts` section: one line', text)
+        self.assertNotIn('Undecided', text)
+
     def test_probes_queue_through_the_run_command_line(self):
         tmp = self._tmpdir()
         live = driver._tool('wave').PROBE_STATE_PATH
@@ -18599,6 +18669,10 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(entry['reason'].endswith('; needs an oracle case'), entry['reason'])
         self.assertEqual(self._wave_state()['batches']['b009']['verdicts'], {})
         self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'kept')
+        self.assertTrue(self._probe_state()['rows'][0]['released'])    # the closed batch lets go
+        self.assertEqual(entry['probed']['batch'], 'p001')
+        self.assertIn('world_entry', entry['probed']['scenarios'])
+        self.assertEqual(entry['probed']['pin'], self.PROBE_PIN)
         self.assertEqual(self._wave_fields()[0]['kind'], 'oracle')      # first's own copy again
         ledger = self._ledger(d)
         self.assertIn('- probes: resolved 0, kept on list 1, findings 0', ledger)
@@ -20492,6 +20566,57 @@ class WaveProbeQueueTest(unittest.TestCase):
         self.assertEqual(rc, 2, out)
         self.assertTrue(out.startswith('nothing left'), out)
 
+    def test_a_batch_without_a_pin_uses_the_early_batches_pin_not_the_states_current_one(self):
+        st = self.wave.load_state(os.path.join(self.tmp, 'wave-state.json'))
+        st['fork_base'] = 'c' * 40
+        self.wave.save_state(os.path.join(self.tmp, 'wave-state.json'), st)
+        self.next()
+        rows = {r['address']: r for r in self.batches()['p001']['rows']}
+        self.assertEqual(rows['0x4258D0']['fork_base'], self.wave.DEFAULT_FORK_BASE)   # b014: none
+        self.assertEqual(rows['0x478490']['fork_base'], 'a' * 40)                        # b013's own
+        self.assertNotEqual(rows['0x4258D0']['fork_base'], 'c' * 40)    # the state's current pin
+
+    def _closed_with_released_row(self, probed):
+        for sc in ('world_entry', 'first_fight'):
+            _write(os.path.join(self.tmp, 'scenarios', sc + '.txt'), 'quit\n')
+        entries = [dict(e) for e in self.ENTRIES[:1]]
+        entries[0]['probed'] = probed
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'probe-list.json'), json.dumps(entries))
+        self.wave.save_state(self.state, {'batches': {'p001': {
+            'rows': [{'address': '0x478490', 'file': 'src/CGameArea.cpp', 'released': True,
+                      'outcome': 'kept'}], 'files': ['src/CGameArea.cpp'], 'status': 'closed',
+            'verdicts': {}, 'branch': 'p3/wso-p001'}}})
+
+    def cov(self, *a, **kw):
+        return CoverageTest.cov(self, *a, **kw)
+
+    def test_a_released_row_returns_only_for_a_new_scenario_or_a_moved_pin(self):
+        pin = 'a' * 40      # b013's own pin: the pin of 0x478490
+        for probed, hits, want in (
+                ({'batch': 'p001', 'scenarios': ['world_entry'], 'pin': pin},
+                 {'world_entry': {'0x478490': 2}}, False),          # the same set again
+                ({'batch': 'p001', 'scenarios': ['world_entry'], 'pin': pin},
+                 {'world_entry': {'0x478490': 2}, 'first_fight': {'0x478490': 1}}, True),   # a new one
+                ({'batch': 'p001', 'scenarios': ['world_entry'], 'pin': 'b' * 40},
+                 {'world_entry': {'0x478490': 2}}, True),           # the pin moved
+                (None, {'world_entry': {'0x478490': 2}}, False)):   # never stamped: stays released
+            self._closed_with_released_row(probed) if probed else self._closed_with_released_row({})
+            self.cov(hits, hooked=['0x478490'])
+            rc, out = self.next()
+            self.assertEqual(rc == 0, want, (probed, hits, out))
+            if want:
+                self.assertIn('p002 assigned: 1 rows', out)
+
+    def test_an_open_batch_still_holds_its_row_even_with_a_new_scenario(self):
+        pin = 'a' * 40
+        self._closed_with_released_row({'batch': 'p001', 'scenarios': [], 'pin': pin})
+        st = self.wave.load_state(self.state)
+        st['batches']['p001']['status'] = 'assigned'
+        self.wave.save_state(self.state, st)
+        self.cov({'world_entry': {'0x478490': 2}}, hooked=['0x478490'])
+        rc, out = self.next()
+        self.assertEqual(rc, 2, out)
+
     def test_next_takes_at_most_size_rows_and_ids_count_up(self):
         rc, out = self.next(size=2)
         self.assertEqual(rc, 0, out)
@@ -20538,6 +20663,11 @@ class WaveProbeQueueTest(unittest.TestCase):
                      'Nothing on the desktop', 'Do not edit `docs/MAP.md`'):
             self.assertIn(rule, text.replace('**', ''), rule)
         self.assertIn('No verdicts', text.replace('**', ''))
+
+    def test_resolve_probe_refuses_an_unknown_measured(self):
+        rc, out = self.wave.resolve_probe('0x478490', 'fork', 'frida-p001-x', measured='guess')
+        self.assertEqual(rc, 2)
+        self.assertIn('measured must be one of', out)
 
     def test_cli_close_kind_probes_reads_the_probe_state(self):
         out = io.StringIO()

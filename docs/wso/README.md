@@ -384,8 +384,14 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   `docs/wso/engine-gaps.json`, and the fix round puts our body back. Not
   exercised: the entry stays, its reason refreshed. `close --kind probes`
   needs every row resolved or back on the list with our body; the scorecard
-  gains a `probes: resolved N, on list M` line. A row already held by a probe
-  batch is not cut again. `wave1`
+  gains a `probes: resolved N, on list M` line. The phase only records the
+  decision (`outcome: fork-equal`, case, measured body, losing kind on the
+  probe-state row); the record stage, after the checks and the (mandatory) review,
+  calls `resolve_probe`. A fork candidate's evidence must be `kind: read-only`;
+  a `neither`-reading row can only be listed as `neither`. A row an open batch
+  holds is not cut again; a closed batch releases the rows it left on the list,
+  stamped `probed: {batch, scenarios, pin}`, and `next` offers one again only
+  when the coverage map now gives it a scenario not in that stamp, or its pin moved. `wave1`
   is `docs/wso/wave-state.json`: the `both_changed_differ` rows, triaged,
   batch ids `b<NNN>`, brief `brief-template.md`, closed with verdicts.
   `import` is `docs/wso/import-state.json`: the `theirs_real_ours_stub`

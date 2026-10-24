@@ -69,7 +69,11 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    as they are and report it as `candidate <0xADDR> neither <reason>`; it
    stays on the probe list with the reason refreshed. The same line is for a
    `fork` row you cannot adopt (say why in the reason); its body stays ours.
-6. **Commit as you go.** WIP commits are fine.
+6. **Bundles first.** Read the bundle for a function before its source; do not
+   read a whole `src/*.cpp` the bundle covers.
+   **Commit as you go.** WIP commits are fine. Probe branches are expected to
+   show parity failures elsewhere in the tree, which is by design, but your own
+   changes must not add failures.
 7. **Asm reds: confirm or waive.** The parity step's asm verify has a known
    false-positive class — the binary inlined a helper that the source calls
    out as a function. Confirm each asm red against the decompile or
@@ -78,7 +82,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    `## Undecided` section; the driver decides every row.
 9. **Never push, never write through a remote.** From a batch worktree,
    `git push` is wrong, and so is any `git fetch <remote>` with a refspec that
-   writes a branch. The coordinator merges and pushes.
+   writes a branch. The worktree's four remotes all carry push URLs, including
+   the untrusted `wso` and `deo`. The coordinator merges and pushes.
 10. **Engine tests run under a memory cap.** `ctest` and `iwd2r_tests` run
     only as `systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 -- <command>`.
 11. **Do not edit `docs/MAP.md`.** The driver regenerates it at close.
