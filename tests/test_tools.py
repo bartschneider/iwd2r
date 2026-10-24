@@ -10088,6 +10088,20 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(driver.ReportError):
             driver.parse_undecided(h + 'undecided 0x401000 fork a\nundecided 0x0401000 neither b\n')
 
+    def test_parse_kept_skips_address_free_prose(self):
+        # i007 (2026-10-24): the fix-round report said "None. Every row the
+        # previous round listed under Kept was parked this round ..." under
+        # ## Kept and the checks raised; the same tolerance as the other two
+        # parsers applies.
+        h = '## Kept\n'
+        for prose in ('None.\n', '(none)\n', 'Every row listed before was parked this round.\n'):
+            self.assertEqual(driver.parse_kept(h + prose), {}, prose)
+        text = h + 'None yet.\nkept 0x401000 ours matches the exe\nThat is all.\n'
+        self.assertEqual(driver.parse_kept(text), {'0x401000': 'ours matches the exe'})
+        for bad in ('Kept: none\n', 'note on 0x401000\n', 'kept 0x401000\n'):
+            with self.assertRaises(driver.ReportError, msg=bad):
+                driver.parse_kept(h + bad)
+
     def test_parse_undecided_skips_address_free_prose(self):
         # b022 (2026-10-24): Flash wrote a placeholder under ## Undecided twice
         # ('(none)', then '(no rows — all 20 decided)') and the checks raised
@@ -10117,7 +10131,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(driver.parse_kept('## Kept\n```text\nkept 0x1 r\n```\n'), {'0x1': 'r'})
 
     def test_parse_kept_rejects_malformed_duplicate_and_imported_rows(self):
-        for bad in ('kept 0x1\n', 'kept 0x1 \n', 'ours is right\n', 'imported 0x1 trace\n'):
+        for bad in ('kept 0x1\n', 'kept 0x1 \n', 'note on 0x1 only\n', 'Kept: none\n'):
             with self.assertRaises(driver.ReportError, msg=bad):
                 driver.parse_kept('## Kept\n' + bad)
         with self.assertRaises(driver.ReportError) as cm:
