@@ -2716,8 +2716,9 @@ class Driver:
             path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
             cov, why = cov_mod.check(path, self.repo)
             if cov is not None:
-                # a UI scenario joins when the map says it hits a row
-                cands = cov_mod.row_scenarios(cov, rows)
+                # a UI scenario joins when the map says it hits a row; the
+                # hold-out applies to the map's candidates as well
+                cands = [c for c in cov_mod.row_scenarios(cov, rows) if c not in self.held_out]
                 self._frida_ran = (cands, [])
             if cov is None:
                 if os.path.exists(path):

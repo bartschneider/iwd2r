@@ -11187,8 +11187,11 @@ class DriverTest(unittest.TestCase):
         truth = driver._tool('truth')
         d.held_out = tuple(truth.PHASE_HELD_OUT)
         self.assertEqual(set(d.held_out), {'save_load_screens', 'biography'})
-        self._coverage_map({'world_entry': {'0x401000': 4, '0x402000': 1, '0x403000': 1},
-                            'save_load_screens': {'0x401000': 1}})
+        # 0x403000 is hit ONLY by save_load_screens, 0x402000 only by biography:
+        # without the hold-out both would run; with it neither does and the
+        # two rows are simply not covered
+        self._coverage_map({'world_entry': {'0x401000': 4},
+                            'save_load_screens': {'0x403000': 1}})
         self._add_ui_entry({'0x402000': 2})
         seen = self._scenario_recorder(d)
         try:
@@ -11196,8 +11199,9 @@ class DriverTest(unittest.TestCase):
         except driver._StageError:
             pass
         self.assertEqual(seen, [['world_entry']])
-        self.assertIn('b011: frida: held out of the phase: save_load_screens, biography',
-                      '\n'.join(self.logs))
+        logs = '\n'.join(self.logs)
+        self.assertIn('b011: frida: held out of the phase: save_load_screens, biography', logs)
+        self.assertIn('scenarios by coverage: world_entry (cover 1 of 3 rows', logs)
 
     def test_driver_frida_phase_adds_the_ui_scenarios_for_screen_rows(self):
         d, batch = self._import_phase_driver()
