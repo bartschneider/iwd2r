@@ -1154,6 +1154,48 @@ def _write_trace_evidence(path, probe, orig_path, ours_path, keep_exemption=Fals
         f.write(''.join([lines[0]] + head + lines[end:]))
 
 
+def _undo_trace_evidence(path, saved_text):
+    """Undo what _write_trace_evidence changed on the CURRENT file: `kind:` back
+    to the saved copy's value, the `trace_source:` line dropped, and the saved
+    `exemption:` line put back when the file lacks one; every other line (prose
+    edited since) stays.  True when done that way; False when the current front
+    matter cannot be read, in which case the saved copy replaces the file."""
+    with open(path, encoding='utf-8', newline='') as f:
+        lines = f.read().splitlines(keepends=True)
+    saved = saved_text.splitlines(keepends=True)
+
+    def front(ls):
+        if not ls or ls[0].strip() != '---':
+            return None
+        end = next((i for i in range(1, len(ls)) if ls[i].strip() == '---'), None)
+        return None if end is None else end
+    end, send = front(lines), front(saved)
+    field = lambda ls, e, n: next((l for l in ls[1:e] if l.partition(':')[0].strip() == n), None)
+    old_kind = field(saved, send, 'kind') if send is not None else None
+    if end is None or old_kind is None:
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write(saved_text)
+        return False
+    eol = '\r\n' if lines[0].endswith('\r\n') else '\n'
+    old_ex = field(saved, send, 'exemption')
+    head, have_ex = [], False
+    for line in lines[1:end]:
+        name = line.partition(':')[0].strip()
+        if name == 'trace_source':
+            continue
+        if name == 'exemption':
+            have_ex = True
+        if name == 'kind':
+            line = old_kind.rstrip('\r\n') + (line[len(line.rstrip('\r\n')):] or eol)
+        head.append(line)
+    if old_ex is not None and not have_ex:
+        at = next((i for i, l in enumerate(head) if l.partition(':')[0].strip() == 'kind'), len(head) - 1)
+        head.insert(at + 1, old_ex.rstrip('\r\n') + eol)
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write(''.join([lines[0]] + head + lines[end:]))
+    return True
+
+
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                       kind='verdicts', transcript=None, covered_files=(),
                       probe=(), base='first', undecided=(), frida_lines=None,
@@ -2357,7 +2399,7 @@ class Driver:
         self._stage(batch_id, 'checks')
         if self.kind == 'import':
             self._clear_kept_outcomes(batch_id, self._kept)
-        if self.kind != 'import':
+        if self.kind != 'import' and not self.dry_run:
             self._withdraw_changed(batch_id, worktree)
         batch = self.load_state(self.state_path)['batches'][batch_id]
         key = _tool('wave')._addr_key
@@ -2920,12 +2962,24 @@ class Driver:
                 cite = (exact.get(k) or [None])[0] if 'exact' in info else (
                     detail[len(truth.EQUAL_PREFIX):].split(', ')[0]
                     if detail.startswith(truth.EQUAL_PREFIX) else None)
-                ok, why = self._wave_trace_evidence(batch_id, worktree, r, cite, traces)
+                dirty = self._dirty_source(worktree, r) if status == 'equal' else None
+                if dirty:
+                    self.log('%s: %s: %s has uncommitted changes at the Frida phase; trace '
+                             'evidence not written' % (batch_id, r['address'], dirty))
+                    self._wave_notes[k] = '%s has uncommitted changes at the Frida phase' % dirty
+                    self._frida_got[k] = ('not measured', self._wave_notes[k])
+                    continue
+                ok, why = self._wave_trace_evidence(batch_id, worktree, r, cite, traces,
+                                                    keep_before=commit is None)
                 self._wave_notes[k] = why
                 if ok:
                     written.append(r['address'])
                     cites.append(cite)
-                    digests[r['address']] = self._wave_digest.get(k)
+                # a digest for every equal row: _land withholds `measured` from a
+                # body that moved since (measured_body of a row on oracle/replay
+                # evidence guards nothing else)
+                digests[r['address']] = _tool('check_evidence').body_digest(
+                    worktree, r['address'], r.get('file'))
             if side and status == 'different':
                 findings.append('%s: the Frida trace diff shows the body on the branch (verdict %s) '
                                 'different from the original (%s); recheck it' % (
@@ -3280,6 +3334,16 @@ class Driver:
             return orig, ours, dumps, 'files'
         return orig, ours, dumps, None
 
+    @staticmethod
+    def _dirty_source(worktree, row):
+        """The source file (or src/) of a row that has uncommitted changes in
+        the worktree, else None.  The x86 build syncs the files on disk, the
+        digest reads HEAD: a dirty file may have measured another body."""
+        path = row.get('file') or 'src'
+        r = subprocess.run(['git', '-C', worktree, 'status', '--porcelain', '--', path],
+                           capture_output=True, text=True)
+        return path if r.returncode == 0 and r.stdout.strip() else None
+
     def _before_path(self, batch_id, address):
         """driver/<batch>/evidence-before/<ADDR>.md: the evidence file as it was
         before the wave-1 phase rewrote it to kind: trace.  It exists exactly
@@ -3296,7 +3360,7 @@ class Driver:
             return None
         return m.group(1) if m else None
 
-    def _wave_trace_evidence(self, batch_id, worktree, row, cite, traces):
+    def _wave_trace_evidence(self, batch_id, worktree, row, cite, traces, keep_before=True):
         """Wave 1: an equal row whose verdict confirms the body on the branch
         and whose evidence is still kind: read-only is rewritten to kind:
         trace (the import path's _write_trace_evidence, the same dump guard;
@@ -3324,8 +3388,9 @@ class Driver:
         path = os.path.join(worktree, wave._evidence_rel(a))
         before = self._before_path(batch_id, a)
         try:
-            os.makedirs(os.path.dirname(before), exist_ok=True)
-            shutil.copyfile(path, before)
+            if keep_before:
+                os.makedirs(os.path.dirname(before), exist_ok=True)
+                shutil.copyfile(path, before)
             _write_trace_evidence(path, '%s-%s' % (batch_id, cite), orig, ours,
                                   keep_exemption=True)
         except (OSError, ValueError) as e:
@@ -3335,8 +3400,6 @@ class Driver:
             except OSError:
                 pass
             return False, 'evidence not rewritable: %s' % e
-        self._wave_digest[wave._addr_key(a)] = _tool('check_evidence').body_digest(
-            worktree, a, row.get('file'))
         return True, None
 
     def _withdraw_trace(self, batch_id, worktree, addresses, why):
@@ -3350,7 +3413,11 @@ class Driver:
             before = self._before_path(batch_id, a)
             rel = wave._evidence_rel(a)
             try:
-                shutil.copyfile(before, os.path.join(worktree, rel))
+                with open(before, encoding='utf-8', newline='') as f:
+                    saved = f.read()
+                if not _undo_trace_evidence(os.path.join(worktree, rel), saved):
+                    self.log('%s: %s: evidence front matter unreadable; the pre-rewrite copy '
+                             'replaced the file' % (batch_id, a))
                 os.unlink(before)
             except OSError as e:
                 self.log('%s: %s: trace evidence not withdrawn (%s)' % (batch_id, a, e))
@@ -3380,6 +3447,16 @@ class Driver:
             self.log('%s: trace evidence withdrawal not committed: %s' % (
                 batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
         return gone
+
+    def _body_moved(self, batch_id, worktree, address):
+        """True when the phase recorded the digest of a row's body and the
+        body on the branch is another one now."""
+        key = _tool('wave')._addr_key
+        batch = self.load_state(self.state_path)['batches'].get(batch_id) or {}
+        row = next((r for r in batch.get('rows', []) if key(r['address']) == key(address)), None)
+        want = row.get('measured_body') if row else None
+        return bool(want) and _tool('check_evidence').body_digest(
+            worktree, address, row.get('file')) != want
 
     def _withdraw_changed(self, batch_id, worktree):
         """A wave-1 row the phase wrote trace evidence for (its body digest is
@@ -3419,6 +3496,16 @@ class Driver:
                         row['address'], scenario, park_text(
                             row['address'], mb, kept_needs(scenario, 'trace files missing')
                             if kept else 'frida trace files missing', edit_back=not kept, kept=kept)))
+        dirty = self._dirty_source(worktree, row)
+        if dirty:
+            self.log('%s: %s: %s has uncommitted changes at the Frida phase; trace evidence '
+                     'not written' % (batch_id, row['address'], dirty))
+            return ('%s: measured equal in %s but %s has uncommitted changes (the measured body '
+                    'is not the committed one); the phase does not run again in this batch, so '
+                    'park it: %s' % (row['address'], scenario, dirty, park_text(
+                        row['address'], mb, kept_needs(scenario, 'source file uncommitted')
+                        if kept else 'source file has uncommitted changes at the Frida phase',
+                        edit_back=not kept, kept=kept)))
         path = os.path.join(worktree, wave._evidence_rel(row['address']))
         try:
             _write_trace_evidence(path, '%s-%s' % (batch_id, scenario), orig, ours)
@@ -3533,17 +3620,20 @@ class Driver:
                            'refs/heads/%s' % branch], capture_output=True).returncode == 0:
             return 1, ('remeasure: branch %s exists already; a pass cuts its own new branch '
                        '(--branch NAME names an unused one)\n' % branch)
+        for rel in (self.ENGINE_GAPS_REL, self.REMEASURE_LOG_REL):
+            # a malformed file refuses before a branch is cut or any evidence rewritten
+            r = self._git_in(self.repo, 'show', '%s:%s' % (self.base, rel))
+            if r.returncode == 0:
+                try:
+                    ok = isinstance(json.loads(r.stdout), list)
+                except ValueError:
+                    ok = False
+                if not ok:
+                    return 1, 'remeasure: %s is not a JSON list; nothing was measured\n' % rel
         worktree, how = self.cut_worktree(self.repo, branch, self.base)
         if worktree is None:
             return 1, 'remeasure: %s\n' % how
         self.log('%s: worktree %s on %s (%s)' % (pid, worktree, branch, how))
-        try:
-            # a malformed engine-gaps.json refuses before any evidence is rewritten
-            self._remeasure_json_list(worktree, self.ENGINE_GAPS_REL)
-            self._remeasure_json_list(worktree, self.REMEASURE_LOG_REL)
-        except ValueError as e:
-            return 1, 'remeasure: %s; nothing was measured (worktree %s, branch %s)\n' % (
-                e, worktree, branch)
         self.log('%s: the sandbox and capture locks serialise this pass with any other driver '
                  'using them; it may wait' % pid)
         chunks = self.remeasure_chunks(picked, chunk)
@@ -4313,6 +4403,10 @@ class Driver:
         with self._lock:
             for addr, (side, case) in sorted(verdicts.items()):
                 measured = self._measured_for(addr, side)
+                if measured == 'frida' and self._body_moved(batch_id, worktree, addr):
+                    self.log('%s: %s: body changed after the Frida phase; not recorded as '
+                             'measured' % (batch_id, addr))
+                    measured = None
                 extra = {} if measured is None else {'measured': measured}
                 if side == 'fork' and self._before_kind(batch_id, addr):
                     # the losing kind is the evidence's before the phase wrote its trace
