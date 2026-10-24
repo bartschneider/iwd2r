@@ -2403,6 +2403,8 @@ def main(argv=None):
         return _driver().main(rest)
     elif cmd == 'remeasure':
         return _driver().remeasure_main(rest)
+    elif cmd == 'selfcheck':
+        return _driver().selfcheck_main(rest)
     else:
         print(f'wave.py: unknown command {cmd}', file=sys.stderr)
         return 2

@@ -895,6 +895,11 @@ ALLOWED_PATHS = ('src/', 'compat/', 'docs/evidence/', 'docs/MAP.md',
                  'docs/wso/import-parked/')
 
 
+# The worker's draft of its report (Task 24): written in the worktree, checked
+# by `wave.py selfcheck`, ignored by git, never an uncommitted path.
+REPORT_DRAFT = '.report.md'
+
+
 def _path_allowed(path):
     return any(path == a or (a.endswith('/') and path.startswith(a))
                for a in ALLOWED_PATHS)
@@ -1214,7 +1219,7 @@ def _undo_trace_evidence(path, saved_text, batch_id=None):
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                       kind='verdicts', transcript=None, covered_files=(),
                       probe=(), base='first', undecided=(), frida_lines=None,
-                      kept=()):
+                      kept=(), tests=True):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
@@ -1236,7 +1241,9 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     docs/evidence file still exists is a problem (close's own wording), and a
     `kept` row (the report's ## Kept section, address keys) must be a
     base-body row of the batch, unparked, with its body unchanged and an
-    evidence file."""
+    evidence file.  `tests` False skips the three test steps at the end (the
+    worker's selfcheck runs the rest); the worker's `.report.md` draft is never
+    an uncommitted path."""
     wave = _tool('wave')
     problems = []
     if transcript:
@@ -1343,6 +1350,7 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                             lambda l: l[3:].split(' -> ')[-1].strip('"'))
     if bad:
         problems.append(bad)
+    dirty = [p for p in dirty if p != REPORT_DRAFT]
     if dirty:
         problems.append('uncommitted paths in the worktree; commit or '
                         'delete: %s' % ', '.join(sorted(dirty)))
@@ -1375,12 +1383,12 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                         '%s:<path> > <path>`, or `git rm <path>` when the merge base '
                         'lacks the file; no batch row lives there) and commit'
                         % (', '.join(ALLOWED_PATHS), ', '.join(outside), held))
-    steps = [
+    steps = [] if not tests else [
         (['python3', '-I', 'tests/test_tools.py'], 'tests/test_tools.py'),
         (['python3', '-I', 'tools/check_evidence.py', '--base', 'first'],
          'tools/check_evidence.py'),
     ]
-    if os.path.isfile(_vanilla_exe()):
+    if tests and os.path.isfile(_vanilla_exe()):
         steps.append((_parity_python() + ['tools/parity/run.py', '--base', 'first'],
                       'tools/parity/run.py'))
     # docs/MAP.md is not the batch's: the driver regenerates it once at close,
@@ -1659,6 +1667,7 @@ FIX_PROMPT = """# Fix round for batch {id}
 The driver's {stage} found the problems below in your work on `{branch}`
 (this worktree). Fix every one, commit, and write your report again.
 {report_rule}
+{selfcheck_rule}
 
 {problems}
 
@@ -1668,6 +1677,12 @@ The original brief follows.
 
 {brief}"""
 
+
+# The last rule of both brief templates and of every fix round (Task 24).
+SELFCHECK_RULE = ("Before you return: write the report to `.report.md` in the worktree, run "
+                  "`python3 -I tools/wave.py selfcheck --batch {id}`, fix every line it prints "
+                  "and run it again until it prints `selfcheck: OK`, then return the same text "
+                  "as your report.")
 
 FIX_REPORT_RULES = {
     'verdicts': ("Write the full `## Verdicts` section, one line for every row you "
@@ -1696,7 +1711,193 @@ def fix_prompt(batch_id, stage, branch, brief, problems, kind='verdicts'):
     return FIX_PROMPT.format(
         id=batch_id, stage=stage, branch=branch, brief=brief,
         report_rule=FIX_REPORT_RULES['import' if kind == 'import' else 'verdicts'],
+        selfcheck_rule=SELFCHECK_RULE.format(id=batch_id),
         problems='\n'.join('- ' + p for p in problems))
+
+
+def _heading_present(text, *names):
+    return any(l.strip().startswith('#') and l.strip().lstrip('#').strip().lower() in names
+               for l in text.splitlines())
+
+
+def parse_imported(text):
+    """The addresses ('0x' + uppercase hex) of the report's `## Imported`
+    lines; prose and anything unparseable is skipped, as parse_kept does."""
+    out, section = set(), None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith('#'):
+            section = line.lstrip('#').strip().lower()
+        elif section == 'imported' and line:
+            m = IMPORTED_RE.match(MARKER_RE.sub('', line, count=1).strip().strip('`').strip())
+            if m:
+                out.add('0x%X' % int(m.group(1), 16))
+    return out
+
+
+def _spelling_problems(worktree, base, batch, report_addrs):
+    """The misspelt evidence file names (`0x78A2F0.md`, lower case) among the
+    batch's rows, the addresses the report names and the functions the branch
+    touched, as instructions: the worker renames, nothing is renamed here.
+    Returns (problems, keys of the rows with a misspelt file)."""
+    ce, wave = _tool('check_evidence'), _tool('wave')
+    key = wave._addr_key
+    addrs = {}
+    for a in [r['address'] for r in batch.get('rows', [])] + list(report_addrs) + \
+            list(batch.get('measured_deps') or {}):
+        addrs.setdefault(key(a), a)
+    try:
+        for _p, a, _n in ce.touched(worktree, base):
+            addrs.setdefault(key('0x%X' % a), '0x%X' % a)
+    except Exception:
+        pass
+    problems, odd_keys = [], set()
+    for k in sorted(addrs):
+        rel, old = ce.canonical_evidence(worktree, k)
+        odd = ce.misspelt_evidence(worktree, k)
+        if not odd:
+            continue
+        odd_keys.add(k)
+        if os.path.isfile(os.path.join(worktree, rel)) or len(odd) > 1:
+            files = ([rel] if os.path.isfile(os.path.join(worktree, rel)) else []) + odd
+            problems.append('two evidence files for 0x%s: %s; keep one, delete the %s'
+                            % (k.upper(), ' and '.join(files) if len(files) < 3
+                               else ', '.join(files), 'other' if len(files) < 3 else 'others'))
+        else:
+            problems.append('%s: misspelt evidence file name; rename it to %s (caps, no 0x): '
+                            '`git mv %s %s` and commit' % (old, rel, old, rel))
+    return problems, odd_keys
+
+
+def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
+    """The driver's mechanical checks that need no driver state, for the
+    worker to run on its own report and files before it returns (Task 24):
+    [] when clean, else one problem per entry in the driver's own wording.
+    The batch id gives the kind (b: verdicts, i: import) and the state file;
+    nothing is edited."""
+    wave = _tool('wave')
+    kind = 'import' if batch_id[:1] == 'i' else 'verdicts'
+    state_rel = 'docs/wso/%s-state.json' % ('import' if kind == 'import' else 'wave')
+    try:
+        batch = wave.load_state(os.path.join(worktree, state_rel))['batches'].get(batch_id)
+    except (OSError, ValueError) as e:
+        return ['cannot read %s (%r)' % (state_rel, e)]
+    if batch is None:
+        return ['batch %s is not in %s; check the --batch id' % (batch_id, state_rel)]
+    key = wave._addr_key
+    problems = []
+    try:
+        parsed = parse_report(report)
+    except ReportError as e:
+        return ['report: %s; fix that line under ## Verdicts (one "verdict <0xADDR> '
+                '<fork|ours|neither> case <id>" per row; ## Verdicts holds verdict lines '
+                'only, put notes under ## Notes)' % e]
+    try:
+        listed = parse_undecided(report)
+    except ReportError as e:
+        return ['report: %s; fix that line under ## Undecided (one "undecided <0xADDR> '
+                '<fork|neither> <one-line reason>" per row)' % e]
+    kept, imported = {}, set()
+    if kind == 'import':
+        try:
+            kept = parse_kept(report)
+        except ReportError as e:
+            return ['report: %s; fix that line under ## Kept (one "kept <0xADDR> <one-line '
+                    'reason>" per row, for a base-body row you leave as ours; never also '
+                    'under ## Imported)' % e]
+        imported = parse_imported(report)
+        if _heading_present(report, 'verdicts'):
+            problems.append('report: an import report has no ## Verdicts section; remove it '
+                            '(nobody decides fork, ours or neither in an import; report the '
+                            'rows under ## Imported, ## Kept or parked)')
+        listed = {}
+    else:
+        if not _heading_present(report, 'verdicts', 'undecided'):
+            problems.append('report: no ## Verdicts section (this is not the report); write '
+                            'one "verdict <0xADDR> <fork|ours|neither> case <id>" line per row '
+                            'under ## Verdicts')
+        auto = {key(a) for a, v in batch.get('verdicts', {}).items()
+                if _side_case(v)[1].startswith('triage-')}
+        parsed = {a: sc for a, sc in parsed.items() if key(a) not in auto}
+        listed = {a: sr for a, sr in listed.items() if key(a) not in auto}
+    if kind == 'import':
+        parked, _bad = wave._parked_rows(worktree)
+        have = {key(a) for a in imported} | {key(a) for a in kept} | set(parked)
+        for r in batch.get('rows', []):
+            if key(r['address']) not in have:
+                problems.append('%s: not accounted for in the report; list it under '
+                                '## Imported (`imported %s <evidence kind>`), under ## Kept, '
+                                'or park it (docs/wso/import-parked/)' % (r['address'], r['address']))
+    spelling, odd = _spelling_problems(worktree, base, batch,
+                                       list(parsed) + list(listed) + list(kept) + list(imported))
+    # frida lines the driver's own commits wrote (a fix round) are not the worker's
+    mb = _merge_base(worktree, base)
+    frida = {}
+    ce = _tool('check_evidence')
+    names = run(['git', '-C', worktree, 'diff', '--name-only', mb, 'HEAD'],
+                capture_output=True, text=True)
+    for rel in (names.stdout or '').split():
+        m = re.fullmatch(r'docs/evidence/([0-9A-Fa-f]+)\.md', rel)
+        if not m:
+            continue
+        subject = run(['git', '-C', worktree, 'log', '-1', '--format=%s', 'HEAD', '--', rel],
+                      capture_output=True, text=True).stdout.strip()
+        try:
+            with open(os.path.join(worktree, rel), encoding='utf-8') as f:
+                src = ce.front_matter(f.read()).get('trace_source') or ''
+        except OSError:
+            continue
+        if subject.startswith('frida:'):
+            frida[m.group(1).lower()] = src
+    checks = mechanical_checks(
+        dict(batch, id=batch_id), worktree, parsed, run=run, kind=kind, base=base,
+        undecided=sorted(listed), frida_lines=frida, kept=sorted(kept), tests=False)
+    gone = {'docs/evidence/%s.md: missing;' % k.upper() for k in odd}
+    checks = [p for p in checks if not any(p.startswith(g) for g in gone)]
+    return problems + spelling + [' '.join(p.split()) for p in checks]
+
+
+def selfcheck_main(argv):
+    """`wave.py selfcheck --batch <id> [--report <file>]`, run in the batch
+    worktree: the report from the file, else `.report.md` there, else stdin."""
+    batch_id = report = None
+    it = iter(argv)
+    for a in it:
+        if a in ('--batch', '--report'):
+            v = next(it, None)
+            if v is None:
+                print('wave selfcheck: %s needs a value' % a, file=sys.stderr)
+                return 2
+            if a == '--batch':
+                batch_id = v
+            else:
+                report = v
+        else:
+            print('wave selfcheck: unknown option %s' % a, file=sys.stderr)
+            return 2
+    if not batch_id:
+        print('wave selfcheck: --batch <id> is required', file=sys.stderr)
+        return 2
+    top = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True)
+    worktree = top.stdout.strip() if top.returncode == 0 and top.stdout.strip() else os.getcwd()
+    if report is None and os.path.isfile(os.path.join(worktree, REPORT_DRAFT)):
+        report = os.path.join(worktree, REPORT_DRAFT)
+    try:
+        if report is None:
+            text = sys.stdin.read()
+        else:
+            with open(report, encoding='utf-8') as f:
+                text = f.read()
+    except OSError as e:
+        print('wave selfcheck: cannot read the report (%s)' % e, file=sys.stderr)
+        return 2
+    problems = selfcheck(batch_id, worktree, text)
+    if not problems:
+        print('selfcheck: OK')
+        return 0
+    for p in problems:
+        print(p)
+    return 1
 
 REVIEW_BRIEF = """# Review of wave-1 batch {id}
 
