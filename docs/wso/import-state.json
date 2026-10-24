@@ -430,6 +430,379 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i005": {
+      "assigned_at": "2026-10-24T03:14:29+00:00",
+      "branch": "p3/wso-i005",
+      "closed_at": null,
+      "files": [
+        "src/CGameEffect.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CChitin.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CDimm.cpp",
+        "src/CUIControlScrollBar.cpp",
+        "src/CUIControlButton.cpp",
+        "src/CSoundMixer.cpp",
+        "src/CMultiplayerSettings.cpp",
+        "src/CSound.cpp",
+        "src/CVidCell.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x48C800",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffect::DecodeEffect",
+          "our_len": 37169,
+          "their_len": 37179
+        },
+        {
+          "address": "0x615F50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::OnDoneButtonClick",
+          "our_len": 8771,
+          "their_len": 8773
+        },
+        {
+          "address": "0x78F0E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CChitin.cpp",
+          "name": "CChitin::AsynchronousUpdate",
+          "our_len": 7405,
+          "their_len": 8012
+        },
+        {
+          "address": "0x5FB3E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::TimerAsynchronousUpdate",
+          "our_len": 4106,
+          "their_len": 4467
+        },
+        {
+          "address": "0x660D00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::TimerAsynchronousUpdate",
+          "our_len": 3802,
+          "their_len": 3822
+        },
+        {
+          "address": "0x788860",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::ServiceRequest",
+          "our_len": 3170,
+          "their_len": 3278
+        },
+        {
+          "address": "0x788CF0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::Update",
+          "our_len": 3037,
+          "their_len": 3194
+        },
+        {
+          "address": "0x5FEE50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::UpdateMainPanel",
+          "our_len": 3056,
+          "their_len": 3067
+        },
+        {
+          "address": "0x783E00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::InternalDemand",
+          "our_len": 2692,
+          "their_len": 2840
+        },
+        {
+          "address": "0x4E52B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlScrollBar.cpp",
+          "name": "CUIControlScrollBar::Render",
+          "our_len": 2561,
+          "their_len": 2721
+        },
+        {
+          "address": "0x60CEB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::UpdatePopupPanel",
+          "our_len": 2578,
+          "their_len": 2602
+        },
+        {
+          "address": "0x60CA10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::ResetFeatsPanel",
+          "our_len": 2549,
+          "their_len": 2555
+        },
+        {
+          "address": "0x4D5070",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlButton.cpp",
+          "name": "CUIControlButton::Render",
+          "our_len": 2379,
+          "their_len": 2438
+        },
+        {
+          "address": "0x7AB340",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CSoundMixer.cpp",
+          "name": "CSoundMixer::Initialize",
+          "our_len": 2396,
+          "their_len": 2390
+        },
+        {
+          "address": "0x518710",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::SetCharacterControlledByPlayer",
+          "our_len": 2286,
+          "their_len": 2288
+        },
+        {
+          "address": "0x7A94F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CSound.cpp",
+          "name": "CSound::ExclusivePlay",
+          "our_len": 2242,
+          "their_len": 2256
+        },
+        {
+          "address": "0x5FA9B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::EngineActivated",
+          "our_len": 2036,
+          "their_len": 2342
+        },
+        {
+          "address": "0x7D0470",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::Blt8To32ClearShadow",
+          "our_len": 2185,
+          "their_len": 2189
+        },
+        {
+          "address": "0x6664F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CUIControlButtonSinglePlayerModifyCharacterCreate::OnLButtonClick",
+          "our_len": 2091,
+          "their_len": 2093
+        },
+        {
+          "address": "0x787F20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::Request",
+          "our_len": 1987,
+          "their_len": 2050
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "i006": {
+      "assigned_at": "2026-10-24T03:38:50+00:00",
+      "branch": "p3/wso-i006",
+      "closed_at": "2026-10-24T05:47:16+00:00",
+      "files": [
+        "src/CGameRemoteObjectArray.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CVideo.cpp",
+        "src/CVidInf.cpp",
+        "src/CNetwork.cpp",
+        "src/CUIControlSlider.cpp",
+        "src/CUIControlEdit.cpp",
+        "src/CScreenOptions.cpp",
+        "src/CAliasList.cpp",
+        "src/CUIControlEditMultiLine.cpp",
+        "src/CInfCursor.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CTimerWorld.cpp",
+        "src/CSevenEyes.cpp",
+        "src/CScreenKeymaps.cpp",
+        "src/CScreenChapter.cpp",
+        "src/CScreenWorldMap.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x59AEF0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameRemoteObjectArray.cpp",
+          "name": "CGameRemoteObjectArray::Add",
+          "our_len": 1913,
+          "their_len": 1920
+        },
+        {
+          "address": "0x625490",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::EngineGameInit",
+          "our_len": 1818,
+          "their_len": 1822
+        },
+        {
+          "address": "0x7952C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVideo.cpp",
+          "name": "CVideo::Initialize",
+          "our_len": 1801,
+          "their_len": 1581
+        },
+        {
+          "address": "0x79DB10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::FXUnlock",
+          "our_len": 1542,
+          "their_len": 1554
+        },
+        {
+          "address": "0x7A2100",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::CheckIncomingQueue",
+          "our_len": 1415,
+          "their_len": 1439
+        },
+        {
+          "address": "0x79C770",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::FXPrep",
+          "our_len": 1307,
+          "their_len": 1311
+        },
+        {
+          "address": "0x4D5B90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlSlider.cpp",
+          "name": "CUIControlSlider::CUIControlSlider",
+          "our_len": 1272,
+          "their_len": 1276
+        },
+        {
+          "address": "0x4D6770",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlEdit.cpp",
+          "name": "CUIControlEdit::CUIControlEdit",
+          "our_len": 1223,
+          "their_len": 1229
+        },
+        {
+          "address": "0x79F950",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidInf.cpp",
+          "name": "CVidInf::RenderPointer",
+          "our_len": 1001,
+          "their_len": 1241
+        },
+        {
+          "address": "0x6541D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CScreenOptions::EngineInitialized",
+          "our_len": 1110,
+          "their_len": 1114
+        },
+        {
+          "address": "0x781AC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CAliasList.cpp",
+          "name": "CAliasList::ResolveFileName",
+          "our_len": 1108,
+          "their_len": 1112
+        },
+        {
+          "address": "0x4D9410",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlEditMultiLine.cpp",
+          "name": "CUIControlEditMultiLine::CUIControlEditMultiLine",
+          "our_len": 1072,
+          "their_len": 1089
+        },
+        {
+          "address": "0x597740",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfCursor.cpp",
+          "name": "CInfCursor::SetToolTip",
+          "our_len": 1018,
+          "their_len": 1024
+        },
+        {
+          "address": "0x668ED0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::EngineGameInit",
+          "our_len": 1007,
+          "their_len": 1013
+        },
+        {
+          "address": "0x54F080",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CTimerWorld.cpp",
+          "name": "CTimerWorld::CheckForTriggerEventPast",
+          "our_len": 967,
+          "their_len": 1005
+        },
+        {
+          "address": "0x76C2F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CSevenEyes.cpp",
+          "name": "CSevenEyes::CheckEyeOfMind",
+          "our_len": 969,
+          "their_len": 981
+        },
+        {
+          "address": "0x638F40",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenKeymaps.cpp",
+          "name": "CScreenKeymaps::EngineInitialized",
+          "our_len": 972,
+          "their_len": 976
+        },
+        {
+          "address": "0x5D3370",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "name": "CScreenChapter::EngineInitialized",
+          "our_len": 962,
+          "their_len": 966
+        },
+        {
+          "address": "0x4D6E20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlEdit.cpp",
+          "name": "CUIControlEdit::OnLButtonDown",
+          "our_len": 945,
+          "their_len": 951
+        },
+        {
+          "address": "0x699F10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorldMap.cpp",
+          "name": "CScreenWorldMap::EngineGameInit",
+          "our_len": 929,
+          "their_len": 933
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
