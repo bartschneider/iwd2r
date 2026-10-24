@@ -10898,7 +10898,8 @@ class DriverTest(unittest.TestCase):
         with open(path) as f:
             text = f.read()
         with open(path, 'w') as f:
-            f.write(re.sub(r'^kind: \S+$', 'kind: %s' % kind, text, count=1, flags=re.M))
+            f.write(re.sub(r'^kind: \S+$', 'kind: %s' % kind + ('\nexemption: "a reading"' if kind == 'read-only' else ''),
+                           text, count=1, flags=re.M))
         if self.git('status', '--porcelain', cwd=self.wt).stdout.strip():
             self.git('commit', '-qam', 'evidence kind', cwd=self.wt)
         return d
@@ -10918,7 +10919,7 @@ class DriverTest(unittest.TestCase):
         fields, text = self._wave_fields()
         self.assertEqual(fields['kind'], 'trace')
         self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
-        self.assertNotIn('exemption', fields)
+        self.assertEqual(fields['exemption'], 'a reading')       # kept beside kind: trace
         self.assertIn('corroborated by WSO at e8dd16a7; case dump-402000 decides', text)
         self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
         subjects = self.git('log', '--format=%s', before + '..HEAD', cwd=self.wt).stdout.splitlines()
@@ -10951,8 +10952,9 @@ class DriverTest(unittest.TestCase):
         orig, ours, dumps, bad = driver.Driver._trace_pair({'s': {
             'orig_path': 'x', 'ours_path': 'y', 'dumps': {'match': False, 'detail': 'd'}}}, 's')
         self.assertEqual(bad, 'dumps')
-        self.assertFalse(d._wave_trace_evidence('b011', self.wt, {'address': '0x402000'}, 's', {'s': {
-            'orig_path': 'x', 'ours_path': 'y', 'dumps': {'match': False, 'detail': 'd'}}}))
+        self.assertEqual(d._wave_trace_evidence('b011', self.wt, {'address': '0x402000'}, 's', {'s': {
+            'orig_path': 'x', 'ours_path': 'y', 'dumps': {'match': False, 'detail': 'd'}}}),
+                         (False, 'state dumps not shown to match: d'))
         self.assertIn('state dumps not shown to match: d', '\n'.join(self.logs))
         self.assertEqual(self._wave_fields()[0]['kind'], 'read-only')
 
@@ -11089,7 +11091,7 @@ class DriverTest(unittest.TestCase):
             _slurp(os.path.join(wt, 'docs', 'evidence', '402000.md')))
         self.assertEqual(fields['kind'], 'trace')
         self.assertIn('frida remeasure-20261024-0300-', fields['trace_source'])
-        self.assertNotIn('exemption', fields)
+        self.assertEqual(fields['exemption'], 'thin')    # a wave-1 deviation text is kept
         self.assertIn('case dump-402000 decides', _slurp(os.path.join(wt, 'docs', 'evidence', '402000.md')))
         # 0x401000 has no hook in the map: nothing written, listed in the summary
         self.assertEqual(load_tool('check_evidence').front_matter(
@@ -11148,6 +11150,232 @@ class DriverTest(unittest.TestCase):
         log = json.loads(_slurp(os.path.join(wt, 'docs', 'wso', 'remeasure-log.json')))
         self.assertEqual(len(log), 1)               # one entry per pass, updated per chunk
         self.assertEqual(log[0]['chunks_done'], 2)
+
+    # -- Task 20 fix round 1 ------------------------------------------------
+
+    SRC_A = '// 0x402000\nint Draw()\n{\n  return %d;\n}\n'
+
+    def _wave_body(self, ret=1):
+        _write(os.path.join(self.wt, 'src', 'A.cpp'), self.SRC_A % ret)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'body %d' % ret, cwd=self.wt)
+
+    def _fix_round_worker(self, edit):
+        """First report leaves 0x401000 undecided (one fix round), the second is
+        complete; the fix round edits the body of 0x402000 when `edit`."""
+        test = self
+        first = '# r\n\n## Verdicts\n\nverdict 0x402000 ours case dump-402000\n'
+        full = self.WAVE_REPORT % ('ours', 'dump-402000')
+
+        class Worker(_SeqWorker):
+            def run(self, brief, cwd):
+                if self.briefs and edit:
+                    test._wave_body(2)
+                return super().run(brief, cwd)
+        return Worker(first, full)
+
+    def test_driver_frida_trace_survives_a_fix_round_that_leaves_the_body(self):
+        d = self._wave_frida_driver(None, worker=self._fix_round_worker(False))
+        self._wave_body(1)
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        fields, text = self._wave_fields()
+        self.assertEqual(fields['kind'], 'trace')            # the second _check took the driver's line
+        v = self._state()['verdicts']['0x402000']
+        self.assertEqual(v['measured'], 'frida')
+        row = [r for r in self._state_all()['batches']['b011']['rows'] if r['address'] == '0x402000'][0]
+        self.assertEqual(row['measured_body'], load_tool('check_evidence').body_digest(self.wt, '0x402000'))
+        self.assertTrue(os.path.isfile(d._before_path('b011', '0x402000')))
+
+    def test_driver_frida_trace_is_withdrawn_when_the_fix_round_changes_the_body(self):
+        d = self._wave_frida_driver(None, worker=self._fix_round_worker(True))
+        self._wave_body(1)
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        fields, text = self._wave_fields()
+        self.assertEqual(fields['kind'], 'read-only')        # the evidence is back as it was
+        self.assertEqual(fields['exemption'], 'a reading')
+        self.assertNotIn('measured', self._state()['verdicts']['0x402000'])
+        row = [r for r in self._state_all()['batches']['b011']['rows'] if r['address'] == '0x402000'][0]
+        self.assertNotIn('measured_body', row)
+        self.assertIn('0x402000: body changed after the Frida phase; trace evidence withdrawn',
+                      '\n'.join(self.logs))
+        self.assertFalse(os.path.exists(d._before_path('b011', '0x402000')))
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        self.assertEqual(d._frida_lines('b011'), {})
+
+    def _first_takes_the_worktree(self, msg):
+        """Commit the worktree and move `first` there: what was written is the
+        merge base's version."""
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', msg, cwd=self.wt)
+        self.git('update-ref', 'refs/heads/first', self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip())
+
+    def _state_all(self):
+        with open(self.state_path) as f:
+            return json.load(f)
+
+    def test_driver_fork_verdict_measured_equal_keeps_the_pre_rewrite_losing_kind(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('fork', 'probe-12'))
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        self.assertEqual(self._wave_fields()[0]['kind'], 'trace')
+        v = self._state()['verdicts']['0x402000']
+        self.assertEqual((v['side'], v['measured'], v['losing_kind']), ('fork', 'frida', 'read-only'))
+
+    def test_driver_wave_one_trace_evidence_keeps_the_body_after_the_front_matter_byte_for_byte(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'))
+        path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
+        before = _slurp(path)
+        d.run_batch('b011')
+        after = _slurp(path)
+        tail = lambda t: t.split('\n---\n', 1)[1]
+        self.assertEqual(tail(after), tail(before))
+        self.assertNotEqual(after, before)
+
+    def test_driver_frida_retry_replaces_the_earlier_trace(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'))
+        batch = dict(self._state_all()['batches']['b011'], id='b011')
+        rows = [r for r in batch['rows'] if r['address'] == '0x402000']
+        d._frida_phase('b011', batch, self.wt, {'0x402000': ('ours', 'dump-402000')}, rows=rows)
+        self.assertEqual(self._wave_fields()[0]['kind'], 'trace')
+        # the same batch measured again, now different: the earlier trace is withdrawn
+        d.frida_run = self._frida_file_run(ours_ret=4)
+        d.frida_cache = False
+        d._frida_phase('b011', batch, self.wt, {'0x402000': ('ours', 'dump-402000')}, rows=rows)
+        self.assertEqual(self._wave_fields()[0]['kind'], 'read-only')
+        self.assertFalse(os.path.exists(d._before_path('b011', '0x402000')))
+
+    def test_remeasure_dump_decided_selects_readout_cases_too(self):
+        d = self._remeasure_driver()
+        state = self._state_all()
+        state['batches']['b011']['verdicts']['0x401000']['case'] = 'readout-401000'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        picked, _ = driver._tool('wave').remeasure_select(self.state_path, self.root, 'dump-decided')
+        self.assertEqual([p['row']['address'] for p in picked], ['0x401000'])
+        self.assertIn('readout-401000', d.remeasure_plan(picked, [], 40, 'dump-decided'))
+
+    def test_remeasure_refuses_an_existing_branch(self):
+        d = self._remeasure_driver()
+        picked, skipped = driver._tool('wave').remeasure_select(
+            self.state_path, self.root, 'rows', ['0x402000'])
+        rc, out = d.remeasure(picked, skipped, branch='first')
+        self.assertEqual(rc, 1)
+        self.assertIn('branch first exists already', out)
+        self.assertFalse(os.path.exists(os.path.join(self.root + '-worktrees', 'first')))
+
+    def test_remeasure_malformed_engine_gaps_refuses_before_any_rewrite(self):
+        d = self._remeasure_driver()
+        _write(os.path.join(self.root, 'docs', 'wso', 'engine-gaps.json'), '{"not": "a list"}')
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'bad gaps')
+        picked, skipped = driver._tool('wave').remeasure_select(
+            self.state_path, self.root, 'rows', ['0x402000'])
+        d.frida_run = lambda *a, **k: self.fail('nothing is measured')
+        rc, out = d.remeasure(picked, skipped, stamp='20261024-030300')
+        self.assertEqual(rc, 1)
+        self.assertIn('engine-gaps.json is not a JSON list; nothing was measured', out)
+
+    def test_remeasure_a_failed_phase_midway_keeps_the_log_and_leaves_no_uncommitted_evidence(self):
+        d = self._remeasure_driver()
+        picked, skipped = driver._tool('wave').remeasure_select(
+            self.state_path, self.root, 'rows', ['0x401000', '0x402000'])
+        d.frida_run = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sandbox gone'))
+        first = self.git('rev-parse', 'first').stdout.strip()
+        rc, out = d.remeasure(picked, skipped, chunk=1, stamp='20261024-030301')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('STOPPED: chunk 2', out)
+        br = 'p3/remeasure-20261024-030301'
+        wt = driver._tool('wave').worktree_for(self.root, br)
+        log = json.loads(_slurp(os.path.join(wt, 'docs', 'wso', 'remeasure-log.json')))
+        self.assertEqual((log[0]['chunks_done'], log[0]['chunks']), (1, 2))
+        self.assertIn('chunk 2', log[0]['stopped'])
+        self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+        self.assertEqual(self._wave_kind_at(wt, '402000'), 'read-only')
+        self.assertEqual(self._status(d)['running'], {})
+
+    def _wave_kind_at(self, wt, stem):
+        return load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(wt, 'docs', 'evidence', stem + '.md')))['kind']
+
+    def test_remeasure_a_stop_taskkills_only_through_the_recorder_and_is_logged(self):
+        d = self._remeasure_driver()
+        d.STOP_WAIT = 0.2
+        sleeper = subprocess.Popen(['sleep', '60'], start_new_session=True)
+        self.addCleanup(lambda: sleeper.poll() is None and sleeper.kill())
+        driver._LIVE.add(sleeper.pid)
+        self.addCleanup(driver._LIVE.discard, sleeper.pid)
+        driver._PROBE_PIDS.add(sleeper.pid)
+
+        def stopping(*a, **k):
+            d._on_stop(signal.SIGTERM, None)
+        d.frida_run = stopping
+        picked, skipped = driver._tool('wave').remeasure_select(
+            self.state_path, self.root, 'rows', ['0x402000'])
+        rc, out = d.remeasure(picked, skipped, stamp='20261024-030302')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('STOPPED: stopped by a signal', out)
+        self.assertEqual(len(self.taskkills), 1)             # the recorder, never the host's
+        wt = driver._tool('wave').worktree_for(self.root, 'p3/remeasure-20261024-030302')
+        log = json.loads(_slurp(os.path.join(wt, 'docs', 'wso', 'remeasure-log.json')))
+        self.assertIn('signal', log[0]['stopped'])
+        self.assertEqual(self._status(d)['running'], {})
+        self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+
+    def test_remeasure_builds_the_worktree_once_and_writes_no_frida_cache(self):
+        d = self._remeasure_driver()
+        builds = []
+        real = self._frida_builder()[0]
+        d.frida_build = lambda wt, log_path=None: builds.append(wt) or real(wt, log_path=log_path)
+        state = self._state_all()
+        # a second hooked row, so two chunks both launch
+        picked, skipped = driver._tool('wave').remeasure_select(
+            self.state_path, self.root, 'rows', ['0x402000'])
+        picked = picked + picked
+        rc, out = d.remeasure(picked, skipped, chunk=1, stamp='20261024-030303')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(builds), 1)
+        self.assertEqual(glob.glob(os.path.join(d.driver_dir, 'remeasure-*', 'frida-cache.json')), [])
+
+    def test_remeasure_main_without_dry_runs_the_pass_with_mocks(self):
+        d = self._remeasure_driver()
+        out = io.StringIO()
+        truth = driver._tool('truth')
+        with mock.patch.object(truth, 'frida_run', self._frida_file_run()), \
+                mock.patch.object(driver, 'frida_build', self._frida_builder()[0]), \
+                mock.patch('sys.stdout', out):
+            rc = driver.remeasure_main(['--rows', '0x402000', '--state', self.state_path],
+                                       repo=self.root)
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertIn('1 asked, 1 measured (1 equal, 0 different)', out.getvalue())
+        self.assertIn('branch: p3/remeasure-', out.getvalue())
+
+    def test_import_phase_measures_a_touched_row_standing_on_another_batchs_frida_trace(self):
+        d, batch = self._import_phase_driver()
+        foreign = ('frida i003-world_entry orig:' + 'a' * 64 + ' ours:' + 'b' * 64 + ' compare=0')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'),
+               '---\naddress: 0x402000\nname: IcewindMisc::Roll\nkind: trace\ntrace_source: %s\n---\n' % foreign)
+        self._first_takes_the_worktree('foreign trace')
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertIn('0x402000', [r['address'] for r in rows])      # measured again, never "stands"
+        self.assertIn("0x402000 stands on another batch's frida trace (i003-world_entry); measured again",
+                      '\n'.join(self.logs))
+
+    def test_import_phase_measures_a_dependency_standing_on_another_batchs_frida_trace(self):
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[r for r in batch['rows'] if r['address'] != '0x403000'])
+        foreign = ('frida i003-world_entry orig:' + 'a' * 64 + ' ours:' + 'b' * 64 + ' compare=0')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '403000.md'),
+               '---\naddress: 0x403000\nname: Rules::Tick\nkind: trace\ntrace_source: %s\n---\n' % foreign)
+        self._first_takes_the_worktree('foreign trace')
+        _write(os.path.join(self.wt, 'src', 'T.cpp'),
+               '// 0x403000\nint Rules::Tick(int a, int b)\n{\n  return a;\n}\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'dependency', cwd=self.wt)
+        mb = driver._tool('wave').merge_base_sha(self.wt, 'first')
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        dep = [r for r in rows if r['address'] == '0x403000']
+        self.assertTrue(dep and dep[0].get('dependency'), rows)
 
     def test_driver_frida_phase_types_tables_from_the_batch_worktrees_headers(self):
         trace = TruthTest._trace
@@ -18663,22 +18891,93 @@ class WaveCloseRulesTest(unittest.TestCase):
         rc, out = self.close()
         self.assertEqual(rc, 0, out)
 
-    def test_close_accepts_a_wave_one_row_whose_evidence_became_frida_trace(self):
-        # Task 20: the wave-1 Frida phase rewrote an equal row's front matter to
-        # kind: trace; the WSO delta sentence is untouched, so close accepts it
+    def _wave_trace_ready(self, measured_body='right'):
+        """b001 with Render's evidence a driver-written frida trace of this
+        batch (kind trace, the WSO delta sentence intact) and its body in src."""
         self.ready(render=('ours', 'dump-1'))
         frida = ('frida b001-world_entry orig:' + 'a' * 64 + ' ours:' + 'b' * 64 + ' compare=0')
         _write(os.path.join(self.wt, 'docs', 'evidence', '643CC0.md'),
                '---\naddress: 0x643CC0\nname: fn-643CC0\nkind: trace\ntrace_source: %s\n---\n\n'
                '## WSO delta\n\ndisagreed with WSO at e8dd16a: the guard differs; '
                'case dump-1 decides.\n' % frida)
+        _write(os.path.join(self.wt, 'src', 'A.cpp'), self.RENDER_BODY)
         self.commit_worktree('frida: trace evidence for 1 row(s) measured equal (world_entry)')
+        digest = load_tool('check_evidence').body_digest(self.wt, '0x643CC0')
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            if r['address'] == '0x643CC0' and measured_body:
+                r['measured_body'] = digest if measured_body == 'right' else 'f' * 64
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_close_accepts_a_wave_one_row_whose_evidence_became_frida_trace(self):
+        # Task 20: the wave-1 Frida phase rewrote an equal row's front matter to
+        # kind: trace and recorded the body it measured; close accepts it
+        self._wave_trace_ready()
         rc, out = self.close()
         self.assertEqual(rc, 0, out)
         ce = load_tool('check_evidence')
         text = _slurp(os.path.join(self.wt, 'docs', 'evidence', '643CC0.md'))
         self.assertEqual(ce.front_matter(text)['kind'], 'trace')
         self.assertTrue(ce.TRACE_SOURCES[1].fullmatch(ce.front_matter(text)['trace_source']))
+
+    def _refused_trace(self, recorded):
+        self._wave_trace_ready(recorded)
+        rc, out = self.close()
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CC0: body changed after the Frida phase; park it or edit it back '
+                      'to the measured body', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+
+    def test_close_refuses_a_wave_one_trace_whose_body_changed_after_the_phase(self):
+        self._refused_trace('wrong')
+
+    def test_close_refuses_a_wave_one_trace_with_no_recorded_body(self):
+        self._refused_trace(None)
+
+    def test_import_close_refuses_a_touched_row_on_another_batchs_frida_trace(self):
+        foreign = self.FRIDA.replace('b001-', 'i009-')
+        self._import_ready(trace=())
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CC0.md'),
+               '---\naddress: 0x643CC0\nname: fn\nkind: trace\ntrace_source: %s\n---\n\nnotes\n' % foreign)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: fn\nkind: replay\n---\n\nnotes\n')
+        self.commit_worktree('foreign trace')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn("its frida trace is another batch's (i009-world_entry)", out)
+        # it passes only for the body this batch's phase recorded
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            if r['address'] == '0x643CC0':
+                r['measured_body'] = load_tool('check_evidence').body_digest(self.wt, '0x643CC0')
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        rc, out = self.close(kind='import')
+        self.assertNotIn("another batch's", out)
+
+    def test_import_close_refuses_a_dependency_on_another_batchs_frida_trace(self):
+        foreign = self.FRIDA.replace('b001-', 'i009-')
+        self._import_ready(trace=('0x643CC0',), evidence=('0x643CD0',))
+        with open(os.path.join(self.wt, 'src', 'A.cpp'), 'a') as f:
+            f.write('// 0x643CE0\nint Dep()\n{\n  return 1;\n}\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CE0.md'),
+               '---\naddress: 0x643CE0\nname: Dep\nkind: trace\ntrace_source: %s\n---\n\nnotes\n' % foreign)
+        self.commit_worktree('dependency on a foreign trace')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn("0x643CE0 (Dep, imported with the batch): ", out)
+        self.assertIn("its frida trace is another batch's (i009-world_entry)", out)
+        with open(self.state) as f:
+            state = json.load(f)
+        state['batches']['b001']['measured_deps'] = {
+            '643ce0': load_tool('check_evidence').body_digest(self.wt, '0x643CE0')}
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+        rc, out = self.close(kind='import')
+        self.assertNotIn("another batch's", out)
 
     def test_close_dump_decided_ours_verdict_passes(self):
         self.ready(render=('ours', 'dump-1'))

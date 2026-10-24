@@ -1115,10 +1115,12 @@ def _schema_failure(traces):
                      and t['dumps'].get('invalid'))
 
 
-def _write_trace_evidence(path, probe, orig_path, ours_path):
+def _write_trace_evidence(path, probe, orig_path, ours_path, keep_exemption=False):
     """Rewrite one evidence file's front matter to `kind: trace` with the
     `trace_source:` of a measured Frida pair (truth.trace_source_line) and no
-    `exemption:`; every other line, and the line endings, stay as they are."""
+    `exemption:` (kept with keep_exemption: a wave-1 row's documented
+    deviation; check_evidence ignores it beside kind: trace); every other
+    line, and the line endings, stay as they are."""
     truth = _tool('truth')
     with open(path, encoding='utf-8', newline='') as f:
         lines = f.read().splitlines(keepends=True)
@@ -1132,7 +1134,7 @@ def _write_trace_evidence(path, probe, orig_path, ours_path):
     head, kind_at, source_at = [], None, None
     for line in lines[1:end]:
         name = line.partition(':')[0].strip()
-        if name == 'exemption':
+        if name == 'exemption' and not keep_exemption:
             continue
         if name == 'kind' and kind_at is None:
             kind_at = len(head)
@@ -1302,7 +1304,8 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                               str.strip)
     if bad:
         problems.append(bad)
-    problems += _foreign_frida_lines(worktree, changed, frida_lines or {})
+    problems += _foreign_frida_lines(worktree, changed, frida_lines or {},
+                                     None if kind == 'import' or not mbs else mbs[0])
     if kind == 'import':
         problems += _kept_and_parked_problems(batch, worktree, base, kept, key, changed)
     outside = sorted(p for p in changed if not _path_allowed(p))
@@ -1420,9 +1423,11 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
     return problems
 
 
-def _foreign_frida_lines(worktree, changed, frida_lines):
+def _foreign_frida_lines(worktree, changed, frida_lines, merge_base=None):
     """Problems for the evidence files among `changed` whose trace_source is
-    a frida line the driver's phase did not write (frida_lines)."""
+    a frida line the driver's phase did not write (frida_lines); with
+    `merge_base`, a line the file already had there is inherited, not the
+    worker's."""
     ce = _tool('check_evidence')
     out = []
     for rel in sorted(changed):
@@ -1434,6 +1439,11 @@ def _foreign_frida_lines(worktree, changed, frida_lines):
                 source = ce.front_matter(f.read()).get('trace_source') or ''
         except OSError:
             continue
+        if merge_base and source:
+            at = subprocess.run(['git', '-C', worktree, 'show', '%s:%s' % (merge_base, rel)],
+                                capture_output=True, text=True)
+            if at.returncode == 0 and (ce.front_matter(at.stdout).get('trace_source') or '') == source:
+                continue
         if ce.TRACE_SOURCES[1].fullmatch(source) and \
                 frida_lines.get(m.group(1).lower()) != source:
             out.append('%s: a frida trace_source the driver did not write; the driver writes '
@@ -1878,6 +1888,8 @@ class _BatchContext(threading.local):
         self.probe = {}         # address key -> (side, case) the oracle passed
         self.frida_got = {}     # address key -> (status, detail) of its one Frida run
         self.frida_notes = {}   # address key -> [frequency-only notes] (ledger lines)
+        self.wave_digest = {}   # address key -> digest of the body a wave-1 trace measured
+        self.wave_notes = {}    # address key -> why an equal wave-1 row got no trace evidence
         self.pool = None        # the pool this batch runs on
         self.t0 = None          # clock() at the cut or resume (ruling R61)
         self.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
@@ -2036,6 +2048,8 @@ class Driver:
     _probe = _per_thread('probe')
     _frida_got = _per_thread('frida_got')
     _frida_notes = _per_thread('frida_notes')
+    _wave_digest = _per_thread('wave_digest')
+    _wave_notes = _per_thread('wave_notes')
 
     @property
     def worker(self):
@@ -2343,6 +2357,8 @@ class Driver:
         self._stage(batch_id, 'checks')
         if self.kind == 'import':
             self._clear_kept_outcomes(batch_id, self._kept)
+        if self.kind != 'import':
+            self._withdraw_changed(batch_id, worktree)
         batch = self.load_state(self.state_path)['batches'][batch_id]
         key = _tool('wave')._addr_key
         auto = {key(a) for a, v in batch.get('verdicts', {}).items()
@@ -2582,6 +2598,8 @@ class Driver:
         (a retry reuses frida-cache.json, see _frida_cache_key).  Returns the findings."""
         self._frida_got = {}
         self._frida_notes = {}
+        self._wave_digest = {}
+        self._wave_notes = {}
         self._frida_ran = None
         if not self.frida or self.dry_run:
             return []
@@ -2626,7 +2644,8 @@ class Driver:
         # changed (frida-cache.json in the batch's driver folder; the key is
         # _frida_cache_key's, taken before the build).  Either way the
         # (traces, info, got) go through one tail below.
-        key_hex = self._frida_cache_key(batch_id, worktree, rows, sigs, run_scenarios)
+        key_hex = self._frida_cache_key(batch_id, worktree, rows, sigs, run_scenarios) \
+            if (self.frida_cache or self._frida_cache_writes) else None
         cache_path = os.path.join(self.driver_dir, batch_id, 'frida-cache.json')
         cached = self._frida_cache_read(batch_id, cache_path, key_hex) \
             if key_hex and self.frida_cache else None
@@ -2894,13 +2913,19 @@ class Driver:
             # adopted the fork's).  Equal confirms that side (measured frida,
             # _measured_for); different is a finding whatever the side.
             side = sides.get(k)
+            if commit is None and os.path.isfile(self._before_path(batch_id, r['address'])):
+                # a retry: the earlier phase's trace is replaced by this one's
+                self._withdraw_trace(batch_id, worktree, [r['address']], 'measured again')
             if side in ('ours', 'fork') and status == 'equal':
                 cite = (exact.get(k) or [None])[0] if 'exact' in info else (
                     detail[len(truth.EQUAL_PREFIX):].split(', ')[0]
                     if detail.startswith(truth.EQUAL_PREFIX) else None)
-                if self._wave_trace_evidence(batch_id, worktree, r, cite, traces):
+                ok, why = self._wave_trace_evidence(batch_id, worktree, r, cite, traces)
+                self._wave_notes[k] = why
+                if ok:
                     written.append(r['address'])
                     cites.append(cite)
+                    digests[r['address']] = self._wave_digest.get(k)
             if side and status == 'different':
                 findings.append('%s: the Frida trace diff shows the body on the branch (verdict %s) '
                                 'different from the original (%s); recheck it' % (
@@ -2913,7 +2938,7 @@ class Driver:
             self._commit_trace_evidence(batch_id, worktree, written, None if importing else (
                 'frida: trace evidence for %d row(s) measured equal (%s)' % (
                     len(written), ', '.join(sorted(set(cites))))))
-        if kept_ok or digests:
+        if (kept_ok or digests) and commit is None:
             self._record_kept(batch_id, kept_ok, digests)
         return findings
 
@@ -3091,12 +3116,14 @@ class Driver:
             # a kept row's included: it closes on that evidence
             why = text is not None and wave.kept_evidence(
                 worktree, mb_sha, r['address'], r.get('name', ''), text)
-            if why and r.get('kept') and wave.other_batch_trace(text, batch_id):
+            if why and wave.other_batch_trace(text, batch_id):
                 # unchanged since the merge base, but another batch's frida
                 # trace: it measured the body that batch had, and nothing ties
-                # it to the one here, so a kept row is measured again
-                self.log('%s: frida %s kept on another batch\'s frida trace (%s); measured again'
-                         % (batch_id, r['address'], wave._frida_probe(text)))
+                # it to the one here, so a kept row, a touched row or a
+                # dependency is measured again
+                self.log('%s: frida %s %s on another batch\'s frida trace (%s); measured again'
+                         % (batch_id, r['address'], 'kept' if r.get('kept') else 'stands',
+                            wave._frida_probe(text)))
                 why = None
             if why:
                 self.log('%s: frida %s kept as written (%s); not measured'
@@ -3176,7 +3203,18 @@ class Driver:
                     'batch, so park it: %s' % (a, status, detail, park(needs)))
         return text + dep
 
+    _frida_cache_writes = True     # remeasure turns the cache off (nothing reads it)
+    _reuse_target = None           # remeasure: {worktree: (checkout, map, None)}, one build per pass
+
     def _frida_target(self, batch_id, worktree):
+        if self._reuse_target is not None and worktree in self._reuse_target:
+            return self._reuse_target[worktree]
+        got = self._frida_target_build(batch_id, worktree)
+        if self._reuse_target is not None and not got[2]:
+            self._reuse_target[worktree] = got
+        return got
+
+    def _frida_target_build(self, batch_id, worktree):
         """(checkout, map path, phase error or None): what the Frida phase
         measures.  By default the batch worktree is built for x86 in its own
         Windows checkout (self.frida_build), so the bodies under test are the
@@ -3242,30 +3280,121 @@ class Driver:
             return orig, ours, dumps, 'files'
         return orig, ours, dumps, None
 
+    def _before_path(self, batch_id, address):
+        """driver/<batch>/evidence-before/<ADDR>.md: the evidence file as it was
+        before the wave-1 phase rewrote it to kind: trace.  It exists exactly
+        while the row's evidence is that driver-written trace."""
+        return os.path.join(self.driver_dir, batch_id, 'evidence-before',
+                            _tool('wave')._addr_key(address).upper() + '.md')
+
+    def _before_kind(self, batch_id, address):
+        """The `kind:` the evidence had before the phase rewrote it, or None."""
+        try:
+            with open(self._before_path(batch_id, address), encoding='utf-8') as f:
+                m = _tool('wave').KIND_RE.search(f.read())
+        except OSError:
+            return None
+        return m.group(1) if m else None
+
     def _wave_trace_evidence(self, batch_id, worktree, row, cite, traces):
         """Wave 1: an equal row whose verdict confirms the body on the branch
         and whose evidence is still kind: read-only is rewritten to kind:
-        trace (the import path's _write_trace_evidence, the same dump guard).
-        True when the file was rewritten; a refusal is logged, never a finding
-        (the verdict stands as measured frida either way)."""
+        trace (the import path's _write_trace_evidence, the same dump guard;
+        the exemption text is kept).  The file as it was goes to
+        _before_path first, and the digest of the body measured is left in
+        self._wave_digest.  (True, None) when the file was rewritten, else
+        (False, why): a refusal is logged, never a finding (the verdict stands
+        as measured frida either way)."""
         wave = _tool('wave')
         a = row['address']
-        if cite is None or self._evidence_kind(worktree, a) != 'read-only':
-            return False
+        kind = self._evidence_kind(worktree, a)
+        if kind != 'read-only':
+            return False, 'evidence is kind %s; it stands' % (kind or 'missing')
+        if cite is None:
+            return False, ('equal only up to a frequency difference; no scenario compared '
+                           'exactly, so no trace evidence can cite one')
         orig, ours, dumps, bad = self._trace_pair(traces, cite)
         if bad:
+            why = ('state dumps not shown to match: %s' % ((dumps or {}).get('detail')
+                                                           or 'not compared') if bad == 'dumps'
+                   else 'trace files missing')
             self.log('%s: frida %s equal in %s but no trace evidence written (%s)' % (
-                batch_id, a, cite, 'state dumps not shown to match: %s' % (
-                    (dumps or {}).get('detail') or 'not compared') if bad == 'dumps'
-                else 'trace files missing'))
-            return False
+                batch_id, a, cite, why))
+            return False, why
+        path = os.path.join(worktree, wave._evidence_rel(a))
+        before = self._before_path(batch_id, a)
         try:
-            _write_trace_evidence(os.path.join(worktree, wave._evidence_rel(a)),
-                                  '%s-%s' % (batch_id, cite), orig, ours)
+            os.makedirs(os.path.dirname(before), exist_ok=True)
+            shutil.copyfile(path, before)
+            _write_trace_evidence(path, '%s-%s' % (batch_id, cite), orig, ours,
+                                  keep_exemption=True)
         except (OSError, ValueError) as e:
             self.log('%s: frida %s: evidence not rewritten to kind: trace (%s)' % (batch_id, a, e))
-            return False
-        return True
+            try:
+                os.unlink(before)
+            except OSError:
+                pass
+            return False, 'evidence not rewritable: %s' % e
+        self._wave_digest[wave._addr_key(a)] = _tool('check_evidence').body_digest(
+            worktree, a, row.get('file'))
+        return True, None
+
+    def _withdraw_trace(self, batch_id, worktree, addresses, why):
+        """Put the pre-rewrite evidence back for each address (from
+        _before_path), commit it, drop the digest the state recorded and the
+        line the status kept."""
+        wave = _tool('wave')
+        key = wave._addr_key
+        rels, gone = [], []
+        for a in addresses:
+            before = self._before_path(batch_id, a)
+            rel = wave._evidence_rel(a)
+            try:
+                shutil.copyfile(before, os.path.join(worktree, rel))
+                os.unlink(before)
+            except OSError as e:
+                self.log('%s: %s: trace evidence not withdrawn (%s)' % (batch_id, a, e))
+                continue
+            rels.append(rel)
+            gone.append(a)
+        if not rels:
+            return []
+        def drop(s):
+            written = (s['batches'].get(batch_id) or {}).get('frida_written') or {}
+            for a in gone:
+                written.pop(key(a), None)
+        self._update_status(drop)
+        with self._lock:
+            state = self.load_state(self.state_path)
+            batch = state['batches'].get(batch_id)
+            if batch is not None:
+                for r in batch.get('rows', []):
+                    if key(r['address']) in {key(a) for a in gone}:
+                        r.pop('measured_body', None)
+                wave.save_state(self.state_path, state)
+        self._git_in(worktree, 'add', '--', *rels)
+        r = self._git_in(worktree, 'commit', '-q', '-m',
+                         'frida: trace evidence withdrawn for %d row(s) of %s (%s)' % (
+                             len(rels), batch_id, why), '--', *rels)
+        if r.returncode != 0:
+            self.log('%s: trace evidence withdrawal not committed: %s' % (
+                batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
+        return gone
+
+    def _withdraw_changed(self, batch_id, worktree):
+        """A wave-1 row the phase wrote trace evidence for (its body digest is
+        in the state) whose body on the branch is another one now: the trace
+        measured a body that does not land, so the evidence goes back to what
+        it was and the row is not measured."""
+        key = _tool('wave')._addr_key
+        ce = _tool('check_evidence')
+        batch = self.load_state(self.state_path)['batches'].get(batch_id) or {}
+        stale = [r['address'] for r in batch.get('rows', [])
+                 if r.get('measured_body') and os.path.isfile(self._before_path(batch_id, r['address']))
+                 and ce.body_digest(worktree, r['address'], r.get('file')) != r['measured_body']]
+        for a in self._withdraw_trace(batch_id, worktree, stale, 'body changed after the Frida phase'):
+            self.log('%s: %s: body changed after the Frida phase; trace evidence withdrawn' % (batch_id, a))
+            self._frida_got[key(a)] = ('not measured', 'body changed after the Frida phase')
 
     def _trace_evidence(self, batch_id, worktree, row, scenario, traces, mb, kept=False):
         """Rewrite one equal import row's evidence to kind: trace, citing
@@ -3382,26 +3511,39 @@ class Driver:
     def remeasure(self, picked, skipped, chunk=40, branch=None, mode='', stamp=None):
         """(exit code, summary text).  Measures the picked closed rows with
         the Frida phase (_frida_phase over the rows it is given: the coverage
-        map's scenarios, the x86 build of the worktree, frida_run under
-        probe.py's locks, frida_verdicts, the dump guard) on a new branch
-        p3/remeasure-<stamp> cut from the base, chunk by chunk.  Per row:
-        equal -> evidence rewritten to kind: trace (Part A's writer), different
-        -> an entry in docs/wso/engine-gaps.json, anything else listed in the
-        summary.  One commit per chunk; docs/wso/remeasure-log.json carries the
-        pass.  No verdict, state or ledger is written."""
+        map's scenarios, the x86 build of the worktree (once per pass),
+        frida_run under probe.py's locks, frida_verdicts, the dump guard) on a
+        new branch p3/remeasure-<stamp> cut from the base, chunk by chunk.
+        Per row: equal -> evidence rewritten to kind: trace (Part A's writer,
+        the exemption text kept), different -> an entry in
+        docs/wso/engine-gaps.json, anything else listed in the summary.  One
+        commit per chunk; docs/wso/remeasure-log.json carries the pass (a stop
+        or a failed phase too).  No verdict, state or ledger is written.  A
+        stop (SIGTERM/SIGINT) kills the live process groups and taskkills the
+        sandbox only when a probe was among them, like the driver's."""
         wave = _tool('wave')
         key = wave._addr_key
-        now = datetime.datetime.now()
-        stamp = stamp or now.strftime('%Y%m%d-%H%M')
+        stamp = stamp or datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
         branch = branch or 'p3/remeasure-%s' % stamp
         pid = 'remeasure-%s' % stamp
         if not picked:
             return 0, 'remeasure: no row to measure\n' + ''.join(
                 'skipped %s: %s\n' % s for s in skipped)
+        if subprocess.run(['git', '-C', self.repo, 'rev-parse', '--verify', '--quiet',
+                           'refs/heads/%s' % branch], capture_output=True).returncode == 0:
+            return 1, ('remeasure: branch %s exists already; a pass cuts its own new branch '
+                       '(--branch NAME names an unused one)\n' % branch)
         worktree, how = self.cut_worktree(self.repo, branch, self.base)
         if worktree is None:
             return 1, 'remeasure: %s\n' % how
         self.log('%s: worktree %s on %s (%s)' % (pid, worktree, branch, how))
+        try:
+            # a malformed engine-gaps.json refuses before any evidence is rewritten
+            self._remeasure_json_list(worktree, self.ENGINE_GAPS_REL)
+            self._remeasure_json_list(worktree, self.REMEASURE_LOG_REL)
+        except ValueError as e:
+            return 1, 'remeasure: %s; nothing was measured (worktree %s, branch %s)\n' % (
+                e, worktree, branch)
         self.log('%s: the sandbox and capture locks serialise this pass with any other driver '
                  'using them; it may wait' % pid)
         chunks = self.remeasure_chunks(picked, chunk)
@@ -3409,68 +3551,105 @@ class Driver:
                'not_exercised': 0, 'other': 0, 'trace_evidence': 0, 'chunks': len(chunks),
                'chunks_done': 0}
         listed, stopped = [], None
-        for i, part in enumerate(chunks, 1):
-            rows = [p['row'] for p in part]
-            verdicts = {p['row']['address']: (p['side'], p['case']) for p in part}
-            self._probe = {}
-            got_written = {}
-
-            def commit(written, cites, findings, got_written=got_written):
-                got_written['rows'] = list(written)
-                got_written['cites'] = list(cites)
-            self.log('%s: chunk %d of %d: %d row(s)' % (pid, i, len(chunks), len(rows)))
+        self._reuse_target = {}
+        self._frida_cache_writes, cache_was = False, self.frida_cache
+        self.frida_cache = False
+        previous = {}
+        _STOPPED.clear()
+        for sig in (signal.SIGTERM, signal.SIGINT):
             try:
-                self._frida_phase(pid, {'branch': branch, 'rows': rows}, worktree, verdicts,
-                                  rows=rows, commit=commit)
-            except _StageError as e:
-                stopped = 'chunk %d: %s' % (i, e.problem)
-                self.log('%s: %s' % (pid, stopped))
-                break
-            written = got_written.get('rows', [])
-            wkeys = {key(a) for a in written}
-            gaps_path, gaps = self._remeasure_json_list(worktree, self.ENGINE_GAPS_REL)
-            found = 0
-            for r in rows:
-                status, detail = self._frida_got.get(key(r['address']), ('skipped', 'no result'))
-                if status in ('equal', 'different'):
-                    tot['measured'] += 1
-                if status == 'equal':
-                    tot['equal'] += 1
-                    if key(r['address']) not in wkeys:
-                        listed.append('%s equal in no run with matching dumps; no trace evidence '
-                                      'written (%s)' % (r['address'], detail))
-                elif status == 'different':
-                    tot['different'] += 1
-                    found += 1
-                    m = re.search(r'differs in ([A-Za-z0-9_]+)', detail)
-                    gaps.append({'address': r['address'], 'name': r.get('name', ''),
-                                 'scenario': m.group(1) if m else '', 'detail': detail,
-                                 'found_by': pid, 'at': _now()})
-                elif status == 'not-exercised':
-                    tot['not_exercised'] += 1
-                    listed.append('%s not exercised (%s)' % (r['address'], detail))
-                else:
-                    tot['other'] += 1
-                    listed.append('%s %s (%s)' % (r['address'], status, detail))
-            tot['trace_evidence'] += len(written)
-            tot['chunks_done'] = i
-            if found:
-                wave._save_json(gaps_path, gaps)
+                previous[sig] = signal.signal(sig, self._on_stop)
+            except ValueError:         # not the main thread: no handler
+                pass
+
+        def write_log(extra=None):
             log_path, log = self._remeasure_json_list(worktree, self.REMEASURE_LOG_REL)
-            entry = dict(tot, stamp=stamp, mode=mode, branch=branch,
-                         at=_now())
+            entry = dict(tot, stamp=stamp, mode=mode, branch=branch, at=_now(), **(extra or {}))
             log = [e for e in log if not (isinstance(e, dict) and e.get('stamp') == stamp)]
             log.append(entry)
             wave._save_json(log_path, log)
-            rels = [wave._evidence_rel(a) for a in written] + [self.REMEASURE_LOG_REL] + (
-                [self.ENGINE_GAPS_REL] if found else [])
-            msg = 'remeasure: trace evidence for %d row(s) (%s); %d finding(s)' % (
-                len(written), ', '.join(sorted(set(got_written.get('cites', [])))) or 'none', found)
-            self._git_in(worktree, 'add', '--', *rels)
-            r = self._git_in(worktree, 'commit', '-q', '-m', msg, '--', *rels)
-            if r.returncode != 0:
-                self.log('%s: chunk %d not committed: %s' % (
-                    pid, i, _one_line((r.stderr or '') + (r.stdout or ''))))
+        try:
+            for i, part in enumerate(chunks, 1):
+                rows = [p['row'] for p in part]
+                verdicts = {p['row']['address']: (p['side'], p['case']) for p in part}
+                self._probe = {}
+                got_written = {}
+
+                def commit(written, cites, findings, got_written=got_written):
+                    got_written['rows'] = list(written)
+                    got_written['cites'] = list(cites)
+                self.log('%s: chunk %d of %d: %d row(s)' % (pid, i, len(chunks), len(rows)))
+                try:
+                    self._frida_phase(pid, {'branch': branch, 'rows': rows}, worktree, verdicts,
+                                      rows=rows, commit=commit)
+                except _StageError as e:
+                    stopped = 'chunk %d: %s' % (i, e.problem)
+                    self.log('%s: %s' % (pid, stopped))
+                    break
+                written = got_written.get('rows', [])
+                wkeys = {key(a) for a in written}
+                gaps_path, gaps = self._remeasure_json_list(worktree, self.ENGINE_GAPS_REL)
+                found = 0
+                for r in rows:
+                    status, detail = self._frida_got.get(key(r['address']), ('skipped', 'no result'))
+                    if status in ('equal', 'different'):
+                        tot['measured'] += 1
+                    if status == 'equal':
+                        tot['equal'] += 1
+                        if key(r['address']) not in wkeys:
+                            listed.append('%s equal but no trace evidence written: %s' % (
+                                r['address'],
+                                self._wave_notes.get(key(r['address'])) or 'no reason recorded'))
+                    elif status == 'different':
+                        tot['different'] += 1
+                        found += 1
+                        m = re.search(r'differs in ([A-Za-z0-9_]+)', detail)
+                        gaps.append({'address': r['address'], 'name': r.get('name', ''),
+                                     'scenario': m.group(1) if m else '', 'detail': detail,
+                                     'found_by': pid, 'at': _now()})
+                    elif status == 'not-exercised':
+                        tot['not_exercised'] += 1
+                        listed.append('%s not exercised (%s)' % (r['address'], detail))
+                    else:
+                        tot['other'] += 1
+                        listed.append('%s %s (%s)' % (r['address'], status, detail))
+                tot['trace_evidence'] += len(written)
+                tot['chunks_done'] = i
+                if found:
+                    wave._save_json(gaps_path, gaps)
+                write_log()
+                rels = [wave._evidence_rel(a) for a in written] + [self.REMEASURE_LOG_REL] + (
+                    [self.ENGINE_GAPS_REL] if found else [])
+                msg = 'remeasure: trace evidence for %d row(s) (%s); %d finding(s)' % (
+                    len(written), ', '.join(sorted(set(got_written.get('cites', [])))) or 'none',
+                    found)
+                self._git_in(worktree, 'add', '--', *rels)
+                r = self._git_in(worktree, 'commit', '-q', '-m', msg, '--', *rels)
+                if r.returncode != 0:
+                    self.log('%s: chunk %d not committed: %s' % (
+                        pid, i, _one_line((r.stderr or '') + (r.stdout or ''))))
+        except _Stop:
+            stopped = 'stopped by a signal; its live process groups were killed'
+            self.log('%s: %s' % (pid, stopped))
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+            _STOPPED.clear()
+            self._reuse_target = None
+            self._frida_cache_writes, self.frida_cache = True, cache_was
+
+            def close_running(s):
+                s['running'].pop(pid, None)
+                if (s.get('current') or {}).get('batch') == pid:
+                    s['current'] = None
+            self._update_status(close_running)
+        if stopped:
+            write_log({'stopped': stopped})
+            self._git_in(worktree, 'add', '--', self.REMEASURE_LOG_REL)
+            self._git_in(worktree, 'commit', '-q', '-m',
+                         'remeasure: pass %s stopped after %d of %d chunk(s)' % (
+                             stamp, tot['chunks_done'], tot['chunks']), '--',
+                         self.REMEASURE_LOG_REL)
         lines = ['remeasure %s: %d asked, %d measured (%d equal, %d different), %d not exercised, '
                  '%d other; %d trace evidence file(s) written in %d of %d chunk(s)' % (
                      stamp, tot['asked'], tot['measured'], tot['equal'], tot['different'],
@@ -3480,13 +3659,12 @@ class Driver:
         lines += ['skipped %s: %s' % s for s in skipped]
         if stopped:
             lines.append('STOPPED: %s' % stopped)
+            dirty = self._git_in(worktree, 'status', '--porcelain').stdout.strip()
+            if dirty:
+                lines.append('uncommitted in the worktree (look before landing):\n' + dirty)
         lines.append('branch: %s (worktree %s); gate it (tools/gates.sh --base %s) and land it' % (
             branch, worktree, self.base))
         return (1 if stopped else 0), '\n'.join(lines) + '\n'
-
-    @staticmethod
-    def _git_in(worktree, *args):
-        return subprocess.run(['git', '-C', worktree, *args], capture_output=True, text=True)
 
     def _merged(self, batch_id, verdicts):
         """The state's verdicts plus the report's, as (side, case)."""
@@ -4136,6 +4314,9 @@ class Driver:
             for addr, (side, case) in sorted(verdicts.items()):
                 measured = self._measured_for(addr, side)
                 extra = {} if measured is None else {'measured': measured}
+                if side == 'fork' and self._before_kind(batch_id, addr):
+                    # the losing kind is the evidence's before the phase wrote its trace
+                    extra['losing_kind'] = self._before_kind(batch_id, addr)
                 rc, text = self.record_verdict(self.state_path, self.repo,
                                                batch_id, addr, side, case,
                                                **extra)
@@ -5195,7 +5376,7 @@ def remeasure_main(argv=None, repo=None):
             else 'dump-decided')
     state = os.path.abspath(args.state) if args.state else os.path.join(repo, 'docs', 'wso', 'wave-state.json')
     picked, skipped = wave.remeasure_select(state, repo, mode, args.rows or (), args.batch)
-    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M')
+    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
     status = os.path.join(repo, DRIVER_REL, 'remeasure-%s' % stamp, 'status.json')
     try:
         d = Driver(repo, state, None, None, os.path.join(os.path.dirname(status), 'progress.md'),

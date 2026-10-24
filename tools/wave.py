@@ -367,15 +367,25 @@ def kept_evidence(worktree, merge_base, address, name, text):
     return None
 
 
-def _import_bar(worktree, merge_base, address, name, rel, text):
+def _import_bar(worktree, merge_base, address, name, rel, text, batch_id=None, want=None,
+                file=None):
     """The close's problem with an import function's evidence, or None:
     trace or better, and either the driver's frida trace or evidence that
-    stands as written (kept_evidence)."""
+    stands as written (kept_evidence).  With `batch_id`, a frida trace another
+    batch wrote measured that batch's body: it passes only while the body
+    here is the one this batch's phase recorded (`want`, a measured_body or
+    measured_deps digest), never as evidence that stands."""
     m = KIND_RE.search(text)
     have = m.group(1) if m else 'none'
     if have not in IMPORT_KINDS:
         return (f'{rel}: kind {have} is not trace or better; let the Frida phase '
                 f'measure it, or park it ({parked_rel(address)})')
+    if batch_id and other_batch_trace(text, batch_id):
+        if want and _check_evidence().body_digest(worktree, address, file) == want:
+            return None
+        return (f'{rel}: its frida trace is another batch\'s ({_frida_probe(text)}): it measured the '
+                f'body that batch had; let the Frida phase measure it here, or park it '
+                f'({parked_rel(address)})')
     if frida_trace(text) or kept_evidence(worktree, merge_base, address, name, text):
         return None
     return (f'{rel}: kind {have} was written in this batch and nothing measured it: only '
@@ -1066,21 +1076,22 @@ def _evidence_kind(repo, branch, address):
     return m.group(1), ''
 
 
-def _verdict_entry(repo, batch, address, side, case):
+def _verdict_entry(repo, batch, address, side, case, losing_kind=None):
     """(verdict dict, None) or (None, error): the losing-kind rule and the
     shape of a recorded verdict, shared by `verdict` and `resolve`."""
     losing = None
     if side == 'ours':
         losing = 'trace'   # his evidence is always a trace of the exe
     elif side == 'fork':
-        losing, err = _evidence_kind(repo, batch['branch'], address)
+        losing, err = (losing_kind, None) if losing_kind else _evidence_kind(
+            repo, batch['branch'], address)
         if losing is None:
             return None, err
     return {'side': side, 'case': case, 'losing_kind': losing}, None
 
 
 def record_verdict(state_path=STATE_PATH, repo=ROOT, batch_id=None,
-                   address=None, side=None, case=None, measured=None):
+                   address=None, side=None, case=None, measured=None, losing_kind=None):
     """Record one row's outcome.  `side` says who won: fork (his body is
     adopted, ours' verification is a trace), ours (his verification wins,
     ours' evidence kind is the losing kind), neither (parser noise).
@@ -1103,7 +1114,7 @@ def record_verdict(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 if _addr_key(r.get('address')) == _addr_key(address)), None)
     if row is None:
         return 1, f'{address} is not one of batch {batch_id}\'s rows\n'
-    entry, err = _verdict_entry(repo, batch, row['address'], side, case)
+    entry, err = _verdict_entry(repo, batch, row['address'], side, case, losing_kind)
     if entry is None:
         return 1, err + '\n'
     losing = entry['losing_kind']
@@ -1367,6 +1378,14 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                         f'{rel}: no "disagreed with WSO at <sha>" / '
                         f'"corroborated by WSO at <sha>" line names this '
                         f'batch\'s pin {batch["fork_base"][:7]}')
+                if (wt is not None and frida_trace(text)
+                        and _frida_probe(text).startswith(f'{batch_id}-')
+                        and _check_evidence().body_digest(
+                            wt, row['address'], row.get('file')) != row.get('measured_body')):
+                    # the driver's trace of this batch measured a body (measured_body);
+                    # a different one, or none recorded, is not what it measured
+                    problems.append(f'{row["address"]}: body changed after the Frida phase; '
+                                    f'park it or edit it back to the measured body')
             else:
                 if (wt is not None and row.get('measured_body') and frida_trace(text)
                         and _check_evidence().body_digest(
@@ -1382,7 +1401,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     # Kept (Task 19): ours already matches the original, so the
                     # body is untouched; what the row needs instead is the
                     # Frida phase's measurement of it, kind: trace.
-                    bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
+                    bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text,
+                                      batch_id, row.get('measured_body'), row.get('file'))
                     this_batch = frida_trace(text) and _frida_probe(text).startswith(
                         f'{batch_id}-')
                     stands = kept_evidence(wt, mb, row['address'], row.get('name', ''), text)
@@ -1401,7 +1421,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     problems.append(f'row {row["address"]} not imported: body unchanged '
                                     f'against {mb[:12] if mb else base}; import it or park '
                                     f'it ({parked_rel(k)})')
-                bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
+                bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text,
+                                  batch_id, row.get('measured_body'), row.get('file'))
                 if bar:
                     problems.append(bar)
         if kind != 'verdicts' and wt is not None:
@@ -1432,7 +1453,8 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     problems.append(f'{label}: body changed after the Frida phase; park it or '
                                     f'edit it back to the measured body')
                     continue
-                bar = _import_bar(wt, mb, '0x' + k, name, rel, dep_text)
+                bar = _import_bar(wt, mb, '0x' + k, name, rel, dep_text, batch_id,
+                                  (batch.get('measured_deps') or {}).get(k))
                 if bar:
                     problems.append(f'{label}: {bar}')
     if gate and not problems and wt is not None:
@@ -1474,7 +1496,7 @@ def remeasure_select(state_path=STATE_PATH, repo=ROOT, mode='rows', addresses=()
 
     mode 'rows': the addresses named; 'read-only-measured': closed rows whose
     verdict says measured frida but whose evidence on `base` is kind:
-    read-only; 'dump-decided': closed rows whose verdict case starts dump-,
+    read-only; 'dump-decided': closed rows whose verdict case is a dump reading (deciding_kind: dump-*, readout-*),
     with no `measured`, evidence read-only (optionally one batch).  Only a
     verdict whose body is on the base is measured (side ours, or fork, whose
     adopted body landed with the close); `neither` is skipped; evidence that
@@ -1504,12 +1526,12 @@ def remeasure_select(state_path=STATE_PATH, repo=ROOT, mode='rows', addresses=()
             if measured != 'frida':
                 continue
         elif mode == 'dump-decided':
-            if not case.startswith('dump-') or measured not in (None, '', 'none'):
+            if deciding_kind(case) != 'dump reading' or measured not in (None, '', 'none'):
                 continue
         else:
             raise ValueError('unknown remeasure mode %r' % mode)
         if side not in ('ours', 'fork'):
-            skipped.append((r['address'], 'verdict %s: no body of ours on the base to measure' % side))
+            skipped.append((r['address'], 'verdict %s: ours is not claimed right, nothing to confirm' % side))
             continue
         kind, _err = _evidence_kind(repo, base, r['address'])
         if kind != 'read-only':
