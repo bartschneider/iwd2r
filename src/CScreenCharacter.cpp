@@ -829,7 +829,7 @@ void CScreenCharacter::UpdateSavingThrows(CUIControlTextDisplay* pText, CDerived
             (LPCSTR)FetchString(17381), // "Reflex"
             DStats.m_nSaveVSReflex,
             (LPCSTR)FetchString(39802), // "Traps"
-            DStats.m_nSaveVSReflex + nTrapSenseBonus);
+            nTrapSenseBonus);
     } else {
         UpdateText(pText,
             "%s: %+d",
@@ -6131,17 +6131,23 @@ void CScreenCharacter::OnExportButtonClick()
 // 0x5E4E80
 BOOL CScreenCharacter::CanLevelUp(CGameSprite* pSprite)
 {
-    if (!m_bMultiPlayerViewable
-        || (g_pChitin->cNetwork.m_nServiceProvider != 0
-            && g_pChitin->cNetwork.m_idLocalPlayer != pSprite->m_remotePlayerID)) {
-        return FALSE;
+    BOOL bResult = FALSE;
+
+    if (m_bMultiPlayerModifyable
+        && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID)) {
+        CDerivedStats DStats;
+        DStats = *pSprite->GetDerivedStats();
+
+        g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetNextLevel(pSprite->m_startTypeAI.m_nClass,
+            DStats,
+            pSprite);
+
+        bResult = (pSprite->GetDerivedStats()->m_generalState & STATE_DEAD) == 0
+            && DStats.m_nLevel != pSprite->GetDerivedStats()->m_nLevel;
     }
-    CDerivedStats stats;
-    stats = pSprite->m_derivedStats;
-    g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetNextLevel(
-        pSprite->m_startTypeAI.m_nClass, stats, pSprite);
-    return stats.m_nLevel != pSprite->m_derivedStats.m_nLevel
-        && (pSprite->m_derivedStats.m_generalState & STATE_DEAD) == 0;
+
+    return bResult;
 }
 
 // 0x5E5330
