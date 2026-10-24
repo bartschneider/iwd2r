@@ -1,0 +1,1 @@
+{"address": "0x6664F0", "name": "CUIControlButtonSinglePlayerModifyCharacterCreate::OnLButtonClick", "file": "src/CScreenSinglePlayer.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_36 = his m_critSect in CUIManager); exe decompile confirms our body"}

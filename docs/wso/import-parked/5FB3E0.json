@@ -1,0 +1,1 @@
+{"address": "0x5FB3E0", "name": "CScreenConnection::TimerAsynchronousUpdate", "file": "src/CScreenConnection.cpp", "batch": "i005", "needs": "fork body contradicts the exe: the original's 46-entry callee list has no OnLoadGameButtonClick/OnNewGameButtonClick and no Iwd2AutoLoad; the head is the field_FA6 PlayMovie/PlayMovieNext block; Iwd2AutoLoad is absent from our tree"}

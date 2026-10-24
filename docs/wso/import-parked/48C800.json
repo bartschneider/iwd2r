@@ -1,0 +1,1 @@
+{"address": "0x48C800", "name": "CGameEffect::DecodeEffect", "file": "src/CGameEffect.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (sub_493400, SetSummonDelay, IcewindCGameEffectVisualSpellHit); exe decompile of 0x48C800 confirms our body"}

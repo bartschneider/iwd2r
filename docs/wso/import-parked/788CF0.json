@@ -1,0 +1,1 @@
+{"address": "0x788CF0", "name": "CDimm::Update", "file": "src/CDimm.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical renames (field_314 = his m_critSectDimm, field_CE = his m_pCurrentRes, field_274 = his m_pLastRes, field_D2 = his m_nServiceOffset, field_2FC = his m_critSectService); exe decompile confirms our body"}

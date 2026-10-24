@@ -1,0 +1,1 @@
+{"address": "0x518710", "name": "CMultiplayerSettings::SetCharacterControlledByPlayer", "file": "src/CMultiplayerSettings.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (sub_723BF0 = his SetHideState); exe decompile confirms our body"}

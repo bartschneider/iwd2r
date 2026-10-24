@@ -1,0 +1,1 @@
+{"address": "0x60CEB0", "name": "CScreenCreateChar::UpdatePopupPanel", "file": "src/CScreenCreateChar.cpp", "batch": "i005", "needs": "ours already matches the exe: fork body equals ours up to offset-identical rename (field_1624 = his m_pActiveScrollBar); exe decompile confirms our body"}
