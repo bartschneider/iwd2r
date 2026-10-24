@@ -6868,7 +6868,7 @@
     "b026": {
       "assigned_at": "2026-10-24T06:13:21+00:00",
       "branch": "p3/wso-b026",
-      "closed_at": null,
+      "closed_at": "2026-10-24T06:43:09+00:00",
       "files": [
         "src/CScreenSpellbook.cpp",
         "src/CStore.cpp",
@@ -6952,8 +6952,51 @@
           "their_len": 72
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x447E30": {
+          "case": "dump-447E30",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x447F10": {
+          "case": "dump-447F10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4E9840": {
+          "case": "dump-4E9840",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x54C1D0": {
+          "case": "dump-54C1D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54C5B0": {
+          "case": "dump-54C5B0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54CA80": {
+          "case": "dump-54CA80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x66BB00": {
+          "case": "dump-66BB00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7C0DB0": {
+          "case": "dump-7C0DB0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
     },
     "b027": {
       "assigned_at": "2026-10-24T06:22:53+00:00",
