@@ -1370,8 +1370,10 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     # body is untouched; what the row needs instead is the
                     # Frida phase's measurement of it, kind: trace.
                     bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
-                    if bar or not frida_trace(text) or not _frida_probe(text).startswith(
-                            f'{batch_id}-'):
+                    this_batch = frida_trace(text) and _frida_probe(text).startswith(
+                        f'{batch_id}-')
+                    stands = kept_evidence(wt, mb, row['address'], row.get('name', ''), text)
+                    if bar or not (this_batch or stands):
                         problems.append(f'{row["address"]}: kept but not measured; park it or '
                                         f'import it')
                     continue
@@ -1403,7 +1405,14 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                                     f'it like a row, or edit it back and park it')
                     continue
                 with open(path, encoding='utf-8') as f:
-                    bar = _import_bar(wt, mb, '0x' + k, name, rel, f.read())
+                    dep_text = f.read()
+                want = (batch.get('measured_deps') or {}).get(k)
+                if (want and frida_trace(dep_text)
+                        and _check_evidence().body_digest(wt, '0x' + k) != want):
+                    problems.append(f'{label}: body changed after the Frida phase; park it or '
+                                    f'edit it back to the measured body')
+                    continue
+                bar = _import_bar(wt, mb, '0x' + k, name, rel, dep_text)
                 if bar:
                     problems.append(f'{label}: {bar}')
     if gate and not problems and wt is not None:
@@ -1788,7 +1797,8 @@ BASE_BODY_PARAGRAPH = (
     "matches the original, do NOT park the row and do NOT touch its body: write\n"
     "(or keep) `docs/evidence/<ADDRESS>.md` (`kind: read-only`, with an\n"
     "`exemption:` that gives your reading, what you checked against the\n"
-    "disassembly; no verdict phrase and no frida line), commit it, and list the\n"
+    "disassembly; no verdict phrase and no frida line; an existing oracle,\n"
+    "replay or trace file stays untouched), commit it, and list the\n"
     "row under `## Kept` in your report, one line `kept <0xADDR> <one-line\n"
     "reason>`. The Frida phase then measures our body against the original and,\n"
     "when they are equal, the driver rewrites that file to `kind: trace`. If his\n"
@@ -1801,14 +1811,16 @@ BASE_BODY_PARAGRAPH = (
 # The template's `## Kept` pieces, rendered for batches that hold base-body rows
 # only (a stub batch has no `## Kept` section to write).
 KEPT_REFUSAL = (" For a base-body row that refusal is a `## Kept` line with that reason,\n"
-                "   not a park.")
+                "   not a park: keep or write its `docs/evidence/<ADDR>.md` (`kind:\n"
+                "   read-only`, `exemption:` with what the exe shows); do not delete it\n"
+                "   (the delete instruction above is for stub rows only).")
 KEPT_MEASURED = (
     " For a base-body row you listed under `## Kept`, when the driver finds OUR\n"
     "   body behaves differently from the original, the finding names the scenario\n"
     "   and the difference: park the row with `needs` of `\"ours differs from the\n"
     "   exe (<scenario>): <difference>; import his body in a later batch\"` (the\n"
     "   body was never changed, so there is nothing to edit back: delete its\n"
-    "   evidence file and write the parked file). An import in the fix round\n"
+    "   evidence file, write the parked file and take the row off `## Kept`). An import in the fix round\n"
     "   cannot be measured (the phase runs once), so it is not offered. A base-body\n"
     "   row you imported that comes back different parks as any import does.")
 KEPT_RULE4_EXCEPTION = ", except a base-body row you list under `## Kept`"
