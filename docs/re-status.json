@@ -9,16 +9,16 @@
     }
   },
   "recovered": {
-    "functions": 6530,
-    "bytes": 3165581
+    "functions": 6534,
+    "bytes": 3168415
   },
   "verified": {
-    "functions": 332,
-    "bytes": 474546,
+    "functions": 337,
+    "bytes": 478840,
     "by_kind": {
-      "oracle": 178,
+      "oracle": 179,
       "replay": 153,
-      "trace": 1
+      "trace": 5
     }
   },
   "scenarios": [
