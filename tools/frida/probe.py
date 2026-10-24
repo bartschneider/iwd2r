@@ -40,6 +40,7 @@ everything else stays under runs/.
 """
 import argparse
 import datetime
+import contextlib
 import json
 import os
 import shutil
@@ -73,7 +74,10 @@ POST_LOAD_FALLBACK = 180             # --post-load when the scenario has no head
 
 
 def log(message):
-    print('sandbox: %s' % message, flush=True)
+    try:
+        print('sandbox: %s' % message, flush=True)
+    except (BrokenPipeError, OSError):
+        pass      # the parent is gone: the cleanup that logs must still run
 
 
 def venv_python():
@@ -300,6 +304,24 @@ def wait_for_result_file(path, seconds):
         time.sleep(2)
 
 
+@contextlib.contextmanager
+def saves_of_its_own(game, out_dir, dry):
+    """Every probe run starts with the empty save folder a replay record
+    gives (oracle.prepared_saves, mode empty, the copy's own saves aside and
+    put back afterwards, the run's saves moved into out_dir/saves): a
+    scenario that saves (save_load_screens) sees the same state on both
+    sides and every run, and no player save is touched.  A plan-only run
+    changes nothing.  Inside the replay and sandbox locks, as record_original
+    holds them."""
+    if dry:
+        yield {}
+        return
+    with oracle.prepared_saves(oracle.mpsave_dir(game),
+                               {'mode': 'empty', 'load': None}, out_dir,
+                               oracle.save_aside(game)) as report:
+        yield report
+
+
 def run_side(target, script, folders, logon_cmd, timeout, host_run, out_dir,
              probe, seed, dump_every, dry, status_name='frida-trace.jsonl.status'):
     """One sandbox for one side -- winsandbox.run_replay's shape with the
@@ -473,7 +495,8 @@ def run(ns):
     rc = 2
     try:
         with filelock.hold(oracle.REPLAY_LOCK, 'replay'), \
-                filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'):
+                filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'), \
+                saves_of_its_own(game, out_dir, dry):
             result = run_side(ns.target, script, folders, logon_cmd, timeout,
                               host_run, out_dir, ns.probe, ns.seed,
                               ns.dump_every, dry, status_name)

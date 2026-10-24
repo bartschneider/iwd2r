@@ -11,6 +11,7 @@ checker as a subprocess with cwd set to that repository, and removes the
 directory afterwards.
 """
 
+import argparse
 import contextlib
 import datetime
 import fcntl
@@ -6925,6 +6926,111 @@ class ProbePlanTest(unittest.TestCase):
         self.assertIn('& echo done > ', ours)
         self.assertTrue(ours.endswith('shutdown /s /t 0'), ours)
 
+    def test_probe_run_gives_the_side_an_empty_save_folder_and_restores_it(self):
+        # Task 18 fix round: the mechanism of record_original (prepared_saves,
+        # mode empty, the copy's saves aside), around run_side, for both sides
+        game = os.path.join(tempfile.mkdtemp(), 'game')
+        self.addCleanup(shutil.rmtree, os.path.dirname(game), True)
+        mpsave = os.path.join(game, 'mpsave')
+        make_save(mpsave, '000000002-Player-Save')
+        make_save(mpsave, 'default')
+        out = os.path.join(os.path.dirname(game), 'out')
+        seen = {}
+        with probe.saves_of_its_own(game, out, False):
+            seen['inside'] = sorted(os.listdir(mpsave))
+            make_save(mpsave, '000000001-Quick-Save-Probe One')
+        self.assertEqual(seen['inside'], ['default'])
+        self.assertEqual(sorted(os.listdir(mpsave)), ['000000002-Player-Save', 'default'])
+        self.assertEqual(os.listdir(os.path.join(out, 'saves')), ['000000001-Quick-Save-Probe One'])
+        # a plan-only run touches nothing
+        with probe.saves_of_its_own(game, out, True):
+            self.assertEqual(sorted(os.listdir(mpsave)), ['000000002-Player-Save', 'default'])
+        # it is the one prepared_saves plan record_original uses, and run() holds it
+        # inside the replay and sandbox locks around run_side
+        with mock.patch.object(probe.oracle, 'prepared_saves') as prep:
+            prep.return_value.__enter__.return_value = {}
+            with probe.saves_of_its_own(game, out, False):
+                pass
+        prep.assert_called_once_with(probe.oracle.mpsave_dir(game),
+                                     {'mode': 'empty', 'load': None}, out,
+                                     probe.oracle.save_aside(game))
+        self.assertFalse(hasattr(winsandbox, 'save_reset_command'))
+        self.assertFalse(hasattr(winsandbox, 'SAVE_RESET_GLOBS'))
+
+
+    def test_probe_run_takes_the_locks_then_the_empty_saves_then_runs_the_side(self):
+        # probe.run itself, with its collaborators mocked: the order of entry
+        # (replay lock, sandbox lock, prepared_saves empty, run_side) and the
+        # reverse order of exit
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        game = os.path.join(tmp, 'game')
+        os.makedirs(game)
+        run_dir = os.path.join(tmp, 'runs', 'stamp')
+        os.makedirs(os.path.join(run_dir, 'replay'))
+        events = []
+
+        def ctx(name):
+            @contextlib.contextmanager
+            def cm(*a, **kw):
+                events.append(('enter', name, a))
+                try:
+                    yield {}
+                finally:
+                    events.append(('exit', name))
+            return cm
+        builddir = os.path.join(tmp, 'build')
+        os.makedirs(builddir)
+        open(os.path.join(builddir, probe.oracle.INJECTOR), 'w').close()
+        ns = argparse.Namespace(
+            dry=False, command='run', probe='hooks.json', scenario='s', timeout=1000,
+            post_load=None, target='original', build_checkout=None, out='t.jsonl',
+            seed=1, dump_every=0, clicks=0)
+        script = os.path.join(tmp, 's.txt')
+
+        def run_side(*a, **kw):
+            events.append(('run_side',))
+            return {'error': None, 'seconds': 1.0}
+        patches = [
+            mock.patch.object(probe, 'load_probe'),
+            mock.patch.object(probe, 'venv_python', return_value=('h', 'v', 'b')),
+            mock.patch.object(probe.oracle, 'scenario_path', return_value=script),
+            mock.patch.object(probe.oracle, 'replay_timeout', return_value=1000),
+            mock.patch.object(probe, 'resolve_post_load', return_value=0),
+            mock.patch.object(probe.winsandbox, 'available', return_value=True),
+            mock.patch.object(probe.oracle, 'ensure_vanilla', return_value=game),
+            mock.patch.object(probe.oracle, 'prepare_replay_ini'),
+            mock.patch.object(probe, 'ours_build', return_value=builddir),
+            mock.patch.object(probe.winsandbox, 'deploy_runtime'),
+            mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
+            mock.patch.object(probe, 'prepare_scenario', return_value=script),
+            mock.patch.object(probe.oracle, 'load_actions', return_value=[]),
+            mock.patch.object(probe, 'sidecar_args', return_value=[]),
+            mock.patch.object(probe, 'original_logon', return_value='cmd'),
+            mock.patch.object(probe.winsandbox, 'wslpath_w', side_effect=lambda x: x),
+            mock.patch.object(probe, 'report', return_value=0),
+            mock.patch.object(probe, 'run_side', run_side),
+            mock.patch.object(probe.filelock, 'hold',
+                              lambda path, what, **kw: ctx(what)(path)),
+            mock.patch.object(probe.oracle, 'prepared_saves', ctx('saves')),
+            mock.patch.object(probe.shutil, 'rmtree'),
+        ]
+        for pt in patches:
+            pt.start()
+            self.addCleanup(pt.stop)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = probe.run(ns)
+        self.assertEqual(rc, 0)
+        self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
+            ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
+            ('run_side',),
+            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay')])
+        saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
+        self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
+                                    {'mode': 'empty', 'load': None},
+                                    os.path.join(run_dir, 'replay'),
+                                    probe.oracle.save_aside(game)))
+
 
 class FridaProbeTest(unittest.TestCase):
     """The sandbox run completes with a verdict: the sidecar command parses
@@ -9884,7 +9990,22 @@ class EvidenceParagraphsTest(unittest.TestCase):
         self.assertFalse(w._cites_pin('disagreed with WSO\n\nat e8dd16a7', 'e8dd16a7'))
 
 
+_REAL_TASKKILL = driver._tool('winsandbox').taskkill_sandbox
+
+
 class DriverTest(unittest.TestCase):
+    def setUp(self):
+        # By construction no DriverTest can reach the host's real taskkill (it
+        # ends every Windows Sandbox on the machine): every Driver built in
+        # this class gets this recorder as its `_taskkill`.
+        self.taskkills = []
+        ws = driver._tool('winsandbox')
+        p = mock.patch.object(ws, 'taskkill_sandbox',
+                              lambda *a, **kw: self.taskkills.append((a, kw)) or [])
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(driver._PROBE_PIDS.clear)
+
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
 
@@ -10762,7 +10883,8 @@ class DriverTest(unittest.TestCase):
         with self.assertRaises(driver._StageError) as cm:
             d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(cm.exception.stage, 'frida')
-        self.assertIn('every Frida scenario failed on infrastructure (no side produced a status): '
+        self.assertIn('every Frida scenario failed on infrastructure (no side produced a status '
+                      'or both sides failed alike): '
                       + '; '.join('%s: original side exited 2' % sc
                                   for sc in sorted(driver._tool('truth').FRIDA_SCENARIOS)),
                       cm.exception.problem)
@@ -10782,6 +10904,139 @@ class DriverTest(unittest.TestCase):
         findings = d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(d._frida_got['401000'][0], 'scenario failed')
         self.assertTrue(any(f.startswith('0x401000:') and 'park it' in f for f in findings), findings)
+
+    def test_driver_frida_both_sides_failure_is_left_out_not_poisoning(self):
+        d, batch = self._import_phase_driver()
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        nothing = {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                   'orig_exit': 2, 'ours_exit': 2, 'failed': 'original side exited 2 (NOT-LOADED)',
+                   'result': {'orig': 'NOT-LOADED', 'ours': 'NOT-LOADED'},
+                   'hits': {'orig': None, 'ours': None}, 'dumps': None}
+        out['biography'] = dict(nothing)
+        d.frida_run = lambda *a, **kw: dict(out)
+        d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(d._frida_got['401000'][0], 'equal')
+        self.assertIn('b011: frida: biography measured nothing (both sides NOT-LOADED) '
+                      'and is left out', self.logs)
+        # every scenario uninformative: the infrastructure exception
+        d, batch = self._import_phase_driver()
+        d.frida_run = lambda *a, **kw: {'biography': dict(nothing), 'world_entry': dict(nothing)}
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn('every Frida scenario failed on infrastructure', cm.exception.problem)
+
+    def test_probe_runs_are_live_groups_and_a_stop_ends_them(self):
+        # a long-running probe.py launch (frida_run's `run`) is a live process
+        # group: the stop path kills it and its batch thread gets _Stop
+        self.addCleanup(driver._STOPPED.clear)
+        outcome = []
+
+        def launch():
+            try:
+                outcome.append(driver._run_probe(['sleep', '60'], capture_output=True, text=True))
+            except BaseException as e:
+                outcome.append(e)
+        t = threading.Thread(target=launch, daemon=True)
+        t.start()
+        end = time.monotonic() + 5
+        while not driver._LIVE and time.monotonic() < end:
+            time.sleep(0.02)
+        self.assertTrue(driver._LIVE, 'the probe launch was not registered as a live group')
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.STOP_WAIT = 0.2
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        t.join(10)
+        self.assertFalse(t.is_alive(), 'the probe was still running after the stop')
+        self.assertIsInstance(outcome[0], driver._Stop)
+        self.assertFalse(driver._LIVE)
+        self.assertEqual(len(self.taskkills), 1)     # the recorder, never the host's
+
+    def _live_sleeper(self, probe):
+        self.addCleanup(driver._STOPPED.clear)
+        sleeper = subprocess.Popen(['sleep', '60'], start_new_session=True)
+        self.addCleanup(lambda: sleeper.poll() is None and sleeper.kill())
+        driver._LIVE.add(sleeper.pid)
+        self.addCleanup(driver._LIVE.discard, sleeper.pid)
+        if probe:
+            driver._PROBE_PIDS.add(sleeper.pid)
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d.STOP_WAIT = 0.2
+        return d
+
+    def test_stop_taskkills_the_sandbox_after_killing_the_probe(self):
+        d = self._live_sleeper(True)
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        self.assertEqual(len(self.taskkills), 1)
+        self.assertTrue(any('taskkilled the sandbox' in m for m in self.logs), self.logs)
+
+    def test_stop_with_only_workers_live_never_taskkills(self):
+        d = self._live_sleeper(False)
+        with self.assertRaises(driver._Stop):
+            d._on_stop(signal.SIGTERM, None)
+        self.assertEqual(self.taskkills, [])
+
+    def test_run_probe_records_its_pid_and_a_plain_run_does_not(self):
+        driver._run_group([sys.executable, '-c', 'pass'], capture_output=True)
+        self.assertFalse(driver._PROBE_PIDS)
+        driver._run_probe([sys.executable, '-c', 'pass'], capture_output=True)
+        self.assertFalse(driver._PROBE_PIDS, 'a finished probe leaves no pid behind')
+
+    def test_the_fixture_driver_has_no_route_to_the_real_taskkill(self):
+        # guard: a later fixture edit cannot drop the recorder
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        self.assertIsNot(d._taskkill, _REAL_TASKKILL)
+        d._taskkill()
+        self.assertEqual(len(self.taskkills), 1)
+        d2 = self._driver(self._BatchWorker(credits=0.0))
+        self.assertIsNot(d2._taskkill, _REAL_TASKKILL)
+        self.assertIsNot(driver.Driver.__init__.__globals__['_tool']('winsandbox').taskkill_sandbox,
+                         _REAL_TASKKILL)
+
+    def test_taskkill_sandbox_runs_each_name_in_its_own_try(self):
+        ws = driver._tool('winsandbox')
+        names = ws.TASKKILL_NAMES
+        calls = []
+
+        def run(argv, **kw):
+            name = argv[argv.index('/IM') + 1]
+            calls.append(name)
+            if name == names[0]:
+                raise subprocess.TimeoutExpired(argv, 15)
+            if name == names[1]:
+                raise OSError('no cmd.exe')
+            return subprocess.CompletedProcess(argv, 0, b'', b'')
+        done = _REAL_TASKKILL(run=run)
+        self.assertEqual(calls, list(names))
+        self.assertEqual(done, [(names[0], None), (names[1], None), (names[2], 0)])
+
+    def test_stop_log_names_the_killed_and_the_failed(self):
+        ws = driver._tool('winsandbox')
+        n = ws.TASKKILL_NAMES
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        d._taskkill = lambda: [(n[0], None), (n[1], 128), (n[2], 0)]
+        d._close_sandbox_after_stop()
+        line = [m for m in self.logs if 'taskkilled the sandbox' in m][0]
+        self.assertIn('killed: %s;' % n[2], line)
+        self.assertIn('failed: %s)' % n[0], line)
+
+    def test_close_sandbox_kills_even_when_the_log_pipe_is_dead(self):
+        ws = driver._tool('winsandbox')
+
+        def log(message):
+            raise BrokenPipeError(32, 'Broken pipe')
+        kills = []
+        with mock.patch.object(ws, 'sandbox_running', return_value=True), \
+                mock.patch.object(ws.time, 'sleep'):
+            ws.close_sandbox(log, timeout=0, kill=lambda: kills.append(1))
+        self.assertEqual(kills, [1])
+        # and probe.log itself swallows a dead pipe
+        with mock.patch('builtins.print', side_effect=BrokenPipeError(32, 'x')):
+            probe.log('still going')
 
     def test_driver_frida_dumps_the_schema_refuses_are_an_exception(self):
         # a recorder (or our dumper) out of step with schema.json makes every
@@ -11180,16 +11435,17 @@ class DriverTest(unittest.TestCase):
         self.assertIn('b011: frida: no usable coverage map; running every scenario', self.logs)
 
     def test_driver_frida_phase_holds_out_the_scenarios_truth_names(self):
-        # the hotfix of 2026-10-23: save_load_screens (a save whose name grows
-        # across runs) and biography (needs --no-loaded) stay out of the phase
-        # until Task 18; the coverage map and scenarios_for keep them
+        # Driver.held_out (truth.PHASE_HELD_OUT) keeps
+        # the scenarios it names out of the phase; the coverage map and
+        # scenarios_for keep them
         d, batch = self._screen_driver()
         truth = driver._tool('truth')
-        d.held_out = tuple(truth.PHASE_HELD_OUT)
-        self.assertEqual(set(d.held_out), {'save_load_screens', 'biography'})
+        # save_load_screens stays out until a real pair confirms its dumps
+        self.assertEqual(tuple(truth.PHASE_HELD_OUT), ('save_load_screens',))
+        d.held_out = ('save_load_screens', 'biography')       # the mechanism still works
         # 0x403000 is hit ONLY by save_load_screens, 0x402000 only by biography:
         # without the hold-out both would run; with it neither does and the
-        # two rows are simply not covered
+        # two rows are simply not covered (0bbf4e66)
         self._coverage_map({'world_entry': {'0x401000': 4},
                             'save_load_screens': {'0x403000': 1}})
         self._add_ui_entry({'0x402000': 2})
@@ -14775,6 +15031,7 @@ class DriverTest(unittest.TestCase):
             self.fail('not stopped')
         w.run = run
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        self.addCleanup(lambda: self.assertEqual(self.taskkills, []))   # a worker only: no taskkill
         before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT))
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self.assertEqual(d.run(), 1)
@@ -16239,6 +16496,124 @@ class TruthTest(unittest.TestCase):
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
                              ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_frida_run_ui_scenarios_pass_no_loaded_on_both_sides(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            fake = self._frida_fake(root)
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a', 'b'])
+            truth.frida_run('b011', table, ['world_entry', 'biography'], run=fake, root=root,
+                            loaded_rva='0x330E60')
+            by = {}
+            for c in fake.calls:
+                by.setdefault(c[c.index('--scenario') + 1], {})[c[c.index('--target') + 1]] = c
+            for side in ('original', 'ours'):
+                self.assertIn('--no-loaded', by['biography'][side])
+                self.assertNotIn('--loaded-rva', by['biography'][side])
+                self.assertNotIn('--no-loaded', by['world_entry'][side])
+            self.assertIn('--loaded-rva', by['world_entry']['ours'])
+            self.assertNotIn('--loaded-rva', by['world_entry']['original'])
+            # a UI scenario needs no loaded rva at all; a world one still fails without it
+            fake.calls.clear()
+            got = truth.frida_run('b011', dict(table, ours_loaded_rva=None),
+                                  ['world_entry', 'biography'], run=fake, root=root)
+            self.assertIn('no ', got['world_entry']['failed'])
+            self.assertIsNone(got['biography']['failed'])
+            self.assertEqual(len(fake.calls), 2)
+
+    def test_status_without_a_loaded_line_is_complete(self):
+        # --no-loaded: orig.py's verdict is CLEAN at exit with no `loaded:` line
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, 's.status')
+            _write(path, 'HITS fn_401000 2\nHITS-FINAL yes\nRESULT: CLEAN  (no hits)\n')
+            self.assertEqual(truth._read_status(path), ('CLEAN', {'fn_401000': 2}, True))
+
+    def test_phase_hold_out_keeps_save_load_screens_and_biography_returns_for_screens(self):
+        self.assertEqual(tuple(truth.PHASE_HELD_OUT), ('save_load_screens',))
+        got = truth.scenarios_for([{'file': 'src/CScreenBio.cpp'}], [])
+        self.assertIn('biography', got)
+        self.assertNotIn('biography', truth.scenarios_for([{'file': 'src/CInfGame.cpp'}], []))
+
+    def test_no_loaded_installs_no_loaded_hook(self):
+        orig = load_tool('frida/orig')
+        spec = {'hooks': [{'addr': '0x401000', 'name': 'fn_401000', 'conv': 'thiscall', 'max': 1}]}
+        default = orig.build_js(spec)
+        self.assertIn('0x6869c0', default.lower())
+        bare = orig.build_js(spec, require_loaded=False)
+        self.assertNotIn('0x6869c0', bare.lower())
+        self.assertNotIn("name: 'loaded'", bare)
+        self.assertNotIn("'loaded'", bare)
+        self.assertIn('fn_401000', bare)
+
+    def test_a_missing_loaded_rva_is_an_infrastructure_failure(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['a'])
+            got = truth.frida_run('b011', dict(table, ours_loaded_rva=None),
+                                  ['world_entry', 'biography'], run=self._frida_fake(root), root=root)
+        why = truth.infrastructure_failure(got)
+        self.assertIn('a build property', why)
+        self.assertIn('world_entry: no ', why)
+        # even next to a UI scenario that ran: not every row parked as scenario failed
+        self.assertNotEqual(why, '')
+        self.assertEqual(truth.infrastructure_failure({'a': {'failed': None}}), '')
+
+    def test_both_clean_with_a_missing_trace_is_one_sided(self):
+        t = {'orig': [], 'ours': [], 'failed': 'ours side left no trace file',
+             'orig_exit': 0, 'ours_exit': 0, 'result': {'orig': 'CLEAN', 'ours': 'CLEAN'}}
+        self.assertEqual(truth.uninformative_reason(t), '')
+        v = truth.frida_verdicts({'a': t, 'b': {'orig': self._trace(('fn_5845D0', 7, 3)),
+                                                'ours': self._trace(('fn_5845D0', 7, 3)),
+                                                'failed': None}}, self.ROWS)
+        self.assertEqual(v['0x5845D0'][0], 'scenario failed')
+
+    def test_calibrate_frida_all_uninformative_is_an_error(self):
+        dead = {'orig': [], 'ours': [], 'failed': 'x', 'orig_exit': 2, 'ours_exit': 2,
+                'result': {'orig': 'NOT-LOADED', 'ours': 'NOT-LOADED'}}
+        self.assertIn('both sides failed alike', truth.infrastructure_failure({'a': dead}))
+        with tempfile.TemporaryDirectory() as d:
+            mp = os.path.join(d, 'map.txt')
+            _write(mp, '')
+            rows = [{'address': '0x5845D0'}]
+            with mock.patch.object(truth, 'frida_run', lambda *a, **kw: {'a': dead}), \
+                    mock.patch.object(truth, 'frida_batch',
+                                      lambda bid, rows_, sigs, mt, run_frida=None, info=None, **kw:
+                                      (run_frida(bid, {}, ['a']), {})[1]):
+                got, meta = truth._calibrate_frida(rows, lambda a: '', mp)
+        self.assertIn('both sides failed alike', meta['error'])
+        self.assertEqual(got['0x5845D0'][0], 'not measured')
+
+    def test_frida_verdicts_a_both_sides_failure_is_uninformative(self):
+        rows = self.ROWS
+        t = self._trace(('fn_5845D0', 7, 3))
+        good = {'orig': t, 'ours': t, 'failed': None}
+
+        def failed(orig_result, ours_result, orig_exit=2, ours_exit=2, why='original side exited 2'):
+            return {'orig': [], 'ours': [], 'failed': why, 'orig_exit': orig_exit,
+                    'ours_exit': ours_exit, 'result': {'orig': orig_result, 'ours': ours_result},
+                    'hits': {'orig': None, 'ours': None}}
+        for both in (failed('NOT-LOADED', 'NOT-LOADED'), failed(None, None),
+                     failed('OBSERVER-ERROR', 'OBSERVER-ERROR')):
+            info = {}
+            v = truth.frida_verdicts({'first_fight': good, 'biography': both}, rows, info=info)
+            self.assertEqual(v['0x5845D0'], ('equal', 'identical in first_fight'), both)
+            self.assertEqual(list(info['uninformative']), ['biography'])
+            self.assertEqual(v['0x777777'][0], 'not-exercised')
+        info = {}
+        truth.frida_verdicts({'a': failed('NOT-LOADED', 'NOT-LOADED')}, rows, info=info)
+        self.assertEqual(info['uninformative'], {'a': 'both sides NOT-LOADED'})
+        truth.frida_verdicts({'a': failed(None, None)}, rows, info=info)
+        self.assertEqual(info['uninformative'], {'a': 'both sides exited 2 with no status'})
+        # one-sided failures keep poisoning: that asymmetry is evidence
+        for one in (failed('CLEAN', None, orig_exit=0, ours_exit=2),
+                    failed('NOT-LOADED', 'OBSERVER-ERROR'),
+                    failed('CRASH', 'CRASH', orig_exit=1, ours_exit=1)):
+            info = {}
+            v = truth.frida_verdicts({'first_fight': good, 'biography': one}, rows, info=info)
+            self.assertEqual(v['0x5845D0'][0], 'scenario failed', one)
+            self.assertEqual(info['uninformative'], {})
+        crashed = dict(failed('NOT-LOADED', 'NOT-LOADED'), ours=[{'tag': 'crash'}])
+        self.assertEqual(truth.uninformative_reason(crashed), '')
 
     def test_map_matches_constructors_and_destructors(self):
         publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,
