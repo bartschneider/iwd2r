@@ -17681,5 +17681,110 @@ class CoverageTest(unittest.TestCase):
                       _slurp(report))
 
 
+class ReStatusTest(unittest.TestCase):
+    TOOL = os.path.join(ROOT, 'tools', 're_status.py')
+    REAL = ('int Foo::Bar(int x)\n{\n    int total = x * 2 + 1;\n    total += x;\n'
+            '    return total + 12345;\n}\n')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = os.path.join(self._tmp.name, 'repo')
+        self.exports = os.path.join(self._tmp.name, 'exports')
+        self.write(self.exports, 'functions.tsv',
+                   '401000\tFoo::Bar\t100\n401100\tFoo::Baz\t200\n'
+                   '401200\tFoo::Stub\t50\n401300\tUnwind@401300\t10\n'
+                   '401400\tthunk_FUN_00401400\t5\n')
+        self.write(self.repo, 'src/Foo.cpp',
+                   '// 0x401000\n' + self.REAL + '\n// 0x401100\n'
+                   + self.REAL.replace('Bar', 'Baz') + '\n// 0x401200\n'
+                   'void Foo::Stub()\n{\n    // TODO: Incomplete\n}\n')
+        self.write(self.repo, 'docs/evidence/401000.md', '---\nkind: oracle\n---\nx\n')
+        self.write(self.repo, 'docs/evidence/401100.md', '---\nkind: read-only\n---\nx\n')
+        self.write(self.repo, 'scenarios/a.txt', 'x\n')
+        self.write(self.repo, 'scenarios/a.expect.json', '{}\n')
+        self.write(self.repo, 'scenarios/pending/p.txt', 'x\n')
+        self.write(self.repo, 'scenarios/pending/p.expect.json', '{}\n')
+        self.write(self.repo, 'README.md',
+                   '## Status\n\ntable\n\n### Roadmap\n\nsteps\n')
+
+    def write(self, base, rel, text):
+        path = os.path.join(base, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def run_tool(self, *args):
+        return subprocess.run([sys.executable, '-I', self.TOOL, '--repo', self.repo,
+                               *args], capture_output=True, text=True)
+
+    def compute(self):
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def snap(self):
+        with open(os.path.join(self.repo, 'docs', 're-status.json')) as f:
+            return json.load(f)
+
+    def test_numbers(self):
+        self.compute()
+        s = self.snap()
+        self.assertRegex(s['at'], r'^\d{4}-\d\d-\d\d$')
+        self.assertEqual(s['ghidra'], {'functions': 3, 'bytes': 350,
+                         'excluded': {'seh_funclets': 1, 'thunks': 1}})
+        self.assertEqual(s['recovered'], {'functions': 2, 'bytes': 300})
+        self.assertEqual(s['verified'], {'functions': 1, 'bytes': 100,
+                         'by_kind': {'oracle': 1, 'replay': 0, 'trace': 0}})
+        self.assertEqual(s['scenarios'], ['a'])
+
+    def test_block_rendered_into_readme(self):
+        self.compute()
+        with open(os.path.join(self.repo, 'README.md')) as f:
+            text = f.read()
+        self.assertLess(text.index('table'), text.index('### Recovery status'))
+        self.assertLess(text.index('### Recovery status'), text.index('### Roadmap'))
+        self.assertIn('| `.text` code recovered | **85.7%** (300 / 350 bytes) |', text)
+        self.assertIn('| Functions recovered | **66.7%** (2 / 3) |', text)
+        self.assertIn('| Verified against the original | **33.3%** (1 / 3; 100 bytes) |', text)
+        self.assertIn('| Scenarios matched | 1 | `a`:', text)
+        md = self.run_tool('--markdown')
+        self.assertEqual(md.returncode, 0)
+        self.assertIn(md.stdout.strip(), text)
+        self.compute()  # idempotent: one block only
+        with open(os.path.join(self.repo, 'README.md')) as f:
+            self.assertEqual(f.read().count('re-status:begin'), 1)
+
+    def test_check_passes_then_fails_when_stale(self):
+        self.compute()
+        self.assertEqual(self.run_tool('--check').returncode, 0)
+        path = os.path.join(self.repo, 'README.md')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(text.replace('85.7%', '99.9%'))
+        r = self.run_tool('--check')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('README.md', r.stderr)
+
+    def test_check_without_snapshot_fails(self):
+        r = self.run_tool('--check')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('re-status.json', r.stderr)
+
+    def test_compute_without_table_is_one_line_error(self):
+        os.remove(os.path.join(self.exports, 'functions.tsv'))
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('functions.tsv', r.stderr)
+        self.assertNotIn('Traceback', r.stderr)
+
+    def test_gate_runs_the_check_next_to_the_map(self):
+        with open(os.path.join(ROOT, 'tools', 'gates.sh')) as f:
+            gates = f.read()
+        self.assertIn('step "recovery status" python3 -I tools/re_status.py --check', gates)
+        self.assertLess(gates.index('step "subsystem map"'),
+                        gates.index('step "recovery status"'))
+
+
 if __name__ == '__main__':
     unittest.main()

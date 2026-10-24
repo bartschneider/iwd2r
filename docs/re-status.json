@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-24",
+  "ghidra": {
+    "functions": 11728,
+    "bytes": 3953190,
+    "excluded": {
+      "seh_funclets": 19632,
+      "thunks": 7
+    }
+  },
+  "recovered": {
+    "functions": 5679,
+    "bytes": 3006059
+  },
+  "verified": {
+    "functions": 313,
+    "bytes": 452894,
+    "by_kind": {
+      "oracle": 171,
+      "replay": 141,
+      "trace": 1
+    }
+  },
+  "scenarios": [
+    "chargen_replay",
+    "first_fight",
+    "replay_click",
+    "walk_and_talk",
+    "world_entry"
+  ]
+}
