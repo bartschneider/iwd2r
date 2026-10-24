@@ -1773,6 +1773,7 @@ def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
     if info is not None:
         info['typed_from'] = dict(table.get('typed_from', {}))
         info['typed_slots'] = {k: list(v) for k, v in table.get('typed_slots', {}).items()}
+        info['skipped'] = dict(table.get('skipped', {}))
     traces = run_frida(batch_id, table, list(scenarios)) if table['original']['hooks'] else {}
     return frida_verdicts(traces, rows, table['skipped'], info=info)
 
