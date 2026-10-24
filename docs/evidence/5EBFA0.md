@@ -8,6 +8,23 @@ ghidra_version: 12.1.4
 
 # 0x5EBFA0 CUIControlButtonCharacter5EBC60::OnLButtonClick
 
+## WSO delta
+
+corroborated by WSO at ee42010d: fork body is a rename-level refactor of ours (HasSpecialistSpell for sub_618D10 at 0x618d10, field_676/field_1776 for our m_spellResRef/m_nSpellLevel at 0x676/0x1776, m_derivedStats for GetDerivedStats(), early return for our rc == SUCCESS block, 0/0 literals for the zero out-refs) with no behavioral delta; case dump-5EBFA0 decides.
+
+Details: exe GetDeny(GetCharacterId(GetSelectedCharacter()) with inline bounds check) on
+SUCCESS: reads 0x7b6 (m_nExtraMageSpells), 0x106 (m_nClass), 0x1776 (m_nSpellLevel) and the
+button resref at 0x676; CSpell SetResRef/Demand/GetDescription (result dropped - ours NOTE);
+universalist check GetSpecialization & 0x4000 else IsSpellSchool(GetSchool()) or
+sub_618D10(nSpellLevel, pSprite); bard/sorcerer (class 2/10) GetMaxKnownSpells(class,
+m_startTypeAI, derivedStats, specialization 0x80c, nSpellLevel, &bonus) + bonus;
+GetSpellcasterIndex; Find assert 0x3327; deselect: SetSelected(FALSE), 0x7b6 = old + 1,
+Remove(nID, nLevel, 1, 0, 0) with exe asserts 0x6cd/0xa0c - ours keeps those asserts (our
+line-1741 asserts), the fork dropped them; select: nExtra > 0 && pRes && CheckUsableBy ==
+TRUE, SetSelected(TRUE), 0x7b6 = old - 1, Add(nID, nLevel, nMax, 0, 0); tail UpdateHelp
+(m_pPanel->m_nID, 30 = 0x1e, GetDescription()), UpdatePopupPanel, ReleaseDeny, resref
+cleanup folded into CSpell dtor in both trees. Our body kept. No code change.
+
 ## Decompiled (Ghidra)
 
 ```c
