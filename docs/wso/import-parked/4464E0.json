@@ -1,0 +1,1 @@
+{"address": "0x4464E0", "name": "CDerivedStats::operator+=", "file": "src/CDerivedStats.cpp", "batch": "i009", "needs": "world_entry: not measured (no Frida hook: no entry for CDerivedStats::operator+= in our map); ours reading matches the decompile"}

@@ -1151,7 +1151,7 @@ void CInfGame::sub_59FA00(BOOL a1)
             }
 
             while (g_pChitin->m_bDisplayStale == TRUE
-                || (g_pChitin->m_bDisplayStale == TRUE && a1)) {
+                || (g_pChitin->m_bInSynchronousUpdate == TRUE && a1)) {
                 SleepEx(5, FALSE);
             }
 
@@ -3887,17 +3887,17 @@ void CInfGame::LoadOptions()
         5,
         g_pBaldurChitin->GetIniFileName());
 
-    if (m_cOptions.m_nGuiFeedbackLevel != 0 || m_cOptions.m_nGuiFeedbackLevel > 5) {
+    if (m_cOptions.m_nGuiFeedbackLevel == 0 || m_cOptions.m_nGuiFeedbackLevel > 5) {
         m_cOptions.m_nGuiFeedbackLevel = 5;
     }
 
     m_cOptions.m_nLocatorFeedbackLevel = GetPrivateProfileIntA("Game Options",
         "Locator Feedback Level",
-        5,
+        3,
         g_pBaldurChitin->GetIniFileName());
 
-    if (m_cOptions.m_nLocatorFeedbackLevel != 0 || m_cOptions.m_nLocatorFeedbackLevel > 5) {
-        m_cOptions.m_nLocatorFeedbackLevel = 5;
+    if (m_cOptions.m_nLocatorFeedbackLevel == 0 || m_cOptions.m_nLocatorFeedbackLevel > 5) {
+        m_cOptions.m_nLocatorFeedbackLevel = 3;
     }
 
     m_cOptions.m_nBoredTime = GetPrivateProfileIntA("Game Options",
