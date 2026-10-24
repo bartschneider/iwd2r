@@ -22,10 +22,17 @@
     }
   },
   "scenarios": [
+    "action_bar",
+    "biography",
     "chargen_replay",
+    "equip_shots",
     "first_fight",
+    "inventory",
+    "level_up",
     "replay_click",
+    "save_load_screens",
     "walk_and_talk",
-    "world_entry"
+    "world_entry",
+    "world_map"
   ]
 }
