@@ -1,182 +1,202 @@
 [
-  {
-    "address": "0x478490",
-    "at": "2026-10-23T16:20:20+00:00",
-    "batch": "b013",
-    "file": "src/CGameArea.cpp",
-    "name": "CGameArea::SetDawn",
-    "reading": "fork",
-    "reason": "<exe sign-extends GetSong(0) via movsx so nSong is char, ours declares BYTE; a dump reading cannot decide a fork row>",
-    "source": "worker"
-  },
-  {
-    "address": "0x6EEBA0",
-    "at": "2026-10-23T16:20:20+00:00",
-    "batch": "b013",
-    "file": "src/CGameAnimationTypeMonsterIcewindNew.cpp",
-    "name": "CGameAnimationTypeMonsterIcewindNew::Render",
-    "reading": "fork",
-    "reason": "<exe ORs 0x2 only when transparency != 0 and pushes the same dwRenderFlags to both FXRender calls \u2014 his plain flag arguments look right; a dump reading cannot decide a fork row>",
-    "source": "worker"
-  },
-  {
-    "address": "0x4258D0",
-    "at": "2026-10-23T19:47:36+00:00",
-    "batch": "b014",
-    "file": "src/CBaldurChitin.cpp",
-    "name": "CBaldurChitin::OnMultiplayerSessionOpen",
-    "reading": "fork",
-    "reason": "the exe's third chat clear (+0x1C90 \u2192 FUN_0064d690) is missing from our body; deciding it needs a multiplayer-session trace and dump evidence cannot carry a fork (rule 1)",
-    "source": "worker"
-  },
-  {
-    "address": "0x602170",
-    "at": "2026-10-23T19:47:36+00:00",
-    "batch": "b014",
-    "file": "src/CScreenConnection.cpp",
-    "name": "CScreenConnection::OnLobbyNewGameButtonClick",
-    "reading": "fork",
-    "reason": "the exe's else branch (non-NULL provider: (+0x1C90)+0x45C = 1, FUN_0064ddb0, SelectEngine) is missing from our body; deciding it needs a lobby-flow trace and dump evidence cannot carry a fork (rule 1)",
-    "source": "worker"
-  },
-  {
-    "address": "0x601AE0",
-    "at": "2026-10-23T21:25:03+00:00",
-    "batch": "b018",
-    "file": "src/CScreenConnection.cpp",
-    "name": "CScreenConnection::AutoStartDirectPlayLobby",
-    "reading": "fork",
-    "reason": "our body lacks the exe's post-NewGame tail (m_nLobbyMode=1, StartMultiPlayer(1), SelectEngine) but the fork's tail needs the unported CScreenMultiPlayer engine and CBaldurChitin+0x1C90, outside this batch's owned files, and no probe/replay/trace case exists for a DirectPlay-lobby startup",
-    "source": "worker"
-  },
-  {
-    "address": "0x4781B0",
-    "at": "2026-10-23T23:14:04+00:00",
-    "batch": "b020",
-    "file": "src/CGameArea.cpp",
-    "name": "CGameArea::SetNight",
-    "reading": "fork",
-    "reason": "exe's play block sits after the GetMemoryAmount if/else join and plays in both branches while ours drops the != 1 extended-ambient branch (m_nightAmbientExtended) and gates play inside == 1 \u2014 the fork matches vanilla, but no probe/replay/trace case can run (the original's CSound::Play reaches DirectSound so no honest oracle fixture exists; no fork recovery note at e8dd16a mentions 0x4781B0/SetNight \u2014 only source-file hits, which trace_source form 1 excludes; the frida-line form is driver-only)",
-    "source": "worker"
-  },
-  {
-    "address": "0x477EE0",
-    "at": "2026-10-23T23:14:04+00:00",
-    "batch": "b020",
-    "file": "src/CGameArea.cpp",
-    "name": "CGameArea::SetDay",
-    "reading": "fork",
-    "reason": "same as 0x4781B0 mirrored for day (ours drops the m_dayAmbientExtended branch and gates play inside == 1 where the exe plays after the join in both branches) with the same threefold absence of a runnable case",
-    "source": "worker"
-  },
-  {
-    "address": "0x7C8990",
-    "at": "2026-10-23T23:48:40+00:00",
-    "batch": "b016",
-    "file": "src/CChitin3d.cpp",
-    "name": "CChitin::Init3d",
-    "reading": "fork",
-    "reason": "his body matches the exe's GLSetup ini branch and MessageBoxA failure path, but adopting it verbatim requires porting his GLSetupSelectDriver subsystem (0x7b7d40 + 0x7bb5d0 + driver tables + ~20 statics), which no b016 row covers \u2014 our body kept",
-    "source": "worker"
-  },
-  {
-    "address": "0x5D79B0",
-    "at": "2026-10-23T23:59:51+00:00",
-    "batch": "b016",
-    "file": "src/CScreenCharacter.cpp",
-    "name": "CScreenCharacter::UpdateSavingThrows",
-    "reading": "fork",
-    "reason": "<exe shows the Traps value as reflex + trap-sense (lea edx,[ecx+ebx] at 0x5d7aa6), ours passes the bare bonus; no scenario reaches the character record, a reading cannot decide a fork row; trace it when a character-record scenario exists>",
-    "source": "coordinator"
-  },
-  {
-    "address": "0x4C08E0",
-    "at": "2026-10-24T05:28:22+00:00",
-    "batch": "b019",
-    "file": "src/CGameEffectList.cpp",
-    "name": "CGameEffectList::RemoveAllOfType",
-    "reading": "neither",
-    "reason": "the exe's second filter compares the argument against +0x1C (m_dwFlags in our layout; cmp [esi+0x1c],eax at 0x4C0941) where ours reads m_effectAmount, but WSO's node handling deviates on reachable paths (unconditional posLeave skip, per-removal fixups vs the exe's stale-ECX RemoveAt at 0x4C0946 and single m_posNext write at 0x4C097C), and the deciding effect-object probe (two-effect list, posLeave mid-list, m_effectAmount != m_dwFlags) exists in no case, replay or probe-list entry; ours kept per rule 13",
-    "source": "worker"
-  },
-  {
-    "address": "0x78A280",
-    "at": "2026-10-24T05:28:22+00:00",
-    "batch": "b019",
-    "file": "src/CResFile.cpp",
-    "name": "CResFile::GetFileSize",
-    "reading": "neither",
-    "reason": "the only WSO delta is the unintegratable m_pFileBuffer rename and both bodies share the exe-divergent field_20+2 fallback, which no capture reaches (every captured resID takes the low-index walk, no return values recorded); no probe, replay or trace case decides either side, ours kept per rule 13",
-    "source": "worker"
-  },
-  {
-    "address": "0x4022E0",
-    "at": "2026-10-24T05:28:22+00:00",
-    "batch": "b019",
-    "file": "src/CResCHR.cpp",
-    "name": "CResCHR::Parse",
-    "reading": "neither",
-    "reason": "his Parse is behaviorally identical to ours (memcmp(\"CHR \") vs the 0x20524843 compare) and both deviate from the exe in the same two corners \u2014 a NULL buffer returns FALSE where it returns m_bParsed, and the V2.2-mismatch path falls through to m_bParsed = TRUE where the exe destroys the temporaries and returns 0 \u2014 and no campaign checkpoint loads a malformed or wrong-version CHR, so no probe case exists; ours kept per rule 13",
-    "source": "worker"
-  },
-  {
-    "address": "0x42CDA0",
-    "at": "2026-10-24T07:27:21+00:00",
-    "batch": "b027",
-    "file": "src/CMessage.cpp",
-    "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
-    "reading": "fork",
-    "reason": "\u2014 exe's lock-status handler jumps to the multiplayer lobby (m_pEngineMultiPlayer StartMultiPlayer/SelectEngine, m_nLobbyMode=1, second engine-gated re-entry) where ours only sets the temp cursor; the lobby behavior is real multiplayer-path work, and adopting fork's body is a behavior change beyond a rename",
-    "source": "worker"
-  },
-  {
-    "address": "0x5007F0",
-    "at": "2026-10-24T07:27:21+00:00",
-    "batch": "b027",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageFireProjectile::Run",
-    "reading": "fork",
-    "reason": "\u2014 exe's Run fires the projectile sound and updates projectile state per the bundle decompile where ours stops short; needs the ADR-0002 single-player call on whether fire-projectile feedback belongs in this build before adopting",
-    "source": "worker"
-  },
-  {
-    "address": "0x4F7620",
-    "at": "2026-10-24T07:27:21+00:00",
-    "batch": "b027",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageHandler::Broadcast",
-    "reading": "fork",
-    "reason": "\u2014 exe marshals the message and SendSpecificMessage's it (SEND_GUARANTEED|SEND_ALL_PLAYERS, flags 0x300) under a session-open gate where ours omits the send per ADR 0002; fork's body names m_bLocalControl (+0x6B, our field_6B), which our tree lacks, so it cannot be adopted as-is",
-    "source": "worker"
-  },
-  {
-    "address": "0x5E56F0",
-    "at": "2026-10-24T10:55:27+00:00",
-    "batch": "b030",
-    "file": "src/CScreenCharacter.cpp",
-    "name": "CScreenCharacter::LevelUp",
-    "reading": "fork",
-    "reason": "the exe reads spell entry field_8 into the greater-rage button count and disabled gate (0x5e5fad-0x5e5fc5) where ours reads field_C; dump-5E56F0 decides only ours, no probe or replay case exists, and adoption needs src/CGameSprite.h renames that are not mine to edit",
-    "source": "worker"
-  },
-  {
-    "address": "0x5C1350",
-    "at": "2026-10-24T10:55:27+00:00",
-    "batch": "b030",
-    "file": "src/CInfGame.cpp",
-    "name": "CInfGame::RestPartyPrivate",
-    "reading": "fork",
-    "reason": "exe gates rest on CGameArea::CheckRestEncounter (0x46FEA0), which ours never calls (TODO at src/CInfGame.cpp:9006); no probe, replay or trace case can decide it, 0x46FEA0 is unported, and src/CGameArea.cpp is not mine to edit",
-    "source": "worker"
-  },
-  {
-    "address": "0x5C1E30",
-    "at": "2026-10-24T10:55:27+00:00",
-    "batch": "b030",
-    "file": "src/CInfGame.cpp",
-    "name": "CInfGame::CanRestParty",
-    "reading": "fork",
-    "reason": "the fork body ports CGameObjectArray 0x5C9300 (rest blocked while any sprite holds spell states 46/47) where ours leaves a TODO (src/CInfGame.cpp:9273); no probe, replay or trace case can decide it, 0x5C9300 is unported, and src/CGameObjectArray.h is not mine to edit",
-    "source": "worker"
-  }
+ {
+  "address": "0x478490",
+  "at": "2026-10-23T16:20:20+00:00",
+  "batch": "b013",
+  "file": "src/CGameArea.cpp",
+  "name": "CGameArea::SetDawn",
+  "reading": "fork",
+  "reason": "<exe sign-extends GetSong(0) via movsx so nSong is char, ours declares BYTE; a dump reading cannot decide a fork row>",
+  "source": "worker"
+ },
+ {
+  "address": "0x6EEBA0",
+  "at": "2026-10-23T16:20:20+00:00",
+  "batch": "b013",
+  "file": "src/CGameAnimationTypeMonsterIcewindNew.cpp",
+  "name": "CGameAnimationTypeMonsterIcewindNew::Render",
+  "reading": "fork",
+  "reason": "<exe ORs 0x2 only when transparency != 0 and pushes the same dwRenderFlags to both FXRender calls \u2014 his plain flag arguments look right; a dump reading cannot decide a fork row>",
+  "source": "worker"
+ },
+ {
+  "address": "0x4258D0",
+  "at": "2026-10-23T19:47:36+00:00",
+  "batch": "b014",
+  "file": "src/CBaldurChitin.cpp",
+  "name": "CBaldurChitin::OnMultiplayerSessionOpen",
+  "reading": "fork",
+  "reason": "the exe's third chat clear (+0x1C90 \u2192 FUN_0064d690) is missing from our body; deciding it needs a multiplayer-session trace and dump evidence cannot carry a fork (rule 1)",
+  "source": "worker"
+ },
+ {
+  "address": "0x602170",
+  "at": "2026-10-23T19:47:36+00:00",
+  "batch": "b014",
+  "file": "src/CScreenConnection.cpp",
+  "name": "CScreenConnection::OnLobbyNewGameButtonClick",
+  "reading": "fork",
+  "reason": "the exe's else branch (non-NULL provider: (+0x1C90)+0x45C = 1, FUN_0064ddb0, SelectEngine) is missing from our body; deciding it needs a lobby-flow trace and dump evidence cannot carry a fork (rule 1)",
+  "source": "worker"
+ },
+ {
+  "address": "0x601AE0",
+  "at": "2026-10-23T21:25:03+00:00",
+  "batch": "b018",
+  "file": "src/CScreenConnection.cpp",
+  "name": "CScreenConnection::AutoStartDirectPlayLobby",
+  "reading": "fork",
+  "reason": "our body lacks the exe's post-NewGame tail (m_nLobbyMode=1, StartMultiPlayer(1), SelectEngine) but the fork's tail needs the unported CScreenMultiPlayer engine and CBaldurChitin+0x1C90, outside this batch's owned files, and no probe/replay/trace case exists for a DirectPlay-lobby startup",
+  "source": "worker"
+ },
+ {
+  "address": "0x4781B0",
+  "at": "2026-10-23T23:14:04+00:00",
+  "batch": "b020",
+  "file": "src/CGameArea.cpp",
+  "name": "CGameArea::SetNight",
+  "reading": "fork",
+  "reason": "exe's play block sits after the GetMemoryAmount if/else join and plays in both branches while ours drops the != 1 extended-ambient branch (m_nightAmbientExtended) and gates play inside == 1 \u2014 the fork matches vanilla, but no probe/replay/trace case can run (the original's CSound::Play reaches DirectSound so no honest oracle fixture exists; no fork recovery note at e8dd16a mentions 0x4781B0/SetNight \u2014 only source-file hits, which trace_source form 1 excludes; the frida-line form is driver-only)",
+  "source": "worker"
+ },
+ {
+  "address": "0x477EE0",
+  "at": "2026-10-23T23:14:04+00:00",
+  "batch": "b020",
+  "file": "src/CGameArea.cpp",
+  "name": "CGameArea::SetDay",
+  "reading": "fork",
+  "reason": "same as 0x4781B0 mirrored for day (ours drops the m_dayAmbientExtended branch and gates play inside == 1 where the exe plays after the join in both branches) with the same threefold absence of a runnable case",
+  "source": "worker"
+ },
+ {
+  "address": "0x7C8990",
+  "at": "2026-10-23T23:48:40+00:00",
+  "batch": "b016",
+  "file": "src/CChitin3d.cpp",
+  "name": "CChitin::Init3d",
+  "reading": "fork",
+  "reason": "his body matches the exe's GLSetup ini branch and MessageBoxA failure path, but adopting it verbatim requires porting his GLSetupSelectDriver subsystem (0x7b7d40 + 0x7bb5d0 + driver tables + ~20 statics), which no b016 row covers \u2014 our body kept",
+  "source": "worker"
+ },
+ {
+  "address": "0x5D79B0",
+  "at": "2026-10-23T23:59:51+00:00",
+  "batch": "b016",
+  "file": "src/CScreenCharacter.cpp",
+  "name": "CScreenCharacter::UpdateSavingThrows",
+  "reading": "fork",
+  "reason": "<exe shows the Traps value as reflex + trap-sense (lea edx,[ecx+ebx] at 0x5d7aa6), ours passes the bare bonus; no scenario reaches the character record, a reading cannot decide a fork row; trace it when a character-record scenario exists>",
+  "source": "coordinator"
+ },
+ {
+  "address": "0x4C08E0",
+  "at": "2026-10-24T05:28:22+00:00",
+  "batch": "b019",
+  "file": "src/CGameEffectList.cpp",
+  "name": "CGameEffectList::RemoveAllOfType",
+  "reading": "neither",
+  "reason": "the exe's second filter compares the argument against +0x1C (m_dwFlags in our layout; cmp [esi+0x1c],eax at 0x4C0941) where ours reads m_effectAmount, but WSO's node handling deviates on reachable paths (unconditional posLeave skip, per-removal fixups vs the exe's stale-ECX RemoveAt at 0x4C0946 and single m_posNext write at 0x4C097C), and the deciding effect-object probe (two-effect list, posLeave mid-list, m_effectAmount != m_dwFlags) exists in no case, replay or probe-list entry; ours kept per rule 13",
+  "source": "worker"
+ },
+ {
+  "address": "0x78A280",
+  "at": "2026-10-24T05:28:22+00:00",
+  "batch": "b019",
+  "file": "src/CResFile.cpp",
+  "name": "CResFile::GetFileSize",
+  "reading": "neither",
+  "reason": "the only WSO delta is the unintegratable m_pFileBuffer rename and both bodies share the exe-divergent field_20+2 fallback, which no capture reaches (every captured resID takes the low-index walk, no return values recorded); no probe, replay or trace case decides either side, ours kept per rule 13",
+  "source": "worker"
+ },
+ {
+  "address": "0x4022E0",
+  "at": "2026-10-24T05:28:22+00:00",
+  "batch": "b019",
+  "file": "src/CResCHR.cpp",
+  "name": "CResCHR::Parse",
+  "reading": "neither",
+  "reason": "his Parse is behaviorally identical to ours (memcmp(\"CHR \") vs the 0x20524843 compare) and both deviate from the exe in the same two corners \u2014 a NULL buffer returns FALSE where it returns m_bParsed, and the V2.2-mismatch path falls through to m_bParsed = TRUE where the exe destroys the temporaries and returns 0 \u2014 and no campaign checkpoint loads a malformed or wrong-version CHR, so no probe case exists; ours kept per rule 13",
+  "source": "worker"
+ },
+ {
+  "address": "0x42CDA0",
+  "at": "2026-10-24T07:27:21+00:00",
+  "batch": "b027",
+  "file": "src/CMessage.cpp",
+  "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
+  "reading": "fork",
+  "reason": "\u2014 exe's lock-status handler jumps to the multiplayer lobby (m_pEngineMultiPlayer StartMultiPlayer/SelectEngine, m_nLobbyMode=1, second engine-gated re-entry) where ours only sets the temp cursor; the lobby behavior is real multiplayer-path work, and adopting fork's body is a behavior change beyond a rename",
+  "source": "worker"
+ },
+ {
+  "address": "0x5007F0",
+  "at": "2026-10-24T07:27:21+00:00",
+  "batch": "b027",
+  "file": "src/CMessage.cpp",
+  "name": "CMessageFireProjectile::Run",
+  "reading": "fork",
+  "reason": "\u2014 exe's Run fires the projectile sound and updates projectile state per the bundle decompile where ours stops short; needs the ADR-0002 single-player call on whether fire-projectile feedback belongs in this build before adopting",
+  "source": "worker"
+ },
+ {
+  "address": "0x4F7620",
+  "at": "2026-10-24T07:27:21+00:00",
+  "batch": "b027",
+  "file": "src/CMessage.cpp",
+  "name": "CMessageHandler::Broadcast",
+  "reading": "fork",
+  "reason": "\u2014 exe marshals the message and SendSpecificMessage's it (SEND_GUARANTEED|SEND_ALL_PLAYERS, flags 0x300) under a session-open gate where ours omits the send per ADR 0002; fork's body names m_bLocalControl (+0x6B, our field_6B), which our tree lacks, so it cannot be adopted as-is",
+  "source": "worker"
+ },
+ {
+  "address": "0x5E56F0",
+  "at": "2026-10-24T10:55:27+00:00",
+  "batch": "b030",
+  "file": "src/CScreenCharacter.cpp",
+  "name": "CScreenCharacter::LevelUp",
+  "reading": "fork",
+  "reason": "the exe reads spell entry field_8 into the greater-rage button count and disabled gate (0x5e5fad-0x5e5fc5) where ours reads field_C; dump-5E56F0 decides only ours, no probe or replay case exists, and adoption needs src/CGameSprite.h renames that are not mine to edit",
+  "source": "worker"
+ },
+ {
+  "address": "0x5C1350",
+  "at": "2026-10-24T10:55:27+00:00",
+  "batch": "b030",
+  "file": "src/CInfGame.cpp",
+  "name": "CInfGame::RestPartyPrivate",
+  "reading": "fork",
+  "reason": "exe gates rest on CGameArea::CheckRestEncounter (0x46FEA0), which ours never calls (TODO at src/CInfGame.cpp:9006); no probe, replay or trace case can decide it, 0x46FEA0 is unported, and src/CGameArea.cpp is not mine to edit",
+  "source": "worker"
+ },
+ {
+  "address": "0x5C1E30",
+  "at": "2026-10-24T10:55:27+00:00",
+  "batch": "b030",
+  "file": "src/CInfGame.cpp",
+  "name": "CInfGame::CanRestParty",
+  "reading": "fork",
+  "reason": "the fork body ports CGameObjectArray 0x5C9300 (rest blocked while any sprite holds spell states 46/47) where ours leaves a TODO (src/CInfGame.cpp:9273); no probe, replay or trace case can decide it, 0x5C9300 is unported, and src/CGameObjectArray.h is not mine to edit",
+  "source": "worker"
+ },
+ {
+  "address": "0x5DAF30",
+  "at": "2026-10-24T16:46:52+00:00",
+  "batch": "b033",
+  "file": "src/CScreenCharacter.cpp",
+  "name": "CScreenCharacter::UpdateInformationPanel",
+  "reading": "fork",
+  "reason": "the exe fetches strref 0x5DBE (23998) for the information panel where ours uses 24766 (0x60BE, a hex transposition); dump-5DAF30 decides only ours and no probe or replay case exists for info-panel labels, and the fork body needs header renames that are not mine to edit",
+  "source": "worker"
+ },
+ {
+  "address": "0x5E4E80",
+  "at": "2026-10-24T16:46:52+00:00",
+  "batch": "b033",
+  "file": "src/CScreenCharacter.cpp",
+  "name": "CScreenCharacter::CanLevelUp",
+  "reading": "fork",
+  "reason": "the exe gates CanLevelUp on the BOOL at this+0x7FA, which our own layout names m_bMultiPlayerViewable (src/CScreenCharacter.h:215), where ours reads m_bMultiPlayerModifyable (+0x7FE); the flags diverge when a viewed character is not Orderable (src/CScreenCharacter.cpp:7788), so ours dead-ends the Level Up button in restricted multiplayer; dump reading says fork but dump decides only ours and no probe, replay or trace case can exercise the restricted-permission multiplayer path",
+  "source": "worker"
+ }
 ]
