@@ -310,6 +310,96 @@
         }
       ],
       "verdicts": {}
+    },
+    "i003": {
+      "assigned_at": "2026-10-23T23:10:21+00:00",
+      "branch": "p3/wso-i003",
+      "closed_at": "2026-10-24T02:21:49+00:00",
+      "files": [
+        "src/CAIGroup.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CInfGame.cpp",
+        "src/CMessage.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x407280",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupProtectPoint",
+          "our_len": 2,
+          "their_len": 5488
+        },
+        {
+          "address": "0x407FC0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupDrawMove",
+          "our_len": 2,
+          "their_len": 4975
+        },
+        {
+          "address": "0x6957E0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::OnLButtonClick",
+          "our_len": 2,
+          "their_len": 4560
+        },
+        {
+          "address": "0x6913C0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartStore",
+          "our_len": 2,
+          "their_len": 4359
+        },
+        {
+          "address": "0x45F6D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::MoveCursor",
+          "our_len": 20,
+          "their_len": 1273
+        },
+        {
+          "address": "0x5A0160",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::sub_5A0160",
+          "our_len": 2,
+          "their_len": 1247
+        },
+        {
+          "address": "0x434EB0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::ChapterAnnounceStatus",
+          "our_len": 14,
+          "their_len": 734
+        },
+        {
+          "address": "0x723BF0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_723BF0",
+          "our_len": 2,
+          "their_len": 614
+        },
+        {
+          "address": "0x4F7490",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageHandler::~CMessageHandler",
+          "our_len": 2,
+          "their_len": 167
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
