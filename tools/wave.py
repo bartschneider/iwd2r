@@ -668,16 +668,16 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
         return 2, f'claims file {claims_path}: {e}\n'
 
     cats = tuple(q.get('categories', ())) if importing else (category,)
-    first_failure = None
+    last_failure = None
     for category in cats:
         eligible, no_addr, coverage_note, failure = _import_pool(
             rows, category, decided, owned, importing, disagreements_path,
             coverage_path, coverage_root, repo, include_uncovered)
         if eligible:
             break
-        first_failure = first_failure or failure
+        last_failure = failure      # the last category's message carries the hint that matters
     if not eligible:
-        return first_failure
+        return last_failure
     chosen = eligible[:size]
     pre = q['prefix']
     nid = 1 + max((int(m.group(1)) for bid in state['batches']
