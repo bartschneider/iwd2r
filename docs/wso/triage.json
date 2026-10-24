@@ -1073,12 +1073,11 @@
   },
   {
     "address": "0x5BFC40",
-    "auto_class": "fork-stub",
-    "class": "ambiguous",
+    "class": "fork-stub",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::GetProtagonist",
     "ours_ref": "82d75232",
-    "reason": "disabled by calibration"
+    "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
     "address": "0x4A7900",
@@ -1242,12 +1241,11 @@
   },
   {
     "address": "0x5E2210",
-    "auto_class": "fork-stub",
-    "class": "ambiguous",
+    "class": "fork-stub",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::OnDoneButtonClick",
     "ours_ref": "82d75232",
-    "reason": "disabled by calibration"
+    "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
     "address": "0x5D6C60",
@@ -1259,12 +1257,11 @@
   },
   {
     "address": "0x5E3B80",
-    "auto_class": "fork-stub",
-    "class": "ambiguous",
+    "class": "fork-stub",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::OnCancelButtonClick",
     "ours_ref": "82d75232",
-    "reason": "disabled by calibration"
+    "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
     "address": "0x5F8C90",
@@ -2108,12 +2105,11 @@
   },
   {
     "address": "0x443B30",
-    "auto_class": "fork-stub",
-    "class": "ambiguous",
+    "class": "fork-stub",
     "file": "src/CDerivedStats.cpp",
     "name": "CDerivedStats::CDerivedStats",
     "ours_ref": "82d75232",
-    "reason": "disabled by calibration"
+    "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
     "address": "0x448250",
@@ -2333,12 +2329,11 @@
   },
   {
     "address": "0x4824F0",
-    "auto_class": "fork-stub",
-    "class": "ambiguous",
+    "class": "fork-stub",
     "file": "src/CGameDialog.cpp",
     "name": "CGameDialogSprite::Reload",
     "ours_ref": "82d75232",
-    "reason": "disabled by calibration"
+    "reason": "their body is under a quarter of ours and calls nothing new"
   },
   {
     "address": "0x482210",
