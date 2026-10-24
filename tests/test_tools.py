@@ -10861,6 +10861,117 @@ class DriverTest(unittest.TestCase):
                 self.assertIn('- frida different, kept fork: 0x402000 differs in world_entry',
                               self._ledger(d))
 
+    # -- Task 20 part A: wave-1 equal rows get trace evidence --------------
+
+    def _wave_frida_driver(self, report, ours_ret=3, dumps=True, kind='read-only', stem='402000',
+                           worker=None):
+        """A measured driver whose 0x402000 evidence is `kind` and whose Frida run
+        returns file-backed traces (dumps match unless `dumps` is False)."""
+        trace = TruthTest._trace
+        files = os.path.join(tempfile.mkdtemp(), 'traces')
+        self.addCleanup(shutil.rmtree, os.path.dirname(files), True)
+        os.makedirs(files)
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            out = {}
+            for sc in scenarios:
+                orig, ours = trace(('fn_402000', 7, 3)), trace(('fn_402000', 7, ours_ret))
+                paths = {}
+                for side, ev in (('orig', orig), ('ours', ours)):
+                    paths[side] = os.path.join(files, '%s-%s.jsonl' % (sc, side))
+                    with open(paths[side], 'w') as f:
+                        f.write(''.join(json.dumps(e) + '\n' for e in ev))
+                out[sc] = {'orig': orig, 'ours': ours, 'orig_path': paths['orig'],
+                           'ours_path': paths['ours'], 'failed': None,
+                           'dumps': {'match': dumps, 'detail': 'fixture'}}
+            return out
+        d = self._measured_driver(worker=worker or _SeqWorker(report), frida=True,
+                                  frida_build=self._frida_builder()[0], frida_run=frida_run,
+                                  oracle_run=lambda *a: {})
+        path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(re.sub(r'^kind: \S+$', 'kind: %s' % kind, text, count=1, flags=re.M))
+        if self.git('status', '--porcelain', cwd=self.wt).stdout.strip():
+            self.git('commit', '-qam', 'evidence kind', cwd=self.wt)
+        return d
+
+    WAVE_REPORT = ('# r\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                   'verdict 0x402000 %s case %s\n')
+
+    def _wave_fields(self, stem='402000'):
+        with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md')) as f:
+            text = f.read()
+        return load_tool('check_evidence').front_matter(text), text
+
+    def test_driver_frida_equal_ours_read_only_row_gets_trace_evidence(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'))
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip()
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        fields, text = self._wave_fields()
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
+        self.assertNotIn('exemption', fields)
+        self.assertIn('corroborated by WSO at e8dd16a7; case dump-402000 decides', text)
+        self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
+        subjects = self.git('log', '--format=%s', before + '..HEAD', cwd=self.wt).stdout.splitlines()
+        self.assertIn('frida: trace evidence for 1 row(s) measured equal (world_entry)', subjects)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        self.assertEqual(d._frida_lines('b011'), {'402000': fields['trace_source']})
+
+    def test_driver_frida_equal_row_with_oracle_evidence_is_untouched(self):
+        for kind in ('oracle', 'replay'):
+            d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'), kind=kind)
+            before = _slurp(os.path.join(self.wt, 'docs', 'evidence', '402000.md'))
+            self.assertEqual(d.run_batch('b011'), 'closed')
+            self.assertEqual(_slurp(os.path.join(self.wt, 'docs', 'evidence', '402000.md')), before)
+            self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
+
+    def test_driver_frida_different_row_keeps_its_evidence(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'), ours_ret=4)
+        d.run_batch('b011')
+        fields, _ = self._wave_fields()
+        self.assertEqual(fields['kind'], 'read-only')
+        self.assertNotIn('measured', self._state()['verdicts']['0x402000'])
+
+    def test_driver_frida_equal_row_with_dumps_mismatch_keeps_its_evidence(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'), dumps=False)
+        d.run_batch('b011')
+        fields, _ = self._wave_fields()
+        self.assertEqual(fields['kind'], 'read-only')
+        # frida_verdicts already refuses an equal on a dumps mismatch; the guard
+        # of the writer itself is exercised directly
+        orig, ours, dumps, bad = driver.Driver._trace_pair({'s': {
+            'orig_path': 'x', 'ours_path': 'y', 'dumps': {'match': False, 'detail': 'd'}}}, 's')
+        self.assertEqual(bad, 'dumps')
+        self.assertFalse(d._wave_trace_evidence('b011', self.wt, {'address': '0x402000'}, 's', {'s': {
+            'orig_path': 'x', 'ours_path': 'y', 'dumps': {'match': False, 'detail': 'd'}}}))
+        self.assertIn('state dumps not shown to match: d', '\n'.join(self.logs))
+        self.assertEqual(self._wave_fields()[0]['kind'], 'read-only')
+
+    def test_driver_frida_equal_fork_row_with_the_adopted_body_gets_trace_evidence(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('fork', 'probe-12'))
+        self.assertEqual(d.run_batch('b011'), 'closed', self._status(d)['exceptions'])
+        fields, text = self._wave_fields()
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('case probe-12 decides', text)
+        self.assertEqual(self._state()['verdicts']['0x402000']['side'], 'fork')
+
+    def test_driver_frida_driver_written_line_passes_the_second_check(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'))
+        d.run_batch('b011')
+        fields, _ = self._wave_fields()
+        ok = lambda argv, **kw: (subprocess.run(argv, **kw) if argv[0] == 'git'
+                                 else subprocess.CompletedProcess(argv, 0, '', ''))
+        batch = {'id': 'b011', 'branch': 'p3/wso-b011', 'rows': [{'address': '0x402000'}]}
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
+            mine = [p for p in driver.mechanical_checks(
+                batch, self.wt, {}, run=ok, frida_lines=d._frida_lines('b011')) if 'frida' in p]
+            foreign = driver._foreign_frida_lines(self.wt, ['docs/evidence/402000.md'], {})
+        self.assertEqual(mine, [])
+        self.assertEqual(len(foreign), 1)
+
     def test_driver_frida_phase_types_tables_from_the_batch_worktrees_headers(self):
         trace = TruthTest._trace
         got = []
@@ -12631,9 +12742,13 @@ class DriverTest(unittest.TestCase):
             # the line the driver's own phase wrote is not a problem
             self.assertEqual(driver.mechanical_checks(batch, self.wt, {}, run=run, kind='import',
                                                       frida_lines={'401000': line}), [])
-            # nor is one on a wave-1 batch's file (the import rule only)
+            # a wave-1 batch's file is held to the same rule (Task 20): the driver's
+            # own line passes, a worker's does not
+            self.assertEqual(len([p for p in driver.mechanical_checks(
+                dict(batch, rows=[]), self.wt, {}, run=run) if 'frida' in p]), 1)
             self.assertEqual([p for p in driver.mechanical_checks(
-                dict(batch, rows=[]), self.wt, {}, run=run) if 'frida' in p], [])
+                dict(batch, rows=[]), self.wt, {}, run=run,
+                frida_lines={'401000': line}) if 'frida' in p], [])
 
     def test_driver_frida_phase_different_read_only_row_is_parked(self):
         trace = TruthTest._trace
@@ -18370,6 +18485,23 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.commit_worktree('wrap')
         rc, out = self.close()
         self.assertEqual(rc, 0, out)
+
+    def test_close_accepts_a_wave_one_row_whose_evidence_became_frida_trace(self):
+        # Task 20: the wave-1 Frida phase rewrote an equal row's front matter to
+        # kind: trace; the WSO delta sentence is untouched, so close accepts it
+        self.ready(render=('ours', 'dump-1'))
+        frida = ('frida b001-world_entry orig:' + 'a' * 64 + ' ours:' + 'b' * 64 + ' compare=0')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CC0.md'),
+               '---\naddress: 0x643CC0\nname: fn-643CC0\nkind: trace\ntrace_source: %s\n---\n\n'
+               '## WSO delta\n\ndisagreed with WSO at e8dd16a: the guard differs; '
+               'case dump-1 decides.\n' % frida)
+        self.commit_worktree('frida: trace evidence for 1 row(s) measured equal (world_entry)')
+        rc, out = self.close()
+        self.assertEqual(rc, 0, out)
+        ce = load_tool('check_evidence')
+        text = _slurp(os.path.join(self.wt, 'docs', 'evidence', '643CC0.md'))
+        self.assertEqual(ce.front_matter(text)['kind'], 'trace')
+        self.assertTrue(ce.TRACE_SOURCES[1].fullmatch(ce.front_matter(text)['trace_source']))
 
     def test_close_dump_decided_ours_verdict_passes(self):
         self.ready(render=('ours', 'dump-1'))

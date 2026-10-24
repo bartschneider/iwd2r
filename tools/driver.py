@@ -1302,8 +1302,8 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                               str.strip)
     if bad:
         problems.append(bad)
+    problems += _foreign_frida_lines(worktree, changed, frida_lines or {})
     if kind == 'import':
-        problems += _foreign_frida_lines(worktree, changed, frida_lines or {})
         problems += _kept_and_parked_problems(batch, worktree, base, kept, key, changed)
     outside = sorted(p for p in changed if not _path_allowed(p))
     if outside:
@@ -2375,8 +2375,8 @@ class Driver:
             kw = {'kind': 'import'} if self.kind == 'import' else {}
             kw['probe'] = sorted(self._probe)
             kw['undecided'] = sorted(listed)
+            kw['frida_lines'] = self._frida_lines(batch_id)
             if self.kind == 'import':
-                kw['frida_lines'] = self._frida_lines(batch_id)
                 kw['kept'] = sorted(self._kept)
             return verdicts, self.mechanical_checks(
                 dict(batch, id=batch_id), worktree, verdicts, **kw)
@@ -2861,7 +2861,7 @@ class Driver:
         key = _tool('wave')._addr_key
         truth = _tool('truth')
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
-        findings, written, kept_ok = [], [], []
+        findings, written, kept_ok, cites = [], [], [], []
         digests = {}
         for r in rows:
             k = key(r['address'])
@@ -2894,12 +2894,21 @@ class Driver:
             # adopted the fork's).  Equal confirms that side (measured frida,
             # _measured_for); different is a finding whatever the side.
             side = sides.get(k)
+            if side in ('ours', 'fork') and status == 'equal':
+                cite = (exact.get(k) or [None])[0] if 'exact' in info else (
+                    detail[len(truth.EQUAL_PREFIX):].split(', ')[0]
+                    if detail.startswith(truth.EQUAL_PREFIX) else None)
+                if self._wave_trace_evidence(batch_id, worktree, r, cite, traces):
+                    written.append(r['address'])
+                    cites.append(cite)
             if side and status == 'different':
                 findings.append('%s: the Frida trace diff shows the body on the branch (verdict %s) '
                                 'different from the original (%s); recheck it' % (
                                     r['address'], side, detail))
         if written:
-            self._commit_trace_evidence(batch_id, worktree, written)
+            self._commit_trace_evidence(batch_id, worktree, written, None if importing else (
+                'frida: trace evidence for %d row(s) measured equal (%s)' % (
+                    len(written), ', '.join(sorted(set(cites))))))
         if kept_ok or digests:
             self._record_kept(batch_id, kept_ok, digests)
         return findings
@@ -3214,16 +3223,53 @@ class Driver:
         return (getattr(self, '_frida_ran', None) or (
             list(_tool('truth').FRIDA_SCENARIOS), []))[0]
 
-    def _trace_evidence(self, batch_id, worktree, row, scenario, traces, mb, kept=False):
-        """Rewrite one equal import row's evidence to kind: trace, citing
-        `scenario`'s run (one whose compare returned 0); None, or the finding
-        that says why it could not be."""
-        wave = _tool('wave')
+    @staticmethod
+    def _trace_pair(traces, scenario):
+        """(orig path, ours path, dumps, why) of `scenario`'s run: why is
+        'dumps' when its two sides were not shown to keep the same state (the
+        dump guard), 'files' when a trace file is missing, else None."""
         t = traces.get(scenario)
         t = t if isinstance(t, dict) else {}
         orig, ours = t.get('orig_path'), t.get('ours_path')
         dumps = t.get('dumps')
         if not (isinstance(dumps, dict) and dumps.get('match') is True):
+            return orig, ours, dumps, 'dumps'
+        if not (orig and ours and os.path.isfile(orig) and os.path.isfile(ours)):
+            return orig, ours, dumps, 'files'
+        return orig, ours, dumps, None
+
+    def _wave_trace_evidence(self, batch_id, worktree, row, cite, traces):
+        """Wave 1: an equal row whose verdict confirms the body on the branch
+        and whose evidence is still kind: read-only is rewritten to kind:
+        trace (the import path's _write_trace_evidence, the same dump guard).
+        True when the file was rewritten; a refusal is logged, never a finding
+        (the verdict stands as measured frida either way)."""
+        wave = _tool('wave')
+        a = row['address']
+        if cite is None or self._evidence_kind(worktree, a) != 'read-only':
+            return False
+        orig, ours, dumps, bad = self._trace_pair(traces, cite)
+        if bad:
+            self.log('%s: frida %s equal in %s but no trace evidence written (%s)' % (
+                batch_id, a, cite, 'state dumps not shown to match: %s' % (
+                    (dumps or {}).get('detail') or 'not compared') if bad == 'dumps'
+                else 'trace files missing'))
+            return False
+        try:
+            _write_trace_evidence(os.path.join(worktree, wave._evidence_rel(a)),
+                                  '%s-%s' % (batch_id, cite), orig, ours)
+        except (OSError, ValueError) as e:
+            self.log('%s: frida %s: evidence not rewritten to kind: trace (%s)' % (batch_id, a, e))
+            return False
+        return True
+
+    def _trace_evidence(self, batch_id, worktree, row, scenario, traces, mb, kept=False):
+        """Rewrite one equal import row's evidence to kind: trace, citing
+        `scenario`'s run (one whose compare returned 0); None, or the finding
+        that says why it could not be."""
+        wave = _tool('wave')
+        orig, ours, dumps, bad = self._trace_pair(traces, scenario)
+        if bad == 'dumps':
             # The dump guard: trace evidence only from a run whose two sides
             # kept the same state (frida_run compares their dumps).
             return ('%s: measured equal in %s but that run\'s state dumps were not shown to '
@@ -3234,7 +3280,7 @@ class Driver:
                             scenario, 'dumps not shown to match') if kept
                             else 'not measured: dumps not shown to match in %s' % scenario,
                             edit_back=not kept, kept=kept)))
-        if not (orig and ours and os.path.isfile(orig) and os.path.isfile(ours)):
+        if bad == 'files':
             return ('%s: measured equal in %s but its trace files are missing; the phase does '
                     'not run again in this batch, so park it: %s' % (
                         row['address'], scenario, park_text(
@@ -3259,7 +3305,7 @@ class Driver:
         saved = (self._read_status()['batches'].get(batch_id) or {}).get('frida_written')
         return dict(saved) if isinstance(saved, dict) else {}
 
-    def _commit_trace_evidence(self, batch_id, worktree, addresses):
+    def _commit_trace_evidence(self, batch_id, worktree, addresses, message=None):
         wave = _tool('wave')
         ce = _tool('check_evidence')
         rels = [wave._evidence_rel(a) for a in addresses]
@@ -3279,7 +3325,7 @@ class Driver:
         if not git('status', '--porcelain', '--', *rels).stdout.strip():
             return
         git('add', '--', *rels)
-        r = git('commit', '-q', '-m', 'frida: trace evidence for %d rows of %s' % (
+        r = git('commit', '-q', '-m', message or 'frida: trace evidence for %d rows of %s' % (
             len(rels), batch_id), '--', *rels)
         if r.returncode != 0:
             self.log('%s: trace evidence not committed: %s' % (
