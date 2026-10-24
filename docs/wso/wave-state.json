@@ -7591,7 +7591,404 @@
           "side": "ours"
         }
       }
+    },
+    "b029": {
+      "assigned_at": "2026-10-24T08:51:56+00:00",
+      "branch": "p3/wso-b029",
+      "closed_at": "2026-10-24T09:13:46+00:00",
+      "files": [
+        "src/CMessage.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x504C80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSaveGame::UnmarshalMessage",
+          "our_len": 89,
+          "their_len": 147
+        },
+        {
+          "address": "0x5157F0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "measured_body": "6c56d09d6a1fe545918e083c4a6622be9b8853224d7203d4ad92145192666b67",
+          "name": "CMessageGroup::Run",
+          "our_len": 99,
+          "their_len": 105
+        },
+        {
+          "address": "0x4844C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessagePickedDialogResponse::GetMsgSubType",
+          "our_len": 68,
+          "their_len": 61
+        },
+        {
+          "address": "0x515400",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageGroup::GetMsgSubType",
+          "our_len": 51,
+          "their_len": 49
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x4844C0": {
+          "case": "dump-4844C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x504C80": {
+          "case": "dump-504C80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x515400": {
+          "case": "dump-515400",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5157F0": {
+          "case": "dump-5157F0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
+    },
+    "b030": {
+      "assigned_at": "2026-10-24T08:51:59+00:00",
+      "branch": "p3/wso-b030",
+      "closed_at": null,
+      "files": [
+        "src/CScreenCharacter.cpp",
+        "src/CAIGroup.cpp",
+        "src/CInfGame.cpp",
+        "src/CScreenInventory.cpp"
+      ],
+      "fork_base": "ee42010d790692f2aec12de8154f9d88b56efc8b",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5E56F0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::LevelUp",
+          "our_len": 9573,
+          "their_len": 7458
+        },
+        {
+          "address": "0x407FC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupDrawMove",
+          "our_len": 4463,
+          "their_len": 4975
+        },
+        {
+          "address": "0x5A1AB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CharacterExport",
+          "our_len": 3811,
+          "their_len": 3618
+        },
+        {
+          "address": "0x5C1350",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::RestPartyPrivate",
+          "our_len": 3522,
+          "their_len": 3737
+        },
+        {
+          "address": "0x5E0FD0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::CheckSummonPopup",
+          "our_len": 3732,
+          "their_len": 3319
+        },
+        {
+          "address": "0x62A4B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::IdentifyWithSpell",
+          "our_len": 3364,
+          "their_len": 3132
+        },
+        {
+          "address": "0x5DB200",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::sub_5DB200",
+          "our_len": 3131,
+          "their_len": 2370
+        },
+        {
+          "address": "0x5F7B00",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateSkillsPanel",
+          "our_len": 2856,
+          "their_len": 2574
+        },
+        {
+          "address": "0x5D9970",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::ResetSpellsPanel",
+          "our_len": 2884,
+          "their_len": 2284
+        },
+        {
+          "address": "0x5E6A30",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::CheckDropSlot",
+          "our_len": 2324,
+          "their_len": 2063
+        },
+        {
+          "address": "0x5E87E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateFeatsPanel",
+          "our_len": 2220,
+          "their_len": 2016
+        },
+        {
+          "address": "0x5EBFA0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacter5EBC60::OnLButtonClick",
+          "our_len": 2222,
+          "their_len": 1827
+        },
+        {
+          "address": "0x62B0B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::CopySpell",
+          "our_len": 2005,
+          "their_len": 1847
+        },
+        {
+          "address": "0x5E5330",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnLevelUpButtonClick",
+          "our_len": 1911,
+          "their_len": 1852
+        },
+        {
+          "address": "0x5D72D0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnKeyDown",
+          "our_len": 1977,
+          "their_len": 1757
+        },
+        {
+          "address": "0x5E1B20",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::SummonPreviousPopup",
+          "our_len": 1788,
+          "their_len": 1807
+        },
+        {
+          "address": "0x5C1E30",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CanRestParty",
+          "our_len": 1711,
+          "their_len": 1564
+        },
+        {
+          "address": "0x62A060",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::IsErrorButtonClickable",
+          "our_len": 1480,
+          "their_len": 1587
+        },
+        {
+          "address": "0x5F7850",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::ResetSkillsPanel",
+          "our_len": 1565,
+          "their_len": 1483
+        },
+        {
+          "address": "0x5DA200",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::ResetFeatsPanel",
+          "our_len": 1482,
+          "their_len": 1438
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "b031": {
+      "assigned_at": "2026-10-24T08:51:59+00:00",
+      "branch": "p3/wso-b031",
+      "closed_at": null,
+      "files": [
+        "src/Icewind586B70.cpp",
+        "src/CRuleTables.cpp",
+        "src/CVariableHash.cpp",
+        "src/CGameSprite.cpp",
+        "src/CItem.cpp",
+        "src/C2DArray.cpp"
+      ],
+      "fork_base": "ee42010d790692f2aec12de8154f9d88b56efc8b",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5872C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/Icewind586B70.cpp",
+          "name": "Icewind586B70::sub_5872C0",
+          "our_len": 1190,
+          "their_len": 1125
+        },
+        {
+          "address": "0x542CB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::sub_542CB0",
+          "our_len": 1333,
+          "their_len": 897
+        },
+        {
+          "address": "0x550600",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CVariableHash.cpp",
+          "name": "CVariableHash::MarshalToCharacter",
+          "our_len": 1033,
+          "their_len": 947
+        },
+        {
+          "address": "0x5463E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::sub_5463E0",
+          "our_len": 829,
+          "their_len": 856
+        },
+        {
+          "address": "0x586DC0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/Icewind586B70.cpp",
+          "name": "Icewind586B70::sub_586DC0",
+          "our_len": 696,
+          "their_len": 813
+        },
+        {
+          "address": "0x5461E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::sub_5461E0",
+          "our_len": 701,
+          "their_len": 630
+        },
+        {
+          "address": "0x723BF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_723BF0",
+          "our_len": 575,
+          "their_len": 614
+        },
+        {
+          "address": "0x4EA4A0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CItem.cpp",
+          "name": "CItem::sub_4EA4A0",
+          "our_len": 401,
+          "their_len": 396
+        },
+        {
+          "address": "0x720310",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CheckSequence",
+          "our_len": 351,
+          "their_len": 346
+        },
+        {
+          "address": "0x545EB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::sub_545EB0",
+          "our_len": 319,
+          "their_len": 257
+        },
+        {
+          "address": "0x542FA0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::GetStartingHitPoints",
+          "our_len": 202,
+          "their_len": 184
+        },
+        {
+          "address": "0x4038E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/C2DArray.cpp",
+          "name": "C2DArray::Find",
+          "our_len": 173,
+          "their_len": 179
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   },
-  "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
+  "fork_base": "ee42010d790692f2aec12de8154f9d88b56efc8b"
 }
