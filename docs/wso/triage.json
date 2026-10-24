@@ -728,174 +728,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x73C490",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_73C490",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x733660",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::SetTargetObject",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x71B9C0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::AddSpecialAbility",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x723CC0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::GetAC",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x733050",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::AddEffect",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x718390",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_718390",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x73CF10",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_73CF10",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x73D080",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_73D080",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x723DB0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_723DB0",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x6F50A0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_6F50A0",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x75F270",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::ReturnToStartLoc",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x71CFF0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_71CFF0",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x7564E0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::ApplyCastingEffectPost",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x761AB0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_761AB0",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x72FBF0",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_72FBF0",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x723F60",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_723F60",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x75E890",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::CanSaveGame",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x6FA810",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::SetPath",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x728B70",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::ProcessPendingTriggers",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x75F240",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::sub_75F240",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x727B80",
-    "class": "ambiguous",
-    "file": "src/CGameSprite.cpp",
-    "name": "CGameSprite::IsVisibleToCaller",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x44DC10",
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
@@ -964,38 +796,6 @@
     "class": "ambiguous",
     "file": "src/CGameAIBase.cpp",
     "name": "CGameAIBase::IncrementChapter",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x481890",
-    "class": "ambiguous",
-    "file": "src/CGameAIBase.cpp",
-    "name": "CGameAIBase::sub_481890",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4686C0",
-    "class": "ambiguous",
-    "file": "src/CGameAIBase.cpp",
-    "name": "CGameAIBase::GetGlobalVariable",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x45D050",
-    "class": "ambiguous",
-    "file": "src/CGameAIBase.cpp",
-    "name": "CGameAIBase::GetTriggerSprite",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x45D3E0",
-    "class": "ambiguous",
-    "file": "src/CGameAIBase.cpp",
-    "name": "CGameAIBase::DecodeSpell",
     "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
@@ -1096,14 +896,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x478490",
-    "class": "ambiguous",
-    "file": "src/CGameArea.cpp",
-    "name": "CGameArea::SetDawn",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x477550",
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
@@ -1140,22 +932,6 @@
     "class": "ambiguous",
     "file": "src/CGameArea.cpp",
     "name": "CGameArea::SnapshotAdjustTarget",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4781B0",
-    "class": "ambiguous",
-    "file": "src/CGameArea.cpp",
-    "name": "CGameArea::SetNight",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x477EE0",
-    "class": "ambiguous",
-    "file": "src/CGameArea.cpp",
-    "name": "CGameArea::SetDay",
     "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
@@ -1296,36 +1072,12 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x5ADAE0",
-    "class": "ambiguous",
-    "file": "src/CInfGame.cpp",
-    "name": "CInfGame::SelectToolbar",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x5BFC40",
     "class": "fork-stub",
     "file": "src/CInfGame.cpp",
     "name": "CInfGame::GetProtagonist",
     "ours_ref": "82d75232",
     "reason": "their body is under a quarter of ours and calls nothing new"
-  },
-  {
-    "address": "0x5BE840",
-    "class": "ambiguous",
-    "file": "src/CInfGame.cpp",
-    "name": "CInfGame::FindEmptyItemPersonalInventory",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x5BA230",
-    "class": "ambiguous",
-    "file": "src/CInfGame.cpp",
-    "name": "CInfGame::CanPortraitEquipInSlot",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
   },
   {
     "address": "0x4A7900",
@@ -1456,14 +1208,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x4258D0",
-    "class": "ambiguous",
-    "file": "src/CBaldurChitin.cpp",
-    "name": "CBaldurChitin::OnMultiplayerSessionOpen",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x5DC9D0",
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
@@ -1588,14 +1332,6 @@
     "class": "ambiguous",
     "file": "src/CScreenCharacter.cpp",
     "name": "CScreenCharacter::EnableMainPanel",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x5D79B0",
-    "class": "ambiguous",
-    "file": "src/CScreenCharacter.cpp",
-    "name": "CScreenCharacter::UpdateSavingThrows",
     "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
@@ -2244,22 +1980,6 @@
     "class": "ambiguous",
     "file": "src/CScreenConnection.cpp",
     "name": "CScreenConnection::OnNewGameButtonClick",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x602170",
-    "class": "ambiguous",
-    "file": "src/CScreenConnection.cpp",
-    "name": "CScreenConnection::OnLobbyNewGameButtonClick",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x601AE0",
-    "class": "ambiguous",
-    "file": "src/CScreenConnection.cpp",
-    "name": "CScreenConnection::AutoStartDirectPlayLobby",
     "ours_ref": "82d75232",
     "reason": "the bodies differ beyond identifier names"
   },
@@ -3410,127 +3130,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x5084C0",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageSetPath::Run",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x42CDA0",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x5007F0",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageFireProjectile::Run",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x502EB0",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageLoadDialog::Run",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4F7620",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageHandler::Broadcast",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x502570",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageInsertResponse::Run",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x507F70",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageSetPath::CMessageSetPath",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4FDF80",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessagePickedDialogResponse::Run",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x515430",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageGroup::~CMessageGroup",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4F59D0",
-    "auto_class": "signature-only",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageInsertResponse::CMessageInsertResponse",
-    "ours_ref": "82d75232",
-    "reason": "disabled by calibration"
-  },
-  {
-    "address": "0x504C40",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageSaveGame::MarshalMessage",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x504C80",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageSaveGame::UnmarshalMessage",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x5157F0",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageGroup::Run",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4844C0",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessagePickedDialogResponse::GetMsgSubType",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x515400",
-    "class": "ambiguous",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageGroup::GetMsgSubType",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x4282C0",
     "class": "ambiguous",
     "file": "src/CBaldurEngine.cpp",
@@ -3915,14 +3514,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x6EEBA0",
-    "class": "ambiguous",
-    "file": "src/CGameAnimationTypeMonsterIcewindNew.cpp",
-    "name": "CGameAnimationTypeMonsterIcewindNew::Render",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x6A55C0",
     "class": "ambiguous",
     "file": "src/CGameAnimationTypeTownStatic.cpp",
@@ -4091,14 +3682,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x7C8990",
-    "class": "ambiguous",
-    "file": "src/CChitin3d.cpp",
-    "name": "CChitin::Init3d",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x661CC0",
     "class": "ambiguous",
     "file": "src/CScreenSinglePlayer.cpp",
@@ -4131,22 +3714,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": null,
-    "class": "ambiguous",
-    "file": "src/CUIControlEditMultiLine.cpp",
-    "name": "CUIControlEditMultiLineScroller::OnScroll",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4C08E0",
-    "class": "ambiguous",
-    "file": "src/CGameEffectList.cpp",
-    "name": "CGameEffectList::RemoveAllOfType",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x4C0830",
     "class": "ambiguous",
     "file": "src/CGameEffectList.cpp",
@@ -4171,22 +3738,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": "0x78A280",
-    "class": "ambiguous",
-    "file": "src/CResFile.cpp",
-    "name": "CResFile::GetFileSize",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": "0x4022E0",
-    "class": "ambiguous",
-    "file": "src/CResCHR.cpp",
-    "name": "CResCHR::Parse",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x586D60",
     "class": "ambiguous",
     "file": "src/Icewind586B70.cpp",
@@ -4203,22 +3754,6 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
-    "address": null,
-    "class": "ambiguous",
-    "file": "src/CResStore.cpp",
-    "name": "CResStore::Parse",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
-    "address": null,
-    "class": "ambiguous",
-    "file": "src/CResEffect.cpp",
-    "name": "CResEffect::Parse",
-    "ours_ref": "82d75232",
-    "reason": "the bodies differ beyond identifier names"
-  },
-  {
     "address": "0x40E0C0",
     "class": "ambiguous",
     "file": "src/CAIResponse.cpp",
@@ -4227,11 +3762,475 @@
     "reason": "the bodies differ beyond identifier names"
   },
   {
+    "address": "0x478490",
+    "class": "ambiguous",
+    "file": "src/CGameArea.cpp",
+    "name": "CGameArea::SetDawn",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4781B0",
+    "class": "ambiguous",
+    "file": "src/CGameArea.cpp",
+    "name": "CGameArea::SetNight",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x477EE0",
+    "class": "ambiguous",
+    "file": "src/CGameArea.cpp",
+    "name": "CGameArea::SetDay",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x6EEBA0",
+    "class": "ambiguous",
+    "file": "src/CGameAnimationTypeMonsterIcewindNew.cpp",
+    "name": "CGameAnimationTypeMonsterIcewindNew::Render",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4258D0",
+    "class": "ambiguous",
+    "file": "src/CBaldurChitin.cpp",
+    "name": "CBaldurChitin::OnMultiplayerSessionOpen",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x602170",
+    "class": "ambiguous",
+    "file": "src/CScreenConnection.cpp",
+    "name": "CScreenConnection::OnLobbyNewGameButtonClick",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x601AE0",
+    "class": "ambiguous",
+    "file": "src/CScreenConnection.cpp",
+    "name": "CScreenConnection::AutoStartDirectPlayLobby",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x5084C0",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageSetPath::Run",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x42CDA0",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x5007F0",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageFireProjectile::Run",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x502EB0",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageLoadDialog::Run",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4F7620",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageHandler::Broadcast",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x502570",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageInsertResponse::Run",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x507F70",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageSetPath::CMessageSetPath",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4FDF80",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessagePickedDialogResponse::Run",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x515430",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageGroup::~CMessageGroup",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4F59D0",
+    "class": "signature-only",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageInsertResponse::CMessageInsertResponse",
+    "ours_ref": "first",
+    "reason": "bodies match under the signature parameters; signatures differ"
+  },
+  {
+    "address": "0x504C40",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageSaveGame::MarshalMessage",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x504C80",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageSaveGame::UnmarshalMessage",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x5157F0",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageGroup::Run",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4844C0",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessagePickedDialogResponse::GetMsgSubType",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x515400",
+    "class": "ambiguous",
+    "file": "src/CMessage.cpp",
+    "name": "CMessageGroup::GetMsgSubType",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x5ADAE0",
+    "class": "ambiguous",
+    "file": "src/CInfGame.cpp",
+    "name": "CInfGame::SelectToolbar",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x5BE840",
+    "class": "ambiguous",
+    "file": "src/CInfGame.cpp",
+    "name": "CInfGame::FindEmptyItemPersonalInventory",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x5BA230",
+    "class": "ambiguous",
+    "file": "src/CInfGame.cpp",
+    "name": "CInfGame::CanPortraitEquipInSlot",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x73C490",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_73C490",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x733660",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::SetTargetObject",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x71B9C0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::AddSpecialAbility",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x723CC0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::GetAC",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x733050",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::AddEffect",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x718390",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_718390",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x73CF10",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_73CF10",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x73D080",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_73D080",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x723DB0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_723DB0",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x6F50A0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_6F50A0",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x75F270",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::ReturnToStartLoc",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x71CFF0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_71CFF0",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x7564E0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::ApplyCastingEffectPost",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x761AB0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_761AB0",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x72FBF0",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_72FBF0",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x723F60",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_723F60",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x75E890",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::CanSaveGame",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x6FA810",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::SetPath",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x728B70",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::ProcessPendingTriggers",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x75F240",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::sub_75F240",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x727B80",
+    "class": "ambiguous",
+    "file": "src/CGameSprite.cpp",
+    "name": "CGameSprite::IsVisibleToCaller",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x481890",
+    "class": "ambiguous",
+    "file": "src/CGameAIBase.cpp",
+    "name": "CGameAIBase::sub_481890",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4686C0",
+    "class": "ambiguous",
+    "file": "src/CGameAIBase.cpp",
+    "name": "CGameAIBase::GetGlobalVariable",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x45D050",
+    "class": "ambiguous",
+    "file": "src/CGameAIBase.cpp",
+    "name": "CGameAIBase::GetTriggerSprite",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x45D3E0",
+    "class": "ambiguous",
+    "file": "src/CGameAIBase.cpp",
+    "name": "CGameAIBase::DecodeSpell",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x5D79B0",
+    "class": "ambiguous",
+    "file": "src/CScreenCharacter.cpp",
+    "name": "CScreenCharacter::UpdateSavingThrows",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x7C8990",
+    "class": "ambiguous",
+    "file": "src/CChitin3d.cpp",
+    "name": "CChitin::Init3d",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": null,
+    "class": "ambiguous",
+    "file": "src/CUIControlEditMultiLine.cpp",
+    "name": "CUIControlEditMultiLineScroller::OnScroll",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4C08E0",
+    "class": "ambiguous",
+    "file": "src/CGameEffectList.cpp",
+    "name": "CGameEffectList::RemoveAllOfType",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x78A280",
+    "class": "ambiguous",
+    "file": "src/CResFile.cpp",
+    "name": "CResFile::GetFileSize",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": "0x4022E0",
+    "class": "ambiguous",
+    "file": "src/CResCHR.cpp",
+    "name": "CResCHR::Parse",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": null,
+    "class": "ambiguous",
+    "file": "src/CResStore.cpp",
+    "name": "CResStore::Parse",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
+    "address": null,
+    "class": "ambiguous",
+    "file": "src/CResEffect.cpp",
+    "name": "CResEffect::Parse",
+    "ours_ref": "first",
+    "reason": "the bodies differ beyond identifier names"
+  },
+  {
     "address": null,
     "class": "ambiguous",
     "file": "src/CResDLG.cpp",
     "name": "CResDLG::Parse",
-    "ours_ref": "82d75232",
+    "ours_ref": "first",
     "reason": "the bodies differ beyond identifier names"
   }
 ]
