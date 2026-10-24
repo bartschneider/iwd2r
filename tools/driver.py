@@ -943,6 +943,7 @@ def unmeasured_needs(run, left=()):
 
 
 COVERAGE_NOT_HIT = 'coverage: no scenario hits it'
+COVERAGE_UNHOOKABLE = 'Frida refuses the hook; coverage'
 
 
 def unmeasured(address, run, park):
@@ -2403,8 +2404,10 @@ class Driver:
             # original): no build, no launch; the same shape the run's
             # verdicts have, read by the loop below.
             hit_text = '%s; consulted %s' % (COVERAGE_NOT_HIT, ', '.join(self._frida_consulted))
-            self._frida_got = {key(r['address']): ('not-exercised', hit_text)
-                               for r in rows}
+            self._frida_got = {key(r['address']): (
+                ('not-exercised', COVERAGE_UNHOOKABLE)
+                if key(r['address']) in self._frida_unhookable else ('not-exercised', hit_text))
+                for r in rows}
             return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
                                         {}, {}, verdicts, importing, mb)
         sigs = {}
@@ -2477,6 +2480,7 @@ class Driver:
                                        'exception' % refused)
         if cached is None and key_hex:
             self._frida_cache_write(batch_id, cache_path, key_hex, run_scenarios, traces, info)
+        got.update({k: ('not-exercised', COVERAGE_UNHOOKABLE) for k in self._frida_unhookable})
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
@@ -2694,6 +2698,7 @@ class Driver:
         truth = _tool('truth')
         cands = list(truth.scenarios_for(rows, [r.get('file') for r in rows]))
         self._frida_ran = (cands, [])
+        self._frida_unhookable = set()
         try:
             cov_mod = _tool('coverage')
             path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
@@ -2707,21 +2712,31 @@ class Driver:
                     self.log('%s: frida: coverage map not used (%s)' % (batch_id, why))
                 self.log('%s: frida: no usable coverage map; running every scenario' % batch_id)
                 return cands, False
-            run = [sc for sc in cands
-                   if any(cov_mod.status_of(cov, r['address'], [sc]) != 'dead' for r in rows)]
+            plan = cov_mod.cover_plan(cov, rows, cands)
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
             self.log('%s: frida: coverage map unreadable (%s)' % (batch_id, _one_line(repr(e), 200)))
             self.log('%s: frida: no usable coverage map; running every scenario' % batch_id)
             return cands, False
+        run, left = plan['run'], plan['left']
+        unhook = plan['unhookable']
+        self._frida_unhookable = {_tool('wave')._addr_key(a) for a in unhook}
         if not run:
             self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
             self._frida_consulted = list(cands)
+            if unhook:
+                self._log_unhookable(batch_id, unhook)
             return [], True
-        left = [sc for sc in cands if sc not in run]
         self._frida_ran = (list(run), left)
-        self.log('%s: frida: scenarios by coverage: %s (left out: %s)'
-                 % (batch_id, ', '.join(run), ', '.join(left) or 'none'))
+        self.log('%s: frida: scenarios by coverage: %s (cover %d of %d rows; left out: %s)'
+                 % (batch_id, ', '.join(run), plan['covered'], plan['total'],
+                    ', '.join(left) or 'none'))
+        if unhook:
+            self._log_unhookable(batch_id, unhook)
         return run, False
+
+    def _log_unhookable(self, batch_id, unhook):
+        self.log('%s: frida: %d row(s) Frida refuses in the original: %s'
+                 % (batch_id, len(unhook), ', '.join(unhook)))
 
     def _import_rows(self, batch_id, batch, worktree, mb_sha):
         """The functions an import batch's Frida phase measures: its rows
@@ -2792,7 +2807,8 @@ class Driver:
         elif status == 'not-exercised':
             run, left = getattr(self, '_frida_ran', None) or (
                 list(_tool('truth').FRIDA_SCENARIOS), [])
-            needs = ('not-exercised (%s)' % detail if detail.startswith(COVERAGE_NOT_HIT)
+            needs = ('not measured (%s)' % detail if detail == COVERAGE_UNHOOKABLE
+                     else 'not-exercised (%s)' % detail if detail.startswith(COVERAGE_NOT_HIT)
                      else unmeasured_needs(run, left))
             text = unmeasured(a, run, park_text(a, mb, needs))
         elif status == 'skipped':
