@@ -1,0 +1,1 @@
+{"address": "0x427B60", "name": "CBaldurEngine::FetchString", "file": "src/CBaldurEngine.cpp", "batch": "i012", "needs": "ours differs from the exe (world_entry): differs in world_entry: event 1: original {\"a0_u32\": 1747680, \"a1_u32\": 18003, \"tag\": \"fn_427B60\"}, ours {\"a0_u32\": 22260264, \"a1_u32\": 18003, \"tag\": \"fn_427B60\"}; import his body in a later batch"}
