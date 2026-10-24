@@ -953,6 +953,27 @@ SCHEMA_HINTS = {
 }
 
 
+NO_LOADED_RVA = 'ours cannot signal loaded'
+
+
+def infrastructure_failure(traces):
+    """'' or why a frida_run's traces are an infrastructure failure, not a
+    verdict on the rows: any scenario that could not run for want of our
+    loaded RVA (a build property), or every scenario failed with no status on
+    either side or failed the same way on both (uninformative_reason)."""
+    runs = [(sc, t) for sc, t in sorted(traces.items()) if isinstance(t, dict)]
+    missing = [(sc, t) for sc, t in runs if NO_LOADED_RVA in str(t.get('failed') or '')]
+    if missing:
+        return 'a build property, not the rows: %s' % '; '.join(
+            '%s: %s' % (sc, t['failed']) for sc, t in missing)
+    if not runs or len(runs) != len(traces) or not all(
+            t.get('failed') and (not any((t.get('result') or {}).values())
+                                 or uninformative_reason(t)) for _sc, t in runs):
+        return ''
+    return ('every Frida scenario failed on infrastructure (no side produced a status or '
+            'both sides failed alike): ' + '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs))
+
+
 def _schema_failures(oracle, folder):
     """(invalid dump count, dump count, first 'file: error') of a replay
     folder under oracle.check_dumps and schema.json, the check replay record
@@ -1059,11 +1080,13 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     whose dumps do not match, and the driver writes trace evidence only from
     one whose dumps match.
 
-    Ours must pass --loaded-rva, else orig.py would hook the original's
-    EngineActivated address inside iwd2r.exe: loaded_rva (or the table's
-    ours_loaded_rva, read from the map) names CScreenWorld::EngineActivated in
-    our build. With neither, every scenario fails with that reason and nothing
-    is run. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
+    Ours must pass --loaded-rva for a world scenario, else orig.py would
+    hook the original's EngineActivated address inside iwd2r.exe: loaded_rva
+    (or the table's ours_loaded_rva, read from the map) names
+    CScreenWorld::EngineActivated in our build. With neither, every world
+    scenario fails with that reason and nothing is run (infrastructure_failure
+    calls it an infrastructure failure). A UI scenario runs --no-loaded on
+    both sides: orig.py then installs no loaded hook at all. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
     default --new-attempt text. build_checkout (a WSL path) is the Windows
     checkout both sides run from (probe.py --build-checkout): ours its x86
     exe, the batch worktree's, so the bodies under test are the ones the
@@ -1087,13 +1110,13 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                 json.dump(table[target], f, indent=1)
             tables[target] = path
         for scenario in scenarios:
-            if not loaded_rva:
+            if not loaded_rva and scenario not in FRIDA_UI_SCENARIOS:
                 traces[scenario] = {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
                                     'orig_exit': None, 'ours_exit': None,
                                     'result': {'orig': None, 'ours': None},
                                     'hits': {'orig': None, 'ours': None}, 'measured': False,
-                                    'failed': 'no %s in our map: ours cannot signal loaded '
-                                              '(pass loaded_rva)' % LOADED_NAME}
+                                    'failed': ('no %s in our map: %s (pass loaded_rva)'
+                                               % (LOADED_NAME, NO_LOADED_RVA))}
                 continue
             own = table.get('clicks', clicks)
             n_clicks = own.get(scenario, clicks) if isinstance(own, dict) else own
@@ -1108,7 +1131,12 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                        '--timeout', str(limit),
                        '--new-attempt', (attempt_reason(scenario, key) if attempt_reason else
                                          'driver frida %s %s' % (batch_id, scenario))]
-                if target == 'ours':
+                if scenario in FRIDA_UI_SCENARIOS:
+                    # a UI-only scenario never reaches the world screen: both
+                    # sides drop the loaded observation (orig.py reads CLEAN
+                    # when the process ends without a crash)
+                    cmd += ['--no-loaded']
+                elif target == 'ours':
                     cmd += ['--loaded-rva', loaded_rva]
                 if build_checkout:
                     cmd += ['--build-checkout', build_checkout]
@@ -1204,6 +1232,29 @@ def _as_scenario(value):
     return {'orig': value[0], 'ours': value[1], 'failed': None}
 
 
+def uninformative_reason(t):
+    """Why a failed scenario result measured nothing, or '' when it did (or
+    did not fail): it failed on BOTH sides with the same non-crash outcome
+    (the same RESULT word, both NOT-LOADED or both the same OBSERVER-ERROR,
+    or both no status, and the same exit code), and neither side logged a
+    crash.  Both exit codes must be non-zero (a side that exited 0 but left
+    no trace file is a one-sided failure).  A one-sided failure (the original CLEAN and ours exited, ours
+    crashed) is evidence and is not uninformative."""
+    if not isinstance(t, dict) or not t.get('failed'):
+        return ''
+    result = t.get('result') or {}
+    a, b = result.get('orig'), result.get('ours')
+    if a != b or str(a).upper() == 'CRASH' or not t.get('orig_exit') \
+            or t.get('orig_exit') != t.get('ours_exit'):
+        return ''
+    if any(str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS
+           for e in list(t.get('orig') or ()) + list(t.get('ours') or ())):
+        return ''
+    if a is None:
+        return 'both sides exited %s with no status' % t.get('orig_exit')
+    return 'both sides %s' % a
+
+
 EQUAL_PREFIX = 'identical in '
 
 
@@ -1280,7 +1331,11 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
     shows the row is never equal (a crash event is a difference, a partial
     trace is 'scenario failed'); one that does not show it counts as 'not
     hit' only when its ORIGINAL side completed (exit 0, HITS present, 0 for
-    that hook), otherwise the row is 'scenario failed' too. A scenario whose
+    that hook), otherwise the row is 'scenario failed' too. A scenario that
+    failed on both sides the same way without a crash (both NOT-LOADED, both
+    no status, the same OBSERVER-ERROR) is uninformative
+    (uninformative_reason): left out of every row, reported in
+    info['uninformative'] {scenario: reason}. A scenario whose
     dumps (frida_run's) do not match measures nothing.
 
     Frequency is a caller's business (the final review's ruling): when every
@@ -1302,6 +1357,11 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
     Pointer returns are compared by presence."""
     skipped = skipped or {}
     info = {} if info is None else info
+    # A scenario that failed the same way on both sides measured nothing: it
+    # is left out of every row's verdict (info['uninformative']).
+    uninformative = {sc: why for sc, v in traces.items()
+                     if (why := uninformative_reason(_as_scenario(v)))}
+    info['uninformative'] = uninformative
     notes_out = info.setdefault('notes', {})
     exact_out = info.setdefault('exact', {})
     verdicts = {}
@@ -1319,6 +1379,8 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
         if sources is None and (info.get('typed_from') or {}).get(key) == 'ghidra':
             sources = ['ghidra'] * 64
         for scenario, value in traces.items():
+            if scenario in uninformative:
+                continue
             t = _as_scenario(value)
             if t['failed']:
                 # A partial trace that saw this row can never read equal.
@@ -1443,12 +1505,12 @@ PROMOTED_SCENARIOS = ('action_bar', 'equip_shots', 'inventory', 'save_load_scree
 FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk') + PROMOTED_SCENARIOS
 # UI-only scenarios (no world play): candidates when a row's file is a screen.
 FRIDA_UI_SCENARIOS = ('biography',)
-# Held out of the driver's phase (2026-10-23; Task 18 brings them back):
-# save_load_screens writes a save whose slot name grows with every run of the
-# shared game folder, so the dump guard refuses it; biography never loads the
-# world and the phase does not yet pass --no-loaded for it.  The coverage map
-# and scenarios_for keep both; driver.Driver.held_out applies the hold-out.
-PHASE_HELD_OUT = ('save_load_screens', 'biography')
+# Scenarios held out of the driver's phase (driver.Driver.held_out applies it).
+# biography returned with Task 18 (--no-loaded on both sides).  save_load_screens
+# stays out until one real original/ours pair confirms matching dumps now that
+# every probe run starts from an empty save folder (probe.saves_of_its_own);
+# the coordinator runs that pair, then removes it from this tuple.
+PHASE_HELD_OUT = ('save_load_screens',)
 UI_FILE_PREFIXES = ('src/CScreen', 'src/CUI')
 
 
@@ -1828,7 +1890,10 @@ def _calibrate_frida(rows, read_evidence, map_path):
         with open(map_path, encoding='utf-8', errors='replace') as f:
             map_text = f.read()
         got = frida_batch('cal', rows, sigs, map_text, run_frida=run_frida, info=info)
-        error = None
+        error = infrastructure_failure(captured) or None
+        if error:
+            got = {}
+            error = error[:300]
     except Exception as e:
         got, error = {}, repr(e)[:300]
     got = {_key(a): v for a, v in got.items()}
