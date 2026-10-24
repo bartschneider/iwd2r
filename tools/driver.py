@@ -1933,12 +1933,14 @@ def blocking_findings(report):
     return out
 
 
-BASE_TESTS_LOG = 'base-tests.log'
+BASE_TESTS_LOG = 'base-tests-%s.log'     # per queue: two drivers share the dir
+BASE_TESTS_TIMEOUT = 600
 BASE_TESTS_KEY = 'first'     # the reserved exceptions key (not a batch id)
 
 
 def run_base_tests(root, log_path):
-    """(ok, failures): `python3 -I tests/test_tools.py` in root, output to
+    """(ok, detail): detail is the failure count, or text for a timeout.
+    A stop that kills the run raises _Stop (never a red base).  `python3 -I tests/test_tools.py` in root, output to
     log_path, under the gate's memory cap (tools/gates.sh) when systemd-run
     is there.  The child sets IWD2R_BASE_TESTS_CHILD, so a suite that built a
     real Driver by mistake would not recurse."""
@@ -1952,11 +1954,18 @@ def run_base_tests(root, log_path):
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
     env = dict(os.environ, IWD2R_BASE_TESTS_CHILD='1')
     try:
-        r = _run_group(argv, timeout=1800, cwd=root, env=env,
+        r = _run_group(argv, timeout=BASE_TESTS_TIMEOUT, cwd=root, env=env,
                        text=True, errors='replace')
         text, rc = (r.stdout or '') + (r.stderr or ''), r.returncode
+    except subprocess.TimeoutExpired:
+        text, rc = 'base tests timed out after %d s\n' % BASE_TESTS_TIMEOUT, 1
+        with open(log_path, 'w', encoding='utf-8') as log:
+            log.write(text)
+        return False, 'timed out after %d s' % BASE_TESTS_TIMEOUT
     except (OSError, subprocess.SubprocessError) as e:
         text, rc = 'base tests could not run: %r\n' % (e,), 1
+    if _STOPPED.is_set() and rc < 0:
+        raise _Stop()
     with open(log_path, 'w', encoding='utf-8') as log:
         log.write(text)
     if rc == 0:
@@ -4658,7 +4667,7 @@ class Driver:
         when they pass or the check is off.  An open exceptions['first']
         blocks without a re-run (`--clear first` lifts it); the suite is
         not re-run while the key of the last green run is unchanged."""
-        if not self.base_tests or self.dry_run:
+        if not self.base_tests or self.dry_run or self._stopping:
             return True
         status = self._read_status()
         if BASE_TESTS_KEY in status['exceptions']:
@@ -4667,7 +4676,8 @@ class Driver:
         last = status.get('base_tests')
         if key is not None and isinstance(last, dict) and last.get('key') == key:
             return True
-        log_path = os.path.join(self.driver_dir, BASE_TESTS_LOG)
+        log_name = BASE_TESTS_LOG % self.queue
+        log_path = os.path.join(self.driver_dir, log_name)
         self.log('base: running the tool tests on %s' % self.base)
         ok, failures = self.base_tests_run(self.repo, log_path)
         if ok:
@@ -4675,9 +4685,10 @@ class Driver:
             self._update_status(lambda s: s.__setitem__('base_tests', green))
             return True
         at = _now()
-        msg = ('base: tool tests fail on first (%d failure%s; see '
-               'driver/%s); no new batch starts until they pass' % (
-                   failures, '' if failures == 1 else 's', BASE_TESTS_LOG))
+        what = (failures if isinstance(failures, str) else
+                '%d failure%s' % (failures, '' if failures == 1 else 's'))
+        msg = ('base: tool tests fail on first (%s; see driver/%s); '
+               'no new batch starts until they pass' % (what, log_name))
         exc = {'stage': 'base-tests', 'problems': [msg], 'at': at}
 
         def record(s):

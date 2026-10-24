@@ -14215,12 +14215,12 @@ class DriverTest(unittest.TestCase):
 
     # -- the base's tool tests (Task 23) -----------------------------------
 
-    def _base_driver(self, results, cuts, keys=None):
+    def _base_driver(self, results, cuts, keys=None, **kw):
         """A Driver with the base-tests check on: `results` are what the
         injected suite run returns in turn, `cuts` the next_batch answers
         (then nothing left); run_batch is a recorder.  `keys` makes the
         cache key move per call (None: the real key of the temp repo)."""
-        d = self._driver(worker=driver.FakeWorker(self.REPORT), base_tests=True)
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), base_tests=True, **kw)
         self.suite_runs, self.cut_calls, self.ran = [], [], []
         results = iter(results)
 
@@ -14242,7 +14242,7 @@ class DriverTest(unittest.TestCase):
         return d
 
     BASE_MSG = ('base: tool tests fail on first (%d failures; see '
-                'driver/base-tests.log); no new batch starts until they pass')
+                'driver/base-tests-wave1.log); no new batch starts until they pass')
 
     def test_base_tests_red_at_start_raise_one_exception_and_no_cut(self):
         d = self._base_driver([(False, 3)], [(0, 'b012 assigned: x\n')])
@@ -14255,7 +14255,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._ledger(d).count('driver first: exception at base-tests'), 1)
         self.assertEqual(len(self.suite_runs), 1)      # no re-run while it stands
         self.assertTrue(self.suite_runs[0][1].endswith(
-            os.path.join('driver', 'base-tests.log')))
+            os.path.join('driver', 'base-tests-wave1.log')))
         self.assertEqual(self.suite_runs[0][0], d.repo)
 
     def test_base_tests_green_lets_cuts_proceed(self):
@@ -14313,6 +14313,90 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d.run(), 0)
         self.assertEqual(self.suite_runs, [])
         self.assertEqual(self.ran, ['b012'])
+
+    def test_a_stop_during_the_base_suite_records_no_exception(self):
+        d = self._base_driver([], [(0, 'b012 assigned: x\n')])
+
+        def stopped(root, log_path):
+            raise driver._Stop()
+        d.base_tests_run = stopped
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertEqual(self.cut_calls, [])
+        self.assertNotIn('base-tests', self._ledger(d) if os.path.exists(d.ledger_path) else '')
+
+    def test_run_base_tests_raises_stop_when_killed_by_a_stop_and_names_timeouts(self):
+        log = os.path.join(tempfile.mkdtemp(), 'x.log')
+        self.addCleanup(shutil.rmtree, os.path.dirname(log), True)
+        killed = subprocess.CompletedProcess([], -9, '', '')
+        with mock.patch.object(driver, '_run_group', return_value=killed):
+            driver._STOPPED.set()
+            self.addCleanup(driver._STOPPED.clear)
+            with self.assertRaises(driver._Stop):
+                driver.run_base_tests(self.root if hasattr(self, 'root') else '.', log)
+            driver._STOPPED.clear()
+            self.assertEqual(driver.run_base_tests('.', log)[0], False)   # not stopped: red
+        with mock.patch.object(driver, '_run_group', side_effect=subprocess.TimeoutExpired('x', 600)):
+            ok, detail = driver.run_base_tests('.', log)
+        self.assertFalse(ok)
+        self.assertIn('timed out after 600 s', detail)
+        d = self._base_driver([(False, detail)], [])
+        d.run()
+        self.assertIn('timed out after 600 s; see driver/base-tests-wave1.log',
+                      self._status(d)['exceptions']['first']['problems'][0])
+
+    def test_blocked_with_batches_in_flight_waits_for_them_and_cuts_nothing_new(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1', 'k2', 'k2', 'k2', 'k2'], workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            red_seen.wait(10)
+            time.sleep(0.2)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(order, ['b012'])        # in flight ran to the end
+        self.assertEqual(len(self.cut_calls), 1)
+        self.assertIn('first', self._status(d)['exceptions'])
+
+    def test_live_clear_first_reruns_the_suite_and_cuts_resume(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1), (True, 0)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1'] + ['k2'] * 8, workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            if bid == 'b012':
+                red_seen.wait(10)
+                for _ in range(100):             # the exception is recorded after the run
+                    if 'first' in self._status(d)['exceptions']:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(driver.clear_exception(d.status_path, 'first')[0], 0)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['b012', 'b013'])
+        self.assertEqual(len(self.suite_runs), 3)
+        self.assertNotIn('first', self._status(d)['exceptions'])
 
     def test_a_cleared_retry_is_not_blocked_by_red_base_tests(self):
         d = self._base_driver([(False, 1)], [(0, 'b012 assigned: x\n')])
