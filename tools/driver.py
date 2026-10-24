@@ -1941,6 +1941,48 @@ def blocking_findings(report):
     return out
 
 
+BASE_TESTS_LOG = 'base-tests-%s.log'     # per queue: two drivers share the dir
+BASE_TESTS_TIMEOUT = 600
+BASE_TESTS_KEY = 'first'     # the reserved exceptions key (not a batch id)
+
+
+def run_base_tests(root, log_path):
+    """(ok, detail): detail is the failure count, or text for a timeout.
+    A stop that kills the run raises _Stop (never a red base).  `python3 -I tests/test_tools.py` in root, output to
+    log_path, under the gate's memory cap (tools/gates.sh) when systemd-run
+    is there.  The child sets IWD2R_BASE_TESTS_CHILD, so a suite that built a
+    real Driver by mistake would not recurse."""
+    if os.environ.get('IWD2R_BASE_TESTS_CHILD'):
+        return True, 0
+    argv = ['python3', '-I', 'tests/test_tools.py']
+    if shutil.which('systemd-run'):
+        argv = ['systemd-run', '--user', '--scope', '-q', '-p',
+                'MemoryMax=%s' % os.environ.get('IWD2R_TEST_MEMORY_MAX', '8G'),
+                '-p', 'MemorySwapMax=0', '--'] + argv
+    os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+    env = dict(os.environ, IWD2R_BASE_TESTS_CHILD='1')
+    try:
+        r = _run_group(argv, timeout=BASE_TESTS_TIMEOUT, cwd=root, env=env,
+                       text=True, errors='replace')
+        text, rc = (r.stdout or '') + (r.stderr or ''), r.returncode
+    except subprocess.TimeoutExpired:
+        text, rc = 'base tests timed out after %d s\n' % BASE_TESTS_TIMEOUT, 1
+        with open(log_path, 'w', encoding='utf-8') as log:
+            log.write(text)
+        return False, 'timed out after %d s' % BASE_TESTS_TIMEOUT
+    except (OSError, subprocess.SubprocessError) as e:
+        text, rc = 'base tests could not run: %r\n' % (e,), 1
+    if _STOPPED.is_set() and rc < 0:
+        raise _Stop()
+    with open(log_path, 'w', encoding='utf-8') as log:
+        log.write(text)
+    if rc == 0:
+        return True, 0
+    m = re.findall(r'FAILED \((.*?)\)', text)
+    n = sum(int(x) for x in re.findall(r'(?:failures|errors)=(\d+)', m[-1])) if m else 0
+    return False, n or 1
+
+
 class _BatchContext(threading.local):
     """The fields of the batch a thread is running (a fresh set per
     thread): the Driver exposes them as properties."""
@@ -1994,13 +2036,19 @@ class Driver:
                  oracle_run=None, frida_run=None, frida_build=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
                  queue='wave1', runner=None, clock=None, max_batches=None,
-                 frida_cache=True):
+                 frida_cache=True, base_tests=True, base_tests_run=None):
         wave = _tool('wave')
         if queue not in wave.QUEUES:
             raise ValueError('unknown queue %r (one of %s)' % (
                 queue, ', '.join(wave.QUEUES)))
         self.repo = repo
         self.frida_cache = frida_cache
+        # Task 23: the tool test suite runs on the base worktree at start and
+        # before each new cut; `base_tests_run(root, log_path)` returns
+        # (ok, failures) and is what tests replace.
+        self.base_tests = base_tests
+        self.base_tests_run = (run_base_tests if base_tests_run is None
+                               else base_tests_run)
         self.state_path = state_path
         self.queue = queue
         self.kind = wave.QUEUES[queue]['kind']
@@ -4152,7 +4200,7 @@ class Driver:
         if self.kind == 'verdicts':
             # disagreements.json too: add and diff --cached skip it unchanged
             paths = [self.state_path, self.report_path, self.probe_path,
-                     self.disagreements_path]
+                     self.disagreements_path, self.triage_path]
         else:    # the import queue: its state (never a scorecard)
             paths = [self.state_path]
         paths.append(self.import_list_path)   # ours-stub rows leave wave 1 for it
@@ -4590,12 +4638,83 @@ class Driver:
         try:
             with self._lock, self._writing():
                 rc, text = self.recompare(
-                    self.state_path, self.disagreements_path, repo=self.repo)
+                    self.state_path, self.disagreements_path, repo=self.repo,
+                    triage_path=self.triage_path)
         except Exception as e:
             rc, text = 2, 'recompare raised %r\n' % (e,)
         self.log(text.rstrip())
         m = re.match(r'recompare: (\d+) new rows', text)
         return int(m.group(1)) if rc == 0 and m else 0
+
+    def _base_key(self):
+        """What the last green run is keyed on: the base's HEAD sha and the
+        working-tree listing of tests/ and tools/ (status lines, with the
+        size and mtime of each listed file).  None when git cannot say."""
+        def git(*args):
+            return subprocess.run(['git', '-C', self.repo, *args],
+                                  capture_output=True, text=True, timeout=120)
+        try:
+            head = git('rev-parse', 'HEAD')
+            st = git('status', '--porcelain', '--untracked-files=all',
+                     '--', 'tests', 'tools')
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if head.returncode != 0 or st.returncode != 0:
+            return None
+        parts = [head.stdout.strip()]
+        for line in sorted(st.stdout.splitlines()):
+            path = line[3:].split(' -> ')[-1].strip('"')
+            try:
+                info = os.stat(os.path.join(self.repo, path))
+                stamp = '%d:%d' % (info.st_size, info.st_mtime_ns)
+            except OSError:
+                stamp = 'gone'
+            parts.append('%s %s' % (line, stamp))
+        return hashlib.sha256('\n'.join(parts).encode()).hexdigest()
+
+    def _base_ok(self):
+        """False while the base's tool tests are red (new cuts stop), True
+        when they pass or the check is off.  An open exceptions['first']
+        blocks without a re-run (`--clear first` lifts it); the suite is
+        not re-run while the key of the last green run is unchanged."""
+        if not self.base_tests or self.dry_run or self._stopping:
+            return True
+        status = self._read_status()
+        if BASE_TESTS_KEY in status['exceptions']:
+            return False
+        key = self._base_key()
+        last = status.get('base_tests')
+        if key is not None and isinstance(last, dict) and last.get('key') == key:
+            return True
+        log_name = BASE_TESTS_LOG % self.queue
+        log_path = os.path.join(self.driver_dir, log_name)
+        self.log('base: running the tool tests on %s' % self.base)
+        ok, failures = self.base_tests_run(self.repo, log_path)
+        if ok:
+            green = {'key': key, 'at': _now()}
+            self._update_status(lambda s: s.__setitem__('base_tests', green))
+            return True
+        at = _now()
+        what = (failures if isinstance(failures, str) else
+                '%d failure%s' % (failures, '' if failures == 1 else 's'))
+        msg = ('base: tool tests fail on first (%s; see driver/%s); '
+               'no new batch starts until they pass' % (what, log_name))
+        exc = {'stage': 'base-tests', 'problems': [msg], 'at': at}
+
+        def record(s):
+            s['exceptions'][BASE_TESTS_KEY] = exc
+            s.pop('base_tests', None)
+        self._update_status(record)
+        line = 'driver first: exception at base-tests (%s): %s' % (at, msg)
+        self._append_ledger(line)
+        self.log(line)
+        if not self.dry_run:
+            try:
+                self.send('driver: first exception at base-tests; see %s'
+                          % self.status_path)
+            except Exception as e:
+                self.log('send failed: %r' % (e,))
+        return False
 
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
@@ -5106,6 +5225,7 @@ class Driver:
             self._update_status(lambda s: s.__setitem__('halted', None))
         if self._read_status()['stopped'] is not None:
             self._update_status(lambda s: s.__setitem__('stopped', None))
+        self._base_ok()   # red: exceptions['first'], and no cut below
         resume, code = self._leftovers()
         if code is not None:
             return code
@@ -5145,6 +5265,7 @@ class Driver:
         adopt = self._adoptable([b for b, _w, _n in pending] + retries)
         capped = False        # --max-batches reached
         crash = None          # an exception that escaped a batch thread
+        base_blocked = False  # the base's tool tests are red: no new cut
         launched = set()      # every batch this run started (no second pickup)
 
         threads = self._threads = []
@@ -5182,7 +5303,7 @@ class Driver:
             return True
 
         def launch_next():
-            nonlocal exhausted, cut_blocked, failure, capped
+            nonlocal exhausted, cut_blocked, failure, capped, base_blocked
             if self._stopping:
                 return False
             if self._halt:
@@ -5260,6 +5381,12 @@ class Driver:
                 self._record_pool(batch_id, name)
                 launch(batch_id, None, name)
                 return True
+            if not self._base_ok():
+                with self._lock:
+                    self._busy[name] -= 1
+                base_blocked = True
+                return False
+            base_blocked = False
             batch_id, code = self._cut()
             if batch_id is None:
                 with self._lock:
@@ -5290,6 +5417,8 @@ class Driver:
             raise crash
         if failure:
             return failure
+        if base_blocked:
+            return 1
         status = self._read_status()
         if self._parked_now or any(
                 isinstance(p, dict) and parked_map(p.get('parked'))
@@ -5376,6 +5505,9 @@ def _parse(argv):
                    help='run the batched Frida differential path after the worker '
                         '(default: docs/wso/truth-calibration.json frida_default; '
                         'off when that file is missing)')
+    p.add_argument('--no-base-tests', dest='base_tests', action='store_false',
+                   help='skip the tool tests the driver runs on the base at '
+                        'start and before each new cut (tests, dry runs)')
     p.add_argument('--frida-cache', action=argparse.BooleanOptionalAction, default=True,
                    help='reuse the Frida results of an earlier phase of the same batch when '
                         'its tree ids, rows, signatures and scenarios are unchanged '
@@ -5499,7 +5631,8 @@ def _build(args, repo):
                    workers_by_pool=workers_by_pool,
                    reviewers_by_pool=reviewers_by_pool,
                    budgets=args.budgets, queue=queue,
-                   max_batches=args.max_batches)
+                   max_batches=args.max_batches,
+                   base_tests=args.base_tests)
     except StatusError as e:
         return None, (1, 'wave.py run: the status file cannot be read: %s' % e)
     except ValueError as e:
@@ -5567,7 +5700,8 @@ def remeasure_main(argv=None, repo=None):
     status = os.path.join(repo, DRIVER_REL, 'remeasure-%s' % stamp, 'status.json')
     try:
         d = Driver(repo, state, None, None, os.path.join(os.path.dirname(status), 'progress.md'),
-                   status, dry_run=False, frida=True, frida_cache=False, queue='wave1')
+                   status, dry_run=False, frida=True, frida_cache=False, queue='wave1',
+                   base_tests=False)
     except (StatusError, ValueError) as e:
         print('wave.py remeasure: %s' % e, file=sys.stderr)
         return 1

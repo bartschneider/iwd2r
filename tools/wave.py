@@ -1597,7 +1597,8 @@ def _write_rows(path, rows):
 
 def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
               repo=ROOT, tip=FORK_REMOTE + '/main', fetch=True,
-              base=COMMON_BASE, ours='first', category=DEFAULT_CATEGORY):
+              base=COMMON_BASE, ours='first', category=DEFAULT_CATEGORY,
+              triage_path=None, triage_show=None):
     """Compare our tree with the fork's tip and queue what is new.
 
     Fetches the fork remote (fetch=True), resolves tip, runs xrec
@@ -1608,7 +1609,13 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
     <tip7> (M already queued, K decided)`: N rows were not in the file,
     M were already queued (a row in the file or in an assigned batch
     without a verdict), K are decided.  Exit 0, 2 when the tip does not
-    resolve.  Nothing is written then.  The fork is only read."""
+    resolve.  Nothing is written then.  The fork is only read.
+
+    Task 23: when triage.json exists (triage_path, default beside the
+    disagreements file) it is regenerated through triage.regen_triage at the
+    new fork_base: closed rows keep their classes, an open row of a class
+    the calibration now disables becomes ambiguous.  The calibration and the
+    demotions are appended to the message; the caller commits the file."""
     if fetch:
         r = subprocess.run(['git', '-C', repo, 'fetch', '--quiet', FORK_REMOTE],
                            capture_output=True, text=True)
@@ -1691,6 +1698,23 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
                 else:
                     new += 1
                 rows[i] = r
+        tri_out, tri_lines = None, []
+        tri_path = triage_path or os.path.join(
+            os.path.dirname(os.path.abspath(disagreements_path)), 'triage.json')
+        if os.path.isfile(tri_path):
+            tri = _triage()
+            show = triage_show or (lambda ref, path: _git_show(repo, ref, path))
+            try:
+                with open(tri_path, encoding='utf-8') as f:
+                    committed = json.load(f)
+                cal = tri.calibrate(state, tri.calibration_triage(
+                    state, rows, sha, show=show))
+                tri_out = tri.regen_triage(
+                    state, rows, committed, sha, ours, cal, show=show,
+                    log=tri_lines.append)
+            except (OSError, ValueError, KeyError) as e:
+                return 2, f'recompare: triage regeneration failed: {e}\n'
+            tri_lines = [tri.calibration_text(cal)] + tri_lines
         # Batches in flight keep the pin their rows were compared at.
         for b in state['batches'].values():
             if b.get('status') != 'closed':
@@ -1700,8 +1724,21 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
         _write_rows(disagreements_path, rows)
         state['fork_base'] = sha
         save_state(state_path, state)
-    return 0, (f'recompare: {new} new rows at {sha[:7]} '
-               f'({queued} already queued, {done} decided)\n')
+        if tri_out is not None:
+            tri._write_atomic(tri_path, tri_out)
+    text = (f'recompare: {new} new rows at {sha[:7]} '
+            f'({queued} already queued, {done} decided)\n')
+    if tri_out is not None:
+        text += (f'triage: regenerated {os.path.basename(tri_path)} at '
+                 f'{sha[:7]} ({len(tri_out)} rows)\n'
+                 + '\n'.join(tri_lines) + '\n')
+    return 0, text
+
+
+def _git_show(repo, ref, path):
+    r = subprocess.run(['git', '-C', repo, 'show', f'{ref}:{path}'],
+                       capture_output=True, text=True, errors='replace')
+    return r.stdout if r.returncode == 0 else ''
 
 
 # -- resolve -------------------------------------------------------------

@@ -8285,6 +8285,62 @@ class WaveTest(unittest.TestCase):
         rc, out = self._recompare(tip_rows)
         self.assertIn('recompare: 0 new rows', out)
 
+    def test_recompare_regenerates_triage_and_demotes_open_rows(self):
+        # Task 23: after a fork_base move disables fork-stub, the closed row
+        # keeps its class, every open row (fresh or kept) is demoted, and the
+        # calibration invariant (open classes within the enabled ones) holds.
+        R = self._row
+        tri = self.wave._triage()
+        self.write_disagreements([R('0x1000'), R('0x2000'), R('0x3000')])
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {
+                'b001': {'status': 'closed', 'branch': 'p3/wso-b001',
+                         'files': ['src/A.cpp'], 'rows': [R('0x1000')],
+                         'verdicts': {'0x1000': {'side': 'fork', 'case': 'dump-1000'}}},
+                'b002': {'status': 'assigned', 'branch': 'p3/wso-b002',
+                         'files': ['src/B.cpp'], 'rows': [R('0x3000')],
+                         'verdicts': {'0x3000': {'side': 'ours', 'case': 'dump-3000'}}}}}, f)
+        tpath = os.path.join(os.path.dirname(self.disagreements), 'triage.json')
+        entry = lambda a: {'address': a, 'class': 'fork-stub', 'name': 'F' + a,
+                           'file': 'src/A.cpp', 'ours_ref': 'old', 'reason': 'old'}
+        with open(tpath, 'w') as f:
+            json.dump([entry('0x1000'), entry('0x3000')], f)
+
+        def fake(todo, fork, ours, **kw):
+            return [dict(r, **{'class': 'fork-stub', 'reason': 'new'}) for r in todo]
+        with mock.patch.object(tri, 'triage_rows', fake):
+            rc, out = self._recompare([R('0x1000'), R('0x2000'), R('0x3000')],
+                                      triage_show=lambda ref, path: '')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('triage: regenerated triage.json at bbbbbbb', out)
+        self.assertIn('fork-stub', out)               # the calibration table
+        self.assertIn('disabled by calibration', out)
+        self.assertIn('0x2000 F0x2000 demoted to ambiguous', out)
+        self.assertIn('0x3000 F0x3000 demoted to ambiguous', out)
+        with open(tpath) as f:
+            got = {r['address']: r for r in json.load(f)}
+        self.assertEqual(got['0x1000']['class'], 'fork-stub')     # closed: kept
+        self.assertEqual(got['0x2000']['class'], 'ambiguous')
+        self.assertEqual(got['0x2000']['auto_class'], 'fork-stub')
+        self.assertEqual(got['0x3000']['class'], 'ambiguous')
+        with open(self.state) as f:
+            state = json.load(f)
+        self.assertEqual(state['fork_base'], 'b' * 40)
+        cal = tri.calibrate(state, [dict(r, **{'class': r.get('auto_class', r['class'])})
+                                    for r in got.values()])
+        open_present = {r['class'] for a, r in got.items() if a != '0x1000'
+                        and r['class'] in tri.AUTO_OURS}
+        self.assertLessEqual(open_present, tri.enabled_classes(cal))
+
+    def test_recompare_without_triage_file_leaves_none(self):
+        R = self._row
+        self.write_disagreements([R('0x1000')])
+        rc, out = self._recompare([R('0x2000')])
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('triage:', out)
+        self.assertFalse(os.path.exists(os.path.join(
+            os.path.dirname(self.disagreements), 'triage.json')))
+
     def test_recompare_unresolved_tip_writes_nothing(self):
         from unittest import mock
         with open(self.disagreements) as f:
@@ -10643,6 +10699,7 @@ class DriverTest(unittest.TestCase):
                 'closed_at': None, 'verdicts': {'0x403000': {
                     'side': 'ours', 'case': 'triage-rename', 'losing_kind': 'trace'}}}}}, f)
         self.pushes, self.sent, self.bundle_dirs, self.logs = [], [], [], []
+        kw.setdefault('base_tests', False)   # a test never runs the real suite
         d = driver.Driver(
             self.root, self.state_path, worker,
             driver.FakeWorker(self.CLEAN_REVIEW) if reviewer is None else reviewer,
@@ -14206,6 +14263,202 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d.run(), 3)
         self.assertEqual(ran, ['b011', 'b012', 'b013'])
 
+    # -- the base's tool tests (Task 23) -----------------------------------
+
+    def _base_driver(self, results, cuts, keys=None, **kw):
+        """A Driver with the base-tests check on: `results` are what the
+        injected suite run returns in turn, `cuts` the next_batch answers
+        (then nothing left); run_batch is a recorder.  `keys` makes the
+        cache key move per call (None: the real key of the temp repo)."""
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), base_tests=True, **kw)
+        self.suite_runs, self.cut_calls, self.ran = [], [], []
+        results = iter(results)
+
+        def suite(root, log_path):
+            self.suite_runs.append((root, log_path))
+            return next(results)
+        d.base_tests_run = suite
+        answers = iter(cuts)
+
+        def nxt(*a, **kw):
+            self.cut_calls.append(1)
+            return next(answers, self.NOTHING)
+        d.next_batch = nxt
+        d.run_batch = lambda bid, resume=None: self.ran.append(bid) or 'closed'
+        d.recompare = lambda *a, **kw: (0, 'recompare: 0 new rows at b (0 already queued, 0 decided)\n')
+        if keys is not None:
+            counter = iter(keys)
+            d._base_key = lambda: next(counter)
+        return d
+
+    BASE_MSG = ('base: tool tests fail on first (%d failures; see '
+                'driver/base-tests-wave1.log); no new batch starts until they pass')
+
+    def test_base_tests_red_at_start_raise_one_exception_and_no_cut(self):
+        d = self._base_driver([(False, 3)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.cut_calls, [])
+        self.assertEqual(self.ran, [])
+        exc = self._status(d)['exceptions']
+        self.assertEqual(list(exc), ['first'])
+        self.assertEqual(exc['first']['problems'], [self.BASE_MSG % 3])
+        self.assertEqual(self._ledger(d).count('driver first: exception at base-tests'), 1)
+        self.assertEqual(len(self.suite_runs), 1)      # no re-run while it stands
+        self.assertTrue(self.suite_runs[0][1].endswith(
+            os.path.join('driver', 'base-tests-wave1.log')))
+        self.assertEqual(self.suite_runs[0][0], d.repo)
+
+    def test_base_tests_green_lets_cuts_proceed(self):
+        d = self._base_driver([(True, 0)], [(0, 'b012 assigned: x\n'),
+                                            (0, 'b013 assigned: x\n')], keys=['k'] * 9)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self.ran, ['b012', 'b013'])
+        self.assertNotIn('first', self._status(d)['exceptions'])
+        self.assertEqual(self._status(d)['base_tests']['key'], 'k')
+
+    def test_base_tests_red_before_a_cut_stops_new_cuts_only(self):
+        d = self._base_driver([(True, 0), (False, 1)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1'] * 2 + ['k2'] * 9)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.ran, ['b012'])           # the first cut went through
+        self.assertEqual(len(self.cut_calls), 1)       # the second was never made
+        st = self._status(d)
+        self.assertEqual(st['exceptions']['first']['problems'],
+                         [self.BASE_MSG.replace('%d failures', '1 failure')])
+
+    def test_clearing_first_reruns_the_suite_and_cuts_resume(self):
+        d = self._base_driver([(False, 2)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(driver.clear_exception(d.status_path, 'first')[0], 0)
+        self.assertNotIn('first', self._status(d)['exceptions'])
+        d = self._base_driver([(True, 0)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.suite_runs), 1)
+        self.assertEqual(self.ran, ['b012'])
+
+    def test_base_tests_cache_skips_the_rerun_until_head_or_tools_change(self):
+        d = self._base_driver([(True, 0), (True, 0)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')])
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.suite_runs), 1)      # start + two cuts, one run
+        self.assertEqual(self.ran, ['b012', 'b013'])
+        key = d._base_key()
+        self.assertEqual(key, d._base_key())
+        _write(os.path.join(self.root, 'tools', 'new_tool.py'), 'x = 1\n')
+        self.assertNotEqual(d._base_key(), key)        # a tools/ listing change
+        os.unlink(os.path.join(self.root, 'tools', 'new_tool.py'))
+        self.assertEqual(d._base_key(), key)
+        self.git('commit', '-q', '--allow-empty', '-m', 'move head')
+        self.assertNotEqual(d._base_key(), key)        # HEAD moved
+
+    def test_no_base_tests_flag_skips_the_check(self):
+        args, err = driver._parse(['--no-base-tests'])
+        self.assertIsNone(err)
+        self.assertFalse(args.base_tests)
+        args, err = driver._parse([])
+        self.assertTrue(args.base_tests)
+        d = self._base_driver([], [(0, 'b012 assigned: x\n')])
+        d.base_tests = False
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self.suite_runs, [])
+        self.assertEqual(self.ran, ['b012'])
+
+    def test_a_stop_during_the_base_suite_records_no_exception(self):
+        d = self._base_driver([], [(0, 'b012 assigned: x\n')])
+
+        def stopped(root, log_path):
+            raise driver._Stop()
+        d.base_tests_run = stopped
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertEqual(self.cut_calls, [])
+        self.assertNotIn('base-tests', self._ledger(d) if os.path.exists(d.ledger_path) else '')
+
+    def test_run_base_tests_raises_stop_when_killed_by_a_stop_and_names_timeouts(self):
+        log = os.path.join(tempfile.mkdtemp(), 'x.log')
+        self.addCleanup(shutil.rmtree, os.path.dirname(log), True)
+        killed = subprocess.CompletedProcess([], -9, '', '')
+        with mock.patch.object(driver, '_run_group', return_value=killed):
+            driver._STOPPED.set()
+            self.addCleanup(driver._STOPPED.clear)
+            with self.assertRaises(driver._Stop):
+                driver.run_base_tests(self.root if hasattr(self, 'root') else '.', log)
+            driver._STOPPED.clear()
+            self.assertEqual(driver.run_base_tests('.', log)[0], False)   # not stopped: red
+        with mock.patch.object(driver, '_run_group', side_effect=subprocess.TimeoutExpired('x', 600)):
+            ok, detail = driver.run_base_tests('.', log)
+        self.assertFalse(ok)
+        self.assertIn('timed out after 600 s', detail)
+        d = self._base_driver([(False, detail)], [])
+        d.run()
+        self.assertIn('timed out after 600 s; see driver/base-tests-wave1.log',
+                      self._status(d)['exceptions']['first']['problems'][0])
+
+    def test_blocked_with_batches_in_flight_waits_for_them_and_cuts_nothing_new(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1', 'k2', 'k2', 'k2', 'k2'], workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            red_seen.wait(10)
+            time.sleep(0.2)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(order, ['b012'])        # in flight ran to the end
+        self.assertEqual(len(self.cut_calls), 1)
+        self.assertIn('first', self._status(d)['exceptions'])
+
+    def test_live_clear_first_reruns_the_suite_and_cuts_resume(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1), (True, 0)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1'] + ['k2'] * 8, workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            if bid == 'b012':
+                red_seen.wait(10)
+                for _ in range(100):             # the exception is recorded after the run
+                    if 'first' in self._status(d)['exceptions']:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(driver.clear_exception(d.status_path, 'first')[0], 0)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['b012', 'b013'])
+        self.assertEqual(len(self.suite_runs), 3)
+        self.assertNotIn('first', self._status(d)['exceptions'])
+
+    def test_a_cleared_retry_is_not_blocked_by_red_base_tests(self):
+        d = self._base_driver([(False, 1)], [(0, 'b012 assigned: x\n')])
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {},
+                       'batches': {'b011': {'outcome': 'exception', 'stage': 'checks'}}}, f)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.ran, ['b011'])           # the retry goes
+        self.assertEqual(self.cut_calls, [])           # no new cut
+        self.assertIn('first', self._status(d)['exceptions'])
+
     def test_cut_failure_is_an_exception_and_stops(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
         d.next_batch = lambda *a, **kw: (1, 'b013 not assigned: git worktree add failed\n')
@@ -14334,7 +14587,7 @@ class DriverTest(unittest.TestCase):
         """A fresh Driver over the same paths, reading the status file again."""
         n = driver.Driver(d.repo, d.state_path, d.worker, d.reviewer, d.ledger_path,
                           d.status_path, push=d.push, send=d.send, gate=False,
-                          log=self.logs.append)
+                          log=self.logs.append, base_tests=False)
         n.render_brief, n.mechanical_checks = d.render_brief, d.mechanical_checks
         n.report_path, n.triage_path = d.report_path, d.triage_path
         return n
@@ -14388,7 +14641,8 @@ class DriverTest(unittest.TestCase):
 
     def test_default_push_and_send(self):
         d = self._driver(worker=None)
-        d = driver.Driver(d.repo, d.state_path, None, None, d.ledger_path, d.status_path)
+        d = driver.Driver(d.repo, d.state_path, None, None, d.ledger_path, d.status_path,
+                          base_tests=False)
         calls = []
 
         def stub(argv, **kw):
@@ -15250,6 +15504,7 @@ class DriverTest(unittest.TestCase):
         with open(self.state_path, 'w') as f:
             json.dump({'fork_base': 'e8dd16a7', 'batches': batches}, f)
         self.pushes, self.sent, self.logs = [], [], []
+        kw.setdefault('base_tests', False)
         d = driver.Driver(
             self.root, self.state_path, None, None, os.path.join(tmp, 'ledger.md'),
             os.path.join(tmp, 'driver', 'status.json'), pools=pools,
