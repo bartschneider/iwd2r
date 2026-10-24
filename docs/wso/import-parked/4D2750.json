@@ -1,0 +1,1 @@
+{"address": "0x4D2750", "name": "CUIPanel::CUIPanel", "file": "src/CUIPanel.cpp", "batch": "i010", "needs": "world_entry: not measured (address-like untyped argument a0 (23434784 vs 27403252); type it from the header); ours reading matches the decompile"}

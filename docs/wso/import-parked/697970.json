@@ -1,0 +1,1 @@
+{"address": "0x697970", "name": "CUIControlButtonClock::CUIControlButtonClock", "file": "src/CScreenWorld.cpp", "batch": "i013", "needs": "world_entry: not measured (address-like untyped argument a0 (222281672 vs 88722856); type it from the header); ours reading matches the decompile"}

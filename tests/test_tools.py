@@ -8139,7 +8139,7 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(self.wave.record_verdict(
             self.state, self.root, 'b001', '0x643CC0', 'ours', 'probe-11')[0], 0)
 
-    def gates(self, rc):
+    def gates(self, rc, summary=None):
         """Patch subprocess.run so the `bash tools/gates.sh` run exits rc;
         record its calls.  Git calls pass through -- including close's
         diff, whose pathspec names tools/gates.sh without invoking it."""
@@ -8150,7 +8150,7 @@ class WaveTest(unittest.TestCase):
         def run(cmd, **kw):
             if cmd[0] == 'bash':
                 calls.append(cmd)
-                stdout = 'gates: all passed\n' if rc == 0 else \
+                stdout = (summary or 'gates: all passed\n') if rc == 0 else \
                     'gates: FAILED: linux-gcc build and tests\n'
                 return subprocess.CompletedProcess(cmd, rc, stdout=stdout,
                                                    stderr='')
@@ -8285,6 +8285,89 @@ class WaveTest(unittest.TestCase):
         rc, out = self._recompare(tip_rows)
         self.assertIn('recompare: 0 new rows', out)
 
+    def test_recompare_regenerates_triage_and_demotes_open_rows(self):
+        # Task 23: after a fork_base move disables fork-stub, the closed row
+        # keeps its class, every open row (fresh or kept) is demoted, and the
+        # calibration invariant (open classes within the enabled ones) holds.
+        R = self._row
+        tri = self.wave._triage()
+        self.write_disagreements([R('0x1000'), R('0x2000'), R('0x3000')])
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {
+                'b001': {'status': 'closed', 'branch': 'p3/wso-b001',
+                         'files': ['src/A.cpp'], 'rows': [R('0x1000')],
+                         'verdicts': {'0x1000': {'side': 'fork', 'case': 'dump-1000'}}},
+                'b002': {'status': 'assigned', 'branch': 'p3/wso-b002',
+                         'files': ['src/B.cpp'], 'rows': [R('0x3000')],
+                         'verdicts': {'0x3000': {'side': 'ours', 'case': 'dump-3000'}}}}}, f)
+        tpath = os.path.join(os.path.dirname(self.disagreements), 'triage.json')
+        entry = lambda a: {'address': a, 'class': 'fork-stub', 'name': 'F' + a,
+                           'file': 'src/A.cpp', 'ours_ref': 'old', 'reason': 'old'}
+        with open(tpath, 'w') as f:
+            json.dump([entry('0x1000'), entry('0x3000')], f)
+
+        def fake(todo, fork, ours, **kw):
+            return [dict(r, **{'class': 'fork-stub', 'reason': 'new'}) for r in todo]
+        with mock.patch.object(tri, 'triage_rows', fake):
+            rc, out = self._recompare([R('0x1000'), R('0x2000'), R('0x3000')],
+                                      triage_show=lambda ref, path: '')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('triage: regenerated triage.json at bbbbbbb', out)
+        self.assertIn('fork-stub', out)               # the calibration table
+        self.assertIn('disabled by calibration', out)
+        self.assertIn('0x2000 F0x2000 demoted to ambiguous', out)
+        self.assertIn('0x3000 F0x3000 demoted to ambiguous', out)
+        with open(tpath) as f:
+            got = {r['address']: r for r in json.load(f)}
+        self.assertEqual(got['0x1000']['class'], 'fork-stub')     # closed: kept
+        self.assertEqual(got['0x2000']['class'], 'ambiguous')
+        self.assertEqual(got['0x2000']['auto_class'], 'fork-stub')
+        self.assertEqual(got['0x3000']['class'], 'ambiguous')
+        with open(self.state) as f:
+            state = json.load(f)
+        self.assertEqual(state['fork_base'], 'b' * 40)
+        cal = tri.calibrate(state, [dict(r, **{'class': r.get('auto_class', r['class'])})
+                                    for r in got.values()])
+        open_present = {r['class'] for a, r in got.items() if a != '0x1000'
+                        and r['class'] in tri.AUTO_OURS}
+        self.assertLessEqual(open_present, tri.enabled_classes(cal))
+
+    def test_recompare_regenerates_triage_with_a_row_that_has_no_address(self):
+        R = self._row
+        tri = self.wave._triage()
+        self.write_disagreements([R('0x1000'), self._noaddr('Nameless::Fn')])
+        tpath = os.path.join(os.path.dirname(self.disagreements), 'triage.json')
+        with open(tpath, 'w') as f:
+            json.dump([], f)
+        seen = []
+
+        def fake(todo, fork, ours, **kw):
+            seen.extend(todo)
+            self.assertTrue(all(r.get('address') for r in todo))
+            return [dict(r, **{'class': 'ambiguous', 'reason': 'x'}) for r in todo]
+        with mock.patch.object(tri, 'triage_rows', fake):
+            rc, out = self._recompare([R('0x2000')], triage_show=lambda ref, path: '')
+        self.assertEqual(rc, 0, out)
+        with open(tpath) as f:
+            got = json.load(f)
+        self.assertTrue(got and all(r.get('address') for r in got))
+        self.assertIn('Nameless::Fn', out)       # still listed as not batchable
+
+    def test_an_uncommented_overload_keeps_a_commented_one_unresolved(self):
+        src = '// 0x4026D0\nvoid Dup::Go()\n{\n}\n\nvoid Dup::Go(int x)\n{\n}\n'
+        self.assertIsNone(self.wave.address_from_header(src, 'Dup::Go'))
+        self.assertEqual(self.wave.address_from_header(
+            '// 0x4026D0\nvoid Dup::Go()\n{\n}\n', 'Dup::Go'), '0x4026D0')
+
+    def test_recompare_without_triage_file_leaves_none(self):
+        R = self._row
+        self.write_disagreements([R('0x1000')])
+        rc, out = self._recompare([R('0x2000')])
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('triage:', out)
+        self.assertFalse(os.path.exists(os.path.join(
+            os.path.dirname(self.disagreements), 'triage.json')))
+
     def test_recompare_unresolved_tip_writes_nothing(self):
         from unittest import mock
         with open(self.disagreements) as f:
@@ -8297,6 +8380,108 @@ class WaveTest(unittest.TestCase):
         with open(self.disagreements) as f:
             self.assertEqual(f.read(), before)
         self.assertFalse(os.path.exists(self.state))
+
+    # -- Task 27: addresses from header comments, the pending coverage list --
+
+    SRC_A = (
+        '#include "A.h"\n\n// 0x402660\nCResStore::CResStore()\n{\n}\n\n'
+        '// 0x4026C0\nvoid CResStore::Parse(int a)\n{\n}\n\n'
+        '// 0x4026D0\nvoid Dup::Go()\n{\n}\n\n// 0x4026E0\nvoid Dup::Go(int x)\n{\n}\n')
+
+    def _noaddr(self, name, file='src/A.cpp', cat='both_changed_differ'):
+        return dict(file=file, name=name, category=cat, their_len=5, our_len=5)
+
+    def test_recompare_fills_a_missing_address_from_our_header_comment(self):
+        self.write_disagreements([])
+        rows = [self._noaddr('CResStore::Parse')]
+        src = lambda f: self.SRC_A if f == 'src/A.cpp' else ''
+        rc, out = self._recompare(rows, source_of=src)
+        self.assertEqual(rc, 0, out)
+        with open(self.disagreements) as f:
+            got = json.load(f)
+        self.assertEqual([r.get('address') for r in got if r['name'] == 'CResStore::Parse'],
+                         ['0x4026C0'])
+        self.assertIn('recompare: 1 new rows', out)
+        self.assertIn('CResStore::Parse 0x4026C0', out)
+        self.assertNotIn('not batchable', out)
+
+    def test_recompare_lists_and_counts_rows_it_cannot_resolve(self):
+        rows = [self._noaddr('CResEffect::Parse'), self._noaddr('Dup::Go')]
+        self.write_disagreements([self._noaddr('Old::Gone', 'src/Z.cpp')])
+        src = lambda f: self.SRC_A
+        rc, out = self._recompare(rows, source_of=src)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('rows without an address (not batchable): 3', out)
+        self.assertIn('  CResEffect::Parse  src/A.cpp', out)
+        self.assertIn('  Dup::Go  src/A.cpp', out)        # an overload is ambiguous
+        self.assertIn('  Old::Gone  src/Z.cpp', out)      # already in the file: still listed
+        # nothing dropped: all three are on file, once, and a rerun adds no copy
+        rc, out = self._recompare(rows, source_of=src)
+        self.assertIn('rows without an address (not batchable): 3', out)
+        with open(self.disagreements, encoding='utf-8') as f:
+            on_file = json.load(f)
+        self.assertEqual(sum(1 for r in on_file if not r.get('address')), 3)
+        report = os.path.join(self.tmp, 'report.md')
+        rc, _ = self.wave.write_scorecard(self.state, report, triage_path=os.path.join(self.tmp, 'none'),
+                                          calibration_path=None, repo=self.tmp)
+        self.assertEqual(rc, 0)
+        with open(report) as f:
+            self.assertIn('rows without an address (not batchable): 3', f.read())
+
+    def test_next_lists_the_rows_it_skips_for_lack_of_an_address(self):
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('(skipped 1 row without an address)', out)
+        self.assertIn('rows without an address (not batchable): 1', out)
+        noaddr = [r for r in _WAVE_ROWS if not r.get('address') and r.get('category') == 'both_changed_differ']
+        self.assertEqual(len(noaddr), 1)
+        self.assertIn('  %s  %s' % (noaddr[0]['name'], noaddr[0]['file']), out)
+
+    def test_next_lists_the_address_less_rows_once_per_process(self):
+        self.wave._NOADDR_LOGGED = False
+        rc, first = self.next(size=1)
+        self.assertIn('not batchable', first)
+        rc, second = self.next(size=1)
+        self.assertIn('(skipped 1 row without an address)', second)
+        self.assertNotIn('not batchable', second)
+
+    def _cov_map(self, hooked):
+        path = os.path.join(os.path.dirname(self.disagreements), 'coverage.json')
+        with open(path, 'w') as f:
+            json.dump({'exe': 'x', 'scenarios_sha': 's', 'at': '2026-10-24T00:00:00Z',
+                       'scenarios': {'world_entry': {'sha': 'q', 'hooks': len(hooked), 'refused': [],
+                                                     'failed_chunks': [], 'measured': len(hooked),
+                                                     'hooked': hooked, 'hits': {}}}}, f)
+
+    def test_recompare_writes_and_merges_the_pending_coverage_list(self):
+        R = self._row
+        pend = os.path.join(os.path.dirname(self.disagreements), 'coverage.pending.json')
+        self.write_disagreements([])
+        self._cov_map(['0x402000'])
+        rows = [R('0x402000'), R('0x403000'), R('0x403000'),
+                R('0x404000', cat='theirs_changed_ours_base'), R('0x405000', cat='same'),
+                R('0x10')]                                  # outside .text: not measurable
+        rc, out = self._recompare(rows)
+        self.assertEqual(rc, 0, out)
+        with open(pend) as f:
+            got = json.load(f)
+        self.assertEqual([(e['address'], e['category']) for e in got],
+                         [('0x403000', 'both_changed_differ'),
+                          ('0x404000', 'theirs_changed_ours_base')])
+        for e in got:
+            self.assertEqual(set(e), {'address', 'name', 'file', 'category', 'at'})
+        self.assertIn('coverage: 2 new candidate(s)', out)
+        # merged with the existing list: a second recompare adds only the new
+        rc, out = self._recompare(rows + [R('0x406000', cat='only_theirs')])
+        with open(pend) as f:
+            got2 = json.load(f)
+        self.assertEqual([e['address'] for e in got2], ['0x403000', '0x404000', '0x406000'])
+        self.assertEqual(got2[:2], got)
+        # no coverage map: nothing is recorded (every row would be "new")
+        os.unlink(os.path.join(os.path.dirname(self.disagreements), 'coverage.json'))
+        os.unlink(pend)
+        self._recompare(rows)
+        self.assertFalse(os.path.exists(pend))
 
     def test_recompare_counts_category_changes_and_keeps_shape(self):
         R = self._row
@@ -8466,6 +8651,22 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(self.batches()['b001']['status'], 'assigned')
         self.assertEqual(self.first_sha(), first)
+
+    def test_wave_close_records_the_gate_kind(self):
+        for summary, kind in (('gates: docs-only fast path\ngates: all passed\n', 'docs-only'),
+                              ('gates: full gate\ngates: all passed\n', 'full')):
+            with self.subTest(kind=kind):
+                self.setUp()
+                self.init_repo()
+                self.write_evidence()
+                self.commit_worktree()
+                self.verdicts()
+                ctx, _calls = self.gates(0, summary)
+                with ctx:
+                    rc, out = self.wave.close_batch(self.state, self.root, 'b001')
+                self.assertEqual(rc, 0, out)
+                self.assertIn('(gate: %s)' % kind, out)
+                self.assertEqual(self.batches()['b001']['gate'], kind)
 
     def test_wave_close_fast_forwards(self):
         self.init_repo()
@@ -10193,6 +10394,20 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x401000: parked') for p in probs), probs)
         self.assertTrue(any(p.startswith('0x401000: both kept and parked') for p in probs), probs)
 
+    def test_only_theirs_row_under_kept_is_refused(self):
+        d = self._mc_repo({'401000': 'kind: read-only'})
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'only_theirs'}]}
+        ce = driver._tool('check_evidence')
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
+                mock.patch.object(ce, 'touched', return_value=[]):
+            probs = [p for p in driver.mechanical_checks(
+                batch, d, {}, run=self._mc_run(0, []), kind='import', kept=['0x401000'])
+                if 'first' not in p.split(':')[0] and not p.startswith('git ')]
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith('0x401000: listed under ## Kept but ours has no '
+                                            'body there; an only-theirs row is never kept'), probs)
+
     def test_parked_evidence_check_covers_the_batch_and_what_the_branch_changed(self):
         d = self._mc_repo({'401000': 'kind: read-only', '405000': 'stray'})
         batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
@@ -10215,6 +10430,252 @@ class DriverTest(unittest.TestCase):
         probs = driver._kept_and_parked_problems(batch, d, 'first', (), key, [])
         self.assertEqual(probs, ['0x401000: parked (docs/wso/import-parked/401000.json) but '
                                  'docs/evidence/401000.md still exists; delete it'])
+
+    # -- Task 24: wave.py selfcheck ------------------------------------------
+
+    SC_DECIDED = ('---\nkind: read-only\n---\n\n## WSO delta\n\ncorroborated by WSO at abc: '
+                  'x; case dump-%s decides\n')
+
+    def _sc_repo(self, kind='verdicts', evidence=None):
+        """A real git repo on branch first, then the batch branch with the
+        state file, for the worker's selfcheck."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+
+        def g(*a):
+            return subprocess.run(['git', '-C', d, '-c', 'user.name=T', '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a],
+                                  check=True, capture_output=True, text=True)
+        self.sc_git = g
+        g('init', '-q', '-b', 'first')
+        imp = kind == 'import'
+        bid = 'i009' if imp else 'b011'
+        rows = [{'address': '0x401000', 'category': 'theirs_real_ours_stub'},
+                {'address': '0x402000', 'category': 'theirs_real_ours_stub'}] if imp else [
+            {'address': '0x401000', 'class': 'ambiguous'},
+            {'address': '0x402000', 'class': 'ambiguous'}]
+        state = {'batches': {bid: {'branch': 'p3/wso-' + bid, 'rows': rows}}}
+        _write(os.path.join(d, 'docs/wso/%s-state.json' % ('import' if imp else 'wave')),
+               json.dumps(state))
+        _write(os.path.join(d, 'src/a.cpp'), 'a\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        g('checkout', '-q', '-b', 'p3/wso-' + bid)
+        for k in ('401000', '402000') if evidence is None else evidence:
+            _write(os.path.join(d, 'docs/evidence/%s.md' % k), self.SC_DECIDED % k)
+        g('add', '-A')
+        g('commit', '-q', '-m', 'evidence')
+        return d
+
+    def _sc_report(self, extra=''):
+        return ('## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                'verdict 0x402000 ours case dump-402000\n\n## Undecided\n\n(none)\n' + extra)
+
+    IMPORT_REPORT = '## Imported\n\nimported 0x401000 trace\nimported 0x402000 trace\n'
+
+    def test_selfcheck_good_reports_are_ok(self):
+        d = self._sc_repo()
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report()), [])
+        d = self._sc_repo('import')
+        self.assertEqual(driver.selfcheck('i009', d, self.IMPORT_REPORT), [])
+        # parked and kept rows are accounted for
+        _write(os.path.join(d, 'docs/wso/import-parked/402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        os.unlink(os.path.join(d, 'docs/evidence/402000.md'))
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'park')
+        self.assertEqual(driver.selfcheck(
+            'i009', d, '## Imported\n\nimported 0x401000 trace\n\n## Kept\n\nNone.\n'), [])
+
+    def test_selfcheck_report_format_problems(self):
+        d = self._sc_repo()
+        # a chat note instead of the report
+        probs = driver.selfcheck('b011', d, 'I decided both rows ours; evidence written.\n')
+        self.assertTrue(probs[0].startswith('report: no ## Verdicts section'), probs)
+        self.assertEqual(len([p for p in probs if 'no verdict line in the report' in p]), 2, probs)
+        # a mangled verdict line and a mangled undecided line: the driver's wording
+        probs = driver.selfcheck('b011', d, '## Verdicts\nverdict 0x401000 maybe case x\n')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('malformed verdict line', probs[0])
+        self.assertIn('fix that line under ## Verdicts', probs[0])
+        probs = driver.selfcheck('b011', d, self._sc_report('undecided 0x401000 ours no\n'))
+        self.assertIn('fix that line under ## Undecided', probs[0])
+        # a row with neither a verdict nor an undecided line
+        probs = driver.selfcheck('b011', d, '## Verdicts\nverdict 0x401000 ours case dump-401000\n')
+        self.assertEqual(probs, [
+            '0x402000: no verdict line in the report; add "verdict <addr> ours|fork|neither case '
+            '<id>" under ## Verdicts (or, if no probe, replay or trace case you can run decides a '
+            'fork or neither reading, list it under ## Undecided)'])
+
+    def test_selfcheck_import_report_problems(self):
+        d = self._sc_repo('import')
+        probs = driver.selfcheck('i009', d, self.IMPORT_REPORT + '\n## Verdicts\n\n(none)\n')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('no ## Verdicts section', probs[0])
+        probs = driver.selfcheck('i009', d, '## Imported\n\nimported 0x401000 trace\n')
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith('0x402000: not accounted for in the report'), probs)
+        # Kept lines parse as the driver parses them
+        probs = driver.selfcheck('i009', d, self.IMPORT_REPORT + '\n## Kept\nkept 0x401000\n')
+        self.assertIn('malformed kept line', probs[0])
+
+    def test_selfcheck_parked_row_with_evidence_left_behind(self):
+        d = self._sc_repo('import')
+        _write(os.path.join(d, 'docs/wso/import-parked/402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'park')
+        probs = driver.selfcheck('i009', d, '## Imported\n\nimported 0x401000 trace\n')
+        self.assertEqual(probs, ['0x402000: parked (docs/wso/import-parked/402000.json) but '
+                                 'docs/evidence/402000.md still exists; delete it'])
+
+    def test_selfcheck_misspelt_evidence_gets_a_rename_instruction(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/0x402000.md'), self.SC_DECIDED % '402000')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'misspelt')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(probs, ['docs/evidence/0x402000.md: misspelt evidence file name; rename '
+                                 'it to docs/evidence/402000.md (caps, no 0x): `git mv '
+                                 'docs/evidence/0x402000.md docs/evidence/402000.md` and commit'])
+        # nothing was renamed
+        self.assertTrue(os.path.isfile(os.path.join(d, 'docs/evidence/0x402000.md')))
+        self.assertFalse(os.path.exists(os.path.join(d, 'docs/evidence/402000.md')))
+
+    def test_selfcheck_deciding_sentence_and_frida_line(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/402000.md'),
+               '---\nkind: read-only\ntrace_source: frida scn orig:%s ours:%s compare=0\n' % ('a' * 64, 'b' * 64) + '---\n\n## WSO delta\n\n'
+               'corroborated by WSO at abc: x; case other decides\n')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'worker evidence')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertTrue(any(p.startswith('0x402000: docs/evidence/402000.md has no sentence reading '
+                                         '"disagreed with WSO at <sha>: ...; case dump-402000 decides"')
+                            for p in probs), probs)
+        self.assertTrue(any(p.startswith('docs/evidence/402000.md: a frida trace_source the driver '
+                                         'did not write') for p in probs), probs)
+        # a frida line the driver's own commit wrote (a fix round) is not the worker's
+        self.sc_git('commit', '-q', '--amend', '-m', 'frida: trace evidence for 1 rows of b011')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # the worker then edits that file's prose: the driver's line stays legitimate
+        path = os.path.join(d, 'docs/evidence/402000.md')
+        _write(path, _slurp(path) + '\nmore reading, case dump-402000 decides\n')
+        self.sc_git('commit', '-q', '-am', 'worker adds a sentence')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # a worker line under a non-frida subject is still flagged
+        _write(os.path.join(d, 'docs/evidence/401000.md'),
+               _slurp(path).replace('402000', '401000'))
+        self.sc_git('commit', '-q', '-am', 'worker evidence with a frida line')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertTrue(any(p.startswith('docs/evidence/401000.md: a frida trace_source')
+                            for p in probs), probs)
+
+    def test_selfcheck_edits_outside_the_allowed_paths_and_uncommitted_paths(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, 'docs/wso/triage.json'), '{}')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'oops')
+        _write(os.path.join(d, 'src/b.cpp'), 'untracked\n')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(len(probs), 2, probs)
+        self.assertTrue(any(p.startswith('uncommitted paths in the worktree; commit or delete: '
+                                         'src/b.cpp') for p in probs), probs)
+        self.assertTrue(any(p.startswith('changed outside the paths a batch may touch (') and
+                            'docs/wso/triage.json' in p for p in probs), probs)
+
+    def test_report_draft_is_never_an_uncommitted_path(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report()), [])
+        probs = driver.mechanical_checks(
+            dict(driver._tool('wave').load_state(
+                os.path.join(d, 'docs/wso/wave-state.json'))['batches']['b011'], id='b011'),
+            d, driver.parse_report(self._sc_report()), tests=False)
+        self.assertFalse(any('uncommitted' in p for p in probs), probs)
+        self.assertIn('.report.md', _slurp(os.path.join(ROOT, '.gitignore')).splitlines())
+
+    def test_selfcheck_cli(self):
+        d = self._sc_repo()
+        wave_py = os.path.join(ROOT, 'tools', 'wave.py')
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
+                           cwd=d, capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout), (0, 'selfcheck: OK\n'), r.stderr)
+        # no draft: exit 2 without reading stdin; stdin by `--report -`, a file by --report
+        os.unlink(os.path.join(d, '.report.md'))
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
+                           cwd=d, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('no report: write .report.md first or pass --report', r.stderr)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', '-'],
+                           cwd=d, input='chat note\n', capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('report: no ## Verdicts section', r.stdout)
+        self.assertEqual(len(r.stdout.strip().splitlines()), 3, r.stdout)
+        other = os.path.join(tempfile.mkdtemp(), 'elsewhere.txt')
+        self.addCleanup(shutil.rmtree, os.path.dirname(other), True)
+        _write(other, self._sc_report())
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', other], cwd=d, capture_output=True, text=True)
+        self.assertEqual(r.stdout, 'selfcheck: OK\n', r.stdout)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck'], cwd=d,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b999',
+                            '--report', other], cwd=d, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('batch b999 is not in docs/wso/wave-state.json', r.stdout)
+
+    def test_selfcheck_cli_excludes_the_draft_untracked(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        exclude = os.path.join(d, '.git', 'info', 'exclude')
+        self.assertNotIn('.report.md', _slurp(exclude) if os.path.exists(exclude) else '')
+        status = self.sc_git('status', '--porcelain', '-uall').stdout
+        head = self.sc_git('rev-parse', 'HEAD').stdout
+        for _ in range(2):
+            r = subprocess.run(['python3', '-I', os.path.join(ROOT, 'tools', 'wave.py'),
+                                'selfcheck', '--batch', 'b011'], cwd=d,
+                               capture_output=True, text=True)
+            self.assertEqual(r.stdout, 'selfcheck: OK\n', r.stdout)
+        self.assertEqual(_slurp(exclude).splitlines().count('.report.md'), 1)
+        self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+        self.assertEqual(self.sc_git('status', '--porcelain', '-uall').stdout, '')
+        self.assertIn('?? .report.md', status)
+
+    def test_selfcheck_never_edits(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/0x402000.md'), self.SC_DECIDED % '402000')
+        before = subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
+                                capture_output=True, text=True).stdout
+        head = self.sc_git('rev-parse', 'HEAD').stdout
+        driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
+                                        capture_output=True, text=True).stdout, before)
+        self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+
+    def test_selfcheck_rule_is_pinned_in_the_briefs_and_the_fix_prompt(self):
+        for name, n in (('brief-template.md', 15), ('import-brief-template.md', 10)):
+            text = _slurp(os.path.join(ROOT, 'docs', 'wso', name))
+            m = re.search(r'\n(\d+)\. \*\*Selfcheck last\.\*\*', text)
+            n = int(m.group(1))
+            rule = text.split(m.group(0))[1].split('\n\n')[0]
+            for need in ('`.report.md`', 'python3 -I tools/wave.py selfcheck --batch {{id}}',
+                         'selfcheck: OK', 'same text as your report'):
+                self.assertIn(need, rule, name)
+            back = text.split('## Report back')[1]
+            self.assertIn('python3 -I tools/wave.py selfcheck --batch {{id}}', back, name)
+            self.assertTrue(back.rstrip().endswith('as the report.'), name)
+            # the selfcheck rule is the last numbered rule
+            self.assertNotIn('\n%d. **' % (n + 1), text, name)
+        for kind in ('verdicts', 'import'):
+            p = driver.fix_prompt('b011', 'checks', 'br', 'BRIEF', ['x'], kind)
+            self.assertIn('python3 -I tools/wave.py selfcheck --batch b011', p)
+            self.assertIn('`selfcheck: OK`', p)
 
     def test_fix_round_rule_for_imports_names_kept(self):
         imp = driver.fix_prompt('i005', 'checks', 'p3/wso-i005', 'BRIEF', ['p'], 'import')
@@ -10629,6 +11090,7 @@ class DriverTest(unittest.TestCase):
                 'closed_at': None, 'verdicts': {'0x403000': {
                     'side': 'ours', 'case': 'triage-rename', 'losing_kind': 'trace'}}}}}, f)
         self.pushes, self.sent, self.bundle_dirs, self.logs = [], [], [], []
+        kw.setdefault('base_tests', False)   # a test never runs the real suite
         d = driver.Driver(
             self.root, self.state_path, worker,
             driver.FakeWorker(self.CLEAN_REVIEW) if reviewer is None else reviewer,
@@ -12787,6 +13249,42 @@ class DriverTest(unittest.TestCase):
         rc, out = self._close_import()
         self.assertEqual(rc, 0, out)
 
+    def test_driver_only_theirs_row_is_measured_when_touched_and_parked_by_removal(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_phase_driver(kept=(), category='only_theirs')
+        # the worker adds the function (absent at the merge base) and commits
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), self.BASE_R)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'add 401000', cwd=self.wt)
+        self.assertEqual(
+            [a for _p, a, _n in driver._tool('check_evidence').touched(self.wt, 'first')],
+            [0x401000])
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 4)))
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        # equal: trace evidence, no outcome (never kept)
+        self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
+        self.assertEqual(set(self._outcomes().values()), {None})
+        # unexercised: parked by REMOVING the function, never edit back
+        idle = [f for f in findings if f.startswith('0x403000:')]
+        self.assertEqual(len(idle), 1, findings)
+        self.assertIn('remove the function you added (and its declaration) so the file is back '
+                      "to the merge base's text for it", idle[0])
+        self.assertNotIn('edit that function back', idle[0])
+        self.assertIn('docs/wso/import-parked/403000.json', idle[0])
+        self.assertIn('needs "', idle[0])
+        diff = [f for f in findings if f.startswith('0x402000:')]
+        self.assertIn('remove the function you added', diff[0])
+        # a stub row's text is unchanged
+        d2, batch2 = self._kept_phase_driver(kept=())
+        d2.frida_run = d.frida_run
+        f2 = d2._frida_phase('b011', batch2, self.wt, {})
+        self.assertTrue([f for f in f2 if 'edit that function back' in f], f2)
+        self.assertFalse([f for f in f2 if 'remove the function you added' in f], f2)
+
     T_SRC = '// 0x404000\nint Rules::Tick(int a, int b)\n{\n  return a + b;\n}\n'
     T_EVIDENCE = ('---\naddress: 0x404000\nname: Rules::Tick\nkind: read-only\n'
                   'exemption: "read against the disassembly: ours matches"\n---\n\n'
@@ -14134,6 +14632,40 @@ class DriverTest(unittest.TestCase):
         self.assertIn('recompare: 0 new rows at bbbbbbb (3 already queued, '
                       '9 decided)', logs)
 
+    def test_driver_logs_the_pending_coverage_line_at_start_and_before_each_cut(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'),
+               json.dumps([{'address': '0x1'}, {'address': '0x2'}, {'address': '0x3'}]))
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        d.recompare = lambda *a, **kw: (0, 'recompare: 0 new rows at bbbbbbb (0 already queued, 0 decided)\n')
+        d.run_batch = lambda bid, resume=None: 'closed'
+        logs = []
+        d.log = logs.append
+        d.run()
+        line = ('coverage: 3 candidate(s) pending (run `python3 -I tools/wave.py coverage '
+                '--pending`); their batches run every scenario until then')
+        self.assertGreaterEqual(logs.count(line), 3)    # start + two cuts
+        self.assertEqual(logs[logs.index(line) + 1:].count(line) + 1, logs.count(line))
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'), '[]\n')
+        logs.clear()
+        cuts = iter([self.NOTHING])
+        d._recompared = False
+        d.run()
+        self.assertFalse([l for l in logs if l.startswith('coverage:')])
+
+    def test_the_pending_line_also_precedes_the_cut_after_a_recompare(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'),
+               json.dumps([{'address': '0x1'}]))
+        cuts = iter([self.NOTHING, (0, self.CUT)])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        d.recompare = lambda *a, **kw: (0, 'recompare: 4 new rows at bbbbbbb (0 already queued, 0 decided)\n')
+        logs = []
+        d.log = logs.append
+        self.assertEqual(d._cut()[0], 'b011')
+        self.assertEqual(len([l for l in logs if l.startswith('coverage: 1 candidate(s) pending')]), 2)
+
     def test_driver_cuts_again_when_recompare_finds_rows(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
         cuts = iter([self.NOTHING, (0, self.CUT), self.NOTHING, self.NOTHING])
@@ -14155,6 +14687,215 @@ class DriverTest(unittest.TestCase):
         d.run_batch = lambda bid: ran.append(bid) or outcomes[bid]
         self.assertEqual(d.run(), 3)
         self.assertEqual(ran, ['b011', 'b012', 'b013'])
+
+    # -- the base's tool tests (Task 23) -----------------------------------
+
+    def _base_driver(self, results, cuts, keys=None, **kw):
+        """A Driver with the base-tests check on: `results` are what the
+        injected suite run returns in turn, `cuts` the next_batch answers
+        (then nothing left); run_batch is a recorder.  `keys` makes the
+        cache key move per call (None: the real key of the temp repo)."""
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), base_tests=True, **kw)
+        self.suite_runs, self.cut_calls, self.ran = [], [], []
+        results = iter(results)
+
+        def suite(root, log_path):
+            self.suite_runs.append((root, log_path))
+            return next(results)
+        d.base_tests_run = suite
+        answers = iter(cuts)
+
+        def nxt(*a, **kw):
+            self.cut_calls.append(1)
+            return next(answers, self.NOTHING)
+        d.next_batch = nxt
+        d.run_batch = lambda bid, resume=None: self.ran.append(bid) or 'closed'
+        d.recompare = lambda *a, **kw: (0, 'recompare: 0 new rows at b (0 already queued, 0 decided)\n')
+        if keys is not None:
+            counter = iter(keys)
+            d._base_key = lambda: next(counter)
+        return d
+
+    BASE_MSG = ('base: tool tests fail on first (%d failures; see '
+                'driver/base-tests-wave1.log); no new batch starts until they pass')
+
+    def test_base_tests_red_at_start_raise_one_exception_and_no_cut(self):
+        d = self._base_driver([(False, 3)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.cut_calls, [])
+        self.assertEqual(self.ran, [])
+        exc = self._status(d)['exceptions']
+        self.assertEqual(list(exc), ['first'])
+        self.assertEqual(exc['first']['problems'], [self.BASE_MSG % 3])
+        self.assertEqual(self._ledger(d).count('driver first: exception at base-tests'), 1)
+        self.assertEqual(len(self.suite_runs), 1)      # no re-run while it stands
+        self.assertTrue(self.suite_runs[0][1].endswith(
+            os.path.join('driver', 'base-tests-wave1.log')))
+        self.assertEqual(self.suite_runs[0][0], d.repo)
+
+    def test_base_tests_green_lets_cuts_proceed(self):
+        d = self._base_driver([(True, 0)], [(0, 'b012 assigned: x\n'),
+                                            (0, 'b013 assigned: x\n')], keys=['k'] * 9)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self.ran, ['b012', 'b013'])
+        self.assertNotIn('first', self._status(d)['exceptions'])
+        self.assertEqual(self._status(d)['base_tests']['key'], 'k')
+
+    def test_base_tests_red_before_a_cut_stops_new_cuts_only(self):
+        d = self._base_driver([(True, 0), (False, 1)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1'] * 2 + ['k2'] * 9)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.ran, ['b012'])           # the first cut went through
+        self.assertEqual(len(self.cut_calls), 1)       # the second was never made
+        st = self._status(d)
+        self.assertEqual(st['exceptions']['first']['problems'],
+                         [self.BASE_MSG.replace('%d failures', '1 failure')])
+
+    def test_clearing_first_reruns_the_suite_and_cuts_resume(self):
+        d = self._base_driver([(False, 2)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(driver.clear_exception(d.status_path, 'first')[0], 0)
+        self.assertNotIn('first', self._status(d)['exceptions'])
+        d = self._base_driver([(True, 0)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.suite_runs), 1)
+        self.assertEqual(self.ran, ['b012'])
+
+    def test_base_tests_cache_skips_the_rerun_until_head_or_tools_change(self):
+        d = self._base_driver([(True, 0), (True, 0)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')])
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.suite_runs), 1)      # start + two cuts, one run
+        self.assertEqual(self.ran, ['b012', 'b013'])
+        key = d._base_key()
+        self.assertEqual(key, d._base_key())
+        _write(os.path.join(self.root, 'tools', 'new_tool.py'), 'x = 1\n')
+        self.assertNotEqual(d._base_key(), key)        # a tools/ listing change
+        os.unlink(os.path.join(self.root, 'tools', 'new_tool.py'))
+        self.assertEqual(d._base_key(), key)
+        self.git('commit', '-q', '--allow-empty', '-m', 'move head')
+        self.assertNotEqual(d._base_key(), key)        # HEAD moved
+
+    def test_no_base_tests_flag_skips_the_check(self):
+        args, err = driver._parse(['--no-base-tests'])
+        self.assertIsNone(err)
+        self.assertFalse(args.base_tests)
+        args, err = driver._parse([])
+        self.assertTrue(args.base_tests)
+        d = self._base_driver([], [(0, 'b012 assigned: x\n')])
+        d.base_tests = False
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self.suite_runs, [])
+        self.assertEqual(self.ran, ['b012'])
+
+    def test_a_stop_during_the_base_suite_records_no_exception(self):
+        d = self._base_driver([], [(0, 'b012 assigned: x\n')])
+
+        def stopped(root, log_path):
+            raise driver._Stop()
+        d.base_tests_run = stopped
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertEqual(self.cut_calls, [])
+        self.assertNotIn('base-tests', self._ledger(d) if os.path.exists(d.ledger_path) else '')
+
+    def test_run_base_tests_raises_stop_when_killed_by_a_stop_and_names_timeouts(self):
+        log = os.path.join(tempfile.mkdtemp(), 'x.log')
+        self.addCleanup(shutil.rmtree, os.path.dirname(log), True)
+        killed = subprocess.CompletedProcess([], -9, '', '')
+        # A private stop flag: the module-level _STOPPED is shared with driver
+        # threads other tests leave finishing, which can clear it between the
+        # set() and the call (seen once as a red base suite on first, 2026-10-24).
+        stopped = threading.Event()
+        stopped.set()
+        # The driver runs the base suite with IWD2R_BASE_TESTS_CHILD=1 so a
+        # suite that built a real Driver would not recurse; run_base_tests
+        # returns green at once under it.  This test calls the function
+        # directly, so it must not see the variable (it did when the suite ran
+        # as a driver's base check, 2026-10-24, and failed only there).
+        env = {k: v for k, v in os.environ.items() if k != 'IWD2R_BASE_TESTS_CHILD'}
+        env_patch = mock.patch.dict(os.environ, env, clear=True)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        with mock.patch.object(driver, '_run_group', return_value=killed), \
+                mock.patch.object(driver, '_STOPPED', stopped):
+            with self.assertRaises(driver._Stop):
+                driver.run_base_tests(self.root if hasattr(self, 'root') else '.', log)
+            stopped.clear()
+            self.assertEqual(driver.run_base_tests('.', log)[0], False)   # not stopped: red
+        with mock.patch.object(driver, '_run_group', side_effect=subprocess.TimeoutExpired('x', 600)):
+            ok, detail = driver.run_base_tests('.', log)
+        self.assertFalse(ok)
+        self.assertIn('timed out after 600 s', detail)
+        d = self._base_driver([(False, detail)], [])
+        d.run()
+        self.assertIn('timed out after 600 s; see driver/base-tests-wave1.log',
+                      self._status(d)['exceptions']['first']['problems'][0])
+
+    def test_blocked_with_batches_in_flight_waits_for_them_and_cuts_nothing_new(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1', 'k2', 'k2', 'k2', 'k2'], workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            red_seen.wait(10)
+            time.sleep(0.2)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(order, ['b012'])        # in flight ran to the end
+        self.assertEqual(len(self.cut_calls), 1)
+        self.assertIn('first', self._status(d)['exceptions'])
+
+    def test_live_clear_first_reruns_the_suite_and_cuts_resume(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1), (True, 0)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1'] + ['k2'] * 8, workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            if bid == 'b012':
+                red_seen.wait(10)
+                for _ in range(100):             # the exception is recorded after the run
+                    if 'first' in self._status(d)['exceptions']:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(driver.clear_exception(d.status_path, 'first')[0], 0)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['b012', 'b013'])
+        self.assertEqual(len(self.suite_runs), 3)
+        self.assertNotIn('first', self._status(d)['exceptions'])
+
+    def test_a_cleared_retry_is_not_blocked_by_red_base_tests(self):
+        d = self._base_driver([(False, 1)], [(0, 'b012 assigned: x\n')])
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {},
+                       'batches': {'b011': {'outcome': 'exception', 'stage': 'checks'}}}, f)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.ran, ['b011'])           # the retry goes
+        self.assertEqual(self.cut_calls, [])           # no new cut
+        self.assertIn('first', self._status(d)['exceptions'])
 
     def test_cut_failure_is_an_exception_and_stops(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
@@ -14284,7 +15025,7 @@ class DriverTest(unittest.TestCase):
         """A fresh Driver over the same paths, reading the status file again."""
         n = driver.Driver(d.repo, d.state_path, d.worker, d.reviewer, d.ledger_path,
                           d.status_path, push=d.push, send=d.send, gate=False,
-                          log=self.logs.append)
+                          log=self.logs.append, base_tests=False)
         n.render_brief, n.mechanical_checks = d.render_brief, d.mechanical_checks
         n.report_path, n.triage_path = d.report_path, d.triage_path
         return n
@@ -14338,7 +15079,8 @@ class DriverTest(unittest.TestCase):
 
     def test_default_push_and_send(self):
         d = self._driver(worker=None)
-        d = driver.Driver(d.repo, d.state_path, None, None, d.ledger_path, d.status_path)
+        d = driver.Driver(d.repo, d.state_path, None, None, d.ledger_path, d.status_path,
+                          base_tests=False)
         calls = []
 
         def stub(argv, **kw):
@@ -15200,6 +15942,7 @@ class DriverTest(unittest.TestCase):
         with open(self.state_path, 'w') as f:
             json.dump({'fork_base': 'e8dd16a7', 'batches': batches}, f)
         self.pushes, self.sent, self.logs = [], [], []
+        kw.setdefault('base_tests', False)
         d = driver.Driver(
             self.root, self.state_path, None, None, os.path.join(tmp, 'ledger.md'),
             os.path.join(tmp, 'driver', 'status.json'), pools=pools,
@@ -15400,6 +16143,19 @@ class DriverTest(unittest.TestCase):
         self.assertIn('b1 closed (1 rows), b2 closed (1 rows, pool x)', text)
         self.assertIn('- pool a\n', driver.ledger_entry(
             {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None, pool='a'))
+
+    def test_ledger_entry_records_the_gate_kind(self):
+        wave = driver._tool('wave')
+        self.assertIn('- gate: docs-only\n', driver.ledger_entry(
+            {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None, gate='docs-only'))
+        self.assertIn('- gate: full\n', driver.ledger_entry(
+            {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None, gate='full'))
+        self.assertNotIn('- gate:', driver.ledger_entry(
+            {'id': 'b1'}, {}, {}, (False, 'n'), 'c', None))
+        self.assertEqual(wave.gate_kind_of('gates: docs-only fast path\ngates: all passed\n'),
+                         'docs-only')
+        self.assertEqual(wave.gate_kind_of('gates: full gate\ngates: all passed\n'), 'full')
+        self.assertEqual(wave.gate_kind_of('gates: all passed\n'), 'unknown')
 
     def test_state_mutations_hold_the_driver_lock(self):
         w = self._BatchWorker(credits=0.0)
@@ -15882,6 +16638,265 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'first').stdout,
                          self.git('rev-parse', 'p3/wso-b011').stdout)
 
+    # -- Task 26: the checks run on a tree that includes first; one landing lock
+
+    _T26_REPORT = '## Verdicts\n\nverdict 0x40B000 ours case dump-b011\n'
+
+    def _t26_driver(self, **kw):
+        d = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
+                              ids=('b011',), **kw)
+        self.seen = []
+
+        def steps(batch, wt, verdicts, **k):
+            self.seen.append((os.path.isfile(os.path.join(wt, 'late.txt')), k.get('tests', True)))
+            return []
+        d.mechanical_checks = steps
+        wt = os.path.join(self.tmp, 'wt-b011')
+        return d, wt
+
+    def _first_moves(self, text='late\n', name='late.txt'):
+        _write(os.path.join(self.root, name), text)
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'first moved')
+
+    def test_check_merges_first_when_it_moved_and_the_tree_is_clean(self):
+        d, wt = self._t26_driver()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            before = self._rev('HEAD', cwd=wt)
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, [])
+        self.assertEqual(self.seen, [(True, True)])      # steps ran on the merged tree
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)
+        self.assertIn(before, parents)
+        body = self.git('log', '-1', '--format=%B', cwd=wt).stdout
+        self.assertTrue(body.startswith('merge first into p3/wso-b011 before the checks'))
+        self.assertIn(driver.STATE_COMMIT_TRAILER, body)
+        self.assertEqual(sum('merged into it before the checks' in l for l in self.logs), 1)
+
+    def test_check_without_a_move_makes_no_merge(self):
+        d, wt = self._t26_driver()
+        before = self._rev('HEAD', cwd=wt)
+        d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(self._rev('HEAD', cwd=wt), before)
+        self.assertEqual(self.seen, [(False, True)])
+
+    def test_check_with_a_dirty_tree_skips_the_merge(self):
+        d, wt = self._t26_driver()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            _write(os.path.join(wt, 'wip.txt'), 'x\n')
+            before = self._rev('HEAD', cwd=wt)
+            d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(self._rev('HEAD', cwd=wt), before)
+        self.assertEqual(self.seen, [(False, True)])
+
+    def test_check_conflict_is_one_coordinator_problem_and_aborts(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'f.txt'), 'branch\n')
+        d, wt = self._t26_driver(base_files={'f.txt': 'base\n'}, on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves('first\n', 'f.txt')
+            before = self._rev('HEAD', cwd=wt)
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ['first conflicts with this branch in f.txt; '
+                                    'the coordinator resolves it'])
+        self.assertEqual(self.seen, [])
+        self.assertEqual(self._rev('HEAD', cwd=wt), before)
+        self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+        self.assertNotEqual(subprocess.run(
+            ['git', '-C', wt, 'rev-parse', '-q', '--verify', 'MERGE_HEAD'],
+            capture_output=True).returncode, 0)
+
+    def test_conflict_gets_no_fix_round_and_raises_the_checks_exception(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'f.txt'), 'branch\n')
+        w = self._BatchWorker(credits=0.0,
+                              before=lambda cwd: self._first_moves('first\n', 'f.txt'))
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
+                              base_files={'f.txt': 'base\n'}, on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 1)               # no fix-round prompt
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(len(exc['problems']), 1)
+        self.assertIn('the coordinator resolves it', exc['problems'][0])
+
+    def test_map_only_conflict_merge_message_has_no_conflicts_comment(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'docs', 'MAP.md'), 'branch\n')
+        d, wt = self._t26_driver(base_files={'docs/MAP.md': 'base\n'}, on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves('first\n', 'docs/MAP.md')
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, [])
+        body = self.git('log', '-1', '--format=%B', cwd=wt).stdout
+        self.assertNotIn('Conflicts', body)
+        self.assertNotIn('#', body)
+        self.assertIn(driver.STATE_COMMIT_TRAILER, body)
+
+    def test_ledger_commit_count_ignores_the_pre_check_merge(self):
+        d, wt = self._t26_driver()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            d._check('b011', wt, self._T26_REPORT)
+        self.assertIn('(1 commit)', d._commits('p3/wso-b011'))
+
+    def test_settle_closed_takes_the_landing_lock(self):
+        d, wt = self._t26_driver()
+        d.LANDING_POLL = 0.05
+        d._has_ledger_entry = lambda b: True
+        d._commit_state = lambda b: None
+        order = []
+        d.push = lambda: (order.append('push'), None)[1]
+        state = d.load_state(d.state_path)
+        state['batches']['b011']['status'] = 'closed'
+        d._stage('b011', 'close')
+        t = threading.Thread(target=lambda: d._settle_closed('b011'))
+        with filelock.hold(d._landing_path(), 'test'):
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d).get('current') or {}).get('note') == \
+                        driver.WAITING_LANDING_NOTE:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail('did not wait for the landing lock')
+            self.assertEqual(order, [])
+        t.join(10)
+        self.assertEqual(order, ['push'])
+
+    def test_stop_while_waiting_clears_the_waiting_note(self):
+        d1, d2 = self._t26_two_drivers()
+        d2._stage('b012', 'close')
+        d2.LANDING_POLL = 0.05
+
+        def waiter():
+            try:
+                with d2._landing_lock('b012'):
+                    pass
+            except driver._Stop:
+                pass
+        with filelock.hold(d2._landing_path(), 'test'):
+            t = threading.Thread(target=waiter)
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d2).get('current') or {}).get('note'):
+                    break
+                time.sleep(0.05)
+            d2._stopping = True
+            t.join(10)
+        st = self._status(d2)
+        self.assertNotIn('note', st['current'])
+        self.assertNotIn('note', st['running']['b012'])
+
+    def _t26_two_drivers(self):
+        d1 = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
+                               ids=('b011', 'b012'))
+        d1.next_batch = lambda *a, **k: self.NOTHING
+        state2 = os.path.join(self.tmp, 'wave-state-2.json')
+        shutil.copy(self.state_path, state2)
+        d2 = driver.Driver(
+            self.root, state2, None, None, os.path.join(self.tmp, 'ledger2.md'),
+            os.path.join(self.tmp, 'driver2', 'status.json'), pools=d1.pools,
+            workers_by_pool=d1.workers_by_pool, reviewers_by_pool=d1.reviewers_by_pool,
+            runner=lambda fn: fn(), push=lambda: self.pushes.append(2),
+            send=self.sent.append, gate=False, log=self.logs.append, queue='wave1',
+            base_tests=False)
+        d2.mechanical_checks = d1.mechanical_checks
+        d2.report_path = d1.report_path
+        d2.triage_path = d1.triage_path
+        return d1, d2
+
+    def _status_or_empty(self, d):
+        try:
+            return self._status(d)
+        except (OSError, ValueError):
+            return {}
+
+    def _land_args(self, d, bid):
+        batch = d.load_state(d.state_path)['batches'][bid]
+        addr = batch['rows'][0]['address']
+        return (bid, batch, os.path.join(self.tmp, 'wt-' + bid),
+                {addr: ('ours', 'dump-' + bid)}, (False, 'not sampled'))
+
+    def test_landing_lock_serialises_two_drivers_and_the_second_lands_cleanly(self):
+        d1, d2 = self._t26_two_drivers()
+        events, out = [], {}
+        real1, real2 = d1.close_batch, d2.close_batch
+
+        def slow(*a, **k):
+            events.append('start1')
+            time.sleep(1.0)
+            r = real1(*a, **k)
+            events.append('end1')
+            return r
+
+        def second(*a, **k):
+            events.append('start2')
+            r = real2(*a, **k)
+            events.append('end2')
+            return r
+        d1.close_batch, d2.close_batch = slow, second
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            t1 = threading.Thread(target=lambda: out.__setitem__(
+                1, d1._land(*self._land_args(d1, 'b011'))))
+            t1.start()
+            while 'start1' not in events:
+                time.sleep(0.02)
+            t2 = threading.Thread(target=lambda: out.__setitem__(
+                2, d2._land(*self._land_args(d2, 'b012'))))
+            t2.start()
+            noted = False
+            for _ in range(100):
+                st = self._status_or_empty(d2)
+                cur = st.get('current') or {}
+                if cur.get('stage') == 'close' and cur.get('note') == driver.WAITING_LANDING_NOTE:
+                    noted = True
+                    break
+                time.sleep(0.05)
+            t1.join(30)
+            t2.join(30)
+        self.assertTrue(noted)
+        self.assertEqual(out, {1: 'closed', 2: 'closed'}, self._status(d2).get('exceptions'))
+        self.assertEqual(events, ['start1', 'end1', 'start2', 'end2'])
+        self.assertNotIn('note', self._status(d2)['running'].get('b012', {}))
+        self.assertEqual(self._rev('first'), self._rev('p3/wso-b012'))
+        self.assertEqual(self.git('merge-base', '--is-ancestor', 'p3/wso-b011', 'first'
+                                  ).returncode, 0)
+
+    def test_landing_lock_is_per_repo_and_released_on_stop_while_waiting(self):
+        d1, d2 = self._t26_two_drivers()
+        path = d1._landing_path()
+        self.assertEqual(path, d2._landing_path())
+        self.assertTrue(path.endswith(os.path.join('.git', 'iwd2r-landing.lock')))
+        raised = []
+
+        def waiter():
+            try:
+                with d2._landing_lock('b012'):
+                    raised.append('got it')
+            except driver._Stop:
+                raised.append('stop')
+        d2._stage('b012', 'close')
+        with filelock.hold(path, 'test'):
+            t = threading.Thread(target=waiter)
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d2).get('current') or {}).get('note') == \
+                        driver.WAITING_LANDING_NOTE:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail('no waiting note')
+            d2._stopping = True
+            t.join(10)
+        self.assertEqual(raised, ['stop'])
+        with filelock.hold(path, 'again', timeout=1):
+            pass                                        # the stopped waiter holds nothing
+
     def test_transcript_does_not_flag_look_alikes(self):
         for cmd in ('git cat-file -p e8dd16a7:src/A.cpp', 'grep -n cat src/A.cpp',
                     'cat src/A.cpp | head -40', 'grep -rn WindowsSandbox tools',
@@ -16244,11 +17259,14 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(sorted(names), ['docs/wso/disagreements.json',
                                          'docs/wso/probe-list.json'])
         _write(d.disagreements_path, '[{"address": "0x2"}]\n')
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'),
+               '[{"address": "0x2"}]\n')
         d._recompared = True
         with mock.patch.dict(os.environ, self.GIT_ENV):
             d._commit_state('b011')
         names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
-        self.assertEqual(names, ['docs/wso/disagreements.json'])
+        self.assertEqual(sorted(names), ['docs/wso/coverage.pending.json',
+                                         'docs/wso/disagreements.json'])
 
     def test_an_undecided_row_beside_a_verdict_row_keeps_the_other(self):
         d = self._undecided_driver('')
@@ -16512,6 +17530,145 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(w.briefs), 1)
         self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
         self.assertEqual(len(self._state_of(d, 'b011')['verdicts']), 1)
+
+    # Task 25: a cleared checks or review exception re-checks the last report.
+
+    def _recheck_setup(self, reviewer=None, review=False):
+        """b011 with a worker whose report names a case the evidence file does
+        not (a checks exception after its one fix round); returns (d, w, fix)
+        where fix() is the coordinator's hand fix to the evidence."""
+        class Bad(_SeqWorker):
+            def run(w, brief, cwd):
+                w.briefs.append(brief)
+                w.cwds.append(cwd)
+                return driver.Result(0, '## Verdicts\n\nverdict 0x40B000 ours case dump-zzz\n',
+                                     None, 0.0, False)
+        w = Bad('')
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
+                              reviewers=reviewer)
+        if review:
+            d.review_needed = lambda *a, **kw: (True, 'test')
+        phases = []
+        d._frida_phase = lambda *a, **kw: phases.append(1) or []
+        d.frida = True
+        self.phases = phases
+        ev = os.path.join(self.tmp, 'wt-b011', 'docs', 'evidence', '40B000.md')
+
+        def fix():
+            _write(ev, '---\naddress: 0x40B000\nname: F11\nkind: oracle\n---\n\n'
+                       'corroborated by WSO at e8dd16a7; case dump-zzz decides\n')
+        return d, w, fix
+
+    def _recheck_first_run(self, d):
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+
+    def test_a_cleared_checks_exception_rechecks_the_last_report_without_the_worker(self):
+        d, w, fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(len(w.briefs), 2)               # the worker and its one fix round
+        fix()
+        self.git('add', '-A', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self.git('commit', '-qm', 'hand fix', cwd=os.path.join(self.tmp, 'wt-b011'))
+        phases_before = len(self.phases)
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), 2)               # the worker did not run again
+        self.assertEqual(len(self.phases), phases_before + 1)
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+        b = self._status(d)['batches']['b011']
+        self.assertEqual(b['outcome'], 'closed')
+        self.assertEqual(b['retry_kind'], 'recheck')
+        with open(d.ledger_path) as f:
+            self.assertIn('retried at its recheck stage: last report re-checked; '
+                          'the worker is not run again', f.read())
+
+    def test_a_recheck_that_finds_the_same_problems_raises_the_exception_again(self):
+        d, w, _fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        first = self._status(d)['exceptions']['b011']['problems']
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 2)               # no worker, no fix round
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(exc['problems'][0], 'unchanged after recheck; fix by hand or '
+                                             'clear with --rerun')
+        self.assertEqual(exc['problems'][1:], first)
+        # and again: the marker does not make the next recheck look new
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 2)
+        self.assertEqual(self._status(d)['exceptions']['b011']['problems'][1:], first)
+
+    def test_a_cleared_review_exception_rechecks_and_reviews_again(self):
+        blocking = '## Findings\n\n- BLOCKING: nope\n'
+        r = _SeqWorker(blocking, blocking, self.CLEAN_REVIEW, credits=0.0)
+        good = _SeqWorker('x')
+        d, w, fix = self._recheck_setup(reviewer={'a': r}, review=True)
+        fix()
+        self.git('add', '-A', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self.git('commit', '-qm', 'evidence', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self._recheck_first_run(d)
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'review')
+        workers, reviews = len(w.briefs), len(r.briefs)
+        self._clear(d, 'b011')
+        d.review_needed = lambda *a, **kw: (True, 'test')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), workers)         # no worker
+        self.assertEqual(len(r.briefs), reviews + 1)     # the reviewer ran again
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+
+    def test_clear_rerun_reenters_a_checks_exception_at_the_worker(self):
+        d, w, fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        self.assertEqual(driver.clear_exception(d.status_path, 'b011', True)[0], 0)
+        self.assertEqual(self._status(d)['cleared']['b011']['rerun'], True)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertTrue(len(w.briefs) > 2)
+        self.assertTrue(w.briefs[2].startswith('Resume:'), w.briefs[2][:60])
+        self.assertEqual(self._status(d)['batches']['b011'].get('retry_kind'), 'rerun')
+
+    def test_clear_without_rerun_marks_the_exception_for_a_recheck(self):
+        exc = {'stage': 'checks', 'problems': ['p1', 'p2'], 'at': 't'}
+        tmp, path = self._status_tmp({'exceptions': {'b011': exc, 'first': {'stage': 'x'}},
+                                      'batches': {'b011': {'outcome': 'exception'}}})
+        self.assertEqual(driver.clear_exception(path, 'b011')[0], 0)
+        self.assertEqual(driver.clear_exception(path, 'first')[0], 0)
+        with open(path) as f:
+            st = json.load(f)
+        self.assertEqual(st['cleared'], {'b011': {'stage': 'checks', 'rerun': False,
+                                                  'problems': ['p1', 'p2']}})
+
+    def test_worker_brief_frida_exceptions_keep_the_worker_reentry(self):
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        for stage in ('worker', 'brief', 'frida', 'record', 'close'):
+            self._write_cleared(d, stage)
+            d._retry_stage.clear()
+            self.assertEqual(d._cleared(), ['b011'])
+            self.assertEqual(d._retry_stage['b011'], stage)
+        for stage, want in (('checks', 'recheck'), ('review', 'recheck')):
+            self._write_cleared(d, stage)
+            self.assertEqual(d._cleared(), ['b011'])
+            self.assertEqual(d._retry_stage['b011'], want)
+        self._write_cleared(d, 'review', rerun=True)
+        d._cleared()
+        self.assertEqual(d._retry_stage['b011'], 'review')
+        self.assertEqual(d._retry_kind['b011'], 'rerun')
+
+    def _write_cleared(self, d, stage, rerun=False):
+        os.makedirs(os.path.dirname(d.status_path), exist_ok=True)
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {}, 'cleared': {'b011': {
+                'stage': stage, 'rerun': rerun, 'problems': []}},
+                'batches': {'b011': {'outcome': 'exception', 'stage': stage}}}, f)
 
     def test_a_cleared_push_exception_pushes_again_without_the_worker(self):
         w = self._BatchWorker(credits=0.0)
@@ -17390,6 +18547,460 @@ class DriverTest(unittest.TestCase):
         d.next_batch = lambda *a, **kw: next(cuts)
         self.assertEqual(d.run(), 0)
         self.assertEqual(self._status(d)['batches']['b011']['wall'], 150.0)
+
+    # -- Task 28: the probe queue --------------------------------------------
+
+    PROBE_REPORT = ('# r\n\n## Candidates\n\n'
+                    'candidate 0x402000 fork his body returns g_x like the decompile\n')
+    PROBE_PIN = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
+    PROBE_WORKER_EVIDENCE = (
+        '---\naddress: 0x402000\nname: IcewindMisc::Roll\nkind: read-only\n'
+        'exemption: "a reading"\n---\n\n## WSO delta\n\nhis body returns g_x unconditionally; '
+        'ours guards it.\n\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n'
+        '{\n  return g_x;\n}\n```\n')
+
+    def _probe_driver(self, report=None, ours_ret=3, dumps=True, worker=None, extra_row=False,
+                      **kw):
+        """A probes driver over the loop fixture: batch p001 (branch
+        p3/wso-p001, its worktree one commit past `first` with the worker's
+        read-only evidence for 0x402000), the probe list holding that row from
+        the closed wave batch b009, wave-state.json beside probe-state.json.
+        check_evidence.touched says 0x402000's body is adopted while
+        self.adopted is True."""
+        d = self._measured_driver(
+            worker=worker or _SeqWorker(report or self.PROBE_REPORT), frida=True,
+            frida_build=self._frida_builder()[0], frida_run=self._frida_file_run(ours_ret, dumps),
+            oracle_run=lambda *a: {}, queue='probes', **kw)
+        self.git('branch', '-m', 'p3/wso-b011', 'p3/wso-p001', cwd=self.wt)
+        # the row's evidence at first is the read-only reading a fork candidate needs
+        p402 = os.path.join(self.root, 'docs', 'evidence', '402000.md')
+        _write(p402, _slurp(p402).replace('kind: oracle', 'kind: read-only'))
+        self.git('commit', '-qam', 'read-only evidence at first')
+        self.git('reset', '-q', '--hard', 'first', cwd=self.wt)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), self.PROBE_WORKER_EVIDENCE)
+        _write(os.path.join(self.wt, 'src', 'B.cpp'),
+               '// 0x402000\nint IcewindMisc::Roll(int a, int b)\n{\n    return g_x;\n}\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'adopt the fork body', cwd=self.wt)
+        row = {'address': '0x402000', 'name': 'IcewindMisc::Roll', 'file': 'src/B.cpp',
+               'reading': 'fork', 'reason': 'ours guards g_x; a dump reading cannot decide',
+               'origin': 'b009', 'fork_base': self.PROBE_PIN, 'category': 'probe_list',
+               'their_len': 90, 'our_len': 100}
+        rows = [row]
+        listed = [{'address': '0x402000', 'at': 't', 'batch': 'b009', 'file': 'src/B.cpp',
+                   'name': 'IcewindMisc::Roll', 'reading': 'fork', 'source': 'worker',
+                   'reason': row['reason']}]
+        if extra_row:
+            rows.append(dict(row, address='0x401000', name='Rules::Render', reading='neither',
+                             reason='both wrong'))
+            listed.append(dict(listed[0], address='0x401000', name='Rules::Render',
+                               reading='neither', reason='both wrong'))
+        self.probe_state_path = os.path.join(self.tmp, 'probe-state.json')
+        _write(self.probe_state_path, json.dumps({'batches': {'p001': {
+            'rows': rows, 'files': ['src/B.cpp'], 'branch': 'p3/wso-p001', 'status': 'assigned',
+            'assigned_at': 't', 'closed_at': None, 'verdicts': {},
+            'fork_base': self.PROBE_PIN}}}))
+        _write(self.state_path, json.dumps({'batches': {'b009': {
+            'rows': [], 'files': [], 'branch': 'p3/wso-b009', 'status': 'closed',
+            'assigned_at': 't', 'closed_at': 't', 'verdicts': {}}}}))
+        _write(os.path.join(self.root, 'docs', 'wso', 'probe-list.json'), json.dumps(listed))
+        _write(os.path.join(self.root, 'docs', 'wso', 'disagreements.json'), json.dumps([
+            dict(r, category='both_changed_differ', their_len=90, our_len=100)
+            for r in ({'address': '0x402000', 'name': 'IcewindMisc::Roll', 'file': 'src/B.cpp'},
+                      {'address': '0x401000', 'name': 'Rules::Render', 'file': 'src/A.cpp'})]))
+        d.state_path = self.probe_state_path
+        self.adopted = True
+        # the driver and wave.py each load their own check_evidence: say it to both
+        for ce in (driver._tool('check_evidence'), driver._tool('wave')._check_evidence()):
+            p = mock.patch.object(ce, 'touched', lambda *a, **kw: (
+                [('src/B.cpp', 0x402000, 'IcewindMisc::Roll')] if self.adopted else []))
+            p.start()
+            self.addCleanup(p.stop)
+        return d
+
+    def _probe_state(self):
+        with open(self.probe_state_path) as f:
+            return json.load(f)['batches']['p001']
+
+    def _probe_list(self):
+        with open(os.path.join(self.root, 'docs', 'wso', 'probe-list.json')) as f:
+            return json.load(f)
+
+    def _wave_state(self):
+        with open(self.state_path) as f:
+            return json.load(f)
+
+    def test_parse_candidates(self):
+        text = ('## Candidates\n\ncandidate 0x402000 fork his body matches\n'
+                '- `Candidate 0X401000 NEITHER both are wrong`\n3. candidate 0x0403000 fork  x y \n'
+                '```text\ncandidate 0x404000 fork fenced\n```\n(none yet)\n\n## Notes\ncandidate nonsense\n')
+        self.assertEqual(driver.parse_candidates(text), {
+            '0x402000': ('fork', 'his body matches'), '0x401000': ('neither', 'both are wrong'),
+            '0x403000': ('fork', 'x y'), '0x404000': ('fork', 'fenced')})
+        self.assertEqual(driver.parse_candidates(self.REPORT), {})
+        for bad in ('candidate 0x1 ours no\n', 'candidate 0x1 fork\n', 'Candidate: none\n',
+                    'candidate 0x1 fork a\ncandidate 0x01 neither b\n', 'note on 0x401000\n'):
+            with self.assertRaises(driver.ReportError, msg=bad):
+                driver.parse_candidates('## Candidates\n' + bad)
+
+    def test_probe_checks_account_for_every_row_and_read_the_evidence(self):
+        d = self._probe_driver(extra_row=True)
+        batch = dict(self._probe_state(), id='p001')
+        key = driver._tool('wave')._addr_key
+        run = lambda cands, **kw: [p for p in driver._probe_candidate_problems(
+            batch, self.wt, 'first', cands, key)]
+        # 0x401000 is not accounted for; 0x999000 is outside the batch
+        probs = run({'0x402000': ('fork', 'r'), '0x999000': ('fork', 'r')})
+        self.assertEqual(len(probs), 2, probs)
+        self.assertTrue(any(p.startswith('0x999000: candidate line for an address outside') for p in probs))
+        self.assertTrue(any(p.startswith('0x401000: not accounted for in the report') for p in probs))
+        # a neither row is not built: its body stays ours
+        self.assertEqual(run({'0x402000': ('fork', 'r'), '0x401000': ('neither', 'r')}), [])
+        # a fork candidate whose body did not change
+        self.adopted = False
+        probs = run({'0x402000': ('fork', 'r'), '0x401000': ('neither', 'r')})
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('listed as `candidate fork` but its body is unchanged', probs[0])
+        self.adopted = True
+        # the worker may not write the deciding case
+        path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
+        with open(path, 'a') as f:
+            f.write('\ndisagreed with WSO at e8dd16a: x; case frida-p001-world_entry decides\n')
+        probs = run({'0x402000': ('fork', 'r'), '0x401000': ('neither', 'r')})
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('the driver writes the deciding case', probs[0])
+
+    def test_probe_report_through_the_driver_check(self):
+        d = self._probe_driver(extra_row=True)
+        verdicts, probs = d._check('p001', self.wt, '# r\n\n## Candidates\n\n'
+                                   'candidate 0x402000 fork r\ncandidate 0x401000 neither both wrong\n')
+        self.assertEqual((verdicts, probs), ({}, []))
+        self.assertEqual(d._candidates, {'0x402000': ('fork', 'r'), '0x401000': ('neither', 'both wrong')})
+        _v, probs = d._check('p001', self.wt, '## Candidates\n\ncandidate 0x402000 fork r\n')
+        self.assertTrue(any(p.startswith('0x401000: not accounted for in the report') for p in probs), probs)
+        _v, probs = d._check('p001', self.wt, '## Candidates\n\ncandidate 0x402000 maybe r\n')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('fix that line under ## Candidates', probs[0])
+        _v, probs = d._check('p001', self.wt, '## Verdicts\n\nverdict 0x402000 fork case x\n\n'
+                             '## Candidates\n\ncandidate 0x402000 fork r\ncandidate 0x401000 neither r\n')
+        self.assertTrue(any('a probe batch has no verdict lines' in p for p in probs), probs)
+
+    def test_probe_equal_row_gets_trace_evidence_and_resolves_into_its_batch(self):
+        d = self._probe_driver()
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout.strip()
+        self.assertEqual(d.run_batch('p001'), 'closed', self._status(d)['exceptions'])
+        fields, text = self._wave_fields()
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('frida p001-world_entry orig:', fields['trace_source'])
+        self.assertEqual(fields['exemption'], 'a reading')
+        self.assertIn('his body returns g_x unconditionally', text)
+        # the deciding sentence the worker never wrote, under ## WSO delta
+        self.assertIn('disagreed with WSO at %s' % self.PROBE_PIN, text)
+        self.assertTrue(text.split('## Decompiled')[0].rstrip().endswith(
+            'case frida-p001-world_entry decides'), text)
+        # recorded through resolve_probe: back in b009 with measured frida, the losing
+        # kind the evidence had before the adoption (read-only at first)
+        b = self._wave_state()['batches']['b009']
+        self.assertEqual(b['verdicts']['0x402000'], {
+            'side': 'fork', 'case': 'frida-p001-world_entry', 'losing_kind': 'read-only',
+            'measured': 'frida'})
+        self.assertEqual([r['address'] for r in b['rows']], ['0x402000'])
+        self.assertEqual(self._probe_list(), [])
+        row = self._probe_state()['rows'][0]
+        self.assertEqual((row['outcome'], row['case']), ('resolved', 'frida-p001-world_entry'))
+        self.assertRegex(row['measured_body'], r'^[0-9a-f]{64}$')
+        subjects = self.git('log', '--format=%s', before + '..HEAD', cwd=self.wt).stdout.splitlines()
+        self.assertEqual(subjects, ['frida: trace evidence for 1 row(s) measured equal (world_entry)'])
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+        # the batch closed on first, the ledger and the scorecard say what happened
+        self.assertEqual(self._probe_state()['status'], 'closed')
+        self.git('merge-base', '--is-ancestor', 'p3/wso-p001', 'first')    # landed on first
+        # a body that moved after the phase is a check problem
+        _write(os.path.join(self.wt, 'src', 'B.cpp'),
+               '// 0x402000\nint IcewindMisc::Roll(int a, int b)\n{\n    return 0;\n}\n')
+        self.git('commit', '-qam', 'moved', cwd=self.wt)
+        probs = driver._probe_candidate_problems(
+            dict(self._probe_state(), id='p001'), self.wt, 'first',
+            {'0x402000': ('fork', 'r')}, driver._tool('wave')._addr_key)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('0x402000: body changed after the Frida phase', probs[0])
+        ledger = self._ledger(d)
+        self.assertIn('## driver p001 (', ledger)
+        self.assertIn('- probes: resolved 1, kept on list 0, findings 0', ledger)
+        self.assertIn('- probe resolved 0x402000: case frida-p001-world_entry', ledger)
+        self.assertIn('probes: resolved 1, on list 0', _slurp(d.report_path))
+        # the state commit carries the probe list, both states and the report
+        files = self.git('show', '--name-only', '--format=%s', 'first').stdout.split('\n')
+        self.assertEqual(files[0], 'probe-state: close p001 (resolved 1, kept on list 0)')
+
+    def test_probe_equal_row_is_only_fork_equal_until_the_review_passes(self):
+        d = self._probe_driver(reviewer=driver.FakeWorker('# review\n\nBLOCKING: 0x402000 src/B.cpp wrong\n'))
+        out = d.run_batch('p001')
+        self.assertEqual(out, 'exception', self._status(d)['exceptions'])
+        self.assertEqual(self._status(d)['exceptions']['p001']['stage'], 'review')
+        row = self._probe_state()['rows'][0]
+        self.assertEqual((row['outcome'], row['case'], row['losing_kind']),
+                         ('fork-equal', 'frida-p001-world_entry', 'read-only'))
+        self.assertRegex(row['measured_body'], r'^[0-9a-f]{64}$')
+        # the phase touched neither the wave state nor the probe list
+        self.assertEqual(self._wave_state()['batches']['b009']['verdicts'], {})
+        self.assertEqual([e['address'] for e in self._probe_list()], ['0x402000'])
+        self.assertEqual(self._wave_fields()[0]['kind'], 'trace')
+        # the review was mandatory (a fork row) and was shown the fork verdict
+        self.assertEqual(d._merged('p001', {}), {'402000': ('fork', 'frida-p001-world_entry')})
+        review = _slurp(os.path.join(os.path.dirname(d.status_path), 'p001', 'reviewer.brief.md'))
+        self.assertIn('verdict 0x402000 fork case frida-p001-world_entry', review)
+        # a retry of the checks keeps the decided row: the driver's own sentence is not a problem
+        _v, probs = d._check('p001', self.wt, self.PROBE_REPORT)
+        self.assertEqual(probs, [])
+
+    def test_probe_record_stage_is_idempotent_and_refuses_a_moved_body(self):
+        d = self._probe_driver()
+        d.close_batch = lambda *a, **k: (1, 'boom')
+        self.assertEqual(d.run_batch('p001'), 'exception')
+        self.assertEqual(self._status(d)['exceptions']['p001']['stage'], 'close')
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'resolved')
+        first = self._wave_state()
+        # the retry arrives with the row still fork-equal (a crash between the two writes)
+        d._probe_outcomes('p001', {'0x402000': {'outcome': 'fork-equal'}})
+        self.assertEqual(d._record_probe_rows('p001', self.wt), [])
+        self.assertEqual(self._wave_state(), first)
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'resolved')
+        self.assertEqual(len(first['batches']['b009']['rows']), 1)
+        # a body that moved since the phase measured it is not recorded
+        d._probe_outcomes('p001', {'0x402000': {'outcome': 'fork-equal'}})
+        _write(os.path.join(self.wt, 'src', 'B.cpp'),
+               '// 0x402000\nint IcewindMisc::Roll(int a, int b)\n{\n    return 1;\n}\n')
+        self.git('commit', '-qam', 'moved', cwd=self.wt)
+        probs = d._record_probe_rows('p001', self.wt)
+        self.assertEqual(len(probs), 1)
+        self.assertIn('0x402000: body changed after the Frida phase; not recorded', probs[0])
+
+    def test_probe_fork_candidates_need_read_only_evidence_and_a_fork_reading(self):
+        d = self._probe_driver(extra_row=True)
+        batch = dict(self._probe_state(), id='p001')
+        key = driver._tool('wave')._addr_key
+        run = lambda c: driver._probe_candidate_problems(batch, self.wt, 'first', c, key)
+        path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
+        text = _slurp(path)
+        _write(path, text.replace('kind: read-only', 'kind: replay'))
+        probs = run({'0x402000': ('fork', 'r'), '0x401000': ('neither', 'r')})
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('evidence is kind replay (on the branch); a fork candidate needs kind: read-only', probs[0])
+        self.assertIn('candidate 0x402000 neither evidence is kind replay; needs a hand ruling', probs[0])
+        _write(path, text)
+        # the merge base's kind counts too: a worker cannot edit it away
+        with mock.patch.object(driver, '_mb_evidence_kind', return_value='replay'):
+            probs = run({'0x402000': ('fork', 'r'), '0x401000': ('neither', 'r')})
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('evidence is kind replay (at the merge base)', probs[0])
+        # the phase leaves such a row alone (no measurement of replay evidence)
+        probs = run({'0x402000': ('fork', 'r'), '0x401000': ('fork', 'r')})
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('0x401000: its reading is `neither`', probs[0])
+
+    def test_probe_fork_equal_row_is_never_re_measured_and_a_sentence_failure_still_records_it(self):
+        d = self._probe_driver()
+        with mock.patch.object(d, '_deciding_sentence', side_effect=OSError('disk')):
+            d.run_batch('p001')
+        row = self._probe_state()['rows'][0]
+        self.assertEqual(row['outcome'], 'fork-equal')      # recorded; resolve_probe will refuse it
+        self.assertIn('the deciding sentence could not be written', '\n'.join(self.logs))
+        # a rerun of the phase skips it whatever the body did since
+        _write(os.path.join(self.wt, 'src', 'B.cpp'),
+               '// 0x402000\nint IcewindMisc::Roll(int a, int b)\n{\n    return 2;\n}\n')
+        self.git('commit', '-qam', 'moved', cwd=self.wt)
+        d.frida_run = lambda *a, **k: self.fail('a decided row is not measured again')
+        d._candidates = {'0x402000': ('fork', 'r')}
+        self.assertEqual(d._probe_phase('p001', dict(self._probe_state(), id='p001'), self.wt), [])
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'fork-equal')
+        # the checks refuse the moved body
+        _v, probs = d._check('p001', self.wt, self.PROBE_REPORT)
+        self.assertTrue(any('body changed after the Frida phase' in p for p in probs), probs)
+
+    def test_probe_record_stage_errors_are_a_record_exception(self):
+        d = self._probe_driver()
+        with mock.patch.object(d, '_record_probe_rows', side_effect=ValueError('probe list: bad')):
+            out = d.run_batch('p001')
+        self.assertEqual(out, 'exception')
+        ex = self._status(d)['exceptions']['p001']
+        self.assertEqual(ex['stage'], 'record')
+        self.assertIn('probe list: bad', ' '.join(ex['problems']))
+
+    def test_probe_pool_short_forms_and_resume_preamble(self):
+        for name in ('glm', 'claude'):
+            self.assertEqual(driver.parse_pool(name, queue='probes').name, name)
+        d = self._probe_driver()
+        text = d._resume_preamble('p001', d.load_state(d.state_path)['batches']['p001'], 'a retry', self.wt)
+        self.assertIn('## Candidates', text)
+        self.assertNotIn('## Verdicts` section: one line', text)
+        self.assertNotIn('Undecided', text)
+
+    def test_probes_queue_through_the_run_command_line(self):
+        tmp = self._tmpdir()
+        live = driver._tool('wave').PROBE_STATE_PATH
+        d, err = driver.driver_from_args(['--queue', 'probes', '--dry-run', '--state', live],
+                                         repo=tmp)
+        self.assertEqual((d, err[0]), (None, 2))
+        self.assertIn('live probe-state file', err[1])
+        copy = os.path.join(tmp, 'copy-probe-state.json')
+        d, err = driver.driver_from_args(['--queue', 'probes', '--dry-run', '--state', copy],
+                                         repo=tmp)
+        self.assertIsNone(err)
+        self.assertEqual((d.kind, d.queue), ('probes', 'probes'))
+        self.assertTrue(d.status_path.endswith(os.path.join('dry-run', 'status-probes.json')))
+        self.assertEqual(os.path.basename(d.template_path), 'probe-brief-template.md')
+        # the dry run's canned report accounts for every row, none built
+        report = driver.dry_report({'rows': [{'address': '0x1', 'reading': 'fork'},
+                                             {'address': '0x2', 'reading': 'neither'}]})
+        self.assertEqual(sorted(driver.parse_candidates(report)), ['0x1', '0x2'])
+
+    def test_probe_resolution_is_a_frida_trace_in_the_scorecard(self):
+        # the case has a / in its scenario id in real runs; it is still a trace
+        wave = driver._tool('wave')
+        self.assertEqual(wave.deciding_kind('frida-p001-vid/hline_shaded16'), 'trace')
+        self.assertEqual(wave.deciding_kind('vid/hline_shaded16'), 'replay checkpoint')
+
+    def test_probe_different_row_is_a_finding_and_the_fix_round_says_edit_it_back(self):
+        d = self._probe_driver(ours_ret=4)
+        _write(os.path.join(self.root, 'docs', 'wso', 'engine-gaps.json'),
+               json.dumps([{'address': '0x1', 'name': 'old'}]))
+        out = d.run_batch('p001')
+        # the worker leaves the adopted body: the second check refuses, nothing resolved
+        self.assertEqual(out, 'exception', self._status(d)['exceptions'])
+        entry = self._probe_list()[0]
+        self.assertEqual(entry['address'], '0x402000')
+        self.assertTrue(entry['probed']['hand'])     # a body known to differ: a pin move only
+        self.assertTrue(entry['reason'].startswith('ours guards g_x; a dump reading cannot decide; '
+                                                   'fork body differs from the exe in world_entry: '),
+                        entry['reason'])
+        gaps = json.loads(_slurp(os.path.join(self.root, 'docs', 'wso', 'engine-gaps.json')))
+        self.assertEqual([g['address'] for g in gaps], ['0x1', '0x402000'])
+        self.assertEqual(sorted(gaps[1]), ['address', 'at', 'detail', 'found_by', 'name', 'scenario'])
+        self.assertEqual((gaps[1]['found_by'], gaps[1]['scenario']), ('p001', 'world_entry'))
+        fix = _slurp(os.path.join(os.path.dirname(d.status_path), 'p001', 'worker-fix-checks.brief.md'))
+        self.assertIn("edit that function back to the merge base's body", fix)
+        self.assertIn('0x402000: fork body differs from the exe in world_entry', fix)
+        self.assertIn('the row stays on the probe list', fix)
+        self.assertIn('## Candidates', fix)
+        self.assertNotIn('## Verdicts` section: ', fix)
+        self.assertEqual(self._wave_state()['batches']['b009']['verdicts'], {})
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'found')
+        self.assertEqual(self._wave_fields()[0]['kind'], 'read-only')
+        # a rerun of the finding does not append it twice
+        tail = entry['reason'].split('; fork body differs', 1)[1]
+        d._probe_list_edit('0x402000', append='fork body differs' + tail)
+        self.assertEqual(self._probe_list()[0]['reason'], entry['reason'])
+
+    def test_probe_not_exercised_row_stays_on_the_list_and_closes_with_our_body(self):
+        fixed = []
+
+        class Worker(_SeqWorker):
+            def run(w, brief, cwd):
+                res = super().run(brief, cwd)
+                if len(w.briefs) > 1:      # the fix round: the body and the evidence go back
+                    self.adopted = False
+                    base = self.git('show', 'first:docs/evidence/402000.md', cwd=cwd).stdout
+                    _write(os.path.join(cwd, 'docs', 'evidence', '402000.md'), base)
+                    self.git('commit', '-qam', 'edit back', cwd=cwd)
+                    fixed.append(1)
+                return res
+        trace = TruthTest._trace
+        d = self._probe_driver(worker=Worker(self.PROBE_REPORT))
+        d.frida_run = lambda b, t, scenarios, **kw: {sc: (trace(), trace()) for sc in scenarios}
+        self.assertEqual(d.run_batch('p001'), 'closed', self._status(d)['exceptions'])
+        self.assertEqual(fixed, [1])
+        entry = self._probe_list()[0]
+        self.assertTrue(entry['reason'].startswith('not exercised by world_entry'), entry['reason'])
+        self.assertTrue(entry['reason'].endswith('; needs an oracle case'), entry['reason'])
+        self.assertEqual(self._wave_state()['batches']['b009']['verdicts'], {})
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'kept')
+        self.assertTrue(self._probe_state()['rows'][0]['released'])    # the closed batch lets go
+        self.assertEqual(entry['probed']['batch'], 'p001')
+        self.assertIn('world_entry', entry['probed']['scenarios'])
+        self.assertEqual(entry['probed']['hits'], [])        # no coverage map in this fixture
+        self.assertEqual(entry['probed']['pin'], self.PROBE_PIN)
+        self.assertEqual(self._wave_fields()[0]['kind'], 'read-only')    # first's own copy again
+        ledger = self._ledger(d)
+        self.assertIn('- probes: resolved 0, kept on list 1, findings 0', ledger)
+        self.assertIn('probes: resolved 0, on list 1', _slurp(d.report_path))
+        fix = _slurp(os.path.join(os.path.dirname(d.status_path), 'p001', 'worker-fix-checks.brief.md'))
+        self.assertIn('not exercised by world_entry', fix)
+
+    def test_probe_neither_candidate_is_not_built_and_keeps_the_list_entry(self):
+        d = self._probe_driver(extra_row=True, report='# r\n\n## Candidates\n\n'
+                               'candidate 0x402000 fork r\ncandidate 0x401000 neither both are wrong in a new way\n')
+        d.frida_build = lambda *a, **kw: self.fail('nothing to build for a neither row alone')
+        batch = self._probe_state()
+        batch['rows'] = batch['rows'][1:]          # only the neither row
+        _write(self.probe_state_path, json.dumps({'batches': {'p001': batch}}))
+        lst = self._probe_list()
+        _write(os.path.join(self.root, 'docs', 'wso', 'probe-list.json'), json.dumps(lst))
+        self.adopted = False
+        d._candidates = {'0x401000': ('neither', 'both are wrong in a new way')}
+        problems = d._probe_phase('p001', dict(batch, id='p001'), self.wt)
+        self.assertEqual(problems, [])
+        reasons = {e['address']: e['reason'] for e in self._probe_list()}
+        self.assertEqual(reasons['0x401000'], 'both are wrong in a new way')
+        self.assertEqual(self._probe_state()['rows'][0]['outcome'], 'kept')
+
+    def test_probe_batch_without_frida_is_an_exception_not_a_silent_keep(self):
+        d = self._probe_driver()
+        d.frida = False
+        self.assertEqual(d.run_batch('p001'), 'exception')
+        self.assertIn('decided by the Frida phase',
+                      ' '.join(self._status(d)['exceptions']['p001']['problems']))
+        self.assertEqual(len(self._probe_list()), 1)
+
+    def test_probe_close_refuses_an_unresolved_row_whose_body_is_still_the_forks(self):
+        d = self._probe_driver()
+        wave = driver._tool('wave')
+        rc, out = wave.close_batch(self.probe_state_path, self.root, 'p001', kind='probes',
+                                   gate=False)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x402000: still on the probe list but its body is changed against', out)
+        self.assertIn("edit that function back to the merge base's body", out)
+        self.assertIn('docs/evidence/402000.md differs from the merge base', out)
+        # nothing landed
+        self.assertNotEqual(self.git('rev-parse', 'first').stdout, self.git('rev-parse', 'p3/wso-p001').stdout)
+        # back on our body (function and evidence), the same close passes
+        self.adopted = False
+        _write(os.path.join(self.wt, 'docs', 'evidence', '402000.md'),
+               self.git('show', 'first:docs/evidence/402000.md').stdout)
+        self.git('commit', '-qam', 'edit back', cwd=self.wt)
+        rc, out = wave.close_batch(self.probe_state_path, self.root, 'p001', kind='probes',
+                                   gate=False)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('p001 closed: 1 rows -- resolved 0, kept on list 1, findings 0', out)
+
+    def test_probe_close_refuses_a_resolution_without_its_verdict_and_other_functions(self):
+        d = self._probe_driver()
+        wave = driver._tool('wave')
+        # the entry left the list but no verdict names this batch's frida case
+        _write(os.path.join(self.root, 'docs', 'wso', 'probe-list.json'), '[]')
+        rc, out = wave.close_batch(self.probe_state_path, self.root, 'p001', kind='probes', gate=False)
+        self.assertEqual(rc, 1)
+        self.assertIn('off the probe list but no fork verdict with a frida-p001-<scenario> case', out)
+        # another function's body or evidence changed
+        ce = driver._tool('wave')._check_evidence()
+        with mock.patch.object(ce, 'touched', return_value=[
+                ('src/B.cpp', 0x402000, 'IcewindMisc::Roll'), ('src/A.cpp', 0x401000, 'Rules::Render')]):
+            rc, out = wave.close_batch(self.probe_state_path, self.root, 'p001', kind='probes',
+                                       gate=False)
+        self.assertIn('0x401000 (Rules::Render): changed against first but not a row of this batch', out)
+
+    def test_probe_scorecard_gains_a_probes_line(self):
+        wave = driver._tool('wave')
+        st = {'batches': {'p001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'outcome': 'resolved'}, {'address': '0x2', 'outcome': 'kept'},
+            {'address': '0x3', 'outcome': 'found'}]},
+            'p002': {'status': 'assigned', 'rows': [{'address': '0x4', 'outcome': 'resolved'}]}}}
+        self.assertEqual(wave._probe_tally(st, [{'address': '0x2'}, {'address': '0x3'}]),
+                         'probes: resolved 1, on list 2')
+        self.assertIsNone(wave._probe_tally({'batches': {}}, []))
+        text = wave.scorecard_text({'batches': {}}, probes='probes: resolved 1, on list 2')
+        self.assertIn('\nprobes: resolved 1, on list 2\n', text)
+        self.assertNotIn('probes:', wave.scorecard_text({'batches': {}}))
 
 
 class TruthTest(unittest.TestCase):
@@ -19129,6 +20740,262 @@ class WaveResolveTest(unittest.TestCase):
             self.assertFalse(os.path.exists(report))
 
 
+class WaveProbeQueueTest(unittest.TestCase):
+    """Task 28: `next --queue probes` cuts p<NNN> batches from the probe list;
+    the brief quotes each row's reading and reason and the Candidates format."""
+    PIN = 'e8dd16a750966af53f24daaf49dcb4fb13594c13'
+    ENTRIES = [
+        {'address': '0x478490', 'at': 't', 'batch': 'b013', 'file': 'src/CGameArea.cpp',
+         'name': 'CGameArea::SetDawn', 'reading': 'fork', 'source': 'worker',
+         'reason': 'exe sign-extends GetSong(0) via movsx'},
+        {'address': '0x4258D0', 'at': 't', 'batch': 'b014', 'file': 'src/CBaldurChitin.cpp',
+         'name': 'CBaldurChitin::OnMultiplayerSessionOpen', 'reading': 'neither', 'source': 'worker',
+         'reason': 'the third chat clear is missing'},
+        {'address': '0x602170', 'at': 't', 'batch': 'b014', 'file': 'src/CScreenConnection.cpp',
+         'name': 'CScreenConnection::OnLobbyNewGameButtonClick', 'reading': 'fork',
+         'source': 'worker', 'reason': 'the else branch is missing'}]
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.wave = load_tool('wave')
+        self.dp = os.path.join(self.tmp, 'docs', 'wso', 'disagreements.json')
+        _write(self.dp, json.dumps([
+            {'address': e['address'], 'name': e['name'], 'file': e['file'],
+             'category': 'both_changed_differ', 'their_len': 100 + i, 'our_len': 90}
+            for i, e in enumerate(self.ENTRIES)]))
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'probe-list.json'), json.dumps(self.ENTRIES))
+        self.wave.save_state(os.path.join(self.tmp, 'wave-state.json'), {
+            'fork_base': self.PIN, 'batches': {
+                'b013': {'rows': [], 'files': [], 'status': 'closed', 'verdicts': {},
+                         'branch': 'p3/wso-b013', 'fork_base': 'a' * 40},
+                'b014': {'rows': [], 'files': [], 'status': 'closed', 'verdicts': {},
+                         'branch': 'p3/wso-b014'}}})
+        self.state = os.path.join(self.tmp, 'probe-state.json')
+
+    def next(self, size=20):
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new branch')) as cut:
+            rc, out = self.wave.next_batch(
+                self.dp, self.state, size, queue='probes', repo=self.tmp, base='first',
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.cut = cut
+        return rc, out
+
+    def batches(self):
+        return self.wave.load_state(self.state)['batches']
+
+    def test_the_queue_is_registered_with_its_own_state_status_and_template(self):
+        q = self.wave.QUEUES['probes']
+        self.assertEqual((q['prefix'], q['kind'], q['triage']), ('p', 'probes', False))
+        self.assertEqual(os.path.basename(q['state']), 'probe-state.json')
+        self.assertEqual(q['status'], 'status-probes.json')
+        self.assertEqual(os.path.basename(q['template']), 'probe-brief-template.md')
+        self.assertTrue(os.path.isfile(q['template']))
+        self.assertTrue(driver.status_rel('probes').endswith('driver/status-probes.json'))
+
+    def test_next_cuts_a_batch_from_the_probe_list_and_marks_the_rows_assigned(self):
+        rc, out = self.next()
+        self.assertEqual(rc, 0, out)
+        self.assertIn('p001 assigned: 3 rows, 3 files, branch p3/wso-p001', out)
+        self.assertIn('worktree /wt (new branch)', out)
+        self.assertEqual(self.cut.call_args[0][1:3], ('p3/wso-p001', 'first'))
+        b = self.batches()['p001']
+        self.assertEqual((b['status'], b['branch']), ('assigned', 'p3/wso-p001'))
+        self.assertEqual(sorted(r['address'] for r in b['rows']),
+                         ['0x4258D0', '0x478490', '0x602170'])
+        row = next(r for r in b['rows'] if r['address'] == '0x478490')
+        self.assertEqual((row['reading'], row['reason'], row['origin']),
+                         ('fork', 'exe sign-extends GetSong(0) via movsx', 'b013'))
+        self.assertEqual(row['fork_base'], 'a' * 40)       # its original batch's pin
+        self.assertIn(b['fork_base'], ('a' * 40, self.PIN))   # the first row's pin: the batch default
+        # the rows are assigned: the next cut finds nothing
+        rc, out = self.next()
+        self.assertEqual(rc, 2, out)
+        self.assertTrue(out.startswith('nothing left'), out)
+
+    def test_a_batch_without_a_pin_uses_the_early_batches_pin_not_the_states_current_one(self):
+        st = self.wave.load_state(os.path.join(self.tmp, 'wave-state.json'))
+        st['fork_base'] = 'c' * 40
+        self.wave.save_state(os.path.join(self.tmp, 'wave-state.json'), st)
+        self.next()
+        rows = {r['address']: r for r in self.batches()['p001']['rows']}
+        self.assertEqual(rows['0x4258D0']['fork_base'], self.wave.DEFAULT_FORK_BASE)   # b014: none
+        self.assertEqual(rows['0x478490']['fork_base'], 'a' * 40)                        # b013's own
+        self.assertNotEqual(rows['0x4258D0']['fork_base'], 'c' * 40)    # the state's current pin
+
+    def _closed_with_released_row(self, probed):
+        for sc in ('world_entry', 'first_fight'):
+            _write(os.path.join(self.tmp, 'scenarios', sc + '.txt'), 'quit\n')
+        entries = [dict(e) for e in self.ENTRIES[:1]]
+        entries[0]['probed'] = probed
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'probe-list.json'), json.dumps(entries))
+        self.wave.save_state(self.state, {'batches': {'p001': {
+            'rows': [{'address': '0x478490', 'file': 'src/CGameArea.cpp', 'released': True,
+                      'outcome': 'kept'}], 'files': ['src/CGameArea.cpp'], 'status': 'closed',
+            'verdicts': {}, 'branch': 'p3/wso-p001'}}})
+
+    def cov(self, *a, **kw):
+        return CoverageTest.cov(self, *a, **kw)
+
+    def test_a_released_row_returns_only_for_a_new_scenario_or_a_moved_pin(self):
+        pin = 'a' * 40      # b013's own pin: the pin of 0x478490
+        for probed, hits, want in (
+                ({'batch': 'p001', 'scenarios': ['world_entry'], 'pin': pin},
+                 {'world_entry': {'0x478490': 2}}, False),          # the same set again
+                ({'batch': 'p001', 'scenarios': ['world_entry'], 'pin': pin},
+                 {'world_entry': {'0x478490': 2}, 'first_fight': {'0x478490': 1}}, True),   # a new one
+                ({'batch': 'p001', 'scenarios': ['world_entry'], 'pin': 'b' * 40},
+                 {'world_entry': {'0x478490': 2}}, True),           # the pin moved
+                (None, {'world_entry': {'0x478490': 2}}, False)):   # never stamped: stays released
+            self._closed_with_released_row(probed) if probed else self._closed_with_released_row({})
+            self.cov(hits, hooked=['0x478490'])
+            rc, out = self.next()
+            self.assertEqual(rc == 0, want, (probed, hits, out))
+            if want:
+                self.assertIn('p002 assigned: 1 rows', out)
+
+    def test_the_re_offer_rule_does_not_loop_on_what_the_phase_stamped(self):
+        pin = 'a' * 40
+        hits = {'world_entry': {'0x478490': 2}, 'first_fight': {'0x478490': 1}}
+        # a fork row kept after a one-scenario run that two scenarios hit: its hits were
+        # stamped with the run, so the same map never offers it again
+        stamp = {'batch': 'p001', 'scenarios': ['world_entry'], 'pin': pin,
+                 'hits': ['first_fight', 'world_entry']}
+        self._closed_with_released_row(stamp)
+        self.cov(hits, hooked=['0x478490'])
+        rc, out = self.next()
+        self.assertEqual(rc, 2, out)
+        # a neither (hand-ruling) row with hits is not re-offered on a scenario change ...
+        self._closed_with_released_row({'batch': 'p001', 'scenarios': [], 'hits': [], 'pin': pin,
+                                        'hand': True})
+        rc, out = self.next()
+        self.assertEqual(rc, 2, out)
+        # ... only on a pin move
+        self._closed_with_released_row({'batch': 'p001', 'scenarios': [], 'hits': [],
+                                        'pin': 'b' * 40, 'hand': True})
+        rc, out = self.next()
+        self.assertEqual(rc, 0, out)
+        # a row stamped with empty hits (measured with no map) is not re-cut for a
+        # scenario that already ran
+        self._closed_with_released_row({'batch': 'p001', 'scenarios': ['world_entry'],
+                                        'hits': [], 'pin': pin})
+        self.cov({'world_entry': {'0x478490': 2}}, hooked=['0x478490'])
+        rc, out = self.next()
+        self.assertEqual(rc, 2, out)
+        self.cov(hits, hooked=['0x478490'])
+        # a hitting scenario the stamp's map did not have is a reason
+        self._closed_with_released_row(dict(stamp, hits=['world_entry']))
+        rc, out = self.next()
+        self.assertEqual(rc, 0, out)
+
+    def test_probe_hits_lists_the_scenarios_the_map_gives_a_row(self):
+        self._closed_with_released_row({'batch': 'p001'})
+        self.cov({'world_entry': {'0x478490': 2}, 'first_fight': {'0x478490': 1}},
+                 hooked=['0x478490'])
+        row = {'address': '0x478490', 'file': 'src/CGameArea.cpp'}
+        self.assertEqual(self.wave.probe_hits(row, self.dp, None, self.tmp, self.tmp),
+                         ['first_fight', 'world_entry'])
+        os.unlink(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'))
+        self.assertEqual(self.wave.probe_hits(row, self.dp, None, self.tmp, self.tmp), [])
+
+    def test_an_open_batch_still_holds_its_row_even_with_a_new_scenario(self):
+        pin = 'a' * 40
+        self._closed_with_released_row({'batch': 'p001', 'scenarios': [], 'pin': pin})
+        st = self.wave.load_state(self.state)
+        st['batches']['p001']['status'] = 'assigned'
+        self.wave.save_state(self.state, st)
+        self.cov({'world_entry': {'0x478490': 2}}, hooked=['0x478490'])
+        rc, out = self.next()
+        self.assertEqual(rc, 2, out)
+
+    def test_next_takes_at_most_size_rows_and_ids_count_up(self):
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('p001 assigned: 2 rows', out)
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('p002 assigned: 1 rows', out)
+        self.assertEqual(sorted(self.batches()), ['p001', 'p002'])
+
+    def test_next_leaves_the_other_queues_state_alone_and_skips_owned_files(self):
+        self.wave.save_state(os.path.join(self.tmp, 'import-state.json'), {'batches': {'i001': {
+            'rows': [], 'files': ['src/CGameArea.cpp'], 'status': 'assigned', 'verdicts': {},
+            'branch': 'p3/wso-i001'}}})
+        rc, out = self.next()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('0x478490', [r['address'] for r in self.batches()['p001']['rows']])
+        self.assertEqual(sorted(self.wave.load_state(
+            os.path.join(self.tmp, 'import-state.json'))['batches']), ['i001'])
+
+    def test_brief_quotes_each_rows_reading_and_reason_and_the_candidates_format(self):
+        self.next()
+        rc, text = self.wave.render_brief(
+            self.wave.QUEUES['probes']['template'], self.state, 'p001',
+            bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+        self.assertEqual(rc, 0, text)
+        self.assertNotIn('{{', text)
+        self.assertIn('`0x478490` **CGameArea::SetDawn** (src/CGameArea.cpp; earlier reading '
+                      '`fork`, left by b013; fork pin `' + 'a' * 40 + '`)', text)
+        self.assertIn('   - reason: exe sign-extends GetSong(0) via movsx', text)
+        self.assertIn('earlier reading `neither`', text)
+        self.assertIn('candidate <0xADDR> fork <one-line reason>', text)
+        self.assertIn('candidate <0xADDR> neither <one-line reason>', text)
+        self.assertIn('## Candidates', text)
+        self.assertIn('Imported-From: WillScarlettOhara/iwd2-re@<40-char sha>', text)
+        self.assertIn('fork pin `%s`)' % self.PIN, text)     # the other rows' own pin
+        self.assertIn('git show\n   <pin>:<path>', text)
+        self.assertIn('p3/wso-p001', text)
+        self.assertIn('python3 -I tools/wave.py selfcheck --batch p001', text)
+        self.assertIn('Do NOT write the deciding sentence', text)
+        self.assertIn('case frida-<batch>-<scenario> decides', text)
+        # a neither row is not built; the rules of the wave-1 brief carry over
+        self.assertIn('A `neither` reading is not built', text)
+        for rule in ('Never rewrite history', 'Never push', 'Selfcheck last',
+                     'Nothing on the desktop', 'Do not edit `docs/MAP.md`'):
+            self.assertIn(rule, text.replace('**', ''), rule)
+        self.assertIn('No verdicts', text.replace('**', ''))
+
+    def test_resolve_probe_refuses_an_unknown_measured(self):
+        rc, out = self.wave.resolve_probe('0x478490', 'fork', 'frida-p001-x', measured='guess')
+        self.assertEqual(rc, 2)
+        self.assertIn('measured must be one of', out)
+
+    def test_cli_close_kind_probes_reads_the_probe_state(self):
+        out = io.StringIO()
+        with mock.patch.object(self.wave, 'close_batch', return_value=(0, 'ok\n')) as cb, \
+                mock.patch('sys.stdout', out):
+            self.assertEqual(self.wave.main(['close', 'p001', '--kind', 'probes']), 0)
+        self.assertEqual(cb.call_args.kwargs['state_path'], self.wave.PROBE_STATE_PATH)
+        self.assertEqual(cb.call_args.kwargs['kind'], 'probes')
+        with mock.patch.object(self.wave, 'close_batch', return_value=(0, 'ok\n')) as cb, \
+                mock.patch('sys.stdout', io.StringIO()):
+            self.wave.main(['close', 'b001'])
+        self.assertNotIn('state_path', cb.call_args.kwargs)     # the other kinds are untouched
+
+    def test_selfcheck_of_a_probe_batch_reads_candidates(self):
+        repo = os.path.join(self.tmp, 'sc')
+        os.makedirs(repo)
+
+        def g(*a):
+            return subprocess.run(['git', '-C', repo, '-c', 'user.name=T', '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a], check=True,
+                                  capture_output=True, text=True)
+        g('init', '-q', '-b', 'first')
+        _write(os.path.join(repo, 'docs/wso/probe-state.json'), json.dumps({'batches': {'p001': {
+            'branch': 'p3/wso-p001', 'rows': [{'address': '0x401000', 'reading': 'neither'}]}}}))
+        _write(os.path.join(repo, 'src/a.cpp'), 'a\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        g('checkout', '-q', '-b', 'p3/wso-p001')
+        self.assertEqual(driver.selfcheck('p001', repo, '## Candidates\n\ncandidate 0x401000 neither r\n'), [])
+        probs = driver.selfcheck('p001', repo, '## Notes\n\nnone\n')
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn('0x401000: not accounted for in the report', probs[0])
+        probs = driver.selfcheck('p001', repo, '## Verdicts\n\nverdict 0x401000 ours case x\n\n'
+                                 '## Candidates\n\ncandidate 0x401000 neither r\n')
+        self.assertTrue(any('a probe report has no ## Verdicts' in p for p in probs), probs)
+
+
 class WaveUndecideTest(unittest.TestCase):
     """wave.py undecide (a batch row onto the probe list) and line-buffered
     output."""
@@ -19499,6 +21366,38 @@ class WaveCloseRulesTest(unittest.TestCase):
         rc, out = self.close(kind='import')
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def _mark_only_theirs(self):
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            r['category'] = 'only_theirs'
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_import_close_accepts_an_imported_and_a_parked_only_theirs_row(self):
+        # Draw imported (new function, this batch's trace), Render imported
+        self._import_ready(trace=('0x643CC0', '0x643CD0'), src=1)
+        self._mark_only_theirs()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_accepts_a_parked_only_theirs_row_with_the_function_removed(self):
+        self._import_ready(parked=self.PARKED)
+        self._mark_only_theirs()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_refuses_a_parked_only_theirs_row_whose_function_is_still_there(self):
+        self._import_ready(parked=self.PARKED)
+        self._mark_only_theirs()
+        _write(os.path.join(self.wt, 'src', 'A.cpp'), self.RENDER_BODY + self.SRC_BODY % 1)
+        self.commit_worktree('add it back')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: parked (docs/wso/import-parked/643CD0.json) but its body is '
+                      'still changed against first', out)
 
     def test_import_close_refuses_unparked_dropped_row(self):
         self._import_ready(parked=[])
@@ -20006,6 +21905,8 @@ class ClaimsTest(unittest.TestCase):
 
     def lock_repo(self):
         root = os.path.join(self.tmp, 'repo')
+        while os.path.exists(root):
+            root += 'x'
         os.makedirs(os.path.join(root, 'tools'))
         subprocess.run(['git', 'init', '-q', root], check=True)
         shutil.copy(os.path.join(ROOT, 'tools', 'gates.sh'),
@@ -20019,6 +21920,133 @@ class ClaimsTest(unittest.TestCase):
         fcntl.flock(fd, fcntl.LOCK_EX)
         os.write(fd, ('held by pid %d\n' % os.getpid()).encode())
         return fd
+
+    # -- the docs-only fast path -------------------------------------------
+
+    SKIPPED = ('linux-gcc build and tests', 'linux-clang build and tests',
+               'structural parity (base first)')
+
+    def fast_repo(self, changed, ancestor=True):
+        """A temp repo with branch `first`, then a commit touching `changed`
+        (paths -> text) on top of it; with ancestor=False the base is a
+        sibling branch instead."""
+        root = self.lock_repo()
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t')
+
+        def git(*a):
+            subprocess.run(['git', '-C', root, *a], check=True, env=env,
+                           capture_output=True)
+        git('checkout', '-q', '-b', 'first')
+        _write(os.path.join(root, 'README.md'), 'x\n')
+        git('add', '-A')
+        git('commit', '-q', '-m', 'base')
+        if not ancestor:
+            git('checkout', '-q', '-b', 'work')
+            _write(os.path.join(root, 'other.txt'), 'y\n')
+            git('add', '-A')
+            git('commit', '-q', '-m', 'sibling')
+            git('checkout', '-q', 'first')
+            git('checkout', '-q', '-b', 'work2')
+        else:
+            git('checkout', '-q', '-b', 'work')
+        for rel, text in changed.items():
+            _write(os.path.join(root, rel), text)
+        git('add', '-A')
+        git('commit', '-q', '--allow-empty', '-m', 'change')
+        return root
+
+    def run_gate(self, root, *args):
+        r = subprocess.run(['bash', os.path.join(root, 'tools', 'gates.sh'),
+                            *args, '--summary-fixture'], capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def assert_full(self, out, base='first'):
+        self.assertNotIn('skipped (docs-only', out)
+        self.assertNotIn('docs-only fast path', out)
+        self.assertRegex(out, r'(?m)^gates: full gate$')
+        for name in self.SKIPPED:
+            name = name.replace('base first', 'base ' + base)
+            self.assertRegex(out, r'(?m)^--- %s: ok$' % re.escape(name))
+
+    def test_gate_docs_only_skips_the_engine_steps(self):
+        root = self.fast_repo({'docs/wso/notes.md': 'n\n', 'tools/other.py': 'p\n',
+                               'tests/test_tools.py': 't\n'})
+        out = self.run_gate(root, '--base', 'first')
+        for name in self.SKIPPED:
+            self.assertIn('=== %s: skipped (docs-only change against first)' % name, out)
+            self.assertNotIn('--- %s: ok' % name, out)
+        self.assertRegex(out, r'(?m)^gates: docs-only fast path$')
+        self.assertRegex(out, r'(?m)^--- fixture one: ok$')
+        self.assertRegex(out, r'(?m)^--- fixture two: ok$')
+
+    def test_gate_src_change_runs_the_full_gate(self):
+        for rel in ('src/a.cpp', 'scenarios/start.txt', 'stray.h', 'CMakeUserPresets.json',
+                    'newdir/x.txt', 'tools/check_evidence.py', 'tools/oracle.py',
+                    'tests/test_x.cpp', 'tests/fixtures/a.bin',
+                    'CMakeLists.txt', 'platform/p.cpp', 'tools/dataview_rules.json'):
+            with self.subTest(rel=rel):
+                root = self.fast_repo({rel: 'z\n'})
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_parity_or_gate_change_runs_the_full_gate(self):
+        for rel in ('tools/parity/run.py', 'tools/gates.sh'):
+            with self.subTest(rel=rel):
+                # gates.sh is the script under test: append, never replace.
+                root = self.fast_repo({} if rel.endswith('.sh') else {rel: 'x\n'})
+                if rel.endswith('.sh'):
+                    with open(os.path.join(root, rel), 'a') as f:
+                        f.write('\n# changed\n')
+                    subprocess.run(['git', '-C', root, '-c', 'user.name=t',
+                                    '-c', 'user.email=t@t', 'commit', '-q', '-am',
+                                    'edit the gate'], check=True)
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_uncommitted_engine_edit_runs_the_full_gate(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'})
+        _write(os.path.join(root, 'src', 'new.cpp'), 'int x;\n')
+        self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_renaming_an_engine_file_into_docs_runs_the_full_gate(self):
+        for rel in ('scenarios/x.txt', 'src/a.cpp', 'tests/fixtures/a.json',
+                    'tools/dataview_rules.json'):
+            with self.subTest(rel=rel):
+                root = self.lock_repo()
+                git = lambda *a: subprocess.run(
+                    ['git', '-C', root, '-c', 'user.name=t', '-c', 'user.email=t@t', *a],
+                    check=True, capture_output=True)
+                git('checkout', '-q', '-b', 'first')
+                _write(os.path.join(root, rel), 'content that stays identical\n' * 5)
+                git('add', '-A')
+                git('commit', '-q', '-m', 'base')
+                git('checkout', '-q', '-b', 'work')
+                os.makedirs(os.path.join(root, 'docs'), exist_ok=True)
+                git('mv', rel, 'docs/moved.txt')
+                git('commit', '-q', '-m', 'move')
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+                # the same move left uncommitted
+                git('reset', '-q', '--hard', 'HEAD~1')
+                os.makedirs(os.path.join(root, 'docs'), exist_ok=True)
+                git('mv', rel, 'docs/moved.txt')
+                self.assert_full(self.run_gate(root, '--base', 'first'))
+
+    def test_gate_full_flag_forces_the_full_gate(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'})
+        self.assert_full(self.run_gate(root, '--base', 'first', '--full'))
+
+    def test_gate_without_base_is_always_full(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'})
+        out = self.run_gate(root)
+        self.assertRegex(out, r'(?m)^gates: full gate$')
+        self.assertNotIn('skipped (docs-only', out)
+        self.assertNotIn('docs-only fast path', out)
+
+    def test_gate_base_not_an_ancestor_runs_the_full_gate(self):
+        root = self.fast_repo({'docs/n.md': 'n\n'}, ancestor=False)
+        self.assert_full(self.run_gate(root, '--base', 'work'), 'work')
+        self.assert_full(self.run_gate(root, '--base', 'no-such-rev'), 'no-such-rev')
 
     def test_gate_lock_serializes(self):
         root = self.lock_repo()
@@ -20468,6 +22496,93 @@ class CoverageTest(unittest.TestCase):
                             ([{'address': '0x1', 'file': 'src/CGame.cpp'}], ['src/CScreenX.cpp'])):
             self.assertEqual(truth.scenarios_for(rows, files),
                              tuple(truth.FRIDA_SCENARIOS) + tuple(truth.FRIDA_UI_SCENARIOS))
+
+    def test_pending_pass_measures_only_the_pending_candidates_merges_empties_and_commits(self):
+        import io
+        from unittest import mock
+        env = dict(GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t', GIT_COMMITTER_NAME='t',
+                   GIT_COMMITTER_EMAIL='t@t', GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        git = lambda *a: subprocess.run(['git', '-C', self.tmp, *a], capture_output=True,
+                                        text=True, env=dict(os.environ, **env))
+        git('init', '-q')
+        old = self.cov({'world_entry': {'0x401000': 4}})
+        ppath = os.path.join(self.tmp, 'docs', 'wso', 'coverage.pending.json')
+        _write(ppath, json.dumps([
+            {'address': '0x408000', 'name': 'N', 'file': 'src/N.cpp', 'category': 'only_theirs', 'at': 'x'},
+            {'address': '0x409000', 'name': 'M', 'file': 'src/M.cpp', 'category': 'only_theirs', 'at': 'x'}]))
+        git('add', '-A')
+        git('commit', '-q', '-m', 'base')
+        # --dry prints the plan and touches nothing
+        out = io.StringIO()
+        self.assertEqual(coverage.main(['--pending', '--dry', '--scenarios', 'world_entry'],
+                                       root=self.tmp, out=out), 0)
+        self.assertIn('2 pending candidate(s), 1 launch(es)', out.getvalue())
+        self.assertEqual(len(json.load(open(ppath))), 2)
+        inner = self._status_fake(self.tmp, {('world_entry', 1): [
+            'HITS fn_408000 7\nHITS fn_409000 0\nHITS-FINAL yes\nRESULT: CLEAN\n']})
+        hooked = []
+
+        def fake(cmd, **kw):
+            with open(cmd[cmd.index('--probe') + 1]) as f:
+                hooked.append(sorted(h['addr'] for h in json.load(f)['hooks']))
+            return inner(cmd, **kw)
+        fake.calls = inner.calls
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env):
+            rc = coverage.main(['--pending', '--scenarios', 'world_entry'], root=self.tmp,
+                               run_=fake, out=out)
+        self.assertEqual(rc, 0, out.getvalue())
+        # only the pending addresses were hooked (one launch, two hooks)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(hooked, [['0x408000', '0x409000']])
+        merged = json.load(open(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
+        we = merged['scenarios']['world_entry']
+        self.assertEqual(we['hits'], {'0x401000': 4, '0x408000': 7})   # old kept, new added
+        self.assertTrue({'0x408000', '0x409000'} <= set(we['hooked']))
+        self.assertEqual(we['sha'], old['scenarios']['world_entry']['sha'])
+        self.assertEqual(merged['scenarios']['first_fight'], old['scenarios']['first_fight'])
+        self.assertEqual(json.load(open(ppath)), [])
+        self.assertEqual(git('log', '-1', '--format=%s').stdout.strip(),
+                         'coverage: 2 pending candidates measured')
+        self.assertTrue(git('log', '-1', '--format=%B').stdout.rstrip().endswith(
+            'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'))
+        self.assertEqual(sorted(git('show', '--format=', '--name-only', 'HEAD').stdout.split()),
+                         ['docs/wso/coverage.json', 'docs/wso/coverage.pending.json'])
+        # a failed chunk merges nothing and keeps the list
+        _write(ppath, json.dumps([{'address': '0x40A000', 'name': 'K', 'file': 'f',
+                                   'category': 'only_theirs', 'at': 'x'}]))
+        fake = self._status_fake(self.tmp, {('world_entry', 1): [None]})
+        out = io.StringIO()
+        self.assertEqual(coverage.main(['--pending', '--scenarios', 'world_entry'], root=self.tmp,
+                                       run_=fake, out=out), 1)
+        self.assertEqual(len(json.load(open(ppath))), 1)
+        self.assertIn('nothing merged', out.getvalue())
+
+    def test_pending_pass_refuses_a_stale_or_absent_scenario(self):
+        import io
+        self.cov({})
+        ppath = os.path.join(self.tmp, 'docs', 'wso', 'coverage.pending.json')
+        _write(ppath, json.dumps([{'address': '0x408000', 'name': 'N', 'file': 'f',
+                                   'category': 'only_theirs', 'at': 'x'}]))
+        launched = []
+        run = lambda *a, **kw: launched.append(a) or None
+        # absent: the map has no 'brand_new'
+        out = io.StringIO()
+        rc = coverage.main(['--pending', '--scenarios', 'world_entry,brand_new'],
+                           root=self.tmp, run_=run, out=out)
+        self.assertEqual(rc, 1)
+        self.assertIn('brand_new', out.getvalue())
+        self.assertIn('full `wave.py coverage`', out.getvalue())
+        # stale: a scenario file changed since the entry was stamped
+        _write(os.path.join(self.tmp, 'scenarios', 'first_fight.txt'), 'edited\nquit\n')
+        out = io.StringIO()
+        rc = coverage.main(['--pending', '--scenarios', 'world_entry,first_fight'],
+                           root=self.tmp, run_=run, out=out)
+        self.assertEqual(rc, 1)
+        self.assertIn('first_fight', out.getvalue())
+        self.assertNotIn('world_entry is', out.getvalue())
+        self.assertEqual(launched, [])
+        self.assertEqual(len(json.load(open(ppath))), 1)      # list kept
 
     def test_a_partial_pass_merges_into_the_existing_map(self):
         path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
@@ -20964,7 +23079,7 @@ class ImportSecondSourceTest(unittest.TestCase):
             return json.load(f)
 
     def test_alias_and_tuple(self):
-        self.assertEqual(self.wave.IMPORT_CATEGORIES, (self.STUB, self.BASE))
+        self.assertEqual(self.wave.IMPORT_CATEGORIES[:2], (self.STUB, self.BASE))
         self.assertEqual(self.wave.IMPORT_CATEGORY, self.STUB)
 
     def test_stubs_first_then_base_rows_covered_first(self):
@@ -21088,6 +23203,77 @@ class ImportSecondSourceTest(unittest.TestCase):
                       flat(texts['i002']))
         self.assertIn('(the delete instruction above is for stub rows only). 2. **Every commit',
                       flat(texts['i002']))
+
+    ONLY = 'only_theirs'
+    ONLY_ROWS = [
+        {'address': '0x409000', 'category': ONLY, 'file': 'src/P.cpp',
+         'name': 'P', 'their_len': 500, 'our_len': 0},
+        {'address': '0x40A000', 'category': ONLY, 'file': 'src/Q.cpp',
+         'name': 'Q', 'their_len': 400, 'our_len': 0}]
+
+    def with_only(self):
+        _write(self.dp, json.dumps(self.ROWS + self.ONLY_ROWS))
+
+    def test_only_theirs_is_the_third_category(self):
+        self.assertEqual(self.wave.IMPORT_CATEGORIES, (self.STUB, self.BASE, self.ONLY))
+        self.assertEqual(self.wave.IMPORT_CATEGORY, self.STUB)
+
+    def test_only_theirs_rows_come_after_stub_and_base_rows(self):
+        self.with_only()
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x405000': 1, '0x406000': 1,
+                                  '0x407000': 1, '0x409000': 9, '0x40A000': 9}})
+        got = []
+        for i in range(1, 5):
+            rc, out = self.next_import()
+            self.assertEqual(rc, 0, out)
+            got.append(self.rows_of(out))
+            if i == 4:
+                self.assertIn('category: only_theirs', out)
+        self.assertEqual(got[0], ['0x401000', '0x403000'])
+        self.assertEqual(sorted(got[1] + got[2]), ['0x405000', '0x406000', '0x407000'])
+        self.assertEqual(got[3], ['0x409000', '0x40A000'])
+        self.assertEqual([r['category'] for r in self.state()['batches']['i004']['rows']],
+                         [self.ONLY] * 2)
+
+    def test_brief_renders_the_only_theirs_paragraph_only_for_such_batches(self):
+        self.with_only()
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x409000': 1}})
+        self.next_import()
+        # base rows are uncovered here, so the next batch is the only-theirs one
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x409000'], out)
+        texts = {}
+        for bid in ('i001', 'i002'):
+            rc, texts[bid] = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, texts[bid])
+            self.assertNotIn('{{', texts[bid])
+        flat = lambda t: t.replace('\n   ', ' ').replace('\n', ' ')
+        for needle in ('For a row where ours has no body', 'git show <fork sha>:<path>',
+                       'the `// 0x<ADDRESS>` header comment', 'REMOVING the function you added',
+                       'never goes under `## Kept`'):
+            self.assertIn(needle, flat(texts['i002']), needle)
+            self.assertNotIn(needle, flat(texts['i001']), needle)
+        self.assertIn('`0x409000` **P** (src/P.cpp, theirs 500 / ours 0 chars; ours has no body)',
+                      texts['i002'])
+        self.assertNotIn('ours has no body)', texts['i001'])
+
+    def test_scorecard_splits_only_theirs_without_touching_the_old_line(self):
+        st = {'batches': {'i001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'category': self.ONLY},
+            {'address': '0x2', 'category': self.ONLY},
+            {'address': '0x3', 'category': self.ONLY},
+            {'address': '0x4'}]}}}
+        self.assertEqual(
+            self.wave._import_tally(st, None, {'3': {}}),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked; only-theirs 2 imported / 1 parked')
+        st['batches']['i001']['rows'] = st['batches']['i001']['rows'][3:]
+        self.assertEqual(
+            self.wave._import_tally(st),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked')
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')
