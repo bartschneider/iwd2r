@@ -7265,6 +7265,332 @@
           "side": "ours"
         }
       }
+    },
+    "b028": {
+      "assigned_at": "2026-10-24T07:48:26+00:00",
+      "branch": "p3/wso-b028",
+      "closed_at": "2026-10-24T08:51:54+00:00",
+      "files": [
+        "src/CInfGame.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CGameSprite.cpp",
+        "src/CMessage.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5BE840",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::FindEmptyItemPersonalInventory",
+          "our_len": 711,
+          "their_len": 620
+        },
+        {
+          "address": "0x481890",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAIBase.cpp",
+          "measured_body": "e6a523886cf1376cb49bccad2d04ccdb0bb876663b46bd67891441c782798938",
+          "name": "CGameAIBase::sub_481890",
+          "our_len": 739,
+          "their_len": 548
+        },
+        {
+          "address": "0x4686C0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::GetGlobalVariable",
+          "our_len": 746,
+          "their_len": 519
+        },
+        {
+          "address": "0x71CFF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "57e7a5ae623dfc9e6be85d7dedb663e76c1a5cb5b725364f6c8fa81e3288fc96",
+          "name": "CGameSprite::sub_71CFF0",
+          "our_len": 616,
+          "their_len": 563
+        },
+        {
+          "address": "0x7564E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "ac874bc9aa4b79f8a2058815d4950a2c1f98470716352e4614365849aa5c8884",
+          "name": "CGameSprite::ApplyCastingEffectPost",
+          "our_len": 802,
+          "their_len": 360
+        },
+        {
+          "address": "0x4FDF80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "measured_body": "5df138eb5679a51007daee61860534404ecb9cc8e7c73deb39bdbeefe279a5c7",
+          "name": "CMessagePickedDialogResponse::Run",
+          "our_len": 585,
+          "their_len": 528
+        },
+        {
+          "address": "0x761AB0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "fb7630a745c5055924714525edf22e50e1e81512dabc7e4413f4ffd06965a920",
+          "name": "CGameSprite::sub_761AB0",
+          "our_len": 651,
+          "their_len": 443
+        },
+        {
+          "address": "0x72FBF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "4cfd78104b3d00502a89f640504aada086b25608b92f996512b1183cf3220d9d",
+          "name": "CGameSprite::sub_72FBF0",
+          "our_len": 518,
+          "their_len": 547
+        },
+        {
+          "address": "0x723F60",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "f845401a5252c31b554f2b41740ddcdd5694de2e2bb1f4759303da2b0d2f7616",
+          "name": "CGameSprite::sub_723F60",
+          "our_len": 502,
+          "their_len": 513
+        },
+        {
+          "address": "0x5BA230",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfGame.cpp",
+          "measured_body": "96f9bca891a706c3e5751965951dde6550611daca09b237274a3149c5de4db19",
+          "name": "CInfGame::CanPortraitEquipInSlot",
+          "our_len": 485,
+          "their_len": 491
+        },
+        {
+          "address": "0x75E890",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "68a74f7dc18f06a34a13c6ccb698cde700631b63b3d3c23cebf1c233e078ebd2",
+          "name": "CGameSprite::CanSaveGame",
+          "our_len": 455,
+          "their_len": 456
+        },
+        {
+          "address": "0x45D050",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAIBase.cpp",
+          "measured_body": "8a3471eb1bc818774893b865477d6406dc085fa5edcd305c9be84ccc792debbb",
+          "name": "CGameAIBase::GetTriggerSprite",
+          "our_len": 378,
+          "their_len": 356
+        },
+        {
+          "address": "0x6FA810",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "b99b6b89c7b8043eaf7f31cff1f813784d3cac1f74ae0a1f6e55b7b2152958d1",
+          "name": "CGameSprite::SetPath",
+          "our_len": 361,
+          "their_len": 339
+        },
+        {
+          "address": "0x45D3E0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::DecodeSpell",
+          "our_len": 403,
+          "their_len": 292
+        },
+        {
+          "address": "0x728B70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "4c1a9b4c4846712b6b5fdbf35d9a194d01ae116bcd0579e8a756afa2bade50b8",
+          "name": "CGameSprite::ProcessPendingTriggers",
+          "our_len": 224,
+          "their_len": 208
+        },
+        {
+          "address": "0x515430",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "measured_body": "b92437162db7d06827ec9aab202107d8d449e4d90e0919176cc531c714a12d10",
+          "name": "CMessageGroup::~CMessageGroup",
+          "our_len": 120,
+          "their_len": 282
+        },
+        {
+          "address": "0x75F240",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "measured_body": "e2ec727ecfd2eb8e0c79d32393397b5a7ffee15c698b53b320617de1610ba103",
+          "name": "CGameSprite::sub_75F240",
+          "our_len": 174,
+          "their_len": 200
+        },
+        {
+          "address": "0x727B80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::IsVisibleToCaller",
+          "our_len": 154,
+          "their_len": 136
+        },
+        {
+          "address": "0x4F59D0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageInsertResponse::CMessageInsertResponse",
+          "our_len": 133,
+          "their_len": 116
+        },
+        {
+          "address": "0x504C40",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSaveGame::MarshalMessage",
+          "our_len": 107,
+          "their_len": 139
+        }
+      ],
+      "status": "closed",
+      "verdicts": {
+        "0x45D050": {
+          "case": "dump-45D050",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x45D3E0": {
+          "case": "dump-45D3E0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4686C0": {
+          "case": "dump-4686C0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x481890": {
+          "case": "dump-481890",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4F59D0": {
+          "case": "dump-4F59D0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x4FDF80": {
+          "case": "dump-4FDF80",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x504C40": {
+          "case": "dump-504C40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x515430": {
+          "case": "dump-515430",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5BA230": {
+          "case": "dump-5BA230",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x5BE840": {
+          "case": "dump-5BE840",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x6FA810": {
+          "case": "dump-6FA810",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x71CFF0": {
+          "case": "dump-71CFF0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x723F60": {
+          "case": "dump-723F60",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x727B80": {
+          "case": "dump-727B80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x728B70": {
+          "case": "dump-728B70",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x72FBF0": {
+          "case": "dump-72FBF0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x7564E0": {
+          "case": "dump-7564E0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x75E890": {
+          "case": "dump-75E890",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x75F240": {
+          "case": "dump-75F240",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x761AB0": {
+          "case": "dump-761AB0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
