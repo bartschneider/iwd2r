@@ -1,8 +1,9 @@
 # Import batch {{id}}: bring in {{size}} functions
 
 You are importing {{size}} functions where WillScarlettOhara's decompilation
-(iwd2-re@{{fork_base}}) has a real body and ours is a stub, or where the row
-already left wave 1 for the import list. His body is the starting point, not
+(iwd2-re@{{fork_base}}) has a real body and ours is a stub, where ours is
+still the base body (Alexander Batalov's) and his fork changed it, or where
+the row already left wave 1 for the import list. His body is the starting point, not
 a verdict: you adapt it, check it against the original, verify it, and record
 where it came from. Where the original contradicts it, the original wins.
 
@@ -15,11 +16,11 @@ Files you own (do not touch functions outside them; other streams own the rest):
 
 {{files}}
 
-Rows, biggest first:
+Rows, biggest first. Each says what ours is: a stub, or the base body.
 
 {{rows}}
 
-Context bundles (one per row; read these before the source):
+{{base_body}}Context bundles (one per row; read these before the source):
 
 {{bundle}}
 
@@ -40,7 +41,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    same stem as its evidence file; one JSON object
    `{address, name, file, batch, needs}`) with `needs` of
    `"fork body contradicts the exe: <what differs>"`. Three of seven fork
-   bodies in batch i002 did.
+   bodies in batch i002 did.{{kept_refusal}}
 2. **Every commit that brings in his code carries exactly this trailer**, one
    per commit, as the last line of the message:
 
@@ -84,7 +85,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    driver, committed on your branch. Every other outcome (different,
    exercised by no scenario, no hook, a failed or unmeasured scenario)
    cannot close: the phase runs once per batch, so park the row in your fix
-   round, with the `needs` the finding names.
+   round, with the `needs` the finding names.{{kept_measured}}
    **Parking a row.** Edit that function back to the merge base's body
    (`git show <merge-base>:<path>` shows it; `git merge-base first HEAD`
    names the merge base; do not replace a file that holds other rows'
@@ -97,9 +98,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
         "needs": "<the scenarios that ran>: not exercised"}
 
    `needs` names what was tried. Commit all three changes together. Every
-   row you do not park must be imported: its body changed against the merge
-   base. A row whose body you leave as ours (ours already matches, or you
-   refused his body) is parked too, with `needs` saying why.
+   row you do not park must be imported (its body changed against the merge
+   base){{kept_rule4}}.{{refusal_rule}}
    A row that was parked and unparked before carries an earlier attempt in that
    batch's branch history (`git log --all -- docs/evidence/<ADDRESS>.md` finds
    it); read it, do not trust it.
@@ -107,7 +107,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
    `close --kind import`, which requires every row imported and at trace or
-   better (or parked), and every dependency you imported likewise.
+   better (or parked{{kept_close}}), and every dependency you imported likewise.
    **Dependencies.** A stub dependency that sits inside your own files is
    imported with the row, in its own commit with its own trailer, and with
    its own `docs/evidence/<ADDR>.md` (`kind: read-only` plus `exemption:`,
@@ -146,6 +146,6 @@ Write a section headed `## Imported`, with one line per function:
 
     imported <0xADDR> <evidence kind>
 
-Then list the commits you made, the evidence files you wrote and anything you
+{{kept_report}}Then list the commits you made, the evidence files you wrote and anything you
 could not import. Do not write a `## Verdicts` section. You do not
 fast-forward anything yourself; the driver records and closes.

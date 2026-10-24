@@ -23,8 +23,8 @@ from the scenario's files now (or is absent) counts as NOT measured for every
 row ("unknown"), so editing one scenario never makes another's entry stale.
 A map with failed chunks, or with no fresh complete phase scenario, is never
 `usable`.  Consumers: `wave.py next --queue import` (covered rows first), the
-driver's frida phase (runs the scenarios that hit its rows or have not
-measured them) and the scorecard line.  The pass itself is run by hand:
+driver's frida phase (runs a minimal cover of the scenarios that hit its
+rows, plus those that have not measured a row nothing hit) and the scorecard line.  The pass itself is run by hand:
 
   python3 -I tools/wave.py coverage [--scenarios a,b,c] [--chunk N]
                                     [--addresses FILE] [--dry]
@@ -367,14 +367,88 @@ def measured(cov, address, scenarios=None):
             and a in r.get('hooked', ())]
 
 
+def refused_in(cov, address, scenarios=None):
+    """Names of the (fresh) scenarios whose entry lists the address as a hook
+    Frida refused (the map names them fn_<HEX>)."""
+    a = norm(address)
+    stale = cov.get('stale', ())
+    out = []
+    for s, r in sorted(cov['scenarios'].items()):
+        if (scenarios is not None and s not in scenarios) or s in stale or not isinstance(r, dict):
+            continue
+        for x in r.get('refused', ()):
+            x = str(x)
+            try:
+                if norm(x[3:] if x.lower().startswith('fn_') else x) == a:
+                    out.append(s)
+                    break
+            except ValueError:
+                pass
+    return out
+
+
 def status_of(cov, address, scenarios):
-    """'hit' (some phase scenario hits it), 'dead' (every phase scenario
-    measured it and none hit it) or 'unknown' (not measured everywhere)."""
+    """'hit' (some phase scenario hits it), 'unhookable' (every scenario is
+    fresh and refused the hook: Frida cannot hook it in the original), 'dead'
+    (every phase scenario measured it, or refused it, and none hit it) or
+    'unknown' (not measured everywhere)."""
     if covered(cov, address, scenarios):
         return 'hit'
-    if len(measured(cov, address, scenarios)) == len(scenarios):
+    ref = refused_in(cov, address, scenarios)
+    if scenarios and len(ref) == len(scenarios):
+        return 'unhookable'
+    if len(measured(cov, address, scenarios)) + len(ref) == len(scenarios):
         return 'dead'
     return 'unknown'
+
+
+def cover_order(cands):
+    """The tie order of the cover: world_entry, first_fight, walk_and_talk,
+    the other phase scenarios in tuple order, the UI scenarios; anything else
+    after."""
+    order = default_scenarios()
+    return sorted(cands, key=lambda s: order.index(s) if s in order else len(order))
+
+
+def cover_plan(cov, rows, cands):
+    """The Frida phase's scenario choice for rows (dicts with 'address') among
+    cands (a list): 'run' (cands order), 'left', 'hit' (rows a scenario hits),
+    'unknown' (addresses some candidate neither measured nor refused),
+    'unhookable' (addresses every fresh scenario refused), 'covered' and
+    'total' (distinct rows).  Rows hit by a fresh scenario are covered by a
+    greedy set cover (most uncovered rows first, ties in cover_order); a
+    candidate that neither measured nor refused a row no fresh scenario hits
+    (a stale or missing entry, or a partial `hooked`) runs.  Row states are
+    status_of's."""
+    hit, unknown, unhookable, forced = {}, [], [], set()
+    addrs = []
+    for r in rows:
+        a = norm(r['address'])
+        if a in addrs:
+            continue
+        addrs.append(a)
+        state = status_of(cov, a, cands)
+        if state == 'hit':
+            hit[a] = set(covered(cov, a, cands))
+        elif state == 'unhookable':
+            unhookable.append(a)
+        elif state == 'unknown':
+            unknown.append(a)
+            done = set(measured(cov, a, cands)) | set(refused_in(cov, a, cands))
+            forced.update(s for s in cands if s not in done)
+    chosen = set()
+    todo = dict(hit)
+    ordered = cover_order(cands)
+    while todo:
+        best = max(ordered, key=lambda s: sum(1 for by in todo.values() if s in by))
+        if not any(best in by for by in todo.values()):
+            break
+        chosen.add(best)
+        todo = {a: by for a, by in todo.items() if best not in by}
+    run = [s for s in cands if s in chosen or s in forced]
+    return {'run': run, 'left': [s for s in cands if s not in run], 'hit': sorted(hit),
+            'unknown': unknown, 'unhookable': unhookable,
+            'covered': sum(1 for by in hit.values() if by & set(run)), 'total': len(addrs)}
 
 
 def row_scenarios(cov, rows):

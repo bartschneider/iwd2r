@@ -75,10 +75,13 @@ Process.setExceptionHandler(function (d) {
 """
 
 
-def build_js(spec: dict) -> str:
-    """PRELUDE + module bases + crash guard + the table + self-checks + ready."""
+def build_js(spec: dict, require_loaded: bool = True) -> str:
+    """PRELUDE + module bases + crash guard + the table + self-checks + ready.
+    require_loaded False (--no-loaded) installs no `loaded` hook at all: its
+    default site is an address of the original's image, which in our exe
+    would land inside our own code."""
     all_hooks = list(spec["hooks"])
-    if not any(h.get("name") == "loaded" for h in all_hooks):
+    if require_loaded and not any(h.get("name") == "loaded" for h in all_hooks):
         all_hooks.append(loaded_hook())
     blocks = ["'use strict';", hooks.PRELUDE]
     bases = hooks.base_prelude(all_hooks)
@@ -307,7 +310,7 @@ def main() -> int:
             session, pid = attach_when_there(ns.attach,
                                              time.monotonic() + ns.attach_timeout)
         session.on("detached", trace.on_detached)
-        script = session.create_script(build_js(spec))
+        script = session.create_script(build_js(spec, ns.require_loaded))
         trace.script = script
         script.on("message", trace.on_message)
         script.load()
