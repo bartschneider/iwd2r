@@ -2420,24 +2420,30 @@
           "address": "0x6664F0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenSinglePlayer.cpp",
+          "measured_body": "8697bfb824892d55d0bf90c3c74e970b6f52d94229411116bbe16b995488f405",
           "name": "CUIControlButtonSinglePlayerModifyCharacterCreate::OnLButtonClick",
           "our_len": 2091,
+          "outcome": "kept",
           "their_len": 2093
         },
         {
           "address": "0x787F20",
           "category": "theirs_changed_ours_base",
           "file": "src/CDimm.cpp",
+          "measured_body": "6afb3cb38a1ad2932938030213d3993943b875c61bf2a321450393ee05b650d8",
           "name": "CDimm::Request",
           "our_len": 1987,
+          "outcome": "kept",
           "their_len": 2050
         },
         {
           "address": "0x4E3880",
           "category": "theirs_changed_ours_base",
           "file": "src/CUIControlTextDisplay.cpp",
+          "measured_body": "b5fe7fd0a3213afc17c558fa526cefc50bddcdf089c196bde4aaa78616221614",
           "name": "CUIControlTextDisplay::TimerAsynchronousUpdate",
           "our_len": 1436,
+          "outcome": "kept",
           "their_len": 1617
         },
         {
@@ -2452,6 +2458,7 @@
           "address": "0x6642C0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenSinglePlayer.cpp",
+          "measured_body": "e8cc04e948588a938f66361e5f94d3bc74b7e82b21f06e90c723cc7a2b0322f3",
           "name": "CScreenSinglePlayer::OnPartySelectionDoneButtonClick",
           "our_len": 1080,
           "their_len": 1082
@@ -2460,16 +2467,20 @@
           "address": "0x660850",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenSinglePlayer.cpp",
+          "measured_body": "bb010cfe91e2342115e546697109d899981623a93ce034a12113bdefc6866123",
           "name": "CScreenSinglePlayer::EngineActivated",
           "our_len": 871,
+          "outcome": "kept",
           "their_len": 1283
         },
         {
           "address": "0x661860",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenSinglePlayer.cpp",
+          "measured_body": "51956550641935ac8a89691e3f98b4dfe67b17931883aec6649ac892fa607536",
           "name": "CScreenSinglePlayer::IsMainDoneButtonClickable",
           "our_len": 1056,
+          "outcome": "kept",
           "their_len": 1062
         },
         {
@@ -2484,48 +2495,60 @@
           "address": "0x6147C0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenCreateChar.cpp",
+          "measured_body": "59ddfca7fbb936bfd82880bd3e972b50e14ce74e0c2506856918525e534b2631",
           "name": "CUIControlButtonCharGenMenu::OnLButtonClick",
           "our_len": 991,
+          "outcome": "kept",
           "their_len": 993
         },
         {
           "address": "0x782550",
           "category": "theirs_changed_ours_base",
           "file": "src/CDimm.cpp",
+          "measured_body": "84c9c69d4a23fc9bb73a2bc716ae00e234e932720f13bac80daad8a6e434e4ad",
           "name": "CDimm::CancelRequest",
           "our_len": 917,
+          "outcome": "kept",
           "their_len": 974
         },
         {
           "address": "0x665C40",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenSinglePlayer.cpp",
+          "measured_body": "17cdb8d3a2b12592a41a05051e57055204bc8af53d5e63962e4e959b60efdad3",
           "name": "CUIControlButtonSinglePlayerCharacter::OnLButtonClick",
           "our_len": 933,
+          "outcome": "kept",
           "their_len": 938
         },
         {
           "address": "0x602C20",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenConnection.cpp",
+          "measured_body": "4c0ba24e7143f033f359133e54e99416c95e5be6c6a3a7286fc1f9da74070551",
           "name": "CUIControlButtonConnectionNewGame::OnLButtonClick",
           "our_len": 898,
+          "outcome": "kept",
           "their_len": 902
         },
         {
           "address": "0x4A6BE0",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameEffect.cpp",
+          "measured_body": "45b49a363bbe4c6d5b06228844a026cf7b995bfd151f529796147b8b2a18438b",
           "name": "CGameEffectColorChange::ApplyEffect",
           "our_len": 811,
+          "outcome": "kept",
           "their_len": 814
         },
         {
           "address": "0x660A20",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenSinglePlayer.cpp",
+          "measured_body": "721b7279498701932677132dbb961ac1408468f8478466a65ad112cf273c17e3",
           "name": "CScreenSinglePlayer::EngineInitialized",
           "our_len": 788,
+          "outcome": "kept",
           "their_len": 792
         },
         {
@@ -2540,44 +2563,265 @@
           "address": "0x617B70",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenCreateChar.cpp",
+          "measured_body": "0643170dfc4fc2c6b6e097454cb8b1afb0178130821ae19571fa5ea56d5d9c69",
           "name": "CScreenCreateChar::DismissPopup",
           "our_len": 644,
+          "outcome": "kept",
           "their_len": 656
         },
         {
           "address": "0x5FC850",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenConnection.cpp",
+          "measured_body": "ee5d7e3584b6c2e4c36e546dc95fb61cfa78489dc17c5b4dc3bc82a542e13f1c",
           "name": "CScreenConnection::DismissPopup",
           "our_len": 629,
+          "outcome": "kept",
           "their_len": 641
         },
         {
           "address": "0x6179D0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenCreateChar.cpp",
+          "measured_body": "176ddb1abff2b37b421fc5d6eee712ec99741bddd3fe603d994bf0dc393da59e",
           "name": "CScreenCreateChar::SummonPopup",
           "our_len": 605,
+          "outcome": "kept",
           "their_len": 599
         },
         {
           "address": "0x783D00",
           "category": "theirs_changed_ours_base",
           "file": "src/CDimm.cpp",
+          "measured_body": "c12eab5fedeb4fee691b37e76d636cd3a47fa7f78d0a4d8f1fa589913046427f",
           "name": "CDimm::Demand",
           "our_len": 586,
+          "outcome": "kept",
           "their_len": 596
         },
         {
           "address": "0x5FB020",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenConnection.cpp",
+          "measured_body": "38a2ca2c884ab5a4937cfb411e09bd748b3c51a306abef27df2a14a5694af324",
           "name": "CScreenConnection::RenderTorch",
           "our_len": 572,
+          "outcome": "kept",
           "their_len": 574
         }
       ],
       "status": "assigned",
+      "verdicts": {}
+    },
+    "i016": {
+      "assigned_at": "2026-10-24T21:37:23+00:00",
+      "branch": "p3/wso-i016",
+      "closed_at": "2026-10-24T23:28:22+00:00",
+      "files": [
+        "src/CSound.cpp",
+        "src/CUIControlButton.cpp",
+        "src/CVidCell.cpp",
+        "src/CGameArea.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CScreenChapter.cpp",
+        "src/CGameAnimationTypeCharacter.cpp",
+        "src/CMessage.cpp",
+        "src/CResFile.cpp",
+        "src/CChitin.cpp",
+        "src/CInfGame.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/CNetwork.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x7A8C90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CSound.cpp",
+          "name": "CSound::CSound",
+          "our_len": 445,
+          "their_len": 452
+        },
+        {
+          "address": "0x4D57C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlButton.cpp",
+          "measured_body": "b68b8ffe270b975081825183d4b10434991da7e4e830e83c62fcefae09e2fd5c",
+          "name": "CUIControlButton::SetEnabled",
+          "our_len": 433,
+          "outcome": "kept",
+          "their_len": 436
+        },
+        {
+          "address": "0x4D4E10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlButton.cpp",
+          "measured_body": "6e6a0fb3da0c1c9d581b27c49008adc352d8f189eddbf7151574cc4621e87f18",
+          "name": "CUIControlButton::OnLButtonUp",
+          "our_len": 247,
+          "outcome": "kept",
+          "their_len": 249
+        },
+        {
+          "address": "0x7ACE50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidCell.cpp",
+          "name": "CVidCell::CVidCell",
+          "our_len": 151,
+          "their_len": 152
+        },
+        {
+          "address": "0x7A9DB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CSound.cpp",
+          "name": "CSound::Play",
+          "our_len": 2416,
+          "their_len": 2441
+        },
+        {
+          "address": "0x479DB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameArea.cpp",
+          "measured_body": "6a51f0a08b5fd5693cfb4c570fac819ff4fd9b2485cfd4818c2bc2d38d991fcc",
+          "name": "CGameArea::GetSong",
+          "our_len": 1001,
+          "outcome": "kept",
+          "their_len": 1001
+        },
+        {
+          "address": "0x68DEC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "measured_body": "89aec463ed7d69b3163839d2843f605d685a97dddf19dabcbd76c2a3bf700c57",
+          "name": "CScreenWorld::TimerSynchronousUpdate",
+          "our_len": 892,
+          "outcome": "kept",
+          "their_len": 918
+        },
+        {
+          "address": "0x5D4E10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "name": "CUIControlTextDisplayChapter::TimerAsynchronousUpdate",
+          "our_len": 755,
+          "their_len": 779
+        },
+        {
+          "address": "0x6CC180",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeCharacter.cpp",
+          "measured_body": "0db10d3144814dee74e2a741fe22f3fa7f70c5797c78bd12e4eb26c819acd6c8",
+          "name": "CGameAnimationTypeCharacter::GetSndArmor",
+          "our_len": 648,
+          "outcome": "kept",
+          "their_len": 675
+        },
+        {
+          "address": "0x5146C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "measured_body": "e64f382e91b7ce2626b6a1a57772355acae8f1fe156e786dde424c4707b27ad9",
+          "name": "CMessage101::Run",
+          "our_len": 524,
+          "outcome": "kept",
+          "their_len": 526
+        },
+        {
+          "address": "0x789950",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResFile.cpp",
+          "name": "CResFile::AddCacheCount",
+          "our_len": 482,
+          "their_len": 521
+        },
+        {
+          "address": "0x78E930",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CChitin.cpp",
+          "measured_body": "f5a56625321a6fa19ebf633a24294b868cb32e90d47b8906bb9041c8340e16c8",
+          "name": "CChitin::~CChitin",
+          "our_len": 476,
+          "outcome": "kept",
+          "their_len": 498
+        },
+        {
+          "address": "0x694AE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "measured_body": "968f68b94504b9380a2754d7fd2e690917878def111897fd4dfcbaf80b75779b",
+          "name": "CScreenWorld::UpdatePartyGoldStatus",
+          "our_len": 403,
+          "outcome": "kept",
+          "their_len": 415
+        },
+        {
+          "address": "0x5D39A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "measured_body": "16f0dee3d0c18f1844fa8fec9ad7e1a37446807f0ce760904affd3fa53d758d6",
+          "name": "CScreenChapter::SwitchMainPanel",
+          "our_len": 339,
+          "outcome": "kept",
+          "their_len": 341
+        },
+        {
+          "address": "0x5AF7F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "measured_body": "d104f6df5532611ca081fcc9370d7a7b57373996604e73f7505b2db284964e3d",
+          "name": "CInfGame::WorldEngineActivated",
+          "our_len": 187,
+          "outcome": "kept",
+          "their_len": 277
+        },
+        {
+          "address": "0x5D4AC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "measured_body": "047a0c47287b7b5a29fc1ce3c8bc2afc5cd990e47d5997d0a43e41c576495c25",
+          "name": "CUIControlButtonChapterDone::OnLButtonClick",
+          "our_len": 229,
+          "outcome": "kept",
+          "their_len": 231
+        },
+        {
+          "address": "0x693860",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::CancelEngine",
+          "our_len": 218,
+          "their_len": 234
+        },
+        {
+          "address": "0x78A900",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResFile.cpp",
+          "name": "CResFile::UnCache",
+          "our_len": 209,
+          "their_len": 227
+        },
+        {
+          "address": "0x725D30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "measured_body": "006cd271b22534cff2463fba6ef7315d4c944104df4176506114bf6a5dcf6da5",
+          "name": "CGameSpriteSpellList::sub_725D30",
+          "our_len": 201,
+          "outcome": "kept",
+          "their_len": 231
+        },
+        {
+          "address": "0x7A5800",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CNetwork.cpp",
+          "measured_body": "5d216c79bf7c7dc2fa27f00e0abda8cdfad02acd5b0537228b8f2e5df24b7423",
+          "name": "CNetwork::SetJoinEnabled",
+          "our_len": 117,
+          "outcome": "kept",
+          "their_len": 120
+        }
+      ],
+      "status": "closed",
       "verdicts": {}
     }
   }
