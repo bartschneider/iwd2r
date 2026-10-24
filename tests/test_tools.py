@@ -8285,6 +8285,62 @@ class WaveTest(unittest.TestCase):
         rc, out = self._recompare(tip_rows)
         self.assertIn('recompare: 0 new rows', out)
 
+    def test_recompare_regenerates_triage_and_demotes_open_rows(self):
+        # Task 23: after a fork_base move disables fork-stub, the closed row
+        # keeps its class, every open row (fresh or kept) is demoted, and the
+        # calibration invariant (open classes within the enabled ones) holds.
+        R = self._row
+        tri = self.wave._triage()
+        self.write_disagreements([R('0x1000'), R('0x2000'), R('0x3000')])
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {
+                'b001': {'status': 'closed', 'branch': 'p3/wso-b001',
+                         'files': ['src/A.cpp'], 'rows': [R('0x1000')],
+                         'verdicts': {'0x1000': {'side': 'fork', 'case': 'dump-1000'}}},
+                'b002': {'status': 'assigned', 'branch': 'p3/wso-b002',
+                         'files': ['src/B.cpp'], 'rows': [R('0x3000')],
+                         'verdicts': {'0x3000': {'side': 'ours', 'case': 'dump-3000'}}}}}, f)
+        tpath = os.path.join(os.path.dirname(self.disagreements), 'triage.json')
+        entry = lambda a: {'address': a, 'class': 'fork-stub', 'name': 'F' + a,
+                           'file': 'src/A.cpp', 'ours_ref': 'old', 'reason': 'old'}
+        with open(tpath, 'w') as f:
+            json.dump([entry('0x1000'), entry('0x3000')], f)
+
+        def fake(todo, fork, ours, **kw):
+            return [dict(r, **{'class': 'fork-stub', 'reason': 'new'}) for r in todo]
+        with mock.patch.object(tri, 'triage_rows', fake):
+            rc, out = self._recompare([R('0x1000'), R('0x2000'), R('0x3000')],
+                                      triage_show=lambda ref, path: '')
+        self.assertEqual(rc, 0, out)
+        self.assertIn('triage: regenerated triage.json at bbbbbbb', out)
+        self.assertIn('fork-stub', out)               # the calibration table
+        self.assertIn('disabled by calibration', out)
+        self.assertIn('0x2000 F0x2000 demoted to ambiguous', out)
+        self.assertIn('0x3000 F0x3000 demoted to ambiguous', out)
+        with open(tpath) as f:
+            got = {r['address']: r for r in json.load(f)}
+        self.assertEqual(got['0x1000']['class'], 'fork-stub')     # closed: kept
+        self.assertEqual(got['0x2000']['class'], 'ambiguous')
+        self.assertEqual(got['0x2000']['auto_class'], 'fork-stub')
+        self.assertEqual(got['0x3000']['class'], 'ambiguous')
+        with open(self.state) as f:
+            state = json.load(f)
+        self.assertEqual(state['fork_base'], 'b' * 40)
+        cal = tri.calibrate(state, [dict(r, **{'class': r.get('auto_class', r['class'])})
+                                    for r in got.values()])
+        open_present = {r['class'] for a, r in got.items() if a != '0x1000'
+                        and r['class'] in tri.AUTO_OURS}
+        self.assertLessEqual(open_present, tri.enabled_classes(cal))
+
+    def test_recompare_without_triage_file_leaves_none(self):
+        R = self._row
+        self.write_disagreements([R('0x1000')])
+        rc, out = self._recompare([R('0x2000')])
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('triage:', out)
+        self.assertFalse(os.path.exists(os.path.join(
+            os.path.dirname(self.disagreements), 'triage.json')))
+
     def test_recompare_unresolved_tip_writes_nothing(self):
         from unittest import mock
         with open(self.disagreements) as f:
@@ -10193,6 +10249,20 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x401000: parked') for p in probs), probs)
         self.assertTrue(any(p.startswith('0x401000: both kept and parked') for p in probs), probs)
 
+    def test_only_theirs_row_under_kept_is_refused(self):
+        d = self._mc_repo({'401000': 'kind: read-only'})
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'only_theirs'}]}
+        ce = driver._tool('check_evidence')
+        with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
+                mock.patch.object(ce, 'touched', return_value=[]):
+            probs = [p for p in driver.mechanical_checks(
+                batch, d, {}, run=self._mc_run(0, []), kind='import', kept=['0x401000'])
+                if 'first' not in p.split(':')[0] and not p.startswith('git ')]
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith('0x401000: listed under ## Kept but ours has no '
+                                            'body there; an only-theirs row is never kept'), probs)
+
     def test_parked_evidence_check_covers_the_batch_and_what_the_branch_changed(self):
         d = self._mc_repo({'401000': 'kind: read-only', '405000': 'stray'})
         batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
@@ -10215,6 +10285,252 @@ class DriverTest(unittest.TestCase):
         probs = driver._kept_and_parked_problems(batch, d, 'first', (), key, [])
         self.assertEqual(probs, ['0x401000: parked (docs/wso/import-parked/401000.json) but '
                                  'docs/evidence/401000.md still exists; delete it'])
+
+    # -- Task 24: wave.py selfcheck ------------------------------------------
+
+    SC_DECIDED = ('---\nkind: read-only\n---\n\n## WSO delta\n\ncorroborated by WSO at abc: '
+                  'x; case dump-%s decides\n')
+
+    def _sc_repo(self, kind='verdicts', evidence=None):
+        """A real git repo on branch first, then the batch branch with the
+        state file, for the worker's selfcheck."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+
+        def g(*a):
+            return subprocess.run(['git', '-C', d, '-c', 'user.name=T', '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a],
+                                  check=True, capture_output=True, text=True)
+        self.sc_git = g
+        g('init', '-q', '-b', 'first')
+        imp = kind == 'import'
+        bid = 'i009' if imp else 'b011'
+        rows = [{'address': '0x401000', 'category': 'theirs_real_ours_stub'},
+                {'address': '0x402000', 'category': 'theirs_real_ours_stub'}] if imp else [
+            {'address': '0x401000', 'class': 'ambiguous'},
+            {'address': '0x402000', 'class': 'ambiguous'}]
+        state = {'batches': {bid: {'branch': 'p3/wso-' + bid, 'rows': rows}}}
+        _write(os.path.join(d, 'docs/wso/%s-state.json' % ('import' if imp else 'wave')),
+               json.dumps(state))
+        _write(os.path.join(d, 'src/a.cpp'), 'a\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        g('checkout', '-q', '-b', 'p3/wso-' + bid)
+        for k in ('401000', '402000') if evidence is None else evidence:
+            _write(os.path.join(d, 'docs/evidence/%s.md' % k), self.SC_DECIDED % k)
+        g('add', '-A')
+        g('commit', '-q', '-m', 'evidence')
+        return d
+
+    def _sc_report(self, extra=''):
+        return ('## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
+                'verdict 0x402000 ours case dump-402000\n\n## Undecided\n\n(none)\n' + extra)
+
+    IMPORT_REPORT = '## Imported\n\nimported 0x401000 trace\nimported 0x402000 trace\n'
+
+    def test_selfcheck_good_reports_are_ok(self):
+        d = self._sc_repo()
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report()), [])
+        d = self._sc_repo('import')
+        self.assertEqual(driver.selfcheck('i009', d, self.IMPORT_REPORT), [])
+        # parked and kept rows are accounted for
+        _write(os.path.join(d, 'docs/wso/import-parked/402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        os.unlink(os.path.join(d, 'docs/evidence/402000.md'))
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'park')
+        self.assertEqual(driver.selfcheck(
+            'i009', d, '## Imported\n\nimported 0x401000 trace\n\n## Kept\n\nNone.\n'), [])
+
+    def test_selfcheck_report_format_problems(self):
+        d = self._sc_repo()
+        # a chat note instead of the report
+        probs = driver.selfcheck('b011', d, 'I decided both rows ours; evidence written.\n')
+        self.assertTrue(probs[0].startswith('report: no ## Verdicts section'), probs)
+        self.assertEqual(len([p for p in probs if 'no verdict line in the report' in p]), 2, probs)
+        # a mangled verdict line and a mangled undecided line: the driver's wording
+        probs = driver.selfcheck('b011', d, '## Verdicts\nverdict 0x401000 maybe case x\n')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('malformed verdict line', probs[0])
+        self.assertIn('fix that line under ## Verdicts', probs[0])
+        probs = driver.selfcheck('b011', d, self._sc_report('undecided 0x401000 ours no\n'))
+        self.assertIn('fix that line under ## Undecided', probs[0])
+        # a row with neither a verdict nor an undecided line
+        probs = driver.selfcheck('b011', d, '## Verdicts\nverdict 0x401000 ours case dump-401000\n')
+        self.assertEqual(probs, [
+            '0x402000: no verdict line in the report; add "verdict <addr> ours|fork|neither case '
+            '<id>" under ## Verdicts (or, if no probe, replay or trace case you can run decides a '
+            'fork or neither reading, list it under ## Undecided)'])
+
+    def test_selfcheck_import_report_problems(self):
+        d = self._sc_repo('import')
+        probs = driver.selfcheck('i009', d, self.IMPORT_REPORT + '\n## Verdicts\n\n(none)\n')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('no ## Verdicts section', probs[0])
+        probs = driver.selfcheck('i009', d, '## Imported\n\nimported 0x401000 trace\n')
+        self.assertEqual(len(probs), 1, probs)
+        self.assertTrue(probs[0].startswith('0x402000: not accounted for in the report'), probs)
+        # Kept lines parse as the driver parses them
+        probs = driver.selfcheck('i009', d, self.IMPORT_REPORT + '\n## Kept\nkept 0x401000\n')
+        self.assertIn('malformed kept line', probs[0])
+
+    def test_selfcheck_parked_row_with_evidence_left_behind(self):
+        d = self._sc_repo('import')
+        _write(os.path.join(d, 'docs/wso/import-parked/402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'park')
+        probs = driver.selfcheck('i009', d, '## Imported\n\nimported 0x401000 trace\n')
+        self.assertEqual(probs, ['0x402000: parked (docs/wso/import-parked/402000.json) but '
+                                 'docs/evidence/402000.md still exists; delete it'])
+
+    def test_selfcheck_misspelt_evidence_gets_a_rename_instruction(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/0x402000.md'), self.SC_DECIDED % '402000')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'misspelt')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(probs, ['docs/evidence/0x402000.md: misspelt evidence file name; rename '
+                                 'it to docs/evidence/402000.md (caps, no 0x): `git mv '
+                                 'docs/evidence/0x402000.md docs/evidence/402000.md` and commit'])
+        # nothing was renamed
+        self.assertTrue(os.path.isfile(os.path.join(d, 'docs/evidence/0x402000.md')))
+        self.assertFalse(os.path.exists(os.path.join(d, 'docs/evidence/402000.md')))
+
+    def test_selfcheck_deciding_sentence_and_frida_line(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/402000.md'),
+               '---\nkind: read-only\ntrace_source: frida scn orig:%s ours:%s compare=0\n' % ('a' * 64, 'b' * 64) + '---\n\n## WSO delta\n\n'
+               'corroborated by WSO at abc: x; case other decides\n')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'worker evidence')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertTrue(any(p.startswith('0x402000: docs/evidence/402000.md has no sentence reading '
+                                         '"disagreed with WSO at <sha>: ...; case dump-402000 decides"')
+                            for p in probs), probs)
+        self.assertTrue(any(p.startswith('docs/evidence/402000.md: a frida trace_source the driver '
+                                         'did not write') for p in probs), probs)
+        # a frida line the driver's own commit wrote (a fix round) is not the worker's
+        self.sc_git('commit', '-q', '--amend', '-m', 'frida: trace evidence for 1 rows of b011')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # the worker then edits that file's prose: the driver's line stays legitimate
+        path = os.path.join(d, 'docs/evidence/402000.md')
+        _write(path, _slurp(path) + '\nmore reading, case dump-402000 decides\n')
+        self.sc_git('commit', '-q', '-am', 'worker adds a sentence')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertFalse(any('frida trace_source' in p for p in probs), probs)
+        # a worker line under a non-frida subject is still flagged
+        _write(os.path.join(d, 'docs/evidence/401000.md'),
+               _slurp(path).replace('402000', '401000'))
+        self.sc_git('commit', '-q', '-am', 'worker evidence with a frida line')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertTrue(any(p.startswith('docs/evidence/401000.md: a frida trace_source')
+                            for p in probs), probs)
+
+    def test_selfcheck_edits_outside_the_allowed_paths_and_uncommitted_paths(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, 'docs/wso/triage.json'), '{}')
+        self.sc_git('add', '-A')
+        self.sc_git('commit', '-q', '-m', 'oops')
+        _write(os.path.join(d, 'src/b.cpp'), 'untracked\n')
+        probs = driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(len(probs), 2, probs)
+        self.assertTrue(any(p.startswith('uncommitted paths in the worktree; commit or delete: '
+                                         'src/b.cpp') for p in probs), probs)
+        self.assertTrue(any(p.startswith('changed outside the paths a batch may touch (') and
+                            'docs/wso/triage.json' in p for p in probs), probs)
+
+    def test_report_draft_is_never_an_uncommitted_path(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report()), [])
+        probs = driver.mechanical_checks(
+            dict(driver._tool('wave').load_state(
+                os.path.join(d, 'docs/wso/wave-state.json'))['batches']['b011'], id='b011'),
+            d, driver.parse_report(self._sc_report()), tests=False)
+        self.assertFalse(any('uncommitted' in p for p in probs), probs)
+        self.assertIn('.report.md', _slurp(os.path.join(ROOT, '.gitignore')).splitlines())
+
+    def test_selfcheck_cli(self):
+        d = self._sc_repo()
+        wave_py = os.path.join(ROOT, 'tools', 'wave.py')
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
+                           cwd=d, capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout), (0, 'selfcheck: OK\n'), r.stderr)
+        # no draft: exit 2 without reading stdin; stdin by `--report -`, a file by --report
+        os.unlink(os.path.join(d, '.report.md'))
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011'],
+                           cwd=d, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('no report: write .report.md first or pass --report', r.stderr)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', '-'],
+                           cwd=d, input='chat note\n', capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('report: no ## Verdicts section', r.stdout)
+        self.assertEqual(len(r.stdout.strip().splitlines()), 3, r.stdout)
+        other = os.path.join(tempfile.mkdtemp(), 'elsewhere.txt')
+        self.addCleanup(shutil.rmtree, os.path.dirname(other), True)
+        _write(other, self._sc_report())
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', other], cwd=d, capture_output=True, text=True)
+        self.assertEqual(r.stdout, 'selfcheck: OK\n', r.stdout)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck'], cwd=d,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b999',
+                            '--report', other], cwd=d, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('batch b999 is not in docs/wso/wave-state.json', r.stdout)
+
+    def test_selfcheck_cli_excludes_the_draft_untracked(self):
+        d = self._sc_repo()
+        _write(os.path.join(d, '.report.md'), self._sc_report())
+        exclude = os.path.join(d, '.git', 'info', 'exclude')
+        self.assertNotIn('.report.md', _slurp(exclude) if os.path.exists(exclude) else '')
+        status = self.sc_git('status', '--porcelain', '-uall').stdout
+        head = self.sc_git('rev-parse', 'HEAD').stdout
+        for _ in range(2):
+            r = subprocess.run(['python3', '-I', os.path.join(ROOT, 'tools', 'wave.py'),
+                                'selfcheck', '--batch', 'b011'], cwd=d,
+                               capture_output=True, text=True)
+            self.assertEqual(r.stdout, 'selfcheck: OK\n', r.stdout)
+        self.assertEqual(_slurp(exclude).splitlines().count('.report.md'), 1)
+        self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+        self.assertEqual(self.sc_git('status', '--porcelain', '-uall').stdout, '')
+        self.assertIn('?? .report.md', status)
+
+    def test_selfcheck_never_edits(self):
+        d = self._sc_repo(evidence=['401000'])
+        _write(os.path.join(d, 'docs/evidence/0x402000.md'), self.SC_DECIDED % '402000')
+        before = subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
+                                capture_output=True, text=True).stdout
+        head = self.sc_git('rev-parse', 'HEAD').stdout
+        driver.selfcheck('b011', d, self._sc_report())
+        self.assertEqual(subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
+                                        capture_output=True, text=True).stdout, before)
+        self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+
+    def test_selfcheck_rule_is_pinned_in_the_briefs_and_the_fix_prompt(self):
+        for name, n in (('brief-template.md', 15), ('import-brief-template.md', 10)):
+            text = _slurp(os.path.join(ROOT, 'docs', 'wso', name))
+            m = re.search(r'\n(\d+)\. \*\*Selfcheck last\.\*\*', text)
+            n = int(m.group(1))
+            rule = text.split(m.group(0))[1].split('\n\n')[0]
+            for need in ('`.report.md`', 'python3 -I tools/wave.py selfcheck --batch {{id}}',
+                         'selfcheck: OK', 'same text as your report'):
+                self.assertIn(need, rule, name)
+            back = text.split('## Report back')[1]
+            self.assertIn('python3 -I tools/wave.py selfcheck --batch {{id}}', back, name)
+            self.assertTrue(back.rstrip().endswith('as the report.'), name)
+            # the selfcheck rule is the last numbered rule
+            self.assertNotIn('\n%d. **' % (n + 1), text, name)
+        for kind in ('verdicts', 'import'):
+            p = driver.fix_prompt('b011', 'checks', 'br', 'BRIEF', ['x'], kind)
+            self.assertIn('python3 -I tools/wave.py selfcheck --batch b011', p)
+            self.assertIn('`selfcheck: OK`', p)
 
     def test_fix_round_rule_for_imports_names_kept(self):
         imp = driver.fix_prompt('i005', 'checks', 'p3/wso-i005', 'BRIEF', ['p'], 'import')
@@ -10629,6 +10945,7 @@ class DriverTest(unittest.TestCase):
                 'closed_at': None, 'verdicts': {'0x403000': {
                     'side': 'ours', 'case': 'triage-rename', 'losing_kind': 'trace'}}}}}, f)
         self.pushes, self.sent, self.bundle_dirs, self.logs = [], [], [], []
+        kw.setdefault('base_tests', False)   # a test never runs the real suite
         d = driver.Driver(
             self.root, self.state_path, worker,
             driver.FakeWorker(self.CLEAN_REVIEW) if reviewer is None else reviewer,
@@ -12787,6 +13104,42 @@ class DriverTest(unittest.TestCase):
         rc, out = self._close_import()
         self.assertEqual(rc, 0, out)
 
+    def test_driver_only_theirs_row_is_measured_when_touched_and_parked_by_removal(self):
+        trace = TruthTest._trace
+        d, batch = self._kept_phase_driver(kept=(), category='only_theirs')
+        # the worker adds the function (absent at the merge base) and commits
+        self.git('merge', '-q', '--no-edit', 'first', cwd=self.wt)
+        _write(os.path.join(self.wt, 'src', 'R.cpp'), self.BASE_R)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'add 401000', cwd=self.wt)
+        self.assertEqual(
+            [a for _p, a, _n in driver._tool('check_evidence').touched(self.wt, 'first')],
+            [0x401000])
+        d.frida_run = lambda b, table, scenarios, **kw: self._file_traces(
+            scenarios, trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+            trace(('fn_401000', 7, 3), ('fn_402000', 7, 4)))
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        # equal: trace evidence, no outcome (never kept)
+        self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
+        self.assertEqual(set(self._outcomes().values()), {None})
+        # unexercised: parked by REMOVING the function, never edit back
+        idle = [f for f in findings if f.startswith('0x403000:')]
+        self.assertEqual(len(idle), 1, findings)
+        self.assertIn('remove the function you added (and its declaration) so the file is back '
+                      "to the merge base's text for it", idle[0])
+        self.assertNotIn('edit that function back', idle[0])
+        self.assertIn('docs/wso/import-parked/403000.json', idle[0])
+        self.assertIn('needs "', idle[0])
+        diff = [f for f in findings if f.startswith('0x402000:')]
+        self.assertIn('remove the function you added', diff[0])
+        # a stub row's text is unchanged
+        d2, batch2 = self._kept_phase_driver(kept=())
+        d2.frida_run = d.frida_run
+        f2 = d2._frida_phase('b011', batch2, self.wt, {})
+        self.assertTrue([f for f in f2 if 'edit that function back' in f], f2)
+        self.assertFalse([f for f in f2 if 'remove the function you added' in f], f2)
+
     T_SRC = '// 0x404000\nint Rules::Tick(int a, int b)\n{\n  return a + b;\n}\n'
     T_EVIDENCE = ('---\naddress: 0x404000\nname: Rules::Tick\nkind: read-only\n'
                   'exemption: "read against the disassembly: ours matches"\n---\n\n'
@@ -14156,6 +14509,202 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d.run(), 3)
         self.assertEqual(ran, ['b011', 'b012', 'b013'])
 
+    # -- the base's tool tests (Task 23) -----------------------------------
+
+    def _base_driver(self, results, cuts, keys=None, **kw):
+        """A Driver with the base-tests check on: `results` are what the
+        injected suite run returns in turn, `cuts` the next_batch answers
+        (then nothing left); run_batch is a recorder.  `keys` makes the
+        cache key move per call (None: the real key of the temp repo)."""
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), base_tests=True, **kw)
+        self.suite_runs, self.cut_calls, self.ran = [], [], []
+        results = iter(results)
+
+        def suite(root, log_path):
+            self.suite_runs.append((root, log_path))
+            return next(results)
+        d.base_tests_run = suite
+        answers = iter(cuts)
+
+        def nxt(*a, **kw):
+            self.cut_calls.append(1)
+            return next(answers, self.NOTHING)
+        d.next_batch = nxt
+        d.run_batch = lambda bid, resume=None: self.ran.append(bid) or 'closed'
+        d.recompare = lambda *a, **kw: (0, 'recompare: 0 new rows at b (0 already queued, 0 decided)\n')
+        if keys is not None:
+            counter = iter(keys)
+            d._base_key = lambda: next(counter)
+        return d
+
+    BASE_MSG = ('base: tool tests fail on first (%d failures; see '
+                'driver/base-tests-wave1.log); no new batch starts until they pass')
+
+    def test_base_tests_red_at_start_raise_one_exception_and_no_cut(self):
+        d = self._base_driver([(False, 3)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.cut_calls, [])
+        self.assertEqual(self.ran, [])
+        exc = self._status(d)['exceptions']
+        self.assertEqual(list(exc), ['first'])
+        self.assertEqual(exc['first']['problems'], [self.BASE_MSG % 3])
+        self.assertEqual(self._ledger(d).count('driver first: exception at base-tests'), 1)
+        self.assertEqual(len(self.suite_runs), 1)      # no re-run while it stands
+        self.assertTrue(self.suite_runs[0][1].endswith(
+            os.path.join('driver', 'base-tests-wave1.log')))
+        self.assertEqual(self.suite_runs[0][0], d.repo)
+
+    def test_base_tests_green_lets_cuts_proceed(self):
+        d = self._base_driver([(True, 0)], [(0, 'b012 assigned: x\n'),
+                                            (0, 'b013 assigned: x\n')], keys=['k'] * 9)
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self.ran, ['b012', 'b013'])
+        self.assertNotIn('first', self._status(d)['exceptions'])
+        self.assertEqual(self._status(d)['base_tests']['key'], 'k')
+
+    def test_base_tests_red_before_a_cut_stops_new_cuts_only(self):
+        d = self._base_driver([(True, 0), (False, 1)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1'] * 2 + ['k2'] * 9)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.ran, ['b012'])           # the first cut went through
+        self.assertEqual(len(self.cut_calls), 1)       # the second was never made
+        st = self._status(d)
+        self.assertEqual(st['exceptions']['first']['problems'],
+                         [self.BASE_MSG.replace('%d failures', '1 failure')])
+
+    def test_clearing_first_reruns_the_suite_and_cuts_resume(self):
+        d = self._base_driver([(False, 2)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(driver.clear_exception(d.status_path, 'first')[0], 0)
+        self.assertNotIn('first', self._status(d)['exceptions'])
+        d = self._base_driver([(True, 0)], [(0, 'b012 assigned: x\n')])
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.suite_runs), 1)
+        self.assertEqual(self.ran, ['b012'])
+
+    def test_base_tests_cache_skips_the_rerun_until_head_or_tools_change(self):
+        d = self._base_driver([(True, 0), (True, 0)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')])
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(len(self.suite_runs), 1)      # start + two cuts, one run
+        self.assertEqual(self.ran, ['b012', 'b013'])
+        key = d._base_key()
+        self.assertEqual(key, d._base_key())
+        _write(os.path.join(self.root, 'tools', 'new_tool.py'), 'x = 1\n')
+        self.assertNotEqual(d._base_key(), key)        # a tools/ listing change
+        os.unlink(os.path.join(self.root, 'tools', 'new_tool.py'))
+        self.assertEqual(d._base_key(), key)
+        self.git('commit', '-q', '--allow-empty', '-m', 'move head')
+        self.assertNotEqual(d._base_key(), key)        # HEAD moved
+
+    def test_no_base_tests_flag_skips_the_check(self):
+        args, err = driver._parse(['--no-base-tests'])
+        self.assertIsNone(err)
+        self.assertFalse(args.base_tests)
+        args, err = driver._parse([])
+        self.assertTrue(args.base_tests)
+        d = self._base_driver([], [(0, 'b012 assigned: x\n')])
+        d.base_tests = False
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(self.suite_runs, [])
+        self.assertEqual(self.ran, ['b012'])
+
+    def test_a_stop_during_the_base_suite_records_no_exception(self):
+        d = self._base_driver([], [(0, 'b012 assigned: x\n')])
+
+        def stopped(root, log_path):
+            raise driver._Stop()
+        d.base_tests_run = stopped
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertEqual(self.cut_calls, [])
+        self.assertNotIn('base-tests', self._ledger(d) if os.path.exists(d.ledger_path) else '')
+
+    def test_run_base_tests_raises_stop_when_killed_by_a_stop_and_names_timeouts(self):
+        log = os.path.join(tempfile.mkdtemp(), 'x.log')
+        self.addCleanup(shutil.rmtree, os.path.dirname(log), True)
+        killed = subprocess.CompletedProcess([], -9, '', '')
+        with mock.patch.object(driver, '_run_group', return_value=killed):
+            driver._STOPPED.set()
+            self.addCleanup(driver._STOPPED.clear)
+            with self.assertRaises(driver._Stop):
+                driver.run_base_tests(self.root if hasattr(self, 'root') else '.', log)
+            driver._STOPPED.clear()
+            self.assertEqual(driver.run_base_tests('.', log)[0], False)   # not stopped: red
+        with mock.patch.object(driver, '_run_group', side_effect=subprocess.TimeoutExpired('x', 600)):
+            ok, detail = driver.run_base_tests('.', log)
+        self.assertFalse(ok)
+        self.assertIn('timed out after 600 s', detail)
+        d = self._base_driver([(False, detail)], [])
+        d.run()
+        self.assertIn('timed out after 600 s; see driver/base-tests-wave1.log',
+                      self._status(d)['exceptions']['first']['problems'][0])
+
+    def test_blocked_with_batches_in_flight_waits_for_them_and_cuts_nothing_new(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1', 'k2', 'k2', 'k2', 'k2'], workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            red_seen.wait(10)
+            time.sleep(0.2)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(order, ['b012'])        # in flight ran to the end
+        self.assertEqual(len(self.cut_calls), 1)
+        self.assertIn('first', self._status(d)['exceptions'])
+
+    def test_live_clear_first_reruns_the_suite_and_cuts_resume(self):
+        red_seen, order = threading.Event(), []
+        d = self._base_driver([(True, 0), (False, 1), (True, 0)],
+                              [(0, 'b012 assigned: x\n'), (0, 'b013 assigned: x\n')],
+                              keys=['k1', 'k1'] + ['k2'] * 8, workers=2)
+        real = d.base_tests_run
+
+        def suite(root, log_path):
+            r = real(root, log_path)
+            if not r[0]:
+                red_seen.set()
+            return r
+
+        def run_batch(bid, resume=None):
+            if bid == 'b012':
+                red_seen.wait(10)
+                for _ in range(100):             # the exception is recorded after the run
+                    if 'first' in self._status(d)['exceptions']:
+                        break
+                    time.sleep(0.05)
+                self.assertEqual(driver.clear_exception(d.status_path, 'first')[0], 0)
+            order.append(bid)
+            return 'closed'
+        d.base_tests_run, d.run_batch = suite, run_batch
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(order, ['b012', 'b013'])
+        self.assertEqual(len(self.suite_runs), 3)
+        self.assertNotIn('first', self._status(d)['exceptions'])
+
+    def test_a_cleared_retry_is_not_blocked_by_red_base_tests(self):
+        d = self._base_driver([(False, 1)], [(0, 'b012 assigned: x\n')])
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {},
+                       'batches': {'b011': {'outcome': 'exception', 'stage': 'checks'}}}, f)
+        self.assertEqual(d.run(), 1)
+        self.assertEqual(self.ran, ['b011'])           # the retry goes
+        self.assertEqual(self.cut_calls, [])           # no new cut
+        self.assertIn('first', self._status(d)['exceptions'])
+
     def test_cut_failure_is_an_exception_and_stops(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
         d.next_batch = lambda *a, **kw: (1, 'b013 not assigned: git worktree add failed\n')
@@ -14284,7 +14833,7 @@ class DriverTest(unittest.TestCase):
         """A fresh Driver over the same paths, reading the status file again."""
         n = driver.Driver(d.repo, d.state_path, d.worker, d.reviewer, d.ledger_path,
                           d.status_path, push=d.push, send=d.send, gate=False,
-                          log=self.logs.append)
+                          log=self.logs.append, base_tests=False)
         n.render_brief, n.mechanical_checks = d.render_brief, d.mechanical_checks
         n.report_path, n.triage_path = d.report_path, d.triage_path
         return n
@@ -14338,7 +14887,8 @@ class DriverTest(unittest.TestCase):
 
     def test_default_push_and_send(self):
         d = self._driver(worker=None)
-        d = driver.Driver(d.repo, d.state_path, None, None, d.ledger_path, d.status_path)
+        d = driver.Driver(d.repo, d.state_path, None, None, d.ledger_path, d.status_path,
+                          base_tests=False)
         calls = []
 
         def stub(argv, **kw):
@@ -15200,6 +15750,7 @@ class DriverTest(unittest.TestCase):
         with open(self.state_path, 'w') as f:
             json.dump({'fork_base': 'e8dd16a7', 'batches': batches}, f)
         self.pushes, self.sent, self.logs = [], [], []
+        kw.setdefault('base_tests', False)
         d = driver.Driver(
             self.root, self.state_path, None, None, os.path.join(tmp, 'ledger.md'),
             os.path.join(tmp, 'driver', 'status.json'), pools=pools,
@@ -16512,6 +17063,145 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(w.briefs), 1)
         self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
         self.assertEqual(len(self._state_of(d, 'b011')['verdicts']), 1)
+
+    # Task 25: a cleared checks or review exception re-checks the last report.
+
+    def _recheck_setup(self, reviewer=None, review=False):
+        """b011 with a worker whose report names a case the evidence file does
+        not (a checks exception after its one fix round); returns (d, w, fix)
+        where fix() is the coordinator's hand fix to the evidence."""
+        class Bad(_SeqWorker):
+            def run(w, brief, cwd):
+                w.briefs.append(brief)
+                w.cwds.append(cwd)
+                return driver.Result(0, '## Verdicts\n\nverdict 0x40B000 ours case dump-zzz\n',
+                                     None, 0.0, False)
+        w = Bad('')
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
+                              reviewers=reviewer)
+        if review:
+            d.review_needed = lambda *a, **kw: (True, 'test')
+        phases = []
+        d._frida_phase = lambda *a, **kw: phases.append(1) or []
+        d.frida = True
+        self.phases = phases
+        ev = os.path.join(self.tmp, 'wt-b011', 'docs', 'evidence', '40B000.md')
+
+        def fix():
+            _write(ev, '---\naddress: 0x40B000\nname: F11\nkind: oracle\n---\n\n'
+                       'corroborated by WSO at e8dd16a7; case dump-zzz decides\n')
+        return d, w, fix
+
+    def _recheck_first_run(self, d):
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+
+    def test_a_cleared_checks_exception_rechecks_the_last_report_without_the_worker(self):
+        d, w, fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(len(w.briefs), 2)               # the worker and its one fix round
+        fix()
+        self.git('add', '-A', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self.git('commit', '-qm', 'hand fix', cwd=os.path.join(self.tmp, 'wt-b011'))
+        phases_before = len(self.phases)
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), 2)               # the worker did not run again
+        self.assertEqual(len(self.phases), phases_before + 1)
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+        b = self._status(d)['batches']['b011']
+        self.assertEqual(b['outcome'], 'closed')
+        self.assertEqual(b['retry_kind'], 'recheck')
+        with open(d.ledger_path) as f:
+            self.assertIn('retried at its recheck stage: last report re-checked; '
+                          'the worker is not run again', f.read())
+
+    def test_a_recheck_that_finds_the_same_problems_raises_the_exception_again(self):
+        d, w, _fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        first = self._status(d)['exceptions']['b011']['problems']
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 2)               # no worker, no fix round
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'checks')
+        self.assertEqual(exc['problems'][0], 'unchanged after recheck; fix by hand or '
+                                             'clear with --rerun')
+        self.assertEqual(exc['problems'][1:], first)
+        # and again: the marker does not make the next recheck look new
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(len(w.briefs), 2)
+        self.assertEqual(self._status(d)['exceptions']['b011']['problems'][1:], first)
+
+    def test_a_cleared_review_exception_rechecks_and_reviews_again(self):
+        blocking = '## Findings\n\n- BLOCKING: nope\n'
+        r = _SeqWorker(blocking, blocking, self.CLEAN_REVIEW, credits=0.0)
+        good = _SeqWorker('x')
+        d, w, fix = self._recheck_setup(reviewer={'a': r}, review=True)
+        fix()
+        self.git('add', '-A', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self.git('commit', '-qm', 'evidence', cwd=os.path.join(self.tmp, 'wt-b011'))
+        self._recheck_first_run(d)
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'review')
+        workers, reviews = len(w.briefs), len(r.briefs)
+        self._clear(d, 'b011')
+        d.review_needed = lambda *a, **kw: (True, 'test')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(len(w.briefs), workers)         # no worker
+        self.assertEqual(len(r.briefs), reviews + 1)     # the reviewer ran again
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+
+    def test_clear_rerun_reenters_a_checks_exception_at_the_worker(self):
+        d, w, fix = self._recheck_setup()
+        self._recheck_first_run(d)
+        self.assertEqual(driver.clear_exception(d.status_path, 'b011', True)[0], 0)
+        self.assertEqual(self._status(d)['cleared']['b011']['rerun'], True)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertTrue(len(w.briefs) > 2)
+        self.assertTrue(w.briefs[2].startswith('Resume:'), w.briefs[2][:60])
+        self.assertEqual(self._status(d)['batches']['b011'].get('retry_kind'), 'rerun')
+
+    def test_clear_without_rerun_marks_the_exception_for_a_recheck(self):
+        exc = {'stage': 'checks', 'problems': ['p1', 'p2'], 'at': 't'}
+        tmp, path = self._status_tmp({'exceptions': {'b011': exc, 'first': {'stage': 'x'}},
+                                      'batches': {'b011': {'outcome': 'exception'}}})
+        self.assertEqual(driver.clear_exception(path, 'b011')[0], 0)
+        self.assertEqual(driver.clear_exception(path, 'first')[0], 0)
+        with open(path) as f:
+            st = json.load(f)
+        self.assertEqual(st['cleared'], {'b011': {'stage': 'checks', 'rerun': False,
+                                                  'problems': ['p1', 'p2']}})
+
+    def test_worker_brief_frida_exceptions_keep_the_worker_reentry(self):
+        d = self._pool_driver(self._two_pools()[:1], {'a': None}, ids=('b011',))
+        for stage in ('worker', 'brief', 'frida', 'record', 'close'):
+            self._write_cleared(d, stage)
+            d._retry_stage.clear()
+            self.assertEqual(d._cleared(), ['b011'])
+            self.assertEqual(d._retry_stage['b011'], stage)
+        for stage, want in (('checks', 'recheck'), ('review', 'recheck')):
+            self._write_cleared(d, stage)
+            self.assertEqual(d._cleared(), ['b011'])
+            self.assertEqual(d._retry_stage['b011'], want)
+        self._write_cleared(d, 'review', rerun=True)
+        d._cleared()
+        self.assertEqual(d._retry_stage['b011'], 'review')
+        self.assertEqual(d._retry_kind['b011'], 'rerun')
+
+    def _write_cleared(self, d, stage, rerun=False):
+        os.makedirs(os.path.dirname(d.status_path), exist_ok=True)
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {}, 'cleared': {'b011': {
+                'stage': stage, 'rerun': rerun, 'problems': []}},
+                'batches': {'b011': {'outcome': 'exception', 'stage': stage}}}, f)
 
     def test_a_cleared_push_exception_pushes_again_without_the_worker(self):
         w = self._BatchWorker(credits=0.0)
@@ -19500,6 +20190,38 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.batches()['b001']['status'], 'closed')
 
+    def _mark_only_theirs(self):
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            r['category'] = 'only_theirs'
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_import_close_accepts_an_imported_and_a_parked_only_theirs_row(self):
+        # Draw imported (new function, this batch's trace), Render imported
+        self._import_ready(trace=('0x643CC0', '0x643CD0'), src=1)
+        self._mark_only_theirs()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_accepts_a_parked_only_theirs_row_with_the_function_removed(self):
+        self._import_ready(parked=self.PARKED)
+        self._mark_only_theirs()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+
+    def test_import_close_refuses_a_parked_only_theirs_row_whose_function_is_still_there(self):
+        self._import_ready(parked=self.PARKED)
+        self._mark_only_theirs()
+        _write(os.path.join(self.wt, 'src', 'A.cpp'), self.RENDER_BODY + self.SRC_BODY % 1)
+        self.commit_worktree('add it back')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: parked (docs/wso/import-parked/643CD0.json) but its body is '
+                      'still changed against first', out)
+
     def test_import_close_refuses_unparked_dropped_row(self):
         self._import_ready(parked=[])
         first = self.first_sha()
@@ -20964,7 +21686,7 @@ class ImportSecondSourceTest(unittest.TestCase):
             return json.load(f)
 
     def test_alias_and_tuple(self):
-        self.assertEqual(self.wave.IMPORT_CATEGORIES, (self.STUB, self.BASE))
+        self.assertEqual(self.wave.IMPORT_CATEGORIES[:2], (self.STUB, self.BASE))
         self.assertEqual(self.wave.IMPORT_CATEGORY, self.STUB)
 
     def test_stubs_first_then_base_rows_covered_first(self):
@@ -21088,6 +21810,77 @@ class ImportSecondSourceTest(unittest.TestCase):
                       flat(texts['i002']))
         self.assertIn('(the delete instruction above is for stub rows only). 2. **Every commit',
                       flat(texts['i002']))
+
+    ONLY = 'only_theirs'
+    ONLY_ROWS = [
+        {'address': '0x409000', 'category': ONLY, 'file': 'src/P.cpp',
+         'name': 'P', 'their_len': 500, 'our_len': 0},
+        {'address': '0x40A000', 'category': ONLY, 'file': 'src/Q.cpp',
+         'name': 'Q', 'their_len': 400, 'our_len': 0}]
+
+    def with_only(self):
+        _write(self.dp, json.dumps(self.ROWS + self.ONLY_ROWS))
+
+    def test_only_theirs_is_the_third_category(self):
+        self.assertEqual(self.wave.IMPORT_CATEGORIES, (self.STUB, self.BASE, self.ONLY))
+        self.assertEqual(self.wave.IMPORT_CATEGORY, self.STUB)
+
+    def test_only_theirs_rows_come_after_stub_and_base_rows(self):
+        self.with_only()
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x405000': 1, '0x406000': 1,
+                                  '0x407000': 1, '0x409000': 9, '0x40A000': 9}})
+        got = []
+        for i in range(1, 5):
+            rc, out = self.next_import()
+            self.assertEqual(rc, 0, out)
+            got.append(self.rows_of(out))
+            if i == 4:
+                self.assertIn('category: only_theirs', out)
+        self.assertEqual(got[0], ['0x401000', '0x403000'])
+        self.assertEqual(sorted(got[1] + got[2]), ['0x405000', '0x406000', '0x407000'])
+        self.assertEqual(got[3], ['0x409000', '0x40A000'])
+        self.assertEqual([r['category'] for r in self.state()['batches']['i004']['rows']],
+                         [self.ONLY] * 2)
+
+    def test_brief_renders_the_only_theirs_paragraph_only_for_such_batches(self):
+        self.with_only()
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x409000': 1}})
+        self.next_import()
+        # base rows are uncovered here, so the next batch is the only-theirs one
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x409000'], out)
+        texts = {}
+        for bid in ('i001', 'i002'):
+            rc, texts[bid] = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, texts[bid])
+            self.assertNotIn('{{', texts[bid])
+        flat = lambda t: t.replace('\n   ', ' ').replace('\n', ' ')
+        for needle in ('For a row where ours has no body', 'git show <fork sha>:<path>',
+                       'the `// 0x<ADDRESS>` header comment', 'REMOVING the function you added',
+                       'never goes under `## Kept`'):
+            self.assertIn(needle, flat(texts['i002']), needle)
+            self.assertNotIn(needle, flat(texts['i001']), needle)
+        self.assertIn('`0x409000` **P** (src/P.cpp, theirs 500 / ours 0 chars; ours has no body)',
+                      texts['i002'])
+        self.assertNotIn('ours has no body)', texts['i001'])
+
+    def test_scorecard_splits_only_theirs_without_touching_the_old_line(self):
+        st = {'batches': {'i001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'category': self.ONLY},
+            {'address': '0x2', 'category': self.ONLY},
+            {'address': '0x3', 'category': self.ONLY},
+            {'address': '0x4'}]}}}
+        self.assertEqual(
+            self.wave._import_tally(st, None, {'3': {}}),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked; only-theirs 2 imported / 1 parked')
+        st['batches']['i001']['rows'] = st['batches']['i001']['rows'][3:]
+        self.assertEqual(
+            self.wave._import_tally(st),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked')
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')
