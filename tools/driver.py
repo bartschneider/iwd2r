@@ -1154,11 +1154,15 @@ def _write_trace_evidence(path, probe, orig_path, ours_path, keep_exemption=Fals
         f.write(''.join([lines[0]] + head + lines[end:]))
 
 
-def _undo_trace_evidence(path, saved_text):
+def _undo_trace_evidence(path, saved_text, batch_id=None):
     """Undo what _write_trace_evidence changed on the CURRENT file: `kind:` back
     to the saved copy's value, the `trace_source:` line dropped, and the saved
     `exemption:` line put back when the file lacks one; every other line (prose
-    edited since) stays.  True when done that way; False when the current front
+    edited since) stays.  `kind:` is reset only while the file still reads
+    `kind: trace` (a worker who replaced it with oracle or replay evidence is
+    left as written), `trace_source:` dropped only when it is this batch's
+    frida line (`frida <batch_id>-...`; any frida line without batch_id), and
+    `exemption:` put back only when `kind:` went back to read-only.  True when done that way; False when the current front
     matter cannot be read, in which case the saved copy replaces the file."""
     with open(path, encoding='utf-8', newline='') as f:
         lines = f.read().splitlines(keepends=True)
@@ -1178,17 +1182,21 @@ def _undo_trace_evidence(path, saved_text):
         return False
     eol = '\r\n' if lines[0].endswith('\r\n') else '\n'
     old_ex = field(saved, send, 'exemption')
-    head, have_ex = [], False
+    head, have_ex, reset = [], False, False
+    prefix = 'frida %s-' % batch_id if batch_id else 'frida '
     for line in lines[1:end]:
-        name = line.partition(':')[0].strip()
-        if name == 'trace_source':
+        name, _, value = line.partition(':')
+        name, value = name.strip(), value.strip()
+        if name == 'trace_source' and value.startswith(prefix):
             continue
         if name == 'exemption':
             have_ex = True
-        if name == 'kind':
+        if name == 'kind' and value == 'trace' and not reset:
+            reset = True
             line = old_kind.rstrip('\r\n') + (line[len(line.rstrip('\r\n')):] or eol)
         head.append(line)
-    if old_ex is not None and not have_ex:
+    if (reset and old_ex is not None and not have_ex
+            and old_kind.partition(':')[2].strip() == 'read-only'):
         at = next((i for i, l in enumerate(head) if l.partition(':')[0].strip() == 'kind'), len(head) - 1)
         head.insert(at + 1, old_ex.rstrip('\r\n') + eol)
     with open(path, 'w', encoding='utf-8', newline='') as f:
@@ -1930,7 +1938,6 @@ class _BatchContext(threading.local):
         self.probe = {}         # address key -> (side, case) the oracle passed
         self.frida_got = {}     # address key -> (status, detail) of its one Frida run
         self.frida_notes = {}   # address key -> [frequency-only notes] (ledger lines)
-        self.wave_digest = {}   # address key -> digest of the body a wave-1 trace measured
         self.wave_notes = {}    # address key -> why an equal wave-1 row got no trace evidence
         self.pool = None        # the pool this batch runs on
         self.t0 = None          # clock() at the cut or resume (ruling R61)
@@ -2090,7 +2097,6 @@ class Driver:
     _probe = _per_thread('probe')
     _frida_got = _per_thread('frida_got')
     _frida_notes = _per_thread('frida_notes')
-    _wave_digest = _per_thread('wave_digest')
     _wave_notes = _per_thread('wave_notes')
 
     @property
@@ -2469,7 +2475,7 @@ class Driver:
             return 'probe'
         # The Frida phase measures the batch's own build, so an equal row
         # confirms whichever side's body the branch holds.
-        if side and self._frida_got.get(key, ('',))[0] == 'equal':
+        if side in ('ours', 'fork') and self._frida_got.get(key, ('',))[0] == 'equal':
             return 'frida'
         return None
 
@@ -2640,7 +2646,6 @@ class Driver:
         (a retry reuses frida-cache.json, see _frida_cache_key).  Returns the findings."""
         self._frida_got = {}
         self._frida_notes = {}
-        self._wave_digest = {}
         self._wave_notes = {}
         self._frida_ran = None
         if not self.frida or self.dry_run:
@@ -3035,7 +3040,8 @@ class Driver:
         """rows[].outcome = 'kept' in the import state for the kept rows the
         phase measured (whatever came back: only a row whose trace evidence
         was written closes as kept), and rows[].measured_body (the digest of
-        the body each trace-evidenced row had) for `digests`; a batch the
+        the body each equal row had when the phase measured it, import or
+        wave 1, trace evidence written or not) for `digests`; a batch the
         state does not hold (a hand-built fixture) is left alone."""
         key = _tool('wave')._addr_key
         want = {key(a) for a in addresses}
@@ -3334,15 +3340,18 @@ class Driver:
             return orig, ours, dumps, 'files'
         return orig, ours, dumps, None
 
-    @staticmethod
-    def _dirty_source(worktree, row):
+    def _dirty_source(self, worktree, row):
         """The source file (or src/) of a row that has uncommitted changes in
         the worktree, else None.  The x86 build syncs the files on disk, the
         digest reads HEAD: a dirty file may have measured another body."""
         path = row.get('file') or 'src'
         r = subprocess.run(['git', '-C', worktree, 'status', '--porcelain', '--', path],
                            capture_output=True, text=True)
-        return path if r.returncode == 0 and r.stdout.strip() else None
+        if r.returncode != 0:
+            self.log('git status of %s failed (%s); counted as uncommitted' % (
+                path, _one_line(r.stderr or '', 120)))
+        # fails closed: a git error counts as dirty
+        return path if r.returncode != 0 or r.stdout.strip() else None
 
     def _before_path(self, batch_id, address):
         """driver/<batch>/evidence-before/<ADDR>.md: the evidence file as it was
@@ -3365,8 +3374,7 @@ class Driver:
         and whose evidence is still kind: read-only is rewritten to kind:
         trace (the import path's _write_trace_evidence, the same dump guard;
         the exemption text is kept).  The file as it was goes to
-        _before_path first, and the digest of the body measured is left in
-        self._wave_digest.  (True, None) when the file was rewritten, else
+        _before_path first (unless keep_before is False: remeasure).  (True, None) when the file was rewritten, else
         (False, why): a refusal is logged, never a finding (the verdict stands
         as measured frida either way)."""
         wave = _tool('wave')
@@ -3415,7 +3423,7 @@ class Driver:
             try:
                 with open(before, encoding='utf-8', newline='') as f:
                     saved = f.read()
-                if not _undo_trace_evidence(os.path.join(worktree, rel), saved):
+                if not _undo_trace_evidence(os.path.join(worktree, rel), saved, batch_id):
                     self.log('%s: %s: evidence front matter unreadable; the pre-rewrite copy '
                              'replaced the file' % (batch_id, a))
                 os.unlink(before)

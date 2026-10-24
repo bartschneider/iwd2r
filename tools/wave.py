@@ -1385,9 +1385,9 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                     # the driver's trace of this batch measured a body (measured_body);
                     # a different one, or none recorded, is not what it measured
                     problems.append(f'{row["address"]}: body changed after the Frida phase; '
-                                    f'edit the body back to what the Frida phase measured (the '
-                                    f"driver's evidence-before copy names it) or let the verdict "
-                                    f'stand on the reading')
+                                    f"edit the body back to the one the driver's 'frida: trace "
+                                    f"evidence' commit measured, or put the evidence file back to "
+                                    f'its pre-phase content so the verdict stands on the reading')
             else:
                 if (wt is not None and row.get('measured_body') and frida_trace(text)
                         and _check_evidence().body_digest(

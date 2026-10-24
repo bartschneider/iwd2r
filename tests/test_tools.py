@@ -11394,7 +11394,7 @@ class DriverTest(unittest.TestCase):
         text = _slurp(path)
         self.assertEqual(text, saved + 'prose added after the phase\n')   # byte for byte but the new prose
         # an exemption the current file lost comes back from the copy, in place
-        _write(path, '---\naddress: 0x402000\nkind: trace\ntrace_source: x\n---\n\nnew prose\n')
+        _write(path, '---\naddress: 0x402000\nkind: trace\ntrace_source: frida b011-w orig:1 ours:2 compare=0\n---\n\nnew prose\n')
         self.assertTrue(d._undo_trace_evidence(path, saved))
         self.assertEqual(_slurp(path), '---\naddress: 0x402000\nkind: read-only\nexemption: "thin"\n---\n\nnew prose\n')
         # an unreadable front matter: the saved copy is the fallback
@@ -11518,6 +11518,66 @@ class DriverTest(unittest.TestCase):
         rc, out = d.remeasure(picked, skipped, stamp='20261024-030304')
         self.assertEqual(rc, 0, out)
         self.assertEqual(glob.glob(os.path.join(d.driver_dir, 'remeasure-*', 'evidence-before', '*')), [])
+
+    # -- Task 20 fix round 3 ------------------------------------------------
+
+    def test_undo_trace_evidence_leaves_a_worker_replaced_oracle_file_and_drops_only_the_batch_line(self):
+        path = os.path.join(self.tmp_dir(), '402000.md')
+        saved = '---\naddress: 0x402000\nkind: read-only\nexemption: "thin"\n---\n\nprose\n'
+        mine = 'frida b011-world_entry orig:%s ours:%s compare=0' % ('a' * 64, 'b' * 64)
+        _write(path, '---\naddress: 0x402000\nkind: oracle\noracle_case: rules/roll\n'
+                     'trace_source: %s\n---\n\nprose\n' % mine)
+        self.assertTrue(driver._undo_trace_evidence(path, saved, 'b011'))
+        self.assertEqual(_slurp(path), '---\naddress: 0x402000\nkind: oracle\n'
+                                        'oracle_case: rules/roll\n---\n\nprose\n')
+        # another batch's frida line is not this batch's to drop
+        _write(path, '---\naddress: 0x402000\nkind: trace\ntrace_source: %s\n---\n' % mine.replace('b011-', 'b012-'))
+        driver._undo_trace_evidence(path, saved, 'b011')
+        self.assertIn('b012-world_entry', _slurp(path))
+
+    def test_driver_retry_does_not_downgrade_or_rewrite_a_worker_oracle_file(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'))
+        batch = dict(self._state_all()['batches']['b011'], id='b011')
+        rows = [r for r in batch['rows'] if r['address'] == '0x402000']
+        d._frida_phase('b011', batch, self.wt, {'0x402000': ('ours', 'dump-402000')}, rows=rows)
+        path = os.path.join(self.wt, 'docs', 'evidence', '402000.md')
+        text = _slurp(path)
+        oracle = re.sub(r'^kind: trace$', 'kind: oracle\noracle_case: rules/roll', text, count=1, flags=re.M)
+        _write(path, oracle)
+        self.git('commit', '-qam', 'the worker declares an oracle case', cwd=self.wt)
+        d.frida_cache = False
+        d._frida_phase('b011', batch, self.wt, {'0x402000': ('ours', 'dump-402000')}, rows=rows)
+        fields, after = self._wave_fields()
+        self.assertEqual((fields['kind'], fields['oracle_case']), ('oracle', 'rules/roll'))
+        self.assertNotIn('trace_source', fields)           # only the batch's own line went
+        self.assertFalse(os.path.exists(d._before_path('b011', '0x402000')))
+
+    def test_measured_for_a_neither_verdict_is_never_frida(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'))
+        d._frida_got = {'402000': ('equal', 'identical in world_entry')}
+        self.assertEqual(d._measured_for('0x402000', 'ours'), 'frida')
+        self.assertEqual(d._measured_for('0x402000', 'fork'), 'frida')
+        self.assertIsNone(d._measured_for('0x402000', 'neither'))
+
+    def test_dirty_source_fails_closed_on_a_git_error(self):
+        d = self._wave_frida_driver(self.WAVE_REPORT % ('ours', 'dump-402000'))
+        self.assertIsNone(d._dirty_source(self.wt, {'file': 'src/A.cpp'}))
+        self.assertEqual(d._dirty_source(os.path.join(self.tmp_dir(), 'not-a-repo'),
+                                         {'file': 'src/A.cpp'}), 'src/A.cpp')
+        self.assertIn('counted as uncommitted', '\n'.join(self.logs))
+
+    def test_driver_import_writes_no_trace_for_a_row_with_a_file_whose_source_is_dirty(self):
+        d, batch = self._import_phase_driver()
+        batch = dict(batch, rows=[dict(r, file='src/A.cpp') for r in batch['rows']])
+        _write(os.path.join(self.wt, 'src', 'A.cpp'), '// 0x401000\nint Render()\n{\n  return 1;\n}\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'src', cwd=self.wt)
+        self._uncommitted_body()
+        d.frida_run = self._frida_file_run_all()
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertTrue([f for f in findings if f.startswith('0x401000:') and 'uncommitted' in f], findings)
+        self.assertEqual(d._evidence_kind(self.wt, '0x401000'), 'read-only')
+        self.assertIn('0x401000: src/A.cpp has uncommitted changes', '\n'.join(self.logs))
 
     def test_driver_frida_phase_types_tables_from_the_batch_worktrees_headers(self):
         trace = TruthTest._trace
@@ -19068,9 +19128,9 @@ class WaveCloseRulesTest(unittest.TestCase):
         self._wave_trace_ready(recorded)
         rc, out = self.close()
         self.assertEqual(rc, 1, out)
-        self.assertIn('0x643CC0: body changed after the Frida phase; edit the body back to what '
-                      "the Frida phase measured (the driver's evidence-before copy names it) or "
-                      'let the verdict stand on the reading', out)
+        self.assertIn('0x643CC0: body changed after the Frida phase; edit the body back to the one '
+                      "the driver's 'frida: trace evidence' commit measured, or put the evidence "
+                      'file back to its pre-phase content so the verdict stands on the reading', out)
         self.assertEqual(self.batches()['b001']['status'], 'assigned')
 
     def test_close_refuses_a_wave_one_trace_whose_body_changed_after_the_phase(self):
