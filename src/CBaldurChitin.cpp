@@ -849,9 +849,6 @@ CRes* CBaldurChitin::AllocResObject(int nType)
         return new CResText();
     case 1018:
         return new CResCHR();
-    case 1019:
-    case 1020:
-        return new CResBinary();
     case 2050:
         return new CResINI();
     default:

@@ -1,0 +1,7 @@
+{
+  "address": "0x423210",
+  "name": "CBaldurChitin::AllocResObject",
+  "file": "src/CBaldurChitin.cpp",
+  "batch": "i011",
+  "needs": "frida different: differs in world_entry: event 1: original {\"a0_s32\": 1006, \"tag\": \"fn_423210\", \"this\": \"<ptr>\"}, ours {\"a0_s32\": 1000, \"tag\": \"fn_423210\", \"this\": \"<ptr>\"}"
+}
