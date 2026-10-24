@@ -14793,7 +14793,14 @@ class DriverTest(unittest.TestCase):
         # set() and the call (seen once as a red base suite on first, 2026-10-24).
         stopped = threading.Event()
         stopped.set()
-        with mock.patch.object(driver, '_run_group', return_value=killed), \
+        # The driver runs the base suite with IWD2R_BASE_TESTS_CHILD=1 so a
+        # suite that built a real Driver would not recurse; run_base_tests
+        # returns green at once under it.  This test calls the function
+        # directly, so it must not see the variable (it did when the suite ran
+        # as a driver's base check, 2026-10-24, and failed only there).
+        env = {k: v for k, v in os.environ.items() if k != 'IWD2R_BASE_TESTS_CHILD'}
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(driver, '_run_group', return_value=killed), \
                 mock.patch.object(driver, '_STOPPED', stopped):
             with self.assertRaises(driver._Stop):
                 driver.run_base_tests(self.root if hasattr(self, 'root') else '.', log)
