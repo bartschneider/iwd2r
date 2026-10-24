@@ -6251,7 +6251,7 @@
     "b023": {
       "assigned_at": "2026-10-24T02:28:26+00:00",
       "branch": "p3/wso-b023",
-      "closed_at": null,
+      "closed_at": "2026-10-24T06:13:19+00:00",
       "files": [
         "src/CAIGroup.cpp",
         "src/CScreenLoad.cpp",
@@ -6447,8 +6447,114 @@
           "their_len": 233
         }
       ],
-      "status": "assigned",
-      "verdicts": {}
+      "status": "closed",
+      "verdicts": {
+        "0x4058E0": {
+          "case": "group/rotate_offsets",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x405E00": {
+          "case": "dump-405E00",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x405F60": {
+          "case": "dump-405F60",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x447C20": {
+          "case": "dump-447C20",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x447CD0": {
+          "case": "dump-447CD0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x448250": {
+          "case": "dump-448250",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        },
+        "0x4EA580": {
+          "case": "dump-4EA580",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54CF80": {
+          "case": "dump-54CF80",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54CFE0": {
+          "case": "dump-54CFE0",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x54D130": {
+          "case": "dump-54D130",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F8C10": {
+          "case": "dump-5F8C10",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F9580": {
+          "case": "dump-5F9580",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F9640": {
+          "case": "dump-5F9640",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x5F9720": {
+          "case": "dump-5F9720",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x63DB40": {
+          "case": "dump-63DB40",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x678050": {
+          "case": "dump-678050",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x67A070": {
+          "case": "dump-67A070",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x681690": {
+          "case": "dump-681690",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x77BD00": {
+          "case": "dump-77BD00",
+          "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7C18F0": {
+          "case": "dump-7C18F0",
+          "losing_kind": "trace",
+          "measured": "frida",
+          "side": "ours"
+        }
+      }
     },
     "b024": {
       "assigned_at": "2026-10-24T04:09:25+00:00",
@@ -6509,6 +6615,95 @@
           "side": "ours"
         }
       }
+    },
+    "b025": {
+      "assigned_at": "2026-10-24T05:36:10+00:00",
+      "branch": "p3/wso-b025",
+      "closed_at": null,
+      "files": [
+        "src/CScreenSave.cpp",
+        "src/CUIControlTextDisplay.cpp",
+        "src/CInfButtonArray.cpp",
+        "src/CGameEffectList.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x65B920",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::OnCancelButtonClick",
+          "our_len": 306,
+          "their_len": 314
+        },
+        {
+          "address": "0x4E2790",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CUIControlTextDisplay.cpp",
+          "name": "CUIControlTextDisplay::OnScroll",
+          "our_len": 282,
+          "their_len": 280
+        },
+        {
+          "address": "0x589FF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::sub_589FF0",
+          "our_len": 246,
+          "their_len": 199
+        },
+        {
+          "address": "0x4C0830",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameEffectList.cpp",
+          "name": "CGameEffectList::sub_4C0830",
+          "our_len": 190,
+          "their_len": 212
+        },
+        {
+          "address": "0x587960",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonSettings::CInfButtonSettings",
+          "our_len": 132,
+          "their_len": 167
+        },
+        {
+          "address": "0x588FF0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::ResetState",
+          "our_len": 151,
+          "their_len": 115
+        },
+        {
+          "address": "0x595E70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::UpdateCustomizableButtonTypes",
+          "our_len": 128,
+          "their_len": 121
+        },
+        {
+          "address": "0x595F70",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CInfButtonArray.cpp",
+          "name": "CInfButtonArray::UpdateSelectedWeaponSet",
+          "our_len": 91,
+          "their_len": 48
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   },
   "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13"
