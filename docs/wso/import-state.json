@@ -2145,7 +2145,7 @@
     "i014": {
       "assigned_at": "2026-10-24T19:08:33+00:00",
       "branch": "p3/wso-i014",
-      "closed_at": null,
+      "closed_at": "2026-10-24T21:14:23+00:00",
       "files": [
         "src/CTimerWorld.cpp",
         "src/CGameAIBase.cpp",
@@ -2165,56 +2165,70 @@
           "address": "0x54EF60",
           "category": "theirs_changed_ours_base",
           "file": "src/CTimerWorld.cpp",
+          "measured_body": "b6c7c55b6b2b984f3d84c7185a0c6f853607a5e4ca96237ca4e026f3372388fd",
           "name": "CTimerWorld::CheckForTriggerEventAbsolute",
           "our_len": 885,
+          "outcome": "kept",
           "their_len": 923
         },
         {
           "address": "0x45B970",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameAIBase.cpp",
+          "measured_body": "a1377a93a9bc5e4375398d23bc07bb735d69a20644eb15f331a0d04aa82874ac",
           "name": "CGameAIBase::GetNextAction",
           "our_len": 837,
+          "outcome": "kept",
           "their_len": 844
         },
         {
           "address": "0x40CB20",
           "category": "theirs_changed_ours_base",
           "file": "src/CAIObjectType.cpp",
+          "measured_body": "87adabe73ae864129d1439c94bb7421ad733e589aca0dc21cc2440a60eac9bc7",
           "name": "CAIObjectType::sub_40CB20",
           "our_len": 689,
+          "outcome": "kept",
           "their_len": 691
         },
         {
           "address": "0x4866E0",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameDoor.cpp",
+          "measured_body": "53ac6fd5cb98036c28ce6febf1858ee5f730aecdc6b7819321d718e3b04e83fd",
           "name": "CGameDoor::~CGameDoor",
           "our_len": 554,
+          "outcome": "kept",
           "their_len": 706
         },
         {
           "address": "0x5D63B0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenCharacter.cpp",
+          "measured_body": "cdb8f3f6379f83ef3b3c2aa6d67e4268d1ba2207d86f8154dd3a4e30a1fee961",
           "name": "CScreenCharacter::~CScreenCharacter",
           "our_len": 509,
+          "outcome": "kept",
           "their_len": 519
         },
         {
           "address": "0x47CAC0",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameContainer.cpp",
+          "measured_body": "5cd522c0059532e4bf60945f77ddd70920acf1b1d03176850787e8284efa47d7",
           "name": "CGameContainer::~CGameContainer",
           "our_len": 368,
+          "outcome": "kept",
           "their_len": 409
         },
         {
           "address": "0x543C80",
           "category": "theirs_changed_ours_base",
           "file": "src/CRuleTables.cpp",
+          "measured_body": "6d795854f50e0c3ec7ee9f290f27911cfd65cb7324e86fb960ce372c53910ea8",
           "name": "CRuleTables::GetChapterText",
           "our_len": 307,
+          "outcome": "kept",
           "their_len": 335
         },
         {
@@ -2229,8 +2243,10 @@
           "address": "0x4CD150",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameTrigger.cpp",
+          "measured_body": "10ba306129f682b9dfec7309eceff39c9a53850ab5c28a573127d39a486f9c62",
           "name": "CGameTrigger::~CGameTrigger",
           "our_len": 221,
+          "outcome": "kept",
           "their_len": 262
         },
         {
@@ -2245,32 +2261,40 @@
           "address": "0x586A40",
           "category": "theirs_changed_ours_base",
           "file": "src/IcewindCVisualEffect.cpp",
+          "measured_body": "bbd9b76366480255ac8307e68f058b2b98c66c6d3fed554e0aab2dfa980c880e",
           "name": "IcewindCVisualEffect::IcewindCVisualEffect",
           "our_len": 91,
+          "outcome": "kept",
           "their_len": 113
         },
         {
           "address": "0x586A90",
           "category": "theirs_changed_ours_base",
           "file": "src/IcewindCVisualEffect.cpp",
+          "measured_body": "db3fe906e46ec3f9e293bf6c92ab52874f86e028af0890d3aafe3a035dd178c8",
           "name": "IcewindCVisualEffect::sub_586A90",
           "our_len": 84,
+          "outcome": "kept",
           "their_len": 100
         },
         {
           "address": "0x4D02A0",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameTrigger.cpp",
+          "measured_body": "a774fd387919b3d30ba71ce9c7362e15e9614c7ed55d436cb9dac4597011d8fa",
           "name": "CGameTrigger::GetPos",
           "our_len": 45,
+          "outcome": "kept",
           "their_len": 48
         },
         {
           "address": "0x6F2C20",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameAIBase.cpp",
+          "measured_body": "8c6d660c374b88b4863f16e6110020a5da107995079aca2c7f5331d55d7769bb",
           "name": "CGameAIBase::GetVisualRange",
           "our_len": 41,
+          "outcome": "kept",
           "their_len": 49
         },
         {
@@ -2301,28 +2325,34 @@
           "address": "0x644CC0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenMap.cpp",
+          "measured_body": "fd37ee6990fb0c91832822c6367351d254f4a3adede9cb27a22e5f5096e59f8e",
           "name": "CUIControlButtonMapAreaMap::SetMap",
           "our_len": 2368,
+          "outcome": "kept",
           "their_len": 2370
         },
         {
           "address": "0x624F70",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenInventory.cpp",
+          "measured_body": "6a5d18c236e573f4f610c13055675fede224546c7b202504e975eb714db7c6c1",
           "name": "CScreenInventory::EngineActivated",
           "our_len": 1711,
+          "outcome": "kept",
           "their_len": 1719
         },
         {
           "address": "0x626390",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenInventory.cpp",
+          "measured_body": "6cc5b56c73fe8ba19157e11bf690e09bb479e47acc83933e73a052aa2d49fdb3",
           "name": "CScreenInventory::OnPortraitLClick",
           "our_len": 1474,
+          "outcome": "kept",
           "their_len": 1484
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     }
   }
