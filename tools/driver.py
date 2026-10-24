@@ -4167,9 +4167,10 @@ class Driver:
 
     def _probe_list_edit(self, address, reason=None, append=None, stamp=None):
         """Refresh (`reason`) or extend (`append`, once) the reason of a probe
-        list entry, and stamp `probed` (batch, scenarios, pin) so `next` offers
-        the row again only for a new scenario or a moved pin; False when the
-        row is not on the list."""
+        list entry, and stamp `probed` (batch, scenarios that ran, `hits` the map
+        gave the row, pin, `hand` for a row only a pin move re-offers) so `next`
+        offers the row again only for a new hitting scenario or a moved pin;
+        False when the row is not on the list."""
         wave = _tool('wave')
         with self._lock:
             entries, err = wave._load_list(self.probe_path, 'probe list', missing_ok=True)
@@ -4404,7 +4405,7 @@ class Driver:
                     problems.append('%s: the deciding sentence could not be written (%r); add '
                                     '`disagreed with WSO at %s: ...; case %s decides` under '
                                     '## WSO delta' % (a, e, pin, case))
-                resolved.append((r, case, cite, sentence is None))
+                resolved.append((r, case, cite))
                 continue
             if status == 'equal':
                 why = self._wave_notes.get(k) or 'no reason recorded'
@@ -4429,7 +4430,8 @@ class Driver:
             else:
                 note = 'not measured (%s: %s); needs an oracle case' % (status, detail)
                 outcome = 'kept'
-            stamp = self._probed_stamp(batch_id, r, batch, ran)
+            # a body known to differ must not be re-adopted for a new scenario
+            stamp = self._probed_stamp(batch_id, r, batch, ran, hand=outcome == 'found')
             if outcome == 'found':
                 self._probe_list_edit(a, append=note, stamp=stamp)
             else:
@@ -4439,10 +4441,10 @@ class Driver:
             problems.append(self._probe_back_text(worktree, a, note))
         if resolved:
             self._commit_trace_evidence(
-                batch_id, worktree, [r['address'] for r, _c, _s, _ok in resolved],
+                batch_id, worktree, [r['address'] for r, _c, _s in resolved],
                 'frida: trace evidence for %d row(s) measured equal (%s)' % (
-                    len(resolved), ', '.join(sorted({sc for _r, _c, sc, _ok in resolved}))))
-        for r, case, _scenario, sentence_ok in resolved:
+                    len(resolved), ', '.join(sorted({sc for _r, _c, sc in resolved}))))
+        for r, case, _scenario in resolved:
             a = r['address']
             rel = wave._evidence_rel(a)
             was = self._git_in(worktree, 'show', '%s:%s' % (mb_sha or self.base, rel))
@@ -5509,7 +5511,7 @@ class Driver:
         if self.kind == 'probes':
             try:
                 failed = self._record_probe_rows(batch_id, worktree)
-            except (ValueError, OSError) as e:
+            except Exception as e:
                 failed = ['recording the probe rows raised %r' % (e,)]
             if failed:
                 return self._exception(batch_id, 'record', failed)

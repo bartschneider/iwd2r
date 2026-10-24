@@ -580,8 +580,9 @@ def _probe_reoffer(row, disagreements_path, coverage_path, coverage_root, repo):
     """Whether a probe row a closed batch released may be cut again.  The
     phase stamped the entry (`probed`: batch, scenarios that ran, `hits` the
     scenarios the map gave the row then, pin, `hand` for a neither / hand-ruling
-    row).  Offered again when the pin moved, or (never for a `hand` row) when the
-    map now has a hitting scenario the stamp's `hits` lacked.  An unstamped row,
+    / found-different row).  Offered again when the pin moved, or (never for a
+    `hand` row) when the map now has a hitting scenario in neither `hits` nor
+    `scenarios`.  An unstamped row,
     or one with no usable map and the same pin, is not."""
     stamp = (row or {}).get('probed')
     if not isinstance(stamp, dict) or not stamp:
@@ -590,9 +591,9 @@ def _probe_reoffer(row, disagreements_path, coverage_path, coverage_root, repo):
         return True
     if stamp.get('hand'):
         return False
-    seen = stamp.get('hits') if stamp.get('hits') is not None else stamp.get('scenarios')
+    seen = set(stamp.get('hits') or ()) | set(stamp.get('scenarios') or ())
     now = probe_hits(row, disagreements_path, coverage_path, coverage_root, repo)
-    return any(sc not in (seen or ()) for sc in now)
+    return any(sc not in seen for sc in now)
 
 
 def _import_pool(rows, category, decided, owned, importing, disagreements_path,
@@ -745,9 +746,11 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
         # The probe list's entries, completed from disagreements.json by
         # address (the sizes the pool sorts by); a row a probe batch holds is
         # not cut again.  A closed batch releases the rows it left on the
-        # list (`released`); a released row is offered again only when a
-        # scenario the coverage map now gives it was not among the ones
-        # that measured it (the entry's `probed` stamp), or its pin moved.
+        # list (`released`); a released row is offered again only when the
+        # coverage map now gives it a scenario that neither ran nor hit it
+        # when the entry was stamped (`probed`: scenarios, hits), or its pin
+        # moved; a `hand` row (neither, or a fork body found different) on a
+        # pin move only.
         if probe_path is None:
             probe_path = os.path.join(repo, PROBE_LIST_REL)
         probes, err = _load_list(probe_path, 'probe list', missing_ok=True)
@@ -1705,7 +1708,7 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
     batch['closed_at'] = _now()
     if kind == 'probes':
         # the rows left on the list are released: `next` offers them again
-        # only for a scenario the entry's probed stamp lacks (_probe_reoffer)
+        # only per the entry's probed stamp (_probe_reoffer)
         left, _err = _load_list(os.path.join(repo, PROBE_LIST_REL), 'probe list',
                                 missing_ok=True)
         still = {_addr_key(e['address']) for e in left or ()}

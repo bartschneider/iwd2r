@@ -18828,6 +18828,7 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(out, 'exception', self._status(d)['exceptions'])
         entry = self._probe_list()[0]
         self.assertEqual(entry['address'], '0x402000')
+        self.assertTrue(entry['probed']['hand'])     # a body known to differ: a pin move only
         self.assertTrue(entry['reason'].startswith('ours guards g_x; a dump reading cannot decide; '
                                                    'fork body differs from the exe in world_entry: '),
                         entry['reason'])
@@ -20832,6 +20833,14 @@ class WaveProbeQueueTest(unittest.TestCase):
                                         'pin': 'b' * 40, 'hand': True})
         rc, out = self.next()
         self.assertEqual(rc, 0, out)
+        # a row stamped with empty hits (measured with no map) is not re-cut for a
+        # scenario that already ran
+        self._closed_with_released_row({'batch': 'p001', 'scenarios': ['world_entry'],
+                                        'hits': [], 'pin': pin})
+        self.cov({'world_entry': {'0x478490': 2}}, hooked=['0x478490'])
+        rc, out = self.next()
+        self.assertEqual(rc, 2, out)
+        self.cov(hits, hooked=['0x478490'])
         # a hitting scenario the stamp's map did not have is a reason
         self._closed_with_released_row(dict(stamp, hits=['world_entry']))
         rc, out = self.next()
