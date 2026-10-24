@@ -9309,8 +9309,16 @@ class TriageTest(unittest.TestCase):
         cal = triage.calibrate(state, triage.calibration_triage(state, rows, fork))
         self.assert_auto_classes_agree(cal)
         enabled = triage.enabled_classes(cal)
-        self.assertEqual(enabled, frozenset(r['class'] for r in committed
-                                            if r['class'] in triage.AUTO_OURS))
+        # Every auto class the committed file applies must be enabled by the
+        # live calibration (a disabled class in the file would auto-decide
+        # rows the calibration rejects).  The converse does not hold: a class
+        # the calibration enables may have no open row left to carry it
+        # (2026-10-24: rename-only enabled on its one closed sample, no open
+        # row renames only), so the file is not required to show it.
+        present = frozenset(r['class'] for r in committed
+                            if r['class'] in triage.AUTO_OURS)
+        self.assertLessEqual(present, enabled,
+                             'triage.json applies a class the calibration disables')
 
     def test_flipped_fork_row_reported_even_when_class_is_disabled(self):
         state = {'batches': {'b': {'status': 'closed', 'rows': [{'address': '0x401000'}],
