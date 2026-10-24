@@ -5383,7 +5383,14 @@ CMessageHandler::CMessageHandler()
 // 0x4F7490
 CMessageHandler::~CMessageHandler()
 {
-    // TODO: Incomplete.
+    POSITION pos = m_messageList.GetHeadPosition();
+    while (pos != NULL) {
+        CMessage* message = m_messageList.GetNext(pos);
+        if (message != NULL) {
+            delete message;
+        }
+    }
+    m_messageList.RemoveAll();
 }
 
 // 0x4EE020
