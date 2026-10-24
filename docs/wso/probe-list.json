@@ -18,5 +18,55 @@
     "reading": "fork",
     "reason": "<exe ORs 0x2 only when transparency != 0 and pushes the same dwRenderFlags to both FXRender calls \u2014 his plain flag arguments look right; a dump reading cannot decide a fork row>",
     "source": "worker"
+  },
+  {
+    "address": "0x4258D0",
+    "at": "2026-10-23T19:47:36+00:00",
+    "batch": "b014",
+    "file": "src/CBaldurChitin.cpp",
+    "name": "CBaldurChitin::OnMultiplayerSessionOpen",
+    "reading": "fork",
+    "reason": "the exe's third chat clear (+0x1C90 \u2192 FUN_0064d690) is missing from our body; deciding it needs a multiplayer-session trace and dump evidence cannot carry a fork (rule 1)",
+    "source": "worker"
+  },
+  {
+    "address": "0x602170",
+    "at": "2026-10-23T19:47:36+00:00",
+    "batch": "b014",
+    "file": "src/CScreenConnection.cpp",
+    "name": "CScreenConnection::OnLobbyNewGameButtonClick",
+    "reading": "fork",
+    "reason": "the exe's else branch (non-NULL provider: (+0x1C90)+0x45C = 1, FUN_0064ddb0, SelectEngine) is missing from our body; deciding it needs a lobby-flow trace and dump evidence cannot carry a fork (rule 1)",
+    "source": "worker"
+  },
+  {
+    "address": "0x601AE0",
+    "at": "2026-10-23T21:25:03+00:00",
+    "batch": "b018",
+    "file": "src/CScreenConnection.cpp",
+    "name": "CScreenConnection::AutoStartDirectPlayLobby",
+    "reading": "fork",
+    "reason": "our body lacks the exe's post-NewGame tail (m_nLobbyMode=1, StartMultiPlayer(1), SelectEngine) but the fork's tail needs the unported CScreenMultiPlayer engine and CBaldurChitin+0x1C90, outside this batch's owned files, and no probe/replay/trace case exists for a DirectPlay-lobby startup",
+    "source": "worker"
+  },
+  {
+    "address": "0x4781B0",
+    "at": "2026-10-23T23:14:04+00:00",
+    "batch": "b020",
+    "file": "src/CGameArea.cpp",
+    "name": "CGameArea::SetNight",
+    "reading": "fork",
+    "reason": "exe's play block sits after the GetMemoryAmount if/else join and plays in both branches while ours drops the != 1 extended-ambient branch (m_nightAmbientExtended) and gates play inside == 1 \u2014 the fork matches vanilla, but no probe/replay/trace case can run (the original's CSound::Play reaches DirectSound so no honest oracle fixture exists; no fork recovery note at e8dd16a mentions 0x4781B0/SetNight \u2014 only source-file hits, which trace_source form 1 excludes; the frida-line form is driver-only)",
+    "source": "worker"
+  },
+  {
+    "address": "0x477EE0",
+    "at": "2026-10-23T23:14:04+00:00",
+    "batch": "b020",
+    "file": "src/CGameArea.cpp",
+    "name": "CGameArea::SetDay",
+    "reading": "fork",
+    "reason": "same as 0x4781B0 mirrored for day (ours drops the m_dayAmbientExtended branch and gates play inside == 1 where the exe plays after the join in both branches) with the same threefold absence of a runnable case",
+    "source": "worker"
   }
 ]

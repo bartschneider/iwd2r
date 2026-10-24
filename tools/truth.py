@@ -500,8 +500,9 @@ def decorated_convention(decorated):
     then the `this` qualifier [ABCD] (none, const, volatile, const volatile),
     then E, is thiscall (regex [AEIMQU][ABCD]E); [CKSY]A is cdecl, [CKSY]G
     stdcall and [CKSY]I fastcall (skipped by the hooks); a plain _name is
-    cdecl and _name@N stdcall."""
-    m = re.match(r'^\?[^@?]+(?:@[^@]+)*?@@(.*)$', decorated or '')
+    cdecl and _name@N stdcall. Special members (??0 constructor, ??1
+    destructor, ??_G and the like) carry the same tail."""
+    m = re.match(r'^\?(?:\?[0-9_A-Z]?)?[^@?]+(?:@[^@]+)*?@@(.*)$', decorated or '')
     if m:
         tail = m.group(1)
         if re.match(r'[AEIMQU][ABCD]E', tail):
@@ -586,9 +587,16 @@ def parse_map(text):
 
 def _map_matches(name, publics):
     """{rva: decorated name} of every public that is Class::Method (decorated
-    ?Method@Class@@...) or a plain name."""
+    ?Method@Class@@...), Class::Class (??0Class@@...), Class::~Class
+    (??1Class@@...; the scalar deleting destructor ??_G is another symbol) or
+    a plain name."""
     parts = name.split('::')
-    prefix = '?' + '@'.join(reversed(parts)) + '@@'
+    if len(parts) >= 2 and parts[-1] == '~' + parts[-2]:
+        prefix = '??1' + '@'.join(reversed(parts[:-1])) + '@@'      # destructor
+    elif len(parts) >= 2 and parts[-1] == parts[-2]:
+        prefix = '??0' + '@'.join(reversed(parts[:-1])) + '@@'      # constructor
+    else:
+        prefix = '?' + '@'.join(reversed(parts)) + '@@'
     found = {}
     for decorated, rva in publics.items():
         if decorated.startswith(prefix) or (len(parts) == 1 and decorated in (name, '_' + name)):
@@ -601,7 +609,16 @@ PROTO_TYPES = {
     'short': 's16', 'int16_t': 's16', 'word': 'u16', 'ushort': 'u16', 'uint16_t': 'u16',
     'int': 's32', 'long': 's32', 'int32_t': 's32',
     'dword': 'u32', 'uint': 'u32', 'ulong': 'u32', 'uint32_t': 'u32', 'size_t': 'u32',
+    # MFC/Win32 typedefs (x86: every pointer-sized integer is 32 bits)
+    'resid': 'u32', 'colorref': 'u32', 'wparam': 'u32', 'uint_ptr': 'u32', 'dword_ptr': 'u32',
+    'lparam': 's32', 'lresult': 's32', 'int_ptr': 's32', 'long_ptr': 's32',
 }
+_CORE_PROTO = frozenset(PROTO_TYPES) - frozenset(
+    'resid colorref wparam uint_ptr dword_ptr lparam lresult int_ptr long_ptr'.split())
+for _name in ('POSITION HANDLE HWND HDC HINSTANCE HMODULE HBITMAP HPALETTE HRGN HFONT HGDIOBJ HGLOBAL '
+              'LPVOID LPCVOID LPSTR LPCSTR LPBYTE LPDWORD LPWORD PVOID PBYTE RESREF FARPROC PROC').split():
+    PROTO_TYPES[_name.lower()] = 'ptr'   # RESREF: a BYTE array parameter decays to a pointer
+
 _PROTO_MODIFIERS = frozenset({'const', 'volatile', 'struct', 'class', 'enum', 'virtual', 'static',
                               'inline', 'explicit', 'extern', 'friend', 'constexpr'})
 _PROTO_SIGN = frozenset({'unsigned', 'signed'})
@@ -692,7 +709,11 @@ def _split_params(raw):
 def _param_type(part):
     part = re.sub(r'=.*$', '', part, flags=re.S).strip()
     words = re.findall(r'[A-Za-z_]\w*|[*&]', part)
-    if len(words) >= 2 and re.match(r'[A-Za-z_]', words[-1]) and words[-1].lower() not in PROTO_TYPES \
+    # a typedef spelled last is the type only when nothing but modifiers precedes it (`const RESREF`)
+    is_type = bool(words) and words[-1].lower() in _CORE_PROTO or (
+        bool(words) and words[-1].lower() in PROTO_TYPES
+        and all(w in _PROTO_MODIFIERS or w in _PROTO_SIGN for w in words[:-1]))
+    if len(words) >= 2 and re.match(r'[A-Za-z_]', words[-1]) and not is_type \
             and words[-1] not in _PROTO_SIGN and words[-1] not in _PROTO_MODIFIERS \
             and words[-1] not in ('void',):
         words = words[:-1]
@@ -730,11 +751,16 @@ def _header_prototypes(texts, name):
     return found
 
 
-def _typed_from_headers(texts, name, ghidra_argc, conv):
-    """(conv, args, ret or None) typed from our prototype, or None when no
-    header declares it (unambiguously) or a type cannot be logged honestly.
-    With several overloads, the ones with the evidence signature's argument
-    count are kept, and the typing stands only when they all agree."""
+def _typed_from_headers(texts, name, ghidra_argc, conv, ghidra_args=None, ghidra_ret=None):
+    """(conv, args, ret or None, slots, mixed) typed from our prototype, or
+    None when no header declares it (unambiguously) or a type cannot be
+    logged honestly. With several overloads, the ones with the evidence
+    signature's argument count are kept, and the typing stands only when
+    they all agree. A parameter (or return) whose spelling _proto_type does
+    not know takes the Ghidra type of its slot (ghidra_args/ghidra_ret, as
+    _hook_signature returns them) when the prototype has as many parameters
+    as ghidra_args. slots is 'ours' or 'ghidra' per argument; mixed is True
+    when any slot or the return came from Ghidra."""
     protos = _header_prototypes(texts, name)
     if len(protos) > 1 and ghidra_argc is not None:
         protos = [p for p in protos if len(p[1]) == ghidra_argc]
@@ -742,13 +768,25 @@ def _typed_from_headers(texts, name, ghidra_argc, conv):
     for ret, params in protos:
         r = _proto_type(ret)
         a = [_proto_type(p) for p in params]
-        if r is None or None in a or 'void' in a:
+        if 'void' in a:
             return None
-        typed.add((tuple(a), None if r == 'void' else r))
+        slots = ['ours'] * len(a)
+        ret_ghidra = False
+        if ghidra_args is not None and len(ghidra_args) == len(a):
+            for i, t in enumerate(a):
+                if t is None:
+                    a[i], slots[i] = ghidra_args[i], 'ghidra'
+        if None in a:
+            return None
+        if r is None:
+            if ghidra_args is None or len(ghidra_args) != len(a) or ghidra_ret is None:
+                return None
+            r, ret_ghidra = ghidra_ret, True
+        typed.add((tuple(a), None if r == 'void' else r, tuple(slots), ret_ghidra))
     if len(typed) != 1:
         return None
-    args, ret = next(iter(typed))
-    return conv, list(args), ret
+    args, ret, slots, ret_ghidra = next(iter(typed))
+    return conv, list(args), ret, list(slots), ('ghidra' in slots or ret_ghidra)
 
 
 def hook_table(rows, signatures, our_map, scenarios, headers=None):
@@ -759,8 +797,9 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
     rows are dicts with address and name; signatures maps address to a C
     signature; headers (header text or a list of them, optional) are our
     src/*.h: a function found there is typed from our prototype (args and
-    return; typed_from[addr] is 'ours'), otherwise from the evidence
-    signature ('ghidra'); our_map is the build's .map text (or a {name: rva} dict). Each
+    return; typed_from[addr] is 'ours', or 'mixed' when a slot the header
+    spells with an unknown type took Ghidra's), otherwise from the evidence
+    signature ('ghidra'); typed_slots[addr] says per argument which; our_map is the build's .map text (or a {name: rva} dict). Each
     row gets one hook per target, named fn_<ADDR> so the traces line up: the
     original's by absolute addr, ours by rva. A row is listed in skipped, with
     no hook on either side, when its signature does not parse or has a
@@ -772,7 +811,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
     from_text = isinstance(our_map, str)
     publics = parse_map(our_map) if from_text else dict(our_map)
     texts = [headers] if isinstance(headers, str) else list(headers or [])
-    original, ours, skipped, typed = [], [], {}, {}
+    original, ours, skipped, typed, slots = [], [], {}, {}, {}
     for row in rows:
         address = row['address']
         key = '0x' + address[2:].upper() if address.lower().startswith('0x') else '0x' + address.upper()
@@ -784,6 +823,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
         decorated = found[rvas[0]] if len(rvas) == 1 else None
         sig = _hook_signature(signatures.get(address) or signatures.get(key), decorated)
         typed_from = 'ghidra'
+        slot_src = None
         if texts and len(rvas) == 1:
             named = decorated_convention(decorated)
             conv_name = None
@@ -793,9 +833,13 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
                 conv_name = FRIDA_CONVS[named]
             if conv_name:
                 argc = len(sig[1]) if not isinstance(sig, str) else None
-                mine = _typed_from_headers(texts, row['name'], argc, conv_name)
+                mine = _typed_from_headers(
+                    texts, row['name'], argc, conv_name,
+                    sig[1] if not isinstance(sig, str) else None,
+                    sig[2] if not isinstance(sig, str) else None)
                 if mine:
-                    sig, typed_from = mine, 'ours'
+                    sig, typed_from = mine[:3], 'mixed' if mine[4] else 'ours'
+                    slot_src = mine[3]
         if isinstance(sig, str) and len(rvas) != 1:
             sig = None  # ambiguity is the more useful reason; reported below
         if isinstance(sig, str):
@@ -809,6 +853,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
             continue
         typed[key] = typed_from
         conv, args, ret = sig
+        slots[key] = slot_src if slot_src is not None else ['ghidra'] * len(args)
         hook = {'name': hook_name(key), 'conv': conv, 'args': args}
         if ret:
             hook['ret'] = ret
@@ -818,7 +863,7 @@ def hook_table(rows, signatures, our_map, scenarios, headers=None):
     loaded = sorted(_map_matches(LOADED_NAME, publics)) if from_text else (
         [publics[LOADED_NAME]] if LOADED_NAME in publics else [])
     return {'original': {'hooks': original}, 'ours': {'hooks': ours},
-            'scenarios': list(scenarios), 'skipped': skipped, 'typed_from': typed,
+            'scenarios': list(scenarios), 'skipped': skipped, 'typed_from': typed, 'typed_slots': slots,
             'ours_loaded_rva': hex(loaded[0]) if len(loaded) == 1 else None}
 
 
@@ -898,20 +943,61 @@ def _oracle():
     return _ORACLE
 
 
+SCHEMA_HINTS = {
+    'original': ('the recorder.dll that ran is out of step with the schema (built before it '
+                 'changed, or the tree under test predates a schema change: merge first into '
+                 'it); rebuild it from the tree under test (tools/oracle.py build, or the '
+                 'frida phase\'s build of the batch checkout) and run again'),
+    'ours': ('our state dumper is out of step with the schema (or the tree under test predates '
+             'a schema change: merge first into it); fix it and run again'),
+}
+
+
+def _schema_failures(oracle, folder):
+    """(invalid dump count, dump count, first 'file: error') of a replay
+    folder under oracle.check_dumps and schema.json, the check replay record
+    makes on every run (finish_replay); (0, 0, '') without the folder."""
+    if not os.path.isdir(folder):
+        return 0, 0, ''
+    with open(oracle.REPLAY_SCHEMA, encoding='utf-8') as f:
+        schema = json.load(f)
+    dumps = oracle.check_dumps(folder, schema)
+    bad = sorted((name, errors) for name, errors in dumps.items() if errors)
+    return len(bad), len(dumps), ('%s: %s' % (bad[0][0], bad[0][1][0]) if bad else '')
+
+
 def compare_dumps(orig_dir, ours_dir, script):
     """{'match': True | False | None, 'detail': text}: whether the state
-    dumps both sides of one scenario wrote agree, compared with the replay
-    tooling's own functions and data (oracle.compare_checkpoints over the
-    scenario copy's checkpoint lines, oracle.compare_frames over the periodic
-    dumps both folders hold, the screens.json screens and the known
-    differences), as `oracle.py replay compare` does.  A missing checkpoint
-    dump is a difference; None means nothing on a compared screen was there
-    to compare (no verdict either way)."""
+    dumps both sides of one scenario wrote agree, with the replay tooling's
+    own semantics end to end.  First the check `oracle.py replay record`
+    makes on every run before anything compares it (finish_replay:
+    oracle.check_dumps against oracle/replay/schema.json): a side with a dump
+    the schema refuses gets no verdict (match None, 'invalid': {side: count},
+    the detail names the side, the first refusal and the likely cause -- the
+    b014/i001 batches ran a recorder.dll built before the schema grew
+    world.enemy_creatures and party morale, which read as 4224 "differences"
+    while our engine was right).  Then the compare `oracle.py replay compare`
+    makes: oracle.compare_checkpoints over the scenario copy's checkpoint
+    lines and oracle.compare_frames over the periodic dumps both folders
+    hold, with the screens.json screens and the known differences; both skip
+    oracle.TIMING_FIELDS and oracle.OURS_ONLY_FIELDS (field_differences).  A
+    missing checkpoint dump is a difference; None also means nothing on a
+    compared screen was there to compare (no verdict either way)."""
     oracle = _oracle()
     try:
         actions = oracle.load_actions(script)
     except (OSError, SystemExit, ValueError) as e:
         return {'match': None, 'detail': 'scenario copy %s unreadable: %s' % (script, e)}
+    invalid, why = {}, []
+    for side, folder, owner in (('original', orig_dir, "the original's"),
+                                ('ours', ours_dir, 'our')):
+        bad, total, first = _schema_failures(oracle, folder)
+        if bad:
+            invalid[side] = bad
+            why.append('%s dumps fail oracle/replay/schema.json (%d of %d; first: %s): %s'
+                       % (owner, bad, total, first, SCHEMA_HINTS[side]))
+    if invalid:
+        return {'match': None, 'detail': '; '.join(why), 'invalid': invalid}
     names = [a['name'] for a in actions if a.get('op') == 'checkpoint']
     screens, known = oracle.load_screens(), oracle.load_known()
     counts = {}
@@ -932,11 +1018,24 @@ def compare_dumps(orig_dir, ours_dir, script):
         counts.get('enabled', 0), counts.get('frames', 0))}
 
 
+def _home_of(done, root, out):
+    """(run folder as printed by probe.py, path of the trace file `out` in
+    it; its status file is that path + '.status') of a finished probe
+    process; (None, None) without a folder."""
+    folder = None
+    for line in (getattr(done, 'stdout', '') or '').splitlines():
+        if line.startswith('probe: ') and line[7:].startswith('runs'):
+            folder = line[7:].strip()
+    return folder, (os.path.join(root, folder, 'replay', out) if folder else None)
+
+
 def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_rva=None,
               clicks=3, hit_min=1, timeout=None, attempt_reason=None, build_checkout=None,
               dumps=compare_dumps):
     """{scenario: {'orig': events, 'ours': events, 'orig_path': path or None,
-    'ours_path': path or None, 'orig_exit': int, 'ours_exit': int, 'final':
+    'ours_path': path or None, 'orig_exit': int, 'ours_exit': int,
+    '<side>_retried': True when that side was launched a second time because
+    its first run came home with no status (exit 2, no RESULT), 'final':
     {'orig': bool, 'ours': bool} (the totals are the exit-time ones),
     'result': {'orig': verdict word, 'ours': verdict word}, 'hits': {'orig':
     {hook: total}, 'ours': {...}} (None per side without a status file),
@@ -966,9 +1065,14 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
     our build. With neither, every scenario fails with that reason and nothing
     is run. attempt_reason(scenario, 'orig'|'ours'), when given, replaces the
     default --new-attempt text. build_checkout (a WSL path) is the Windows
-    checkout whose x86 build ours runs (probe.py --build-checkout): the batch
-    worktree's, so the bodies under test are the ones the map's RVAs name;
-    without it probe.py runs this checkout's build. `run` is injectable
+    checkout both sides run from (probe.py --build-checkout): ours its x86
+    exe, the batch worktree's, so the bodies under test are the ones the
+    map's RVAs name; the original its oracle build's injector and recorder,
+    so the recorder that writes the original's dumps comes from the same tree
+    as the dumper that writes ours and both follow one schema.json (the
+    driver's checkout held a recorder.dll older than the schema: every dump
+    guard of b014 and i001 failed on it). Without it probe.py runs this
+    checkout's builds. `run` is injectable
     (the tests never launch anything); the real call is made by hand on the
     Windows machine under the one-launch rules."""
     import tempfile
@@ -1006,14 +1110,21 @@ def frida_run(batch_id, table, scenarios, run=subprocess.run, root=ROOT, loaded_
                                          'driver frida %s %s' % (batch_id, scenario))]
                 if target == 'ours':
                     cmd += ['--loaded-rva', loaded_rva]
-                    if build_checkout:
-                        cmd += ['--build-checkout', build_checkout]
+                if build_checkout:
+                    cmd += ['--build-checkout', build_checkout]
                 done = run(cmd, capture_output=True, text=True, cwd=root)
-                folder = None
-                for line in (getattr(done, 'stdout', '') or '').splitlines():
-                    if line.startswith('probe: ') and line[7:].startswith('runs'):
-                        folder = line[7:].strip()
-                path = os.path.join(root, folder, 'replay', out) if folder else None
+                folder, out_path = _home_of(done, root, out)
+                if getattr(done, 'returncode', 0) == 2 and folder and \
+                        _read_status(out_path + '.status')[0] is None:
+                    # a flake (no status came home): the side runs once more
+                    i = cmd.index('--new-attempt') + 1
+                    cmd[i] = (attempt_reason(scenario, key) + ' retry: no status'
+                              if attempt_reason else
+                              'driver frida %s %s retry: %s side came home with no status'
+                              % (batch_id, scenario, target))
+                    result[key + '_retried'] = True
+                    done = run(cmd, capture_output=True, text=True, cwd=root)
+                folder, path = _home_of(done, root, out)
                 homes[key] = os.path.join(root, folder) if folder else None
                 if path and not os.path.isfile(path):
                     path = None
@@ -1063,6 +1174,10 @@ def _row_events(events, tag):
                          or str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS])
 
 
+def _row_crash(orig, ours):
+    return any(str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS for e in orig + ours)
+
+
 def _first_difference(orig, ours):
     """A short description of the first differing event pair, or of a crash."""
     try:
@@ -1110,6 +1225,40 @@ def _prefix_side(orig, ours, tag):
     return side if trace_diff.compare(short, other[:len(short)]) == 0 else None
 
 
+ADDRESS_LIKE = (0x00010000, 0x7FFFFFFF)
+
+
+def _address_like_difference(orig, ours, tag, sources):
+    """When every differing field of the row's two traces is an argument slot
+    typed from Ghidra (sources: 'ours'/'ghidra' per argument) holding a
+    value in ADDRESS_LIKE on both sides, the detail naming the first such
+    slot; otherwise None. Same event counts and order are required."""
+    if not sources:
+        return None
+    try:
+        o, r = trace_diff.normalize(orig), trace_diff.normalize(ours)
+    except trace_diff.TraceInputError:
+        return None
+    if len(o) != len(r) or any(e.get('tag') != f.get('tag') for e, f in zip(o, r)) \
+            or any(str(e.get('tag', '')).lower() in trace_diff.TERMINAL_FAILURE_TAGS for e in o + r):
+        return None
+    first = None
+    for e, f in zip(o, r):
+        left = {k: v for k, v in e.items() if k != 'tag'}
+        right = {k: v for k, v in f.items() if k != 'tag'}
+        for field, a, b in trace_diff._value_diffs(left, right, '', 0.0):
+            m = re.match(r'^a(\d+)_\w+$', field)
+            if not m or int(m.group(1)) >= len(sources) or sources[int(m.group(1))] != 'ghidra':
+                return None
+            if not all(isinstance(v, int) and not isinstance(v, bool)
+                       and ADDRESS_LIKE[0] <= v <= ADDRESS_LIKE[1] for v in (a, b)):
+                return None
+            if first is None:
+                first = 'address-like untyped argument a%s (%s vs %s); type it from the header' % (
+                    m.group(1), a, b)
+    return first
+
+
 def frida_verdicts(traces, rows, skipped=None, info=None):
     """{'0x<ADDR>': (status, detail)} from the {scenario: ...} traces frida_run
     returns (a bare (orig, ours) pair per scenario is accepted too) and the
@@ -1119,7 +1268,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
     or a return at a call both sides made, or a crash event; detail carries
     the first differing pair); 'not measured' (a compared scenario without
     final HITS totals on both sides where they are needed, one whose state
-    dumps do not match (the dump guard), or a row called on one side only);
+    dumps do not match (the dump guard), one where Frida could not hook the
+    row on a side (orig.py's {tag: 'unhooked'} event: that side saw nothing,
+    so neither its calls nor their absence count), or a row called on one
+    side only);
     'scenario failed'; 'not-exercised'; 'skipped' (the row had no hook;
     detail is the reason).
 
@@ -1161,7 +1313,11 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
             continue
         tag = hook_name(key)
         different, exact, prefix, partial, crashed = [], [], [], [], []
-        unmeasured, dumped, one_sided, notes = [], [], [], []
+        unmeasured, dumped, one_sided, notes, blind = [], [], [], [], []
+        addrlike = []
+        sources = (info.get('typed_slots') or {}).get(key)
+        if sources is None and (info.get('typed_from') or {}).get(key) == 'ghidra':
+            sources = ['ghidra'] * 64
         for scenario, value in traces.items():
             t = _as_scenario(value)
             if t['failed']:
@@ -1181,6 +1337,14 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
                     ohits = (t.get('hits') or {}).get('orig')
                     if not (t.get('orig_exit') == 0 and ohits and tag in ohits and ohits[tag] == 0):
                         partial.append('%s: %s' % (scenario, t['failed']))
+                continue
+            refused = [(side, e) for side, events in (('the original', t['orig']), ('ours', t['ours']))
+                       for e in events if e.get('tag') == 'unhooked' and e.get('name') == tag]
+            if refused:
+                # Frida refused the site on that side (a body too short for its
+                # jump): that side's trace is blind to the row, called or not.
+                blind.append('Frida could not hook it on %s in %s (%s)' % (
+                    refused[0][0], scenario, refused[0][1].get('error') or 'no reason given'))
                 continue
             orig, ours = _row_events(t['orig'], tag), _row_events(t['ours'], tag)
             if not [e for e in orig + ours if str(e.get('tag', '')).startswith(tag)]:
@@ -1213,7 +1377,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
                                  'every captured event equal' % ((scenario,) + counts))
                 continue
             side = _prefix_side(orig, ours, tag)
-            if side is None:
+            if side is None and not _row_crash(orig, ours) and \
+                    (why := _address_like_difference(orig, ours, tag, sources)):
+                addrlike.append(why)
+            elif side is None:
                 different.append('%s: %s' % (scenario, _first_difference(orig, ours)))
             elif not have_final:
                 unmeasured.append(scenario)
@@ -1230,10 +1397,10 @@ def frida_verdicts(traces, rows, skipped=None, info=None):
             verdicts[key] = ('different', 'differs in ' + '; '.join(different + crashed))
         elif partial:
             verdicts[key] = ('scenario failed', '; '.join(partial))
-        elif unmeasured or dumped:
+        elif unmeasured or dumped or blind or addrlike:
             verdicts[key] = ('not measured', '; '.join(
                 (['no final HITS totals in %s' % ', '.join(unmeasured)] if unmeasured else [])
-                + dumped))
+                + dumped + blind + addrlike[:1]))
         elif exact or prefix:
             verdicts[key] = ('equal', EQUAL_PREFIX + ', '.join(exact + prefix))
         elif one_sided:
@@ -1269,6 +1436,13 @@ trace_source_line = trace_source
 
 CMAKE_ANCHOR = 'cases/store_spell.cpp'   # the last case file of oracle/CMakeLists.txt's runner
 FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk')
+# Promoted on 2026-10-23 (MATCH at every checkpoint); they join the phase once
+# the coverage map includes them and the phase picks scenarios by coverage
+# (Task 12), so a batch does not pay 18 launches where 6 did.
+PROMOTED_SCENARIOS = ('action_bar', 'equip_shots', 'inventory', 'save_load_screens',
+                      'level_up', 'world_map')
+# UI-only scenarios (no world play): used when a row's file is a CScreen*.
+FRIDA_UI_SCENARIOS = ('biography',)
 
 
 class OracleError(RuntimeError):
@@ -1280,13 +1454,48 @@ def evidence_signature(evidence_text):
     section (everything before the opening brace, joined on one line), or
     None."""
     code = _section_code(evidence_text)
-    if code is None or '{' not in code:
+    return _signature_head(code) if code is not None else None
+
+
+def _signature_head(code):
+    """The text before the first `{` of decompiled code, comments stripped and
+    whitespace joined on one line; None without a brace or an empty head."""
+    if '{' not in code:
         return None
     head = code[:code.find('{')]
     head = re.sub(r'/\*.*?\*/', '', head, flags=re.S)
     head = re.sub(r'//[^\n]*', '', head)
     head = ' '.join(head.split())
     return head or None
+
+
+def exports_default():
+    """The ghidra-exports folder tools/ghidra/export_decompiles.py writes by
+    default (IWD2R_HOME aware). The four lines are repeated here on purpose:
+    loading that module puts tools/ on sys.path and imports its Ghidra
+    helpers; the test suite keeps the two in step."""
+    home = (os.environ.get('IWD2R_HOME')
+            or os.path.join(os.path.expanduser('~'), '.local', 'share', 'iwd2r'))
+    return os.path.join(home, 'ghidra-exports')
+
+
+def export_signature(address, exports_dir=None):
+    """The one-line signature head of the Ghidra decompile export's
+    <exports_dir>/decompile/<ADDR>.c (ADDR: `address` without 0x, uppercase),
+    or None when the file is missing, unreadable or has no `{`. exports_dir
+    None is exports_default()."""
+    if exports_dir is None:
+        exports_dir = exports_default()
+    addr = str(address).strip()
+    if addr[:2].lower() == '0x':
+        addr = addr[2:]
+    try:
+        with open(os.path.join(exports_dir, 'decompile', addr.upper() + '.c'),
+                  encoding='utf-8', errors='replace') as f:
+            code = f.read()
+    except OSError:
+        return None
+    return _signature_head(code)
 
 
 _check_evidence = None
@@ -1551,6 +1760,7 @@ def frida_batch(batch_id, rows, signatures, map_text, scenarios=FRIDA_SCENARIOS,
                        _our_headers() if headers is None else headers)
     if info is not None:
         info['typed_from'] = dict(table.get('typed_from', {}))
+        info['typed_slots'] = {k: list(v) for k, v in table.get('typed_slots', {}).items()}
     traces = run_frida(batch_id, table, list(scenarios)) if table['original']['hooks'] else {}
     return frida_verdicts(traces, rows, table['skipped'], info=info)
 

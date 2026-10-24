@@ -346,9 +346,11 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   `compat/`, `docs/evidence/`, `docs/MAP.md`, `oracle/cases/` and
   `oracle/CMakeLists.txt`, a `fork` verdict whose evidence has no `kind:`
   line. (A stale `docs/MAP.md` is no longer checked here: the close
-  regenerates it.) The
-  `corroborated by WSO` phrase is required only for verdicts the driver
-  recorded from an oracle probe pass.
+  regenerates it.) Every verdict row's evidence carries the deciding
+  sentence (`disagreed with WSO at <sha>: ...; case <id> decides` or
+  `corroborated by WSO at <sha>: ...; case <id> decides`, wrapped lines
+  allowed) and the checks enforce it; a driver probe pass needs the
+  `corroborated by WSO` form.
 - Retrying a cleared exception (`--clear`): at the `close`, `record` or
   `push` stage the batch goes straight to that stage on its worktree and
   recorded verdicts, with no worker run; at any other stage the worker

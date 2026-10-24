@@ -68,6 +68,13 @@ def parse_report(text):
         cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
         m = VERDICT_RE.match(cand)
         if not m:
+            # Prose that names no address and does not try to be a verdict
+            # ("All 20 rows are decided; there is no ## Undecided section.")
+            # decides nothing and is skipped: a mangled verdict line always
+            # carries its address or the word verdict, and those still fail.
+            if not re.search(r'0[xX][0-9a-fA-F]+', cand) and \
+                    not cand.lower().startswith('verdict'):
+                continue
             raise ReportError('line %d: malformed verdict line: %r' % (n, raw))
         addr = '0x%X' % int(m.group(1), 16)
         side, case = m.group(2).lower(), m.group(3)
@@ -710,7 +717,8 @@ def _split_unquoted(text, seps):
 def _history_rewrite(args, covered=(), tracked=None):
     """True when the arguments of a `git` command (after the command word)
     rewrite or discard history or work: reset, rebase, revert, restore,
-    clean, stash, filter-repo, push, update-ref, commit --amend, branch
+    clean, stash (except the read-only `stash list` / `stash show`),
+    filter-repo, push, update-ref, commit --amend, branch
     -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
     branch switch (`--`, -f, -B, `.`, a path after a start point, or one
     argument that names a covered file, looks like a path or starts with a
@@ -725,6 +733,12 @@ def _history_rewrite(args, covered=(), tracked=None):
     if not rest:
         return False
     sub, rest = rest[0], rest[1:]
+    if sub == 'stash':
+        # `git stash list` / `git stash show` only read the stash; every
+        # other form (push, pop, apply, drop, clear, a bare `git stash`)
+        # moves work around
+        pos = [a for a in rest if not a.startswith('-')]
+        return not (pos and pos[0] in ('list', 'show'))
     if sub in _HISTORY_VERBS:
         return True
     if sub == 'commit':
@@ -918,6 +932,7 @@ def park_text(address, mb, needs):
 
 
 UNMEASURED_NEEDS = FRIDA_SCENARIOS_TEXT + ': not exercised'
+COVERAGE_NOT_HIT = 'coverage: no scenario hits it'
 UNMEASURED = '%s: exercised by no scenario (' + FRIDA_SCENARIOS_TEXT + '); park it: %s'
 
 
@@ -933,22 +948,36 @@ def _merge_base(worktree, base):
 X86_MAP_REL = 'build/windows-msvc-x86/RelWithDebInfo/iwd2r.map'
 
 
+FRIDA_BUILD_TARGETS = 'iwd2r iwd2r_injector iwd2r_recorder'
+
+
 def frida_build(worktree, log_path=None):
     """Our x86 build of a batch worktree, for its Frida phase (spec B): the
     worktree synced into its own Windows checkout (play.win_checkout:
     %USERPROFILE%\\iwd2r-build-<worktree folder name>, never the driver's,
     whatever IWD2R_WIN_CHECKOUT says) and built there with the x86 preset,
-    the compiler output in log_path.  Returns (checkout, map path): the map
-    beside the exe names the RVAs of the bodies under test, and probe.py
-    --build-checkout runs that exe.  Raises on any failure (play exits with
+    the compiler output in log_path: our exe and the oracle's injector and
+    recorder (FRIDA_BUILD_TARGETS), which the original side runs from the
+    same checkout (probe.py --build-checkout), so the recorder writing the
+    original's state dumps and the dumper writing ours come from one tree and
+    the dump guard compares like with like (the driver checkout's recorder,
+    older than schema.json, failed every b014/i001 guard).  Returns
+    (checkout, map path): the map beside the exe names the RVAs of the
+    bodies under test.  Raises on any failure (play exits with
     SystemExit)."""
     play = _tool('play')
+    oracle = _tool('oracle')
     checkout = play.win_checkout(worktree, {})
     play.sync_windows(root=worktree, checkout=checkout)
-    exe = play.build_windows_x86(checkout=checkout, log_path=log_path)
+    exe = play.build_windows_x86(checkout=checkout, log_path=log_path,
+                                 target=FRIDA_BUILD_TARGETS)
     map_path = os.path.splitext(exe)[0] + '.map'
     if not os.path.isfile(map_path):
         raise RuntimeError('the x86 build left no %s' % map_path)
+    for name in (oracle.INJECTOR, oracle.RECORDER):
+        path = os.path.join(checkout, oracle.REPLAY_DIR_REL, name)
+        if not os.path.isfile(path):
+            raise RuntimeError('the x86 build left no %s' % path)
     return checkout, map_path
 
 
@@ -970,6 +999,17 @@ def _infrastructure_failure(traces):
             t.get('failed') and not any((t.get('result') or {}).values()) for _sc, t in runs):
         return ''
     return '; '.join('%s: %s' % (sc, t['failed']) for sc, t in runs)
+
+
+def _schema_failure(traces):
+    """The scenarios whose state dumps truth.compare_dumps refused on the
+    replay schema (a recorder or our dumper out of step with schema.json:
+    every scenario's dump guard would fail on it, whatever the rows did),
+    with its detail, else ''."""
+    return '; '.join('%s: %s' % (sc, t['dumps'].get('detail'))
+                     for sc, t in sorted(traces.items())
+                     if isinstance(t, dict) and isinstance(t.get('dumps'), dict)
+                     and t['dumps'].get('invalid'))
 
 
 def _write_trace_evidence(path, probe, orig_path, ours_path):
@@ -1110,14 +1150,27 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         driver_probe = k in probe_keys or (
             side == 'ours' and batch.get('id') is not None
             and case.startswith('probe-%s-' % batch['id']))
-        if driver_probe:
+        paras = wave.evidence_paragraphs(text)
+        probe_msg = driver_probe and not any(
+            wave.EVIDENCE_PHRASES[1] in para for para in paras)
+        if probe_msg:
             # A probe pass says ours matches the original (ruling R57).
-            if wave.EVIDENCE_PHRASES[1] not in text:
-                problems.append("%s: its verdict case is a probe; add the exact "
-                                "phrase 'corroborated by WSO at <sha>'" % rel)
-        elif not any(p in text for p in wave.EVIDENCE_PHRASES):
-            problems.append("%s: no 'disagreed with WSO' or 'corroborated by "
-                            "WSO' phrase; add one of the exact phrases" % rel)
+            problems.append("%s: its verdict case is a probe; write the "
+                            "sentence 'corroborated by WSO at <sha>: ...; "
+                            "case %s decides' in the ## WSO delta section"
+                            % (rel, case))
+        if not probe_msg and not wave._evidence_decided_by(text, case):
+            problems.append(
+                '%s: docs/evidence/%s.md has no sentence reading "disagreed '
+                'with WSO at <sha>: ...; case %s decides" (or "corroborated '
+                'by WSO ..."); write it in the ## WSO delta section'
+                % (r['address'], k.upper(), case))
+        if batch.get('fork_base') and not wave._cites_pin(
+                text, batch['fork_base']):
+            problems.append(
+                '%s: no "disagreed with WSO at <sha>" / "corroborated by WSO '
+                'at <sha>" line names this batch\'s pin %s'
+                % (rel, batch['fork_base'][:7]))
     dirty, bad = _git_paths(run, worktree, ('status', '--porcelain', '-uall'),
                             lambda l: l[3:].split(' -> ')[-1].strip('"'))
     if bad:
@@ -1340,13 +1393,8 @@ BLOCKING_RE = re.compile(r'^(?:[-*]|\d+\.)?\s*[*_`]*BLOCKING[*_`]*:')
 FIX_PROMPT = """# Fix round for batch {id}
 
 The driver's {stage} found the problems below in your work on `{branch}`
-(this worktree). Fix every one, commit, and write your report again: the
-full `## Verdicts` section, one line for every row you decide, not only
-the rows you fixed. `## Verdicts` holds verdict lines only; put notes under
-`## Notes`. A row whose reading is fork or neither, with no probe, replay
-or trace case you can run to decide it, gets no verdict line: keep our
-body and list it under `## Undecided` as `undecided <0xADDR> <fork|neither>
-<one-line reason>`. Never write `ours` for such a row.
+(this worktree). Fix every one, commit, and write your report again.
+{report_rule}
 
 {problems}
 
@@ -1355,6 +1403,33 @@ The original brief follows.
 ---
 
 {brief}"""
+
+
+FIX_REPORT_RULES = {
+    'verdicts': ("Write the full `## Verdicts` section, one line for every row you "
+                 "decide, not only the rows you fixed. `## Verdicts` holds verdict lines "
+                 "only; put notes under `## Notes`. A row whose reading is fork or neither, "
+                 "with no probe, replay or trace case you can run to decide it, gets no "
+                 "verdict line: keep our body and list it under `## Undecided` as "
+                 "`undecided <0xADDR> <fork|neither> <one-line reason>`. Never write "
+                 "`ours` for such a row."),
+    'import': ("This is an import batch: do not write a `## Verdicts` section at all, "
+               "not even an empty one or a placeholder line. Report as the brief says: "
+               "`## Imported` with one `imported <0xADDR> <evidence kind>` line per "
+               "function, then the commits you made, the evidence files you wrote and "
+               "anything you could not import (the rows you parked, with their parked "
+               "files)."),
+}
+
+
+def fix_prompt(batch_id, stage, branch, brief, problems, kind='verdicts'):
+    """The fix-round prompt: the problems, the report rule for the batch's
+    kind (a verdicts batch rewrites ## Verdicts; an import batch has none),
+    then the original brief."""
+    return FIX_PROMPT.format(
+        id=batch_id, stage=stage, branch=branch, brief=brief,
+        report_rule=FIX_REPORT_RULES['import' if kind == 'import' else 'verdicts'],
+        problems='\n'.join('- ' + p for p in problems))
 
 REVIEW_BRIEF = """# Review of wave-1 batch {id}
 
@@ -1699,6 +1774,7 @@ class Driver:
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
+        self.exports_dir = None
         self.frida_map = frida_map
         self.oracle_run = truth.run_oracle if oracle_run is None else oracle_run
         self.frida_run = truth.frida_run if frida_run is None else frida_run
@@ -2148,7 +2224,7 @@ class Driver:
             if not carried:
                 return again
             return again + ('## Measured before you started\n\nThe oracle probe passed these rows earlier '
-                    '(the driver records each as `ours`; cite `corroborated by WSO at <sha>`):\n'
+                    '(the driver records each as `ours`; write the ## WSO delta sentence `corroborated by WSO at <sha>: ...; case probe-<batch>-<ADDR> decides`, the exact case shown):\n'
                     + ''.join('- 0x%s: case %s\n' % (k.upper(), self._probe[k][1]) for k in sorted(carried))
                     + '\n')
 
@@ -2187,8 +2263,9 @@ class Driver:
         if passed:
             lines.append('The oracle probe passed these rows (ours matches the original over a '
                          'swept domain). The driver records each as `ours`, with the case shown; '
-                         'write the evidence file with the exact phrase '
-                         '`corroborated by WSO at <sha>` and cite that case:')
+                         'write the evidence file with the sentence '
+                         '`corroborated by WSO at <sha>: ...; case probe-<batch>-<ADDR> decides` '
+                         'in the ## WSO delta section, with the exact case shown:')
             lines += ['- %s: case %s (%s)' % p for p in passed]
         if failed:
             lines.append('The oracle probe FAILED these rows (ours and the original disagree). '
@@ -2280,7 +2357,8 @@ class Driver:
         the batch branch, and any other outcome (different, not exercised, no
         hook, scenario failed, not measured) is a finding that parks it.  A
         phase-wide failure (no build, the run raised, every scenario failed
-        with no status on either side) raises _StageError('frida'): the
+        with no status on either side, state dumps the replay schema refuses)
+        raises _StageError('frida'): the
         batch's exception, nothing measured, parked or rewritten.  It runs
         once per batch, never again.  Returns the findings."""
         self._frida_got = {}
@@ -2301,11 +2379,24 @@ class Driver:
             rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
         if not rows:
             return []
+        if self._coverage_skips(batch_id, rows):
+            # No scenario of the phase hits any row (the coverage map of the
+            # original): no build, no launch; the same shape the run's
+            # verdicts have, read by the loop below.
+            self._frida_got = {key(r['address']): ('not-exercised', COVERAGE_NOT_HIT)
+                               for r in rows}
+            return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
+                                        {}, {}, verdicts, importing, mb)
         checkout, map_path, why = self._frida_target(batch_id, worktree)
         sigs = {}
         for r in rows:
             text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
             sig = truth.evidence_signature(text) if text else None
+            if not sig:
+                sig = truth.export_signature(r['address'], self.exports_dir)
+                if sig:
+                    self.log('%s: frida: %s signature from the Ghidra export (the evidence '
+                             'gives none)' % (batch_id, r['address']))
             if sig:
                 sigs[r['address']] = sig
         traces = {}
@@ -2338,12 +2429,27 @@ class Driver:
             raise _StageError('frida', 'every Frida scenario failed on infrastructure (no side '
                                        'produced a status): %s; no row was measured, parked or '
                                        'rewritten; fix it and clear this exception' % dead)
+        refused = _schema_failure(traces)
+        if refused:
+            raise _StageError('frida', 'the state dumps of a Frida run fail the replay schema '
+                                       '(tooling out of step, not the rows): %s; no row was '
+                                       'measured, parked or rewritten; fix it and clear this '
+                                       'exception' % refused)
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
         # _land, never a finding or a verdict (the final review's ruling).
         self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
         exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
+        return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
+                                    verdicts, importing, mb)
+
+    def _frida_findings(self, batch_id, worktree, rows, got, traces, info, exact, verdicts,
+                        importing, mb):
+        """The per-row outcomes of a Frida phase (or of a coverage skip): the
+        log lines, the import findings, the trace evidence written."""
+        key = _tool('wave')._addr_key
+        truth = _tool('truth')
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
         findings, written = [], []
         for r in rows:
@@ -2378,6 +2484,29 @@ class Driver:
         if written:
             self._commit_trace_evidence(batch_id, worktree, written)
         return findings
+
+    def _coverage_skips(self, batch_id, rows):
+        """True when a usable coverage map exists and every row (a dependency
+        included) was measured by every scenario the phase runs and hit by
+        none; a row nobody measured is unknown and keeps the phase."""
+        try:
+            cov_mod = _tool('coverage')
+            path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
+            cov, why = cov_mod.check(path, self.repo)
+            if cov is None:
+                if os.path.exists(path):
+                    self.log('%s: frida: coverage map not used (%s); running as usual'
+                             % (batch_id, why))
+                return False
+            phase = _tool('truth').FRIDA_SCENARIOS
+            if any(cov_mod.status_of(cov, r['address'], phase) != 'dead' for r in rows):
+                return False
+        except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
+            self.log('%s: frida: coverage map unreadable (%s); running as usual'
+                     % (batch_id, _one_line(repr(e), 200)))
+            return False
+        self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
+        return True
 
     def _import_rows(self, batch_id, batch, worktree, mb_sha):
         """The functions an import batch's Frida phase measures: its rows
@@ -2446,7 +2575,9 @@ class Driver:
                     'original (%s); the phase does not run again in this batch, so park it: %s'
                     % (a, detail, park_text(a, mb, 'frida different: %s' % detail)))
         elif status == 'not-exercised':
-            text = UNMEASURED % (a, park_text(a, mb, UNMEASURED_NEEDS))
+            needs = ('not-exercised (%s)' % detail if detail == COVERAGE_NOT_HIT
+                     else UNMEASURED_NEEDS)
+            text = UNMEASURED % (a, park_text(a, mb, needs))
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
                 a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
@@ -2473,6 +2604,13 @@ class Driver:
             if checkout is None:
                 return None, None, ('--frida-map %s is not where an x86 build writes its map '
                                     '(<checkout>/%s)' % (self.frida_map, X86_MAP_REL))
+            oracle = _tool('oracle')
+            for name in (oracle.INJECTOR, oracle.RECORDER):
+                path = os.path.join(checkout, oracle.REPLAY_DIR_REL, name)
+                if not os.path.isfile(path):
+                    return None, None, ('--frida-map %s: no %s beside it; the original side runs '
+                                        'that checkout\'s injector and recorder (tools/oracle.py '
+                                        'build from it)' % (self.frida_map, path))
             self.log('%s: frida: --frida-map given: measuring the build in %s, not a build '
                      'of %s' % (batch_id, checkout, worktree))
             return checkout, self.frida_map, None
@@ -2573,9 +2711,7 @@ class Driver:
         return out
 
     def _fix(self, batch_id, batch, worker, worktree, stage, problems, brief, label):
-        prompt = FIX_PROMPT.format(
-            id=batch_id, stage=stage, branch=batch['branch'], brief=brief,
-            problems='\n'.join('- ' + p for p in problems))
+        prompt = fix_prompt(batch_id, stage, batch['branch'], brief, problems, self.kind)
         self._stage(batch_id, label)
         return self._run(worker, prompt, worktree, batch_id, label)
 
@@ -3829,6 +3965,7 @@ class Driver:
         adopt = self._adoptable([b for b, _w, _n in pending] + retries)
         capped = False        # --max-batches reached
         crash = None          # an exception that escaped a batch thread
+        launched = set()      # every batch this run started (no second pickup)
 
         threads = self._threads = []
 
@@ -3847,6 +3984,7 @@ class Driver:
             nonlocal running
             running += 1
             self._began += 1
+            launched.add(batch_id)
             self._start(lambda: body(batch_id, why, name))
 
         def reap(block):
@@ -3906,6 +4044,17 @@ class Driver:
                     self._busy[name] += 1
             if name is None:
                 return False
+            if not retries:
+                # An exception cleared while the driver runs (`wave.py run
+                # --clear`): outside the lock, as at the start.
+                live = set(self._read_status()['running'])
+                skip = launched | live | {b for b, _w, _n in pending}
+                for bid in self._cleared():
+                    if bid not in skip:
+                        retries.append(bid)
+                        self.log('%s: exception cleared while running; '
+                                 'retrying at its %s stage'
+                                 % (bid, self._retry_stage.get(bid)))
             if retries:
                 bid = retries.pop(0)
                 why = self._retry_why(bid)

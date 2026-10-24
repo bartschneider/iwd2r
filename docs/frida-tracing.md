@@ -114,12 +114,17 @@ before spending a launch.
   RunScenario drives the same scenario in-engine. `--loaded-rva` points the
   `loaded` observation at `CScreenWorld::EngineActivated` (the default,
   0x6869C0, is the original's absolute address; ours needs the RVA).
-- `--build-checkout CHECKOUT` (ours only) runs the x86 build of another
-  Windows checkout: the driver's Frida phase builds each batch worktree in
-  its own checkout (`%USERPROFILE%\iwd2r-build-<worktree name>`) and passes
-  it here, with the hook table's RVAs from that build's map, so the bodies
-  under test are the batch's. The default is this checkout's build; the
-  sidecar tools are staged from this checkout either way.
+- `--build-checkout CHECKOUT` runs a side from another Windows checkout:
+  ours its x86 build, the original its oracle build's injector and
+  recorder. The driver's Frida phase builds each batch worktree in its own
+  checkout (`%USERPROFILE%\iwd2r-build-<worktree name>`: `iwd2r`,
+  `iwd2r_injector`, `iwd2r_recorder`) and passes it for both sides, with the
+  hook table's RVAs from that build's map, so the bodies under test are the
+  batch's and the recorder writing the original's dumps comes from the same
+  tree as the dumper writing ours (one schema.json; a recorder.dll older
+  than the schema in the driver's checkout failed every b014/i001 dump
+  guard). The default is this checkout's builds; the sidecar tools are
+  staged from this checkout either way.
 - `--clicks N` inserts N `click 400 300` actions (each followed by a wait)
   before the scenario's trailing `quit`, on a run-folder-local copy — the
   repo's scenarios/ tree is never written. A click is what drives
@@ -148,6 +153,18 @@ orig.py writes a status file whose last line is `RESULT: <verdict>`; probe.py
 maps it to its exit code: CLEAN 0, CRASH 1, NOT-LOADED / NOT-EXERCISED /
 OBSERVER-ERROR all 2. The 2s mean *ran, proved nothing* — same discipline as
 a smoke's `--hit`, so a soft failure cannot masquerade as a pass.
+
+A script error also writes `ERROR script: <description> (<file>:<line>)` to
+the status file (it used to reach only the trace). A hook site Frida refuses
+("unable to intercept function at ...", e.g. a stub that is `ret 4` and int3
+padding, shorter than Frida's 5-byte jump) is caught per hook: the status
+file gets `UNHOOKED <name> at <addr>: <error>` and no HITS line for it, the
+other hooks, the `loaded` observation and the exit-time totals still
+install, and the run is not an OBSERVER-ERROR. That row reads `not
+measured` ("Frida could not hook it on ours in <scenario>"). Before this,
+one refused site aborted the whole script: i001's ours runs ended
+OBSERVER-ERROR with `HITS-FINAL no` on CInfGame::CacheResFileWithResource's
+3-byte stub.
 
 Dropped from the fork on purpose: his in-target load driver (cursor
 calibration, movie skip, the click driver — the house pipeline drives
@@ -311,9 +328,13 @@ per scenario, then across the three scenarios:
   a call both sides made, or a crash event.
 - **The dump guard.** Both sides write checkpoint and periodic state dumps
   into their replay folders; `truth.frida_run` compares them per scenario
-  with the replay compare's own functions (`truth.compare_dumps`:
-  `oracle.compare_checkpoints` and `compare_frames`, `screens.json`, the
-  known differences). A scenario whose dumps differ measures nothing (its
+  with the replay tooling's own semantics (`truth.compare_dumps`): first
+  `replay record`'s schema check (`oracle.check_dumps` against
+  `oracle/replay/schema.json`; a side the schema refuses gives no verdict,
+  and the driver makes that the batch's exception at stage frida, nothing
+  parked), then `oracle.compare_checkpoints` and `compare_frames`
+  (`screens.json`, the known differences, `TIMING_FIELDS` and
+  `OURS_ONLY_FIELDS` skipped). A scenario whose dumps differ measures nothing (its
   rows read `not measured`, "dumps differ in <scenario>"), and the driver
   writes trace evidence only from a run whose dumps match. A void hook logs
   no return, so its trace mostly measures its callers; the dumps speak for

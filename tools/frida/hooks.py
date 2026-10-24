@@ -29,6 +29,14 @@ conv: thiscall (this=ecx, stack args -> args[0..]) | cdecl | stdcall.
 Hook function ENTRIES only (Frida's x86 inline trampoline rewrites ~5 bytes
 and corrupts anything mid-function).
 
+A site Frida refuses ("unable to intercept function at ...": a body shorter
+than the 5-byte jump, e.g. a stub that is `ret 4` and int3 padding) must not
+take the rest down: each Interceptor.attach runs inside try/catch, and a
+refusal sends {tag: 'unhooked', name, addr, error} instead of throwing out of
+the script (which left every later hook, the loaded observation and the
+exit-time totals uninstalled).  The hook's counter stays 0: the sidecar
+reports it as UNHOOKED, never as a hit total.
+
 Addresses (ours, in addition to his): a hook may carry "rva" instead of
 "addr" -- an offset from the module base, resolved in the target at install
 time (Process.getModuleByName(...).base).  Tables for the original use
@@ -127,13 +135,25 @@ def _global_js(g):
     return READERS.get(g.get("type", "u32"), READERS["u32"]).format(p=expr)
 
 
-def js_for_hook(h, idx):
+def js_for_hook(h, idx, count_only=False):
     name = h["name"]
+    if count_only and name != "loaded":
+        # coverage pass: count the hit, send nothing per call (the HITS
+        # totals and the unhooked event stay as in every other table)
+        return "\n".join([
+            f"let cnt{idx} = 0;",
+            "try {",
+            f"Interceptor.attach({addr_expr(h)}, {{ onEnter(args) {{ ++cnt{idx}; }} }});",
+            "} catch (e) {",
+            f"  send({{ tag: 'unhooked', name: '{name}', "
+            f"addr: guard(() => {addr_expr(h)}.toString()), error: String(e) }});",
+            "}"])
     conv = h.get("conv", "thiscall")
     args = h.get("args", [])
     maxn = int(h.get("max", 500))
     parts = []
     parts.append(f"let cnt{idx} = 0;")
+    parts.append("try {")
     parts.append(f"Interceptor.attach({addr_expr(h)}, {{")
     parts.append("  onEnter(args) {")
     parts.append(f"    if (++cnt{idx} > {maxn}) return;")
@@ -162,11 +182,18 @@ def js_for_hook(h, idx):
         parts.append(f"    send({{ tag: '{name}_ret', ret: {rexpr} }});")
     parts.append("  }")
     parts.append("});")
+    parts.append("} catch (e) {")
+    parts.append(f"  send({{ tag: 'unhooked', name: '{name}', "
+                 f"addr: guard(() => {addr_expr(h)}.toString()), error: String(e) }});")
+    parts.append("}")
     return "\n".join(parts)
 
 
-def hooks_js(hooks):
-    return "\n".join(js_for_hook(h, i) for i, h in enumerate(hooks))
+def hooks_js(hooks, count_only=False):
+    """The hooks' JS; count_only (a table-level flag) installs a bare
+    counter per hook instead of the logging onEnter/onLeave (the "loaded"
+    hook keeps its event: the scenario waits on it)."""
+    return "\n".join(js_for_hook(h, i, count_only) for i, h in enumerate(hooks))
 
 
 def hit_counts_js(hooks, period_ms=2000):

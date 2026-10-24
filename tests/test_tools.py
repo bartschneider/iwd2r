@@ -129,6 +129,7 @@ gltrace = load_tool('gltrace')
 truth = load_tool('truth')
 triage = load_tool('triage')
 driver = load_tool('driver')
+coverage = load_tool('coverage')
 
 
 def load_ghidra_tool(name):
@@ -7090,6 +7091,10 @@ class FridaProbeTest(unittest.TestCase):
         play.build_windows_x86(build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe',
                                checkout='/mnt/c/b', log_path='/l')
         self.assertEqual((calls[0]['checkout'], calls[0]['log_path']), ('/mnt/c/b', '/l'))
+        calls.clear()
+        play.build_windows_x86(build=lambda **kw: calls.append(kw) or '/x/iwd2r.exe',
+                               target='iwd2r iwd2r_recorder')
+        self.assertEqual(calls[0]['target'], 'iwd2r iwd2r_recorder')
 
     def test_ours_runs_the_build_checkout_it_is_given(self):
         probe = load_tool('frida/probe')
@@ -7097,7 +7102,11 @@ class FridaProbeTest(unittest.TestCase):
                          os.path.join('/mnt/c/b', probe.OURS_EXE_REL))
         self.assertEqual(probe.ours_build('ours'),
                          os.path.join(play.WIN_CHECKOUT, probe.OURS_EXE_REL))
+        # the original side's injector and recorder come from the same
+        # checkout, so both sides' dumps follow the same schema.json
         self.assertEqual(probe.ours_build('original', '/mnt/c/b'),
+                         os.path.join('/mnt/c/b', load_tool('oracle').REPLAY_DIR_REL))
+        self.assertEqual(probe.ours_build('original'),
                          os.path.join(play.WIN_CHECKOUT, load_tool('oracle').REPLAY_DIR_REL))
 
 
@@ -8062,6 +8071,9 @@ class WaveTest(unittest.TestCase):
         self.assertIn('case ', brief)
         self.assertIn('disagreed with WSO', brief)
         self.assertIn('corroborated by WSO', brief)
+        self.assertIn('; case <id> decides', brief)
+        self.assertIn("the driver's checks refuse a verdict row whose "
+                      "evidence lacks it", brief)
         self.assertIn('Imported-From', brief)
         self.assertIn('WIP', brief)
         self.assertIn('parity_waiver', brief)
@@ -9805,6 +9817,73 @@ class _DirtyWorker(_SeqWorker):
         return super().run(brief, cwd)
 
 
+class EvidenceParagraphsTest(unittest.TestCase):
+    FIXTURE = ('---\nkind: oracle\n---\n\n# 0x401000\n\n## WSO delta\n\n'
+               'disagreed with WSO at e8dd16a7: the guard differs; the\n'
+               'clamp is the same in both builds; the oracle sweep\n'
+               'agrees on every sampled argument; the trace shows one\n'
+               'path; nothing else reads the result; the other callers\n'
+               'only forward it; the replay confirms it;\n'
+               'case probe-9 decides.\n\n'
+               '```c\nint f(int a)\n{\n  return a;\n}\n```\n\n'
+               'first paragraph\nsecond line\n\nlast paragraph\n')
+
+    def setUp(self):
+        self.wave = load_tool('wave')
+
+    def test_paragraphs(self):
+        self.assertEqual(self.wave.evidence_paragraphs(self.FIXTURE), [
+            '---', 'kind: oracle', '---',
+            '# 0x401000', '## WSO delta',
+            'disagreed with WSO at e8dd16a7: the guard differs; the clamp is the '
+            'same in both builds; the oracle sweep agrees on every sampled '
+            'argument; the trace shows one path; nothing else reads the result; '
+            'the other callers only forward it; the replay confirms it; '
+            'case probe-9 decides.',
+            '```c', 'int f(int a)', '{', '  return a;', '}', '```',
+            'first paragraph second line', 'last paragraph'])
+
+    def test_a_single_line_is_unchanged(self):
+        self.assertEqual(self.wave.evidence_paragraphs('one line\n'), ['one line'])
+        self.assertEqual(self.wave.evidence_paragraphs(''), [])
+
+    def test_decided_by_reads_the_wrapped_sentence(self):
+        w = self.wave
+        self.assertTrue(w._evidence_decided_by(self.FIXTURE, 'probe-9'))
+        self.assertFalse(w._evidence_decided_by(self.FIXTURE, 'probe-8'))
+        self.assertFalse(w._evidence_decided_by(
+            self.FIXTURE.replace('disagreed with WSO', 'disagreed with us'), 'probe-9'))
+        self.assertTrue(w._evidence_decided_by(
+            'corroborated by WSO at abc1234; case c decides', 'c'))
+
+    def test_decided_by_keeps_the_physical_line_reading(self):
+        w = self.wave
+        text = ('- disagreed with WSO at abc1234: x; case c decides\n'
+                '- another bullet\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        text = ('disagreed with WSO at abc1234: x; case c decides.\n'
+                'more prose right after it\n')
+        self.assertTrue(w._evidence_decided_by(text, 'c'))
+        self.assertFalse(w._evidence_decided_by(text, 'd'))
+
+    def test_front_matter_does_not_join_the_body(self):
+        paras = self.wave.evidence_paragraphs('---\nkind: oracle\n---\nbody a\nbody b\n')
+        self.assertEqual(paras, ['---', 'kind: oracle', '---', 'body a body b'])
+
+    def test_decided_by_does_not_join_across_a_blank_line_or_fence(self):
+        w = self.wave
+        text = 'disagreed with WSO at abc1234: x\n\ncase c decides\n'
+        self.assertFalse(w._evidence_decided_by(text, 'c'))
+
+    def test_cites_pin_across_a_wrap(self):
+        w = self.wave
+        self.assertTrue(w._cites_pin(self.FIXTURE, 'e8dd16a7' + '0' * 32))
+        wrapped = 'disagreed with WSO\nat e8dd16a7: x;\ncase c decides\n'
+        self.assertTrue(w._cites_pin(wrapped, 'e8dd16a7'))
+        self.assertFalse(w._cites_pin(wrapped, '1234567'))
+        self.assertFalse(w._cites_pin('disagreed with WSO\n\nat e8dd16a7', 'e8dd16a7'))
+
+
 class DriverTest(unittest.TestCase):
     REPORT = ('# report\n\n## Verdicts\n\nverdict 0x401000 ours case dump-401000\n'
               'verdict 0x402000 fork case probe-b011-402000\n')
@@ -9945,11 +10024,22 @@ class DriverTest(unittest.TestCase):
                          {'0x76D370': ('ours', 'c1')})
         self.assertEqual(driver.parse_report(h + '`verdict 0x1 fork case c2`\n2. Verdict 0X02 neither case c3\n'),
                          {'0x1': ('fork', 'c2'), '0x2': ('neither', 'c3')})
+        # a mangled verdict (it names an address, or starts with the word)
+        # still fails, with its line number
         with self.assertRaises(driver.ReportError) as cm:
-            driver.parse_report(h + '\nI think it is ours.\n')
+            driver.parse_report(h + '\nI think 0x401000 is ours.\n')
         self.assertIn('line 3', str(cm.exception))
         with self.assertRaises(driver.ReportError):
+            driver.parse_report(h + 'verdict ours case a\n')
+        with self.assertRaises(driver.ReportError):
             driver.parse_report(h + 'verdict 0x401000 ours case a\nverdict 0x0401000 fork case b\n')
+        # prose that names no address decides nothing and is skipped (b017's
+        # Flash worker wrote this sentence under ## Verdicts three times)
+        self.assertEqual(driver.parse_report(
+            h + 'verdict 0x1 ours case a\n'
+                'All 20 rows are decided; there is no `## Undecided` section.\n'
+                '(none; this is an import batch)\nverdict 0x2 fork case b\n'),
+            {'0x1': ('ours', 'a'), '0x2': ('fork', 'b')})
 
     def test_run_non_json_output(self):
         def stub(argv, **kw):
@@ -9978,6 +10068,12 @@ class DriverTest(unittest.TestCase):
         g('init', '-q', '-b', 'p3/wso-b011')
         os.makedirs(os.path.join(d, 'docs', 'evidence'))
         for addr, text in evidence.items():
+            phrase = next((p for p in ('disagreed with WSO', 'corroborated by WSO') if p in text), None)
+            if phrase:
+                # every case id the tests below give a verdict decides
+                text += ''.join('\n\n%s at abc; case %s decides' % (phrase, c) for c in (
+                    'c', 'dump-3', 'probe-3', 'probe-4', 'probe-17', 'x',
+                    'probe-b011-76D370', 'readout-401000'))
             with open(os.path.join(d, 'docs', 'evidence', addr + '.md'), 'w') as f:
                 f.write(text)
         return d
@@ -10050,7 +10146,7 @@ class DriverTest(unittest.TestCase):
         self.assertNotIn('docs/plan.md', outside[0])
 
     def test_mechanical_checks_flags_missing_and_foreign_verdicts(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         calls = []
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             probs = driver.mechanical_checks(
@@ -10065,7 +10161,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(all(c[1] == d for c in calls))
 
     def test_mechanical_checks_accept_undecided_in_place_of_a_verdict(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
                 mock.patch.object(driver._tool('check_evidence'), 'touched',
@@ -10088,7 +10184,7 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any(p.startswith('0x999999:') and 'outside' in p for p in probs))
 
     def test_mechanical_checks_undecided_row_must_keep_our_body(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         ce = driver._tool('check_evidence')
         args = (batch, d, {'0x76D370': ('ours', 'c')})
@@ -10143,7 +10239,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('76D370.md', probs[0])
 
     def test_mechanical_checks_subprocess_steps(self):
-        d = self._mc_repo({'76D370': 'disagreed with WSO at x'})
+        d = self._mc_repo({'76D370': 'disagreed with WSO at x; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
         exe = os.path.join(d, 'iwd2.exe')
@@ -10219,8 +10315,13 @@ class DriverTest(unittest.TestCase):
         self.git('worktree', 'add', '-q', '-b', 'p3/wso-b011', self.wt, 'first')
         lines = {'403000': self.AUTO_LINE}
         if phrases:
-            lines['401000'] = 'disagreed with WSO at e8dd16a7: the guard; case probe-1 decides'
-            lines['402000'] = 'corroborated by WSO at e8dd16a7'
+            lines['401000'] = ('disagreed with WSO at e8dd16a7: the guard; case dump-401000 decides\n\n'
+                               'disagreed with WSO at e8dd16a7: the guard; case probe-b011-401000 decides\n\n'
+                               'disagreed with WSO at e8dd16a7: the guard; case dry-0x401000 decides')
+            lines['402000'] = ('corroborated by WSO at e8dd16a7; case dump-402000 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case probe-b011-402000 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case probe-12 decides\n\n'
+                               'corroborated by WSO at e8dd16a7; case dry-0x402000 decides')
         for stem, line in lines.items():
             with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'), 'a') as f:
                 f.write('\n' + line + '\n')
@@ -10312,10 +10413,13 @@ class DriverTest(unittest.TestCase):
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
         with open(os.path.join(self.wt, 'docs', 'evidence', '401000.md'), 'a') as f:
-            f.write('\ncorroborated by WSO at e8dd16a7\n' + self.PURE_EVIDENCE)
+            f.write('\ncorroborated by WSO at e8dd16a7; case dump-401000 decides\n' + self.PURE_EVIDENCE)
         with open(os.path.join(self.wt, 'docs', 'evidence', '402000.md'), 'a') as f:
             f.write('\n## Decompiled (Ghidra)\n\n```c\nint Roll(int a, int b)\n\n{\n  return g_x;\n}\n```\n')
         self.git('commit', '-qam', 'decompiled', cwd=self.wt)
+        # hermetic: a row without a signature never reads the machine's real
+        # ghidra-exports (tests that want the fallback set their own folder)
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
         return d
 
     def test_driver_records_measured_from_probe_results(self):
@@ -10568,6 +10672,17 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(calls, [1])
         self.assertEqual(self._state()['verdicts']['0x402000']['measured'], 'frida')
 
+    @staticmethod
+    def _stage_oracle_tools(checkout):
+        """The injector and recorder an x86 build leaves under checkout, as
+        empty files (the original side of a Frida pair runs them)."""
+        oracle = driver._tool('oracle')
+        folder = os.path.join(checkout, oracle.REPLAY_DIR_REL)
+        os.makedirs(folder, exist_ok=True)
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            with open(os.path.join(folder, name), 'w'):
+                pass
+
     def _frida_builder(self, map_text=None):
         """(builder, calls, checkout): a fake per-batch x86 build whose map
         sits where the x86 build writes it, under a fake Windows checkout."""
@@ -10647,7 +10762,9 @@ class DriverTest(unittest.TestCase):
             d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(cm.exception.stage, 'frida')
         self.assertIn('every Frida scenario failed on infrastructure (no side produced a status): '
-                      'first_fight: original side exited 2', cm.exception.problem)
+                      + '; '.join('%s: original side exited 2' % sc
+                                  for sc in sorted(driver._tool('truth').FRIDA_SCENARIOS)),
+                      cm.exception.problem)
         self.assertIn('kind: read-only', _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
         # the run itself raising is the same exception
         d.frida_run = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('sandbox gone'))
@@ -10665,6 +10782,28 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d._frida_got['401000'][0], 'scenario failed')
         self.assertTrue(any(f.startswith('0x401000:') and 'park it' in f for f in findings), findings)
 
+    def test_driver_frida_dumps_the_schema_refuses_are_an_exception(self):
+        # a recorder (or our dumper) out of step with schema.json makes every
+        # scenario's dumps uncomparable: tooling, not the rows; nothing parks
+        d, batch = self._import_phase_driver()
+        trace = TruthTest._trace
+        t = trace(('fn_401000', 7, 3))
+        out = self._file_traces(['world_entry', 'walk_and_talk'], t, t)
+        out['world_entry']['dumps'] = {
+            'match': None, 'invalid': {'original': 24},
+            'detail': "the original's dumps fail oracle/replay/schema.json (24 of 114; first: "
+                      "checkpoint-world.json: $.world: missing required property 'enemy_creatures')"}
+        d.frida_run = lambda *a, **kw: dict(out)
+        before = self.git('rev-parse', 'HEAD', cwd=self.wt).stdout
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(cm.exception.stage, 'frida')
+        self.assertIn("world_entry: the original's dumps fail oracle/replay/schema.json",
+                      cm.exception.problem)
+        self.assertIn('no row was measured, parked or rewritten', cm.exception.problem)
+        self.assertEqual(self.git('rev-parse', 'HEAD', cwd=self.wt).stdout, before)
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+
     def test_driver_frida_map_override_measures_the_build_beside_it(self):
         d, batch = self._import_phase_driver()
         _build, _calls, checkout = self._frida_builder(self.IMPORT_MAP)
@@ -10672,6 +10811,14 @@ class DriverTest(unittest.TestCase):
         d.frida_map = os.path.join(checkout, driver.X86_MAP_REL)
         seen = []
         d.frida_run = lambda b, table, scenarios, build_checkout=None: seen.append(build_checkout) or {}
+        # the original side runs the injector and recorder beside the map:
+        # without them the override measures nothing (the batch's exception)
+        with self.assertRaises(driver._StageError) as cm:
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('no %s beside it' % os.path.join(
+            checkout, driver._tool('oracle').REPLAY_DIR_REL, 'injector.exe'), cm.exception.problem)
+        self.assertEqual(seen, [])
+        self._stage_oracle_tools(checkout)
         d._frida_phase('b011', batch, self.wt, {})
         self.assertEqual(seen, [checkout])
         # a map that is not where an x86 build puts it measures nothing: the
@@ -10687,23 +10834,33 @@ class DriverTest(unittest.TestCase):
 
     def test_frida_build_uses_the_worktrees_own_checkout(self):
         play = driver._tool('play')
+        oracle = driver._tool('oracle')
         calls = []
-        out = os.path.join(tempfile.mkdtemp(), 'iwd2r.exe')
-        self.addCleanup(shutil.rmtree, os.path.dirname(out), True)
-        open(os.path.splitext(out)[0] + '.map', 'w').close()
-        with mock.patch.object(play, 'sync_windows',
-                               lambda **kw: calls.append(('sync', kw))), \
+        base = os.path.join(tempfile.mkdtemp(), 'iwd2r-build')
+        self.addCleanup(shutil.rmtree, os.path.dirname(base), True)
+        want = base + '-p3-wso-i009'
+        out = os.path.join(want, driver.X86_MAP_REL[:-len('.map')] + '.exe')
+        _write(os.path.splitext(out)[0] + '.map', '')
+        for name in (oracle.INJECTOR, oracle.RECORDER):
+            _write(os.path.join(want, oracle.REPLAY_DIR_REL, name), '')
+        with mock.patch.object(play, 'WIN_BUILD_BASE', base), \
+                mock.patch.object(play, 'sync_windows',
+                                  lambda **kw: calls.append(('sync', kw))), \
                 mock.patch.object(play, 'build_windows_x86',
                                   lambda **kw: calls.append(('build', kw)) or out), \
                 mock.patch.dict(os.environ, {'IWD2R_WIN_CHECKOUT': '/mnt/c/driver-checkout'}):
             got = driver.frida_build('/home/x/wt/p3-wso-i009', log_path='/l/b.log')
-        want = play.WIN_BUILD_BASE + '-p3-wso-i009'
-        self.assertEqual(got, (want, os.path.splitext(out)[0] + '.map'))
-        self.assertEqual(calls, [('sync', {'root': '/home/x/wt/p3-wso-i009', 'checkout': want}),
-                                 ('build', {'checkout': want, 'log_path': '/l/b.log'})])
-        os.unlink(os.path.splitext(out)[0] + '.map')
-        with mock.patch.object(play, 'sync_windows', lambda **kw: None), \
-                mock.patch.object(play, 'build_windows_x86', lambda **kw: out):
+            self.assertEqual(got, (want, os.path.splitext(out)[0] + '.map'))
+            # ours, and the injector and recorder the original side runs: the
+            # recorder built from the same tree as our dumper
+            self.assertEqual(calls, [('sync', {'root': '/home/x/wt/p3-wso-i009', 'checkout': want}),
+                                     ('build', {'checkout': want, 'log_path': '/l/b.log',
+                                                'target': 'iwd2r iwd2r_injector iwd2r_recorder'})])
+            os.unlink(os.path.join(want, oracle.REPLAY_DIR_REL, oracle.RECORDER))
+            with self.assertRaises(RuntimeError) as cm:
+                driver.frida_build('/home/x/wt/p3-wso-i009')
+            self.assertIn(oracle.RECORDER, str(cm.exception))
+            os.unlink(os.path.splitext(out)[0] + '.map')
             with self.assertRaises(RuntimeError):
                 driver.frida_build('/home/x/wt/p3-wso-i009')
 
@@ -10729,6 +10886,131 @@ class DriverTest(unittest.TestCase):
                 {'address': '0x402000', 'name': 'IcewindMisc::Roll'},
                 {'address': '0x403000', 'name': 'Rules::Tick'}]
         return d, {'branch': 'p3/wso-b011', 'rows': rows}
+
+    def _coverage_map(self, hits, hooked=('0x401000', '0x402000', '0x403000')):
+        phase = driver._tool('truth').FRIDA_SCENARIOS
+        cov = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.root),
+               'at': '2026-10-24T00:00:00Z',
+               'scenarios': {sc: {'hooks': 3, 'refused': [], 'failed_chunks': [],
+                                  'measured': len(hooked), 'hooked': list(hooked),
+                                  'hits': hits.get(sc, {})} for sc in phase}}
+        _write(os.path.join(self.root, 'docs', 'wso', 'coverage.json'), json.dumps(cov))
+
+    def test_driver_frida_phase_skips_launches_when_coverage_hits_no_row(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
+        d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        text = 'coverage: no scenario hits it'
+        self.assertEqual(len(findings), len(d._frida_got))
+        self.assertTrue(findings)
+        self.assertEqual(set(d._frida_got.values()), {('not-exercised', text)})
+        for f in findings:
+            self.assertIn('"not-exercised (%s)"' % text, f)
+        self.assertIn('b011: frida: skipped, coverage says no scenario exercises any row',
+                      self.logs)
+
+    def test_driver_frida_phase_runs_as_today_when_one_row_is_covered(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'first_fight': {'0x402000': 4}})
+        built = []
+        inner = d.frida_build
+        d.frida_build = lambda *a, **kw: built.append(1) or inner(*a, **kw)
+        ran = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            ran.append(sorted(h['name'] for h in table['original']['hooks']))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertEqual(built, [1])
+        self.assertEqual(len(ran), 1)
+        self.assertTrue(len(ran[0]) >= 2)   # uncovered rows stay in the table
+        self.assertNotIn('b011: frida: skipped, coverage says no scenario exercises any row',
+                         self.logs)
+
+    def test_driver_frida_phase_runs_when_a_row_was_not_measured(self):
+        # an unmeasured row is unknown, not dead: the phase runs
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}}, hooked=('0x401000', '0x402000'))
+        built = []
+        d.frida_build = lambda *a, **kw: built.append(1) or (_ for _ in ()).throw(
+            SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(built, [1])
+
+    def test_driver_frida_phase_ignores_an_incomplete_coverage_map(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        path = os.path.join(self.root, 'docs', 'wso', 'coverage.json')
+        cov = json.loads(_slurp(path))
+        cov['scenarios']['first_fight']['failed_chunks'] = [2]
+        _write(path, json.dumps(cov))
+        d.frida_build = lambda *a, **kw: (_ for _ in ()).throw(SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertIn('map has failed chunk(s) in first_fight', '\n'.join(self.logs))
+        del cov['scenarios']['first_fight']
+        _write(path, json.dumps(cov))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        _write(path, json.dumps({'scenarios': 5}))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+
+    def test_driver_frida_phase_ignores_a_stale_coverage_map(self):
+        d, batch = self._import_phase_driver()
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        _write(os.path.join(self.root, 'scenarios', 'new.txt'), 'quit\n')
+        built = []
+        d.frida_build = lambda *a, **kw: built.append(1) or (_ for _ in ()).throw(
+            SystemExit('stop here'))
+        with self.assertRaises(driver._StageError):
+            d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(built, [1])
+
+    def test_driver_frida_phase_falls_back_to_the_ghidra_export_signature(self):
+        d, batch = self._import_phase_driver()
+        # 403000's evidence loses its Decompiled section
+        with open(os.path.join(self.wt, 'docs', 'evidence', '403000.md'), 'w') as f:
+            f.write('---\naddress: 0x403000\nname: Rules::Tick\nkind: read-only\n---\n')
+        self.git('commit', '-qam', 'no decompiled section', cwd=self.wt)
+        ex = os.path.join(self.tmp, 'exports')
+        os.makedirs(os.path.join(ex, 'decompile'))
+        with open(os.path.join(ex, 'decompile', '403000.c'), 'w') as f:
+            f.write('\nint Tick(int a,\n         int b)\n\n{\n  return 0;\n}\n')
+        names = []
+
+        def frida_run(batch_id, table, scenarios, **kw):
+            names.append(sorted(h['name'] for h in table['original']['hooks']))
+            return {sc: {'orig': [], 'ours': [], 'orig_path': None, 'ours_path': None,
+                         'failed': 'x', 'dumps': None} for sc in scenarios}
+        d.frida_run = frida_run
+        line = ('b011: frida: 0x403000 signature from the Ghidra export '
+                '(the evidence gives none)')
+        d.exports_dir = ex
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertIn('fn_403000', names[0])
+        self.assertIn(line, self.logs)
+        # without the export the row is skipped as before
+        names.clear()
+        self.logs.clear()
+        d.exports_dir = os.path.join(self.tmp, 'no-exports')
+        try:
+            d._frida_phase('b011', batch, self.wt, {})
+        except driver._StageError:
+            pass
+        self.assertNotIn('fn_403000', names[0] if names else [])
+        self.assertNotIn(line, self.logs)
 
     def test_driver_frida_phase_runs_for_import_kind(self):
         trace = TruthTest._trace
@@ -11252,8 +11534,90 @@ class DriverTest(unittest.TestCase):
         self.assertIn('0x401000: no verdict line', w.briefs[1])
         self.assertIn('BRIEF b011', w.briefs[1])
 
+    WRAPPED = ('corroborated by WSO at e8dd16a7: the guard and the clamp are\n'
+               'the same in both builds, the oracle sweep agrees on every\n'
+               'sampled argument and the trace shows one path, so the\n'
+               'original and ours cannot differ on the swept domain,\n'
+               'which is what the replay needs, and nothing else reads the\n'
+               'result; the other callers only forward it to the renderer;\n'
+               'case %s decides.\n')
+
+    def _set_evidence(self, stem, body):
+        path = os.path.join(self.wt, 'docs', 'evidence', stem + '.md')
+        with open(path, 'w') as f:
+            f.write('---\naddress: 0x%s\nname: F\nkind: oracle\n---\n\n%s' % (stem, body))
+        self.git('commit', '-qam', 'evidence ' + stem, cwd=self.wt)
+
+    def test_check_flags_evidence_without_the_deciding_sentence(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        self._set_evidence('401000', 'disagreed with WSO at e8dd16a7: the guard; case other decides\n')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        _verdicts, probs = d._check('b011', self.wt, self.REPORT)
+        self.assertEqual(probs, [
+            '0x401000: docs/evidence/401000.md has no sentence reading "disagreed '
+            'with WSO at <sha>: ...; case dump-401000 decides" (or "corroborated '
+            'by WSO ..."); write it in the ## WSO delta section'])
+
+    def test_check_probe_row_needs_the_deciding_sentence_too(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        case = 'probe-b011-402000'
+        self._set_evidence('401000', self.WRAPPED % 'dump-401000')
+        self._set_evidence('402000', 'corroborated by WSO at e8dd16a7: same\n')
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [
+            '0x402000: docs/evidence/402000.md has no sentence reading "disagreed '
+            'with WSO at <sha>: ...; case %s decides" (or "corroborated by WSO '
+            '..."); write it in the ## WSO delta section' % case])
+        self._set_evidence('402000', self.WRAPPED % case)
+        _v, probs = d._check('b011', self.wt, self.REPORT.replace(
+            'fork case probe-b011-402000', 'ours case ' + case))
+        self.assertEqual(probs, [])
+
+    def test_check_flags_a_pin_the_evidence_does_not_cite(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['fork_base'] = 'e8dd16a7'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self._set_evidence('401000', 'disagreed with WSO at 1234567: the guard; case dump-401000 decides\n')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        _verdicts, probs = d._check('b011', self.wt, self.REPORT)
+        self.assertEqual(probs, [
+            'docs/evidence/401000.md: no "disagreed with WSO at <sha>" / '
+            '"corroborated by WSO at <sha>" line names this batch\'s pin e8dd16a'])
+
+    def test_check_does_not_read_evidence_of_triage_decided_rows(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        self._set_evidence('401000', self.WRAPPED % 'dump-401000')
+        self._set_evidence('402000', self.WRAPPED % 'probe-b011-402000')
+        self._set_evidence('403000', 'disagreed with WSO at e8dd16a7: x; case nothing decides\n')
+        report = self.REPORT + 'verdict 0x403000 fork case probe-x\n'
+        verdicts, probs = d._check('b011', self.wt, report)
+        self.assertEqual(probs, [])
+        self.assertNotIn('0x403000', verdicts)
+        self.assertIn('0x403000', d._ignored)
+
+    def test_check_fix_round_carries_the_evidence_problem_to_the_worker(self):
+        outer = self
+
+        class Fixer(_SeqWorker):
+            def run(self, brief, cwd):
+                res = super().run(brief, cwd)
+                if len(self.briefs) == 2:
+                    outer._set_evidence('401000', outer.WRAPPED % 'dump-401000')
+                return res
+        w = Fixer(self.REPORT)
+        d = self._driver(worker=w)
+        self._set_evidence('401000', 'disagreed with WSO at e8dd16a7: the guard; case other decides\n')
+        self.assertEqual(d.run_batch('b011'), 'closed')
+        self.assertEqual(len(w.briefs), 2)
+        self.assertIn('docs/evidence/401000.md has no sentence reading "disagreed '
+                      'with WSO at <sha>: ...; case dump-401000 decides"', w.briefs[1])
+
     def test_malformed_report_is_a_check_failure(self):
-        w = _SeqWorker('## Verdicts\nI think it is ours.\n', self.REPORT)
+        w = _SeqWorker('## Verdicts\nI think 0x401000 is ours.\n', self.REPORT)
         d = self._driver(worker=w)
         self.assertEqual(d.run_batch('b011'), 'closed')
         self.assertIn('malformed verdict line', w.briefs[1])
@@ -11284,7 +11648,7 @@ class DriverTest(unittest.TestCase):
         diff = os.path.join(os.path.dirname(d.status_path), 'b011', 'review.diff')
         self.assertIn(diff, r.briefs[0])
         with open(diff) as f:
-            self.assertIn('probe-1 decides', f.read())
+            self.assertIn('dump-401000 decides', f.read())
         self.assertEqual(self._state()['status'], 'assigned')
         self.assertEqual(self.pushes, [])
         self.assertEqual(len(self.sent), 1)
@@ -11404,6 +11768,82 @@ class DriverTest(unittest.TestCase):
         d.next_batch = lambda *a, **kw: self.NOTHING
         self.assertEqual(d.run(), 0)
         self.assertEqual(ran, [])
+
+    def _live_clear_driver(self):
+        """The first cut (b011) runs and blocks on `release`; b012 is
+        assigned with an exception entry; the next cut would be b013."""
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b012'] = dict(state['batches']['b011'], branch='p3/wso-b012')
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        os.makedirs(os.path.dirname(d.status_path))
+        with open(d.status_path, 'w') as f:
+            json.dump({'exceptions': {'b012': {'stage': 'checks'}}, 'running': {},
+                       'batches': {'b012': {'outcome': 'exception',
+                                            'stage': 'checks'}}}, f)
+        d = self._reload(d)
+        inside, release = threading.Event(), threading.Event()
+        events = []
+
+        def run_batch(bid, resume=None):
+            events.append('run ' + bid)
+            if bid == 'b011':
+                inside.set()
+                self.assertTrue(release.wait(10))
+            return 'closed'
+        d.run_batch = run_batch
+        cuts = iter([(0, self.CUT), (0, self.CUT.replace('b011', 'b013')),
+                     self.NOTHING])
+
+        def cut(*a, **kw):
+            events.append('cut')
+            return next(cuts)
+        d.next_batch = cut
+        return d, inside, release, events
+
+    def _edit_status(self, d, fn):
+        with open(d.status_path) as f:
+            status = json.load(f)
+        fn(status)
+        with open(d.status_path, 'w') as f:
+            json.dump(status, f)
+
+    def _run_with_clear(self, d, inside, release, edit):
+        codes = []
+        t = threading.Thread(target=lambda: codes.append(d.run()))
+        t.start()
+        try:
+            self.assertTrue(inside.wait(10))
+            self._edit_status(d, edit)
+        finally:
+            release.set()
+            t.join(20)
+        return codes
+
+    def test_run_picks_up_an_exception_cleared_while_running(self):
+        d, inside, release, events = self._live_clear_driver()
+        codes = self._run_with_clear(
+            d, inside, release, lambda s: s.__setitem__('exceptions', {}))
+        self.assertEqual(codes, [0])
+        # The cleared batch goes before the next cut, and only once.
+        self.assertEqual(events, ['cut', 'run b011', 'run b012', 'cut',
+                                  'run b013', 'cut'])
+        line = ('b012: exception cleared while running; retrying at its '
+                'checks stage')
+        self.assertEqual(self.logs.count(line), 1)
+
+    def test_live_clear_skips_a_batch_that_is_still_running(self):
+        d, inside, release, events = self._live_clear_driver()
+
+        def edit(s):
+            s['exceptions'] = {}
+            s['running'] = {'b012': {'at': 't'}}   # stale: its own retry
+        codes = self._run_with_clear(d, inside, release, edit)
+        self.assertEqual(codes, [0])
+        self.assertNotIn('run b012', events)
+        self.assertEqual([l for l in self.logs if 'cleared while running' in l], [])
 
     def _reload(self, d):
         """A fresh Driver over the same paths, reading the status file again."""
@@ -12311,7 +12751,7 @@ class DriverTest(unittest.TestCase):
             self.git('worktree', 'add', '-q', '-b', 'p3/wso-' + bid, wt, 'first')
             _write(os.path.join(wt, 'docs', 'evidence', addr[2:] + '.md'),
                    f'---\naddress: {addr}\nname: F{n}\nkind: oracle\n---\n\n'
-                   'corroborated by WSO at e8dd16a7\n')
+                   f'corroborated by WSO at e8dd16a7; case dump-{bid} decides\n')
             if on_branch:
                 on_branch(wt, bid)
             self.git('add', '-A', cwd=wt)
@@ -12718,7 +13158,7 @@ class DriverTest(unittest.TestCase):
                 pass
         # the fix-round, resume and check texts, rendered
         quoted += re.findall(r'`(git [^`]*)`', driver.FIX_PROMPT + driver.RESUME_PREAMBLE
-                             + driver.REVIEW_BRIEF)
+                             + driver.REVIEW_BRIEF + ''.join(driver.FIX_REPORT_RULES.values()))
         self.assertTrue(any(q.startswith('git show') for q in quoted), quoted)
         self.assertTrue(any(q.startswith('git rm') for q in quoted), quoted)
         for q in quoted:
@@ -12727,6 +13167,14 @@ class DriverTest(unittest.TestCase):
             self.assertFalse(driver._history_rewrite(args, ['src/A.cpp']), q)
         # and the checker notices a forbidden quote
         self.assertTrue(driver._history_rewrite(['checkout', 'first', '--', 'x']))
+        # i003's worker ran `git stash list --format='%H %gs'`: reading the
+        # stash is not a rewrite; every other stash form still is
+        self.assertFalse(driver._history_rewrite(['stash', 'list', "--format=%H %gs"]))
+        self.assertFalse(driver._history_rewrite(['stash', 'show', '-p', 'stash@{0}']))
+        for form in (['stash'], ['stash', 'push', '-m', 'x'], ['stash', 'pop'],
+                     ['stash', 'apply'], ['stash', 'drop'], ['stash', 'clear'],
+                     ['stash', '--include-untracked']):
+            self.assertTrue(driver._history_rewrite(form), form)
         # The prose remedies too (first's 021a6cb0): no worker-facing text tells
         # a worker to revert or restore, and none puts a whole file back except
         # the out-of-scope-path check, whose files hold no batch row.
@@ -12734,6 +13182,7 @@ class DriverTest(unittest.TestCase):
                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
                  and id(n) not in docs and ' ' in n.value]
         prose += [driver.FIX_PROMPT, driver.RESUME_PREAMBLE, driver.REVIEW_BRIEF]
+        prose += list(driver.FIX_REPORT_RULES.values())
         for rel in ('import-brief-template.md', 'brief-template.md', 'README.md'):
             prose.append(_slurp(os.path.join(ROOT, 'docs', 'wso', rel)))
         verb = re.compile(r'\b(?:revert|restor)\w*', re.I)
@@ -12915,7 +13364,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('could not be read', probs[0])
 
     def test_mechanical_checks_include_transcript_problems(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
         path = self._tcalls(('Bash', {'command': 'git show wso/main:src/A.cpp'}))
@@ -13007,8 +13456,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(self._bash('cat src/A.cpp | head -300')), 1)
 
     def test_mechanical_checks_refuse_dump_decided_fork_or_neither(self):
-        d = self._mc_repo({'76D370': 'kind: oracle\ncorroborated by WSO at abc',
-                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'kind: oracle\ncorroborated by WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
@@ -13102,8 +13551,8 @@ class DriverTest(unittest.TestCase):
         b011 has a second row triage moves to the import list."""
         evidence = {'docs/evidence/%X.md' % a: (
             '---\naddress: 0x%X\nname: F\nkind: oracle\n---\n\n'
-            'corroborated by WSO at e8dd16a7\n' % a)
-            for a in (0x40B000, 0x40C000)}
+            'corroborated by WSO at e8dd16a7; case dump-%s decides\n' % (a, b))
+            for a, b in ((0x40B000, 'b011'), (0x40C000, 'b012'))}
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w},
                               ids=('b011', 'b012'), base_files=evidence, **kw)
@@ -13395,9 +13844,22 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(any('both a verdict line and an undecided line' in p
                             for p in problems), problems)
 
+    def test_fix_prompt_report_rule_follows_the_batch_kind(self):
+        # i002 wrote "(none; this is an import batch)" under ## Verdicts because
+        # the fix-round prompt asked every batch for that section
+        imp = driver.fix_prompt('i002', 'checks', 'p3/wso-i002', 'BRIEF', ['p1', 'p2'], 'import')
+        self.assertIn('do not write a `## Verdicts` section at all', imp)
+        self.assertNotIn('full `## Verdicts` section', imp)
+        self.assertIn('- p1\n- p2', imp)
+        self.assertTrue(imp.rstrip().endswith('BRIEF'))
+        wave = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', 'BRIEF', ['p1'])
+        self.assertIn('full `## Verdicts` section', wave)
+        self.assertNotIn('import batch', wave)
+
     def test_the_fix_round_header_names_undecided_and_notes(self):
+        rendered = driver.fix_prompt('b011', 'checks', 'p3/wso-b011', '', ['p'])
         for needle in ('## Undecided', '## Notes', 'verdict lines only', 'Never write `ours`'):
-            self.assertIn(needle, driver.FIX_PROMPT)
+            self.assertIn(needle, rendered)
         with open(os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')) as f:
             text = f.read()
         for needle in ('undecided <0xADDR> <fork|neither> <one-line reason>',
@@ -13460,8 +13922,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.sent, ['driver: b011 exception at worker; see %s' % d.status_path])
 
     def test_probe_phrase_applies_only_to_driver_recorded_probe_passes(self):
-        d = self._mc_repo({'76D370': 'kind: oracle\ndisagreed with WSO at abc',
-                           '401000': 'kind: oracle\ndisagreed with WSO at abc'})
+        d = self._mc_repo({'76D370': 'kind: oracle\ndisagreed with WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ndisagreed with WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         ok = self._mc_run(0, [])
@@ -13475,7 +13937,7 @@ class DriverTest(unittest.TestCase):
                 batch, d, {'0x76D370': ('ours', 'probe-b011-76D370'), '0x401000': ('ours', 'x')},
                 run=ok)
             self.assertEqual(len(probs), 1)
-            self.assertIn("'corroborated by WSO at <sha>'", probs[0])
+            self.assertIn("'corroborated by WSO at <sha>: ...; case probe-b011-76D370 decides'", probs[0])
             # The driver's probe set decides whatever the case says.
             probs = driver.mechanical_checks(
                 batch, d, {'0x76D370': ('ours', 'x'), '0x401000': ('ours', 'x')},
@@ -13484,8 +13946,8 @@ class DriverTest(unittest.TestCase):
             self.assertIn('401000.md', probs[0])
 
     def test_a_fork_verdict_needs_a_kind_line_in_the_evidence(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc',
-                           '401000': 'kind: oracle\ncorroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides',
+                           '401000': 'kind: oracle\ncorroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:2]
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
@@ -13958,7 +14420,7 @@ class DriverTest(unittest.TestCase):
         self.assertNotEqual(res.returncode, 0)
 
     def test_mechanical_checks_leave_the_map_to_the_close(self):
-        d = self._mc_repo({'76D370': 'corroborated by WSO at abc'})
+        d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         calls = []
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             driver.mechanical_checks(self._mc_batch(), d, {'0x76d370': ('ours', 'c')},
@@ -14207,6 +14669,119 @@ class DriverTest(unittest.TestCase):
         with mock.patch.object(wave, '_cut_worktree', return_value=('/wt', 'new')):
             rc, out = wave.next_batch(dp, w1, 20, repo=self.root, import_path=ip)
         self.assertTrue(out.startswith('b001 assigned'), out)
+
+    # -- wave.py unpark ----------------------------------------------------------
+
+    def _unpark_fixture(self):
+        tmp, dp, ip = self._import_repo()
+        wave = driver._tool('wave')
+        imp = os.path.join(tmp, 'import-state.json')
+        row = lambda a, n, f: {'address': a, 'name': n, 'file': f, 'their_len': 70, 'our_len': 2}
+        state = {'batches': {
+            'i001': {'status': 'closed', 'branch': 'p3/wso-i001', 'files': ['src/A.cpp', 'src/C.cpp'],
+                     'verdicts': {}, 'rows': [row('0x401000', 'F', 'src/A.cpp'),
+                                              row('0x403000', 'H', 'src/C.cpp')]},
+            'i002': {'status': 'assigned', 'branch': 'p3/wso-i002', 'files': ['src/D.cpp'],
+                     'verdicts': {}, 'rows': [row('0x404000', 'I', 'src/D.cpp')]}}}
+        with open(imp, 'w') as f:
+            json.dump(state, f)
+        folder = os.path.join(self.root, 'docs', 'wso', 'import-parked')
+        os.makedirs(folder)
+        for a, n, b in (('403000', 'H', 'i001'), ('404000', 'I', 'i002'), ('405000', 'J', 'i001')):
+            with open(os.path.join(folder, a + '.json'), 'w') as f:
+                json.dump({'address': '0x' + a, 'name': n, 'file': 'src/x.cpp', 'batch': b,
+                           'needs': 'world_entry: not exercised'}, f)
+        return tmp, dp, ip, imp, folder, wave
+
+    def _unpark_snapshot(self, imp, folder):
+        with open(imp) as f:
+            st = f.read()
+        return st, sorted(os.listdir(folder))
+
+    def test_unpark_moves_the_row_and_next_offers_it_again(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        rc, out = wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        lines = out.splitlines()
+        self.assertEqual(lines[0], 'unparked 0x403000 H (was world_entry: not exercised) from i001')
+        self.assertIn('import-state.json', lines[-1])
+        self.assertIn('docs/wso/import-parked', lines[-1])
+        self.assertFalse(os.path.exists(os.path.join(folder, '403000.json')))
+        with open(imp) as f:
+            b = json.load(f)['batches']['i001']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x401000'])
+        (u,) = b['unparked']
+        self.assertEqual((u['address'], u['reason'], u['needs']),
+                         ('0x403000', 'needs met', 'world_entry: not exercised'))
+        self.assertRegex(u['at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d')
+        rc, out = wave.next_batch(dp, imp, 20, wave.IMPORT_CATEGORY, repo=self.root,
+                                  import_path=ip, worktree_root=os.path.join(tmp, 'wts'),
+                                  queue='import')
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(out.startswith('i003 assigned: 1 rows'), out)
+        with open(imp) as f:
+            (r,) = json.load(f)['batches']['i003']['rows']
+        self.assertEqual((r['address'], r['category']), ('0x403000', 'theirs_real_ours_stub'))
+        # A second unpark of the same address: not parked any more.
+        rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual((rc, out), (1, '403000: not parked\n'))
+
+    def test_unpark_reason_and_any_address_spelling(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        # the parked file may carry a worker's spelling (0x prefix, lower
+        # case): the file that was read is the file that goes
+        os.rename(os.path.join(folder, '403000.json'), os.path.join(folder, '0x403000.json'))
+        rc, out = wave.unpark(['0X403000'], 'signature parses now', state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('0x403000.json', os.listdir(folder))
+        with open(imp) as f:
+            self.assertEqual(json.load(f)['batches']['i001']['unparked'][0]['reason'],
+                             'signature parses now')
+
+    def test_unpark_reports_a_parked_file_it_could_not_delete(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        real_unlink = os.unlink
+
+        def failing(path):
+            if path.endswith('403000.json'):
+                raise PermissionError(13, 'Permission denied', path)
+            real_unlink(path)
+        with mock.patch.object(os, 'unlink', failing):
+            rc, out = wave.unpark(['403000'], None, state_path=imp, repo=self.root)
+        self.assertEqual(rc, 1, out)
+        self.assertIn('unparked 0x403000 H', out)
+        self.assertIn('the state is saved but these parked files remain', out)
+        self.assertIn('403000.json (Permission denied)', out)
+        self.assertIn('403000.json', os.listdir(folder))
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual([r['address'] for r in st['batches']['i001'].get('unparked', [])],
+                         ['0x403000'])
+
+    def test_unpark_refusals_write_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        for args, msg in ((['0x401000'], '0x401000: not parked\n'),
+                          (['0x404000'], '0x404000: in assigned batch i002; close or clear it first\n'),
+                          (['0x405000'], '0x405000: in no import batch\n'),
+                          # one good address does not carry a bad one through
+                          (['0x403000', '0x404000'],
+                           '0x404000: in assigned batch i002; close or clear it first\n')):
+            rc, out = wave.unpark(args, None, state_path=imp, repo=self.root)
+            self.assertEqual((rc, out), (1, msg))
+            self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_unpark_leaves_scorecard_and_status_working(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self.assertEqual(wave.unpark(['0x403000'], None, state_path=imp, repo=self.root)[0], 0)
+        report = os.path.join(tmp, 'report.md')
+        with open(report, 'w') as f:
+            f.write('# R\n\n## Scorecard\n\nold\n')
+        rc, out = wave.write_scorecard(imp, report, os.path.join(tmp, 'no-triage.json'))
+        self.assertEqual(rc, 0, out)
+        rc, out = wave.status(imp)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('i001 closed p3/wso-i001 1 rows', out)
 
     def test_queue_import_driver_wiring(self):
         tmp, dp, ip = self._import_repo()
@@ -14672,6 +15247,69 @@ class TruthTest(unittest.TestCase):
         table = truth.hook_table(self.TYPED_ROWS[3:], self.TYPED_SIGS, self.TYPED_MAP, ['s'], headers)
         self.assertEqual(table['typed_from'], {'0x400': 'ghidra', '0x500': 'ghidra'})
 
+    def test_proto_type_typedefs(self):
+        self.assertEqual(truth._proto_type('POSITION'), 'ptr')
+        self.assertEqual(truth._proto_type('const RESREF'), 'ptr')
+        self.assertEqual(truth._proto_type('HWND'), 'ptr')
+        self.assertEqual(truth._proto_type('RESID'), 'u32')
+        self.assertEqual(truth._proto_type('WPARAM'), 'u32')
+        self.assertEqual(truth._proto_type('LRESULT'), 's32')
+        self.assertEqual(truth._proto_type('LONG_PTR'), 's32')
+        self.assertIsNone(truth._proto_type('CString'))
+
+    B019_HEADERS = ('class CGameEffectList {\npublic:\n'
+                    '    void RemoveAllOfType(CGameSprite* pSprite, WORD effectID, POSITION posLeave, LONG effectAmount);\n'
+                    '    void Take(CString s, RESREF resref, DWORD n);\n};\n')
+
+    def test_typed_from_headers_takes_ghidra_type_for_unknown_slot(self):
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::RemoveAllOfType', 4, 'thiscall',
+                                        ['u32', 'u16', 'u32', 's32'], None)
+        self.assertEqual(got[:3], ('thiscall', ['ptr', 'u16', 'ptr', 's32'], None))
+        self.assertFalse(got[4])
+        # a class by value with Ghidra's slot count: the slot takes Ghidra's type, the row is mixed
+        got = truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall',
+                                        ['u32', 'ptr', 'u32'], None)
+        self.assertEqual((got[1], got[3], got[4]), (['u32', 'ptr', 'u32'], ['ghidra', 'ours', 'ours'], True))
+        # a different count rejects it
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 2, 'thiscall',
+                                                    ['u32', 'ptr'], None))
+        self.assertIsNone(truth._typed_from_headers([self.B019_HEADERS], 'CGameEffectList::Take', 3, 'thiscall'))
+
+    def test_hook_table_mixed_typing_and_slots(self):
+        m = ' 0001:00001000       ?Take@CGameEffectList@@QAEXPAEK@Z 00401000 f a.obj\n'
+        rows = [{'address': '0x100', 'name': 'CGameEffectList::Take'}]
+        table = truth.hook_table(rows, {'0x100': 'void Take(uint a, byte *b, uint c)'}, m, ['s'], self.B019_HEADERS)
+        self.assertEqual(table['typed_from'], {'0x100': 'mixed'})
+        self.assertEqual(table['typed_slots'], {'0x100': ['ghidra', 'ours', 'ours']})
+
+    B019_ORIG = [{'tag': 'fn_100', 'a0_u32': 91363456, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+    B019_OURS = [{'tag': 'fn_100', 'a0_u32': 145435200, 'a1_u32': 142, 'a2_ptr': None, 'a3_s32': 39}]
+
+    def test_address_like_untyped_argument_is_not_measured(self):
+        rows = [{'address': '0x100', 'name': 'X'}]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'], ('not measured', 'address-like untyped argument a0 (91363456 vs 145435200); '
+                                                    'type it from the header'))
+        # exact slots of a mixed row
+        info = {'typed_from': {'0x100': 'mixed'}, 'typed_slots': {'0x100': ['ghidra', 'ours', 'ours', 'ours']}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'not measured')
+        # header-typed slot stays different
+        info = {'typed_from': {'0x100': 'ours'}, 'typed_slots': {'0x100': ['ours'] * 4}}
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, self.B019_OURS)}, rows, info=info)
+        self.assertEqual(v['0x100'][0], 'different')
+        # another field differing too, or a non-address value, stays different
+        other = [dict(self.B019_OURS[0], a1_u32=143)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, other)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        small = [dict(self.B019_OURS[0], a0_u32=5)]
+        v = truth.frida_verdicts({'s': (self.B019_ORIG, small)}, rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+        only1 = [dict(self.B019_ORIG[0], a1_u32=142)]
+        v = truth.frida_verdicts({'s': ([dict(self.B019_ORIG[0], a1_u32=142)], [dict(self.B019_ORIG[0], a1_u32=143)])},
+                                 rows, info={'typed_from': {'0x100': 'ghidra'}})
+        self.assertEqual(v['0x100'][0], 'different')
+
     def test_ours_env_runs_under_replay_clock(self):
         env = probe.ours_env('C:\\game', 7)
         self.assertEqual(env['IWD2R_SEED'], '7')
@@ -14897,31 +15535,116 @@ class TruthTest(unittest.TestCase):
             self.assertEqual(seen, [])
             self.assertIsNone(got['world_entry']['dumps'])
 
+    @staticmethod
+    def _fixture_dump(name):
+        return json.loads(_slurp(os.path.join(ROOT, 'tests', 'fixtures',
+                                              'state_dump_%s.json' % name)))
+
+    @staticmethod
+    def _dump_sides(root, orig_dumps, ours_dumps):
+        """Two replay folders under root, each holding its {file name: dump}."""
+        sides = [os.path.join(root, side) for side in ('orig', 'ours')]
+        for side, dumps in zip(sides, (orig_dumps, ours_dumps)):
+            for name, dump in dumps.items():
+                _write(os.path.join(side, name), json.dumps(dump))
+        return sides
+
     def test_compare_dumps_uses_the_replay_compare(self):
-        import tempfile
         with tempfile.TemporaryDirectory() as root:
             script = os.path.join(root, 'scenario.txt')
             _write(script, 'wait 10\ncheckpoint world\nquit\n')
-            sides = [os.path.join(root, side) for side in ('orig', 'ours')]
-            dump = {'frame': 10, 'checkpoint': 'world', 'screen': 'world', 'rng_state': 1,
-                    'world': {'area': 'AR1000'}}
-            for side in sides:
-                _write(os.path.join(side, 'checkpoint-world.json'), json.dumps(dump))
-                _write(os.path.join(side, 'frame-30.json'), json.dumps(dict(dump, frame=30)))
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            same = {'checkpoint-world.json': world, 'frame-30.json': periodic}
+            sides = self._dump_sides(root, same, same)
             got = truth.compare_dumps(sides[0], sides[1], script)
             self.assertEqual(got, {'match': True,
                                    'detail': '1 checkpoints and 1 periodic dumps match'})
-            _write(os.path.join(sides[1], 'frame-30.json'),
-                   json.dumps(dict(dump, frame=30, world={'area': 'AR1001'})))
+            moved = json.loads(json.dumps(periodic))
+            moved['chargen']['rolls'][0] += 1
+            _write(os.path.join(sides[1], 'frame-30.json'), json.dumps(moved))
             got = truth.compare_dumps(sides[0], sides[1], script)
             self.assertIs(got['match'], False)
-            self.assertIn('world.area', got['detail'])
+            self.assertIn('chargen.rolls[0]', got['detail'])
             os.unlink(os.path.join(sides[1], 'checkpoint-world.json'))
             self.assertIn('MISSING', truth.compare_dumps(sides[0], sides[1], script)['detail'])
             empty = os.path.join(root, 'empty.txt')
             _write(empty, 'wait 10\nquit\n')
             self.assertIsNone(truth.compare_dumps(os.path.join(root, 'none1'),
                                                   os.path.join(root, 'none2'), empty)['match'])
+
+    def test_compare_dumps_skips_ours_only_and_timing_fields_as_the_harness_does(self):
+        # the b014 world_entry pair, in small: the recorder writes no
+        # search_wait_timeouts and the two runs' timing fields differ; the
+        # replay compare (oracle.field_differences) skips both, so the dumps
+        # match; a world value that differs does not
+        oracle = load_tool('oracle')
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            orig = {'checkpoint-world.json': json.loads(json.dumps(world)),
+                    'frame-30.json': json.loads(json.dumps(periodic))}
+            for dump in orig.values():
+                for field in oracle.OURS_ONLY_FIELDS:
+                    dump[field.split('.')[0]].pop(field.split('.')[1])
+            ours = {'checkpoint-world.json': json.loads(json.dumps(world)),
+                    'frame-30.json': json.loads(json.dumps(periodic))}
+            for dump in ours.values():
+                dump['globals']['search_wait_timeouts'] = 3
+                for field in oracle.TIMING_FIELDS:
+                    if field == 'frame':
+                        dump['frame'] += 1
+                    else:
+                        dump['globals'][field.split('.')[1]] += 1
+            self.assertEqual(set(oracle.OURS_ONLY_FIELDS) | set(oracle.TIMING_FIELDS),
+                             {'globals.search_wait_timeouts', 'frame', 'globals.au_counter',
+                              'globals.ai_stalled_frames', 'globals.ai_overlap_frames',
+                              'globals.in_async_update', 'globals.held_frames'})
+            sides = self._dump_sides(root, orig, ours)
+            self.assertEqual(truth.compare_dumps(sides[0], sides[1], script),
+                             {'match': True, 'detail': '1 checkpoints and 1 periodic dumps match'})
+            hurt = json.loads(json.dumps(ours['checkpoint-world.json']))
+            hurt['world']['enemy_creatures'][0]['hp'] -= 1
+            _write(os.path.join(sides[1], 'checkpoint-world.json'), json.dumps(hurt))
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIs(got['match'], False)
+            self.assertIn('DIFF world.enemy_creatures[0].hp: original 4, ours 3', got['detail'])
+
+    def test_compare_dumps_refuses_dumps_the_schema_refuses(self):
+        # replay record checks every dump against schema.json (finish_replay)
+        # before anything compares it; a recorder built before the schema
+        # grew world.enemy_creatures and party morale (the b014/i001 runs:
+        # recorder.dll of 2026-10-17 12:15) is caught there, not read as an
+        # engine difference: no verdict, the side and the cause named
+        oracle = load_tool('oracle')
+        with tempfile.TemporaryDirectory() as root:
+            script = os.path.join(root, 'scenario.txt')
+            _write(script, 'wait 10\ncheckpoint world\nquit\n')
+            world, periodic = self._fixture_dump('world'), self._fixture_dump('periodic')
+            stale = json.loads(json.dumps(world))
+            del stale['world']['enemy_creatures']
+            for member in stale['world']['party']:
+                del member['morale']
+            sides = self._dump_sides(root, {'checkpoint-world.json': stale, 'frame-30.json': periodic},
+                                     {'checkpoint-world.json': world, 'frame-30.json': periodic})
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertIsNone(got['match'])
+            self.assertEqual(got['invalid'], {'original': 1})
+            self.assertIn("the original's dumps fail oracle/replay/schema.json (1 of 2; first: "
+                          "checkpoint-world.json: $.world: missing required property "
+                          "'enemy_creatures')", got['detail'])
+            self.assertIn('recorder', got['detail'])
+            self.assertIn('tools/oracle.py build', got['detail'])
+            # ours failing it names our dumper
+            sides = self._dump_sides(os.path.join(root, 'b'),
+                                     {'checkpoint-world.json': world},
+                                     {'checkpoint-world.json': stale})
+            got = truth.compare_dumps(sides[0], sides[1], script)
+            self.assertEqual((got['match'], got['invalid']), (None, {'ours': 1}))
+            self.assertIn("our dumps fail oracle/replay/schema.json", got['detail'])
+            # the same check as replay record's
+            self.assertTrue(any(oracle.check_dumps(sides[1], json.loads(
+                _slurp(oracle.REPLAY_SCHEMA))).values()))
 
     def test_frida_verdicts_dump_guard(self):
         # equal events and final totals, but the two runs did not keep the
@@ -14980,15 +15703,133 @@ class TruthTest(unittest.TestCase):
             truth.frida_run('b011', table, ['first_fight'], run=fake, root=root, clicks=1, timeout=77)
             c = fake.calls[0]
             self.assertEqual((c[c.index('--clicks') + 1], c[c.index('--timeout') + 1]), ('1', '77'))
-            # no build checkout: probe.py runs this checkout's build; with one,
-            # only ours runs it (the original side is the oracle's injector)
+            # no build checkout: probe.py runs this checkout's builds; with one,
+            # both sides run it (ours its exe, the original its injector and
+            # recorder: one tree writes both sides' dumps)
             self.assertFalse(any('--build-checkout' in c for c in fake.calls))
             fake.calls.clear()
             truth.frida_run('b011', table, ['first_fight'], run=fake, root=root,
                             build_checkout='/mnt/c/Users/u/iwd2r-build-p3-wso-i009')
             self.assertEqual([c[c.index('--build-checkout') + 1] if '--build-checkout' in c else None
                               for c in fake.calls],
-                             [None, '/mnt/c/Users/u/iwd2r-build-p3-wso-i009'])
+                             ['/mnt/c/Users/u/iwd2r-build-p3-wso-i009'] * 2)
+
+    def test_map_matches_constructors_and_destructors(self):
+        publics = {'??0CMessageHandler@@QAE@XZ': 0x220830,
+                   '??1CMessageHandler@@QAE@XZ': 0x222d20,
+                   '??_GCMessageHandler@@QAEPAXI@Z': 0x222d90,
+                   '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z': 0x224a60,
+                   '??1CInner@COuter@@QAE@XZ': 0x300000}
+        self.assertEqual(truth._map_matches('CMessageHandler::~CMessageHandler', publics),
+                         {0x222d20: '??1CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::CMessageHandler', publics),
+                         {0x220830: '??0CMessageHandler@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('COuter::CInner::~CInner', publics),
+                         {0x300000: '??1CInner@COuter@@QAE@XZ'})
+        self.assertEqual(truth._map_matches('CMessageHandler::AddMessage', publics),
+                         {0x224a60: '?AddMessage@CMessageHandler@@QAEFPAVCMessage@@H@Z'})
+        # the special members' tails read like any member's
+        self.assertEqual(truth.decorated_convention('??1CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('??0CMessageHandler@@QAE@XZ'), '__thiscall')
+        self.assertEqual(truth.decorated_convention('?Roll@IcewindMisc@@YAHHH@Z'), '__cdecl')
+        # a destructor's Ghidra head hooks as a thiscall with no arguments
+        self.assertEqual(truth._hook_signature('void CMessageHandler::~CMessageHandler(void)',
+                                               '??1CMessageHandler@@QAE@XZ'),
+                         ('thiscall', [], None))
+
+    def test_exports_default_matches_export_decompiles(self):
+        # truth repeats the four-line default rather than loading the module
+        # (which puts tools/ on sys.path); this keeps the two in step
+        import importlib.util
+        path = os.path.join(ROOT, 'tools', 'ghidra', 'export_decompiles.py')
+        spec = importlib.util.spec_from_file_location('_export_decompiles_for_test', path)
+        mod = importlib.util.module_from_spec(spec)
+        saved_path, saved_mods = list(sys.path), set(sys.modules)
+        try:
+            spec.loader.exec_module(mod)
+            for home in (os.path.join(tempfile.gettempdir(), 'iwd2r-home-for-test'), '', None):
+                with mock.patch.dict(os.environ, {'IWD2R_HOME': home} if home is not None else {},
+                                     clear=False):
+                    if home is None:
+                        os.environ.pop('IWD2R_HOME', None)
+                    self.assertEqual(truth.exports_default(), mod._exports_default())
+        finally:
+            sys.path[:] = saved_path
+            for name in set(sys.modules) - saved_mods:
+                del sys.modules[name]
+
+    def test_export_signature_reads_the_ghidra_export_head(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as ex:
+            os.makedirs(os.path.join(ex, 'decompile'))
+            with open(os.path.join(ex, 'decompile', '407280.c'), 'w') as f:
+                f.write('/* header */\nvoid CAIGroup::GroupProtectPoint\n'
+                        '  /* the args */\n          (uint param_1,int param_2,undefined4 param_3)\n'
+                        '\n{\n  return;\n}\n')
+            with open(os.path.join(ex, 'decompile', '407FC0.c'), 'w') as f:
+                f.write('// nothing here\n')
+            want = 'void CAIGroup::GroupProtectPoint (uint param_1,int param_2,undefined4 param_3)'
+            self.assertEqual(truth.export_signature('0x407280', ex), want)
+            self.assertEqual(truth.export_signature('0x407fc0', ex), None)
+            self.assertEqual(truth.export_signature('0x999999', ex), None)
+
+    def test_frida_run_retries_a_side_that_came_home_with_no_status_once(self):
+        import tempfile
+        import subprocess as sp
+        clean = 'HITS fn_5845D0 4\nRESULT: CLEAN\n'
+        table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
+
+        def make(root, ours_statuses, ours_exit_first=2):
+            calls = []
+
+            def fake(cmd, **kw):
+                calls.append(cmd)
+                target = cmd[cmd.index('--target') + 1]
+                out = cmd[cmd.index('--out') + 1]
+                d = os.path.join(root, 'runs', 'x-' + target, 'replay')
+                os.makedirs(d, exist_ok=True)
+                with open(os.path.join(d, out), 'w') as f:
+                    f.write(json.dumps({'tag': 'fn_5845D0', 'a0_s32': 1}) + '\n')
+                rc, st = 0, clean
+                if target == 'ours':
+                    n = sum(1 for c in calls if c[c.index('--target') + 1] == 'ours') - 1
+                    rc, st = ours_statuses[min(n, len(ours_statuses) - 1)]
+                sp_path = os.path.join(d, out + '.status')
+                if os.path.exists(sp_path):
+                    os.remove(sp_path)
+                if st is not None:
+                    with open(sp_path, 'w') as f:
+                        f.write(st)
+                return sp.CompletedProcess(cmd, rc, stdout='probe: runs/x-%s\n' % target, stderr='')
+            fake.calls = calls
+            return fake
+
+        def ours_calls(fake):
+            return [c for c in fake.calls if c[c.index('--target') + 1] == 'ours']
+        with tempfile.TemporaryDirectory() as root:
+            fake = make(root, [(2, None), (0, clean)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                dumps=lambda *a: {'match': True, 'detail': 'x'})['s1']
+            self.assertTrue(r['measured'])
+            self.assertTrue(r['ours_retried'])
+            self.assertNotIn('orig_retried', r)
+            ours = ours_calls(fake)
+            self.assertEqual(len(ours), 2)
+            self.assertEqual(ours[1][ours[1].index('--new-attempt') + 1],
+                             'driver frida b011 s1 retry: ours side came home with no status')
+            fake = make(root, [(2, None)])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root,
+                                attempt_reason=lambda sc, k: 'why %s %s' % (sc, k))['s1']
+            self.assertFalse(r['measured'])
+            self.assertIn('ours side exited 2', r['failed'])
+            self.assertEqual(len(ours_calls(fake)), 2)
+            self.assertEqual(ours_calls(fake)[1][ours_calls(fake)[1].index('--new-attempt') + 1],
+                             'why s1 ours retry: no status')
+            fake = make(root, [(2, 'HITS fn_5845D0 0\nRESULT: UNSAFE\n')])
+            r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
+            self.assertFalse(r['measured'])
+            self.assertNotIn('ours_retried', r)
+            self.assertEqual(len(ours_calls(fake)), 1)
 
     def test_frida_run_marks_exit2_side_not_measured(self):
         import tempfile
@@ -15147,6 +15988,91 @@ class TruthTest(unittest.TestCase):
             table = truth.hook_table(self.ROWS, self.SIGS, self.MAP, ['s1'])
             r = truth.frida_run('b011', table, ['s1'], run=fake, root=root)['s1']
             self.assertEqual(r['final'], {'orig': True, 'ours': False})
+
+    def test_a_site_frida_cannot_hook_is_reported_not_fatal(self):
+        # i001: CInfGame::CacheResFileWithResource is `ret 4` + int3 padding in
+        # our build (rva 0x1f26b0); Interceptor.attach threw at the script's
+        # top level, so the hooks after it, the loaded observation and the
+        # exit-time totals never installed: ours ended OBSERVER-ERROR with
+        # HITS-FINAL no, the error text only in the trace file
+        hooks_mod = load_tool('frida/hooks')
+        table = [{'name': 'fn_5A0950', 'rva': '0x1f26b0', 'conv': 'thiscall', 'args': ['ptr']},
+                 {'name': 'fn_5A04B0', 'rva': '0x1f26c0', 'conv': 'thiscall', 'args': ['ptr'],
+                  'ret': 's32'}]
+        js = hooks_mod.hooks_js(table)
+        self.assertEqual(js.count('try {'), 2)
+        self.assertEqual(js.count('Interceptor.attach('), 2)
+        for i, hook in enumerate(table):
+            one = hooks_mod.js_for_hook(hook, i)
+            self.assertLess(one.index('try {'), one.index('Interceptor.attach('))
+            catch = one[one.index('} catch (e) {'):]
+            self.assertIn("tag: 'unhooked', name: '%s'" % hook['name'], catch)
+            self.assertIn('error: String(e)', catch)
+        # every hook orig.py installs is guarded, its own loaded hook too
+        orig = load_tool('frida/orig')
+        full = orig.build_js({'hooks': table})
+        self.assertEqual(full.count("tag: 'unhooked'"), 3)
+        self.assertLess(full.index("tag: 'unhooked', name: 'loaded'"), full.index("tag: 'ready'"))
+        # the sidecar: an UNHOOKED line, no HITS line for it, the run still CLEAN
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        trace, status = os.path.join(d, 'o.jsonl'), os.path.join(d, 'o.status')
+        tr = orig.Trace(trace, status)
+        err = 'Error: unable to intercept function at 00B126B0; please file a bug'
+        tr.on_message({'type': 'send', 'payload': {'tag': 'unhooked', 'name': 'fn_5A0950',
+                                                   'addr': '0xb126b0', 'error': err}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'loaded'}}, None)
+        tr.on_message({'type': 'send', 'payload': {'tag': 'HITS', 'final': True, 'counts': {
+            'fn_5A0950': 0, 'fn_5A04B0': 2, 'loaded': 1}}}, None)
+        self.assertEqual(tr.finish('', 1), 0)
+        text = _slurp(status)
+        self.assertIn('UNHOOKED fn_5A0950 at 0xb126b0: ' + err + '\n', text)
+        self.assertNotIn('HITS fn_5A0950', text)
+        self.assertIn('HITS fn_5A04B0 2\n', text)
+        self.assertIn('HITS-FINAL yes\n', text)
+        self.assertIn('RESULT: CLEAN', text)
+        self.assertEqual(truth._read_status(status), ('CLEAN', {'fn_5A04B0': 2, 'loaded': 1}, True))
+        # the trace keeps the event: frida_verdicts reads it
+        self.assertEqual(json.loads(_slurp(trace).splitlines()[0]),
+                         {'tag': 'unhooked', 'name': 'fn_5A0950', 'addr': '0xb126b0', 'error': err})
+        # an unhooked loaded observation cannot pass for loaded
+        tr = orig.Trace(os.path.join(d, 'l.jsonl'), os.path.join(d, 'l.status'))
+        tr.on_message({'type': 'send', 'payload': {'tag': 'unhooked', 'name': 'loaded',
+                                                   'addr': '0x1', 'error': err}}, None)
+        self.assertEqual(tr.finish('', 1), 2)
+        self.assertIn('RESULT: NOT-LOADED', _slurp(os.path.join(d, 'l.status')))
+        # any other script error: its text in the status file, not only the trace
+        tr = orig.Trace(os.path.join(d, 'e.jsonl'), os.path.join(d, 'e.status'))
+        tr.on_message({'type': 'error', 'description': 'ReferenceError: x is not defined',
+                       'stack': 'ReferenceError: x is not defined\n    at <eval> (/script1.js:54:19)',
+                       'fileName': '/script1.js', 'lineNumber': 54, 'columnNumber': 19}, None)
+        tr.loaded = True
+        self.assertEqual(tr.finish('', 1), 2)
+        text = _slurp(os.path.join(d, 'e.status'))
+        self.assertIn('ERROR script: ReferenceError: x is not defined (/script1.js:54)\n', text)
+        self.assertIn('RESULT: OBSERVER-ERROR', text)
+
+    def test_frida_verdicts_a_row_frida_could_not_hook_is_not_measured(self):
+        rows = self.ROWS[:2]
+        t = self._trace(('fn_5845D0', 7, 3), ('fn_73F560', 1, 9))
+        err = 'Error: unable to intercept function at 00B126B0; please file a bug'
+        unhooked = {'tag': 'unhooked', 'name': 'fn_5845D0', 'addr': '0xb126b0', 'error': err}
+        ours = [unhooked] + [e for e in t if not str(e['tag']).startswith('fn_5845D0')]
+        base = {'failed': None, 'final': {'orig': True, 'ours': True},
+                'hits': {'orig': {'fn_5845D0': 1, 'fn_73F560': 1}, 'ours': {'fn_73F560': 1}},
+                'dumps': {'match': True, 'detail': 'ok'}}
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=t, ours=ours)}, rows)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'Frida could not hook it on ours in '
+                                                         'world_entry (%s)' % err))
+        self.assertEqual(v['0x73F560'], ('equal', 'identical in world_entry'))
+        # the original not calling it there proves nothing either: ours is blind
+        orig = [e for e in t if not str(e['tag']).startswith('fn_5845D0')]
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=orig, ours=ours)}, rows)
+        self.assertEqual(v['0x5845D0'][0], 'not measured')
+        # either side
+        v = truth.frida_verdicts({'world_entry': dict(base, orig=[unhooked] + orig, ours=t)}, rows)
+        self.assertEqual(v['0x5845D0'], ('not measured', 'Frida could not hook it on the original '
+                                                         'in world_entry (%s)' % err))
 
     def test_frida_batch_types_from_our_headers_by_default(self):
         seen = []
@@ -15626,7 +16552,8 @@ class WaveResolveTest(unittest.TestCase):
         with open(report) as f:
             text = f.read()
         with open(self.state) as f:
-            self.assertEqual(text, self.wave.scorecard_text(json.load(f)))
+            self.assertEqual(text, self.wave.scorecard_text(json.load(f))
+                             + '\nCoverage: not measured\n')
         self.assertNotIn('Audit sample', text)
 
     def test_scorecard_rejects_malformed_audit(self):
@@ -15697,6 +16624,18 @@ class WaveCloseRulesTest(unittest.TestCase):
         rc, out = self.close()
         self.assertEqual(rc, 1, out)
         self.assertIn('a fork/neither verdict decided by a dump reading (readout-643CD0)', out)
+
+    def test_close_passes_a_wrapped_deciding_sentence(self):
+        self.ready()
+        wrapped = ('---\nkind: replay\n---\n\n## WSO delta\n\n'
+                   'disagreed with\nWSO at e8dd16a: the guard\ndiffers in both\n'
+                   'builds and the replay\nshows it; case probe-9\ndecides.\n')
+        for stem in ('643CC0', '643CD0'):
+            with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md'), 'w') as f:
+                f.write(wrapped)
+        self.commit_worktree('wrap')
+        rc, out = self.close()
+        self.assertEqual(rc, 0, out)
 
     def test_close_dump_decided_ours_verdict_passes(self):
         self.ready(render=('ours', 'dump-1'))
@@ -15891,6 +16830,23 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertIsNone(bad)
         self.assertEqual(sorted(parked), ['643cc0', '643cd0'])
         self.assertEqual(parked['643cc0']['batch'], 'i002')
+
+    def test_parked_file_named_with_0x_prefix_is_read(self):
+        # i001's worker wrote docs/wso/import-parked/0x5A0950.json; the reader
+        # keys it by the bare address like a <ADDR>.json file (the brief asks
+        # for caps, no 0x; either spelling is the same row)
+        self.init_repo()
+        entry = dict(self.PARKED[0], address='0x5A0950', name='Stub', batch='i001')
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', '0x5A0950.json'),
+               json.dumps(entry))
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIsNone(bad)
+        self.assertEqual(list(parked), ['5a0950'])
+        self.assertEqual(parked['5a0950']['batch'], 'i001')
+        # anything else in the folder is still refused
+        _write(os.path.join(self.root, 'docs', 'wso', 'import-parked', 'notes.json'), '{}')
+        parked, bad = self.wave._parked_rows(self.root)
+        self.assertIn('notes.json: not a parked row', bad)
 
     def test_import_close_refuses_parked_row_whose_evidence_remains(self):
         self._import_ready(parked=self.PARKED, evidence=('0x643CD0',))
@@ -16422,6 +17378,493 @@ class ClaimsTest(unittest.TestCase):
         for bad in ('../x.cpp', '/etc/passwd', '.'):
             with self.assertRaises(self.claims.ClaimError):
                 self.claims.claim('s2', 'me', [bad], **self.kw)
+
+
+class CoverageTest(unittest.TestCase):
+    """tools/coverage.py, the count-only hook table, and the wave.py
+    consumers (next --queue import, scorecard); nothing here launches."""
+    ROWS = [
+        {'address': '0x401000', 'category': 'theirs_real_ours_stub', 'file': 'src/A.cpp',
+         'name': 'A', 'their_len': 90, 'our_len': 2},
+        {'address': '0x00402000', 'category': 'only_theirs', 'file': 'src/B.cpp',
+         'name': 'B', 'their_len': 80, 'our_len': 0},
+        {'address': '0x401000', 'category': 'both_stub_diff', 'file': 'src/A.cpp',
+         'name': 'A', 'their_len': 1, 'our_len': 1},
+        {'address': '0x403000', 'category': 'theirs_real_ours_stub', 'file': 'src/C.cpp',
+         'name': 'C', 'their_len': 70, 'our_len': 2},
+        {'address': '0x404000', 'category': 'identical', 'file': 'src/D.cpp',
+         'name': 'D', 'their_len': 5, 'our_len': 5},
+        {'address': '0x405000', 'category': 'theirs_changed_ours_base', 'file': 'src/E.cpp',
+         'name': 'E', 'their_len': 5, 'our_len': 5},
+        {'address': '0x406000', 'category': 'both_changed_differ', 'file': 'src/F.cpp',
+         'name': 'F', 'their_len': 5, 'our_len': 5},
+        {'address': '0x407000', 'category': 'theirs_real_ours_stub', 'file': 'src/G.cpp',
+         'name': 'G', 'their_len': 5, 'our_len': 5},
+        {'address': '0x8C', 'category': 'only_theirs', 'file': 'src/H.cpp',
+         'name': 'H', 'their_len': 5, 'our_len': 0},
+        {'name': 'noaddr', 'category': 'only_theirs'}]
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.wave = load_tool('wave')
+        self.dp = os.path.join(self.tmp, 'docs', 'wso', 'disagreements.json')
+        _write(self.dp, json.dumps(self.ROWS))
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), '# timeout: 99\nquit\n')
+        _write(os.path.join(self.tmp, 'scenarios', 'first_fight.txt'), 'quit\n')
+
+    def cov(self, hits, hooked=None, **kw):
+        phase = truth.FRIDA_SCENARIOS
+        hooked = coverage.candidates(self.dp) if hooked is None else list(hooked)
+        data = {'exe': 'x', 'scenarios_sha': coverage.scenarios_sha(self.tmp),
+                'at': '2026-10-24T01:02:03Z',
+                'scenarios': {sc: {'hooks': 6, 'refused': [], 'failed_chunks': [],
+                                   'measured': len(hooked), 'hooked': hooked,
+                                   'hits': hits.get(sc, {})} for sc in phase}}
+        data.update(kw)
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
+        return data
+
+    def test_candidates_are_the_sorted_unique_addresses_of_five_categories(self):
+        self.assertEqual(coverage.split_candidates(self.dp)[1], ['0x8C'])
+        self.assertEqual(coverage.candidates(self.dp), [
+            '0x401000', '0x402000', '0x403000', '0x405000', '0x406000', '0x407000'])
+        f = os.path.join(self.tmp, 'addrs.txt')
+        _write(f, '0x500000\n\n# c\n0x4ff000 # x\n0x500000\n')
+        self.assertEqual(coverage.read_addresses(f), ['0x4FF000', '0x500000'])
+
+    def test_table_is_count_only_original_hooks(self):
+        self.assertEqual(coverage.table(['0x401000', '0x4ff0a0']), {
+            'original': {'hooks': [{'name': 'fn_401000', 'addr': '0x401000'},
+                                   {'name': 'fn_4FF0A0', 'addr': '0x4FF0A0'}]},
+            'count_only': True})
+
+    def test_count_only_script_sends_nothing_per_call(self):
+        orig = load_tool('frida/orig')
+        spec = coverage.table(['0x401000', '0x402000'])
+        spec['original']['hooks'][1].update(conv='cdecl', args=['u32'], ret='u32')
+        js = orig.build_js(dict(spec['original'], count_only=True))
+        self.assertNotIn("send({ tag: 'fn_", js)
+        self.assertNotIn('onLeave', js)
+        self.assertIn('onEnter(args) { ++cnt0; }', js)
+        self.assertIn('onEnter(args) { ++cnt1; }', js)
+        self.assertIn('hitCounts', js)
+        self.assertIn('finalHits', js)
+        self.assertIn("tag: 'unhooked', name: 'fn_401000'", js)
+        self.assertIn("'TerminateProcess'", js)
+        # without the flag the same table logs per call
+        self.assertIn("send({ tag: 'fn_", orig.build_js(spec['original']))
+
+    def _status_fake(self, root, per_chunk):
+        """A probe fake: per_chunk[(scenario, chunk)] is a list of status
+        texts (one per launch of that chunk, the last repeated)."""
+        import subprocess as sp
+        calls, seen = [], {}
+
+        def fake(cmd, **kw):
+            calls.append(cmd)
+            out = cmd[cmd.index('--out') + 1]
+            _, scenario, rest = out.split('-', 2)
+            chunk = int(rest.split('.')[0])
+            n = seen[(scenario, chunk)] = seen.get((scenario, chunk), 0) + 1
+            texts = per_chunk[(scenario, chunk)]
+            text = texts[min(n, len(texts)) - 1]
+            d = os.path.join(root, 'runs', 'r%d' % len(calls), 'replay')
+            os.makedirs(d, exist_ok=True)
+            open(os.path.join(d, out), 'w').close()
+            if text is not None:
+                with open(os.path.join(d, out + '.status'), 'w') as f:
+                    f.write(text)
+            return sp.CompletedProcess(cmd, 0 if text else 2,
+                                       stdout='probe: runs/r%d\n' % len(calls), stderr='')
+        fake.calls = calls
+        return fake
+
+    def test_run_collects_hits_refusals_and_retries_a_chunk_without_status(self):
+        addrs = ['0x401000', '0x402000', '0x403000']
+        clean = lambda body: body + 'HITS-FINAL yes\nRESULT: CLEAN\n'
+        fake = self._status_fake(self.tmp, {
+            ('world_entry', 1): [clean('HITS fn_401000 5\nHITS fn_402000 0\nUNHOOKED fn_402000 at 0x402000: boom\n')],
+            ('world_entry', 2): [clean('HITS fn_403000 2\nHITS loaded 1\n')],
+            ('first_fight', 1): [None, clean('HITS fn_401000 1\n')],      # exit 2, then a retry
+            ('first_fight', 2): [None, None]})                             # failed twice
+        res = coverage.run(['world_entry', 'first_fight'], chunk=2, run=fake, root=self.tmp,
+                           addresses=addrs)
+        self.assertEqual(res['world_entry'], {
+            'hooks': 3, 'refused': ['fn_402000'], 'failed_chunks': [],
+            'hits': {'0x401000': 5, '0x403000': 2}, 'hooked': ['0x401000', '0x403000']})
+        self.assertEqual(res['first_fight'], {
+            'hooks': 3, 'refused': [], 'failed_chunks': [2], 'hits': {'0x401000': 1},
+            'hooked': ['0x401000', '0x402000']})
+        cmds = [c for c in fake.calls]
+        self.assertEqual(len(cmds), 2 + 2 + 2)
+        first = cmds[0]
+        self.assertEqual(first[first.index('--target') + 1], 'original')
+        self.assertNotIn('--loaded-rva', first)
+        self.assertEqual(first[first.index('--new-attempt') + 1],
+                         'coverage world_entry chunk 1/2: 2 hooks')
+        self.assertEqual(first[first.index('--timeout') + 1], '99')
+        self.assertEqual(first[first.index('--out') + 1], 'coverage-world_entry-1.jsonl')
+        retry = [c for c in cmds if 'retry' in c[c.index('--new-attempt') + 1]]
+        self.assertEqual(len(retry), 2)
+        path = os.path.join(self.tmp, 'out', 'coverage.json')
+        data = coverage.write(path, res, root=self.tmp, exe='abc')
+        self.assertEqual(coverage.read(path), data)
+        self.assertEqual(data['exe'], 'abc')
+        self.assertEqual(data['scenarios']['world_entry']['hits'],
+                         {'0x401000': 5, '0x403000': 2})
+        self.assertEqual(data['scenarios']['world_entry']['measured'], 2)
+        self.assertEqual(coverage.measured(data, '0x402000'), ['first_fight'])
+        self.assertEqual(coverage.measured(data, '0x401000'), ['first_fight', 'world_entry'])
+        self.assertEqual(coverage.covered(data, '0x401000'), ['first_fight', 'world_entry'])
+        self.assertEqual(coverage.covered(data, '0x402000'), [])
+        self.assertIsNone(coverage.read(os.path.join(self.tmp, 'nope.json')))
+
+    def test_stale_follows_the_scenario_set(self):
+        data = self.cov({'world_entry': {}})
+        self.assertFalse(coverage.stale(data, self.tmp))
+        _write(os.path.join(self.tmp, 'scenarios', 'extra.txt'), 'quit\n')
+        self.assertTrue(coverage.stale(data, self.tmp))
+        self.assertIsNone(coverage.usable(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'),
+                                          self.tmp))
+
+    def test_usable_needs_every_phase_scenario_complete(self):
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        self.assertIsNotNone(coverage.usable(path, self.tmp))
+        data['scenarios']['walk_and_talk']['failed_chunks'] = [3]
+        _write(path, json.dumps(data))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+        self.assertIn('failed chunk(s) in walk_and_talk', coverage.check(path, self.tmp)[1])
+        del data['scenarios']['walk_and_talk']
+        _write(path, json.dumps(data))
+        self.assertIn('lacks scenario(s) walk_and_talk', coverage.check(path, self.tmp)[1])
+        _write(path, json.dumps({'scenarios': {'world_entry': 3}, 'scenarios_sha': 1}))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+        data = self.cov({'world_entry': {'0x401000': 1}})
+        data['scenarios']['first_fight']['hits'] = 7
+        _write(path, json.dumps(data))
+        self.assertIsNone(coverage.usable(path, self.tmp))
+
+    def test_status_of_separates_hit_dead_and_unknown(self):
+        data = self.cov({'first_fight': {'0x401000': 1}}, hooked=['0x401000', '0x402000'])
+        phase = truth.FRIDA_SCENARIOS
+        self.assertEqual(coverage.status_of(data, '0x401000', phase), 'hit')
+        self.assertEqual(coverage.status_of(data, '0x402000', phase), 'dead')
+        self.assertEqual(coverage.status_of(data, '0x403000', phase), 'unknown')
+
+    def test_the_table_file_is_what_probe_and_orig_read(self):
+        probe = load_tool('frida/probe')
+        orig = load_tool('frida/orig')
+        seen = []
+
+        def fake(cmd, **kw):
+            import subprocess as sp
+            spec = probe.load_probe(cmd[cmd.index('--probe') + 1])   # SystemExit if no hooks
+            seen.append(orig.build_js(spec))
+            return sp.CompletedProcess(cmd, 2, stdout='', stderr='')
+        coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                     addresses=['0x401000', '0x402000'])
+        js = seen[0]
+        self.assertNotIn("send({ tag: 'fn_", js)
+        self.assertIn('hitCounts', js)
+        self.assertIn('finalHits', js)
+        self.assertIn("send({ tag: 'loaded'", js)
+        self.assertIn('onEnter(args) { ++cnt0; }', js)
+
+    def test_incomplete_chunks_fail_and_a_failed_pass_writes_no_map(self):
+        import io
+        for bad in ('HITS fn_401000 3\nHITS-FINAL yes\nRESULT: CRASH\n',
+                    'HITS fn_401000 3\nHITS-FINAL no\nRESULT: CLEAN\n',
+                    'HITS fn_401000 3\nHITS-FINAL yes\nRESULT: NOT-LOADED\n'):
+            fake = self._status_fake(self.tmp, {(sc, 1): [bad] for sc in truth.FRIDA_SCENARIOS})
+            res = coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                               addresses=['0x401000'])
+            self.assertEqual(res['world_entry']['failed_chunks'], [1])
+            self.assertEqual(res['world_entry']['hits'], {'0x401000': 3})   # kept
+            self.assertEqual(res['world_entry']['hooked'], [])
+            self.assertEqual(len(fake.calls), 2)                            # one retry
+        fake = self._status_fake(self.tmp, {(sc, 1): [None] for sc in truth.FRIDA_SCENARIOS})
+        out = io.StringIO()
+        _write(os.path.join(self.tmp, 'addrs.txt'), '0x401000\n')
+        rc = coverage.main(['--addresses', os.path.join(self.tmp, 'addrs.txt')],
+                           root=self.tmp, run_=fake, out=out)
+        self.assertEqual(rc, 1)
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.failed.json')))
+        self.assertIn('failed chunk(s): ' + '; '.join('%s 1' % sc for sc in sorted(truth.FRIDA_SCENARIOS)),
+                      out.getvalue())
+
+    def test_cli_dry_prints_the_launches_and_writes_nothing(self):
+        import io
+        out = io.StringIO()
+        rc = coverage.main(['--dry', '--chunk', '2', '--scenarios', 'world_entry'],
+                           root=self.tmp, out=out)
+        self.assertEqual(rc, 0)
+        lines = out.getvalue().splitlines()
+        self.assertTrue(lines[2].startswith('coverage: injector and recorder'), lines[2])
+        del lines[2]
+        self.assertEqual(lines, [
+            'coverage: 6 candidate function(s), 3 launch(es)',
+            'coverage: dropped 1 address(es) outside .text [0x401000, 0x8468F1): 0x8C',
+            'coverage world_entry chunk 1/3: 2 hooks',
+            'coverage world_entry chunk 2/3: 2 hooks',
+            'coverage world_entry chunk 3/3: 2 hooks'])
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
+
+    def next_import(self, **kw):
+        imp = os.path.join(self.tmp, 'import-state.json')
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, imp, 2, queue='import', repo=self.tmp,
+                import_path=os.path.join(self.tmp, 'import-list.json'), base='first',
+                coverage_root=self.tmp, claims_path=os.path.join(self.tmp, 'claims.json'), **kw)
+        return rc, out
+
+    def rows_of(self, out):
+        return re.findall(r'^\s*\d+\. (0x\w+)', out, re.M)
+
+    def test_next_import_offers_covered_rows_first_and_leaves_the_rest_out(self):
+        self.cov({'world_entry': {'0x403000': 3, '0x401000': 1},
+                  'first_fight': {'0x403000': 2}, 'walk_and_talk': {}})
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        rc, out = self.next_import(include_uncovered=True)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertNotIn('left out', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        self.cov({'world_entry': {'0x403000': 3}})
+        rc, out = self.next_import(include_uncovered=True)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+
+    def test_next_import_keeps_rows_nobody_measured(self):
+        cands = [a for a in coverage.candidates(self.dp) if a != '0x407000']
+        self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
+        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        self.cov({'world_entry': {'0x403000': 3}}, hooked=['0x403000'])
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, os.path.join(self.tmp, 'import-state.json'), 5, queue='import',
+                repo=self.tmp, import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first', coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000', '0x407000'])
+        self.assertIn('coverage: 0 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 2 row(s) kept that no scenario measured (unknown)', out)
+
+    def test_next_include_uncovered_needs_the_import_queue(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.wave.main(['next', '--include-uncovered']), 2)
+        self.assertIn('--include-uncovered only applies to --queue import', err.getvalue())
+
+    def test_next_import_without_a_fresh_map_is_unchanged(self):
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])  # biggest rows first
+        self.assertIn('coverage: no map', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        self.cov({'world_entry': {'0x406000': 9}})
+        _write(os.path.join(self.tmp, 'scenarios', 'extra.txt'), 'quit\n')
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])
+        self.assertIn('coverage: map is stale', out)
+
+    def test_scorecard_carries_the_coverage_line(self):
+        state = os.path.join(self.tmp, 'docs', 'wso', 'wave-state.json')
+        report = os.path.join(self.tmp, 'report.md')
+        args = (state, report, os.path.join(self.tmp, 'no-triage.json'), None,
+                os.path.join(self.tmp, 'no-audit.json'))
+        rc, out = self.wave.write_scorecard(*args)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Coverage: not measured', _slurp(report))
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 2}, 'first_fight': {'0x403000': 1}})
+        rc, out = self.wave.write_scorecard(*args)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('Coverage: 2 of 6 candidate functions exercised by %d scenarios (2026-10-24)' % len(truth.FRIDA_SCENARIOS) + '',
+                      _slurp(report))
+
+
+class ReStatusTest(unittest.TestCase):
+    TOOL = os.path.join(ROOT, 'tools', 're_status.py')
+    REAL = ('int Foo::Bar(int x)\n{\n    int total = x * 2 + 1;\n    total += x;\n'
+            '    return total + 12345;\n}\n')
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = os.path.join(self._tmp.name, 'repo')
+        self.exports = os.path.join(self._tmp.name, 'exports')
+        self.write(self.exports, 'functions.tsv',
+                   '401000\tFoo::Bar\t100\n401100\tFoo::Baz\t200\n'
+                   '401200\tFoo::Stub\t50\n401300\tUnwind@401300\t10\n'
+                   '401400\tthunk_FUN_00401400\t5\n')
+        self.write(self.repo, 'src/Foo.cpp',
+                   '// 0x401000\n' + self.REAL + '\n// 0x401100\n'
+                   + self.REAL.replace('Bar', 'Baz') + '\n// 0x401200\n'
+                   'void Foo::Stub()\n{\n    // TODO: Incomplete\n}\n')
+        self.write(self.repo, 'docs/evidence/401000.md', '---\nkind: oracle\n---\nx\n')
+        self.write(self.repo, 'docs/evidence/401100.md', '---\nkind: read-only\n---\nx\n')
+        self.write(self.repo, 'scenarios/a.txt', 'x\n')
+        self.write(self.repo, 'scenarios/a.expect.json', '{}\n')
+        self.write(self.repo, 'scenarios/pending/p.txt', 'x\n')
+        self.write(self.repo, 'scenarios/pending/p.expect.json', '{}\n')
+        self.write(self.repo, 'README.md',
+                   '## Status\n\ntable\n\n### Roadmap\n\nsteps\n')
+
+    def write(self, base, rel, text):
+        path = os.path.join(base, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def run_tool(self, *args):
+        return subprocess.run([sys.executable, '-I', self.TOOL, '--repo', self.repo,
+                               *args], capture_output=True, text=True)
+
+    def compute(self):
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def snap(self):
+        with open(os.path.join(self.repo, 'docs', 're-status.json')) as f:
+            return json.load(f)
+
+    def test_numbers(self):
+        self.compute()
+        s = self.snap()
+        self.assertRegex(s['at'], r'^\d{4}-\d\d-\d\d$')
+        self.assertEqual(s['ghidra'], {'functions': 3, 'bytes': 350,
+                         'excluded': {'seh_funclets': 1, 'thunks': 1}})
+        self.assertEqual(s['recovered'], {'functions': 2, 'bytes': 300})
+        self.assertEqual(s['verified'], {'functions': 1, 'bytes': 100,
+                         'by_kind': {'oracle': 1, 'replay': 0, 'trace': 0}})
+        self.assertEqual(s['scenarios'], ['a'])
+
+    def test_block_rendered_into_readme(self):
+        self.compute()
+        with open(os.path.join(self.repo, 'README.md')) as f:
+            text = f.read()
+        self.assertLess(text.index('table'), text.index('### Recovery status'))
+        self.assertLess(text.index('### Recovery status'), text.index('### Roadmap'))
+        self.assertIn('| `.text` code recovered | **85.7%** (300 / 350 bytes) |', text)
+        self.assertIn('| Functions recovered | **66.7%** (2 / 3) |', text)
+        self.assertIn('| Verified against the original | **33.3%** (1 / 3; 100 bytes) |', text)
+        self.assertIn('| Scenarios matched | 1 | `a`:', text)
+        md = self.run_tool('--markdown')
+        self.assertEqual(md.returncode, 0)
+        self.assertIn(md.stdout.strip(), text)
+        self.compute()  # idempotent: one block only
+        with open(os.path.join(self.repo, 'README.md')) as f:
+            self.assertEqual(f.read().count('re-status:begin'), 1)
+
+    def test_check_passes_then_fails_when_stale(self):
+        self.compute()
+        self.assertEqual(self.run_tool('--check').returncode, 0)
+        path = os.path.join(self.repo, 'README.md')
+        with open(path) as f:
+            text = f.read()
+        with open(path, 'w') as f:
+            f.write(text.replace('85.7%', '99.9%'))
+        r = self.run_tool('--check')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('README.md', r.stderr)
+
+    def test_check_without_snapshot_fails(self):
+        r = self.run_tool('--check')
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('re-status.json', r.stderr)
+
+    def test_compute_without_table_is_one_line_error(self):
+        os.remove(os.path.join(self.exports, 'functions.tsv'))
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('functions.tsv', r.stderr)
+        self.assertNotIn('Traceback', r.stderr)
+
+    def test_marker_parser(self):
+        rs = load_tool('re_status')
+        stubby = load_tool('xrec').stubby
+        body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
+        src = (
+            '// 0x1000\nint A::F(int x)\n{\n    ' + body + '}\n'
+            '// 0x1001\nint A::F(char x)\n{\n    ' + body + '}\n'
+            '// 0x1002\nstatic int ReadBand_Fmt20(int x)\n{\n    ' + body + '}\n'
+            '// 0x1003\nB::B(int a)\n    : Base(a), m_x(0)\n{\n    ' + body + '}\n'
+            '// 0x1004\nint g_table[] = {1, 2, 3};\n'
+            '// 0x1005\n// 0x1006\nint C::G()\n{\n    ' + body + '}\n'
+            '// 0x1007).\n// see above\n'
+            '// 0x1008\n\n// note\nint D::H()\n{\n    ' + body + '}\n'
+            '// 0x1009\nbool E::Caps() const { return m_bCapsLockKeyOn; }\n'
+            '// 0x100A\nvoid E::T()\n{\n    // TODO: Incomplete\n}\n'
+            '// 0x100B\nvoid E::U() const;\n'
+            '// 0x100C\nvoid E::V()\n{\n    assert(false);\n}\n'
+            '// 0x100D\nvoid E::W()\n{\n}\n')
+        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        real = {a for a, (n, s) in got.items() if not s}
+        self.assertEqual(real, {'0x1000', '0x1001', '0x1002', '0x1003', '0x1006',
+                                '0x1008', '0x1009'})
+        self.assertEqual(got['0x1000'][0], 'A::F')
+        self.assertEqual(got['0x1002'][0], 'ReadBand_Fmt20')
+        self.assertEqual(got['0x1003'][0], 'B::B')
+        self.assertEqual(got['0x1009'][0], 'E::Caps')
+        for a in ('0x1004', '0x1005', '0x1007', '0x100B'):
+            self.assertNotIn(a, got)
+        for a in ('0x100A', '0x100C', '0x100D'):
+            self.assertTrue(got[a][1], a)
+
+    def test_operator_definitions_and_brace_initializers(self):
+        rs = load_tool('re_status')
+        stubby = load_tool('xrec').stubby
+        body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
+        src = (
+            '// 0x2000\nA& A::operator=(const A& o)\n{\n    ' + body + '}\n'
+            '// 0x2001\nbool A::operator==(const A& o) const\n{\n    ' + body + '}\n'
+            '// 0x2002\nint g_val = 3;\n'
+            '// 0x2003\nB::B(int a)\n    : m_x{0}, m_y{a}\n{\n    ' + body + '}\n'
+            '// 0x2004\nint A::operator()(int i)\n{\n    ' + body + '}\n')
+        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        self.assertEqual({a for a, (n, s) in got.items() if not s},
+                         {'0x2000', '0x2001', '0x2003', '0x2004'})
+        self.assertNotIn('0x2002', got)
+        self.assertEqual(got['0x2000'][0], 'A::operator=')
+
+    def test_header_inline_body_counts_and_name_mismatch_warns(self):
+        self.write(self.repo, 'src/Foo.h',
+                   '// 0x401400\nint Foo::Inl(int x)\n{\n    int t = x * 2 + 1;\n'
+                   '    t += x;\n    return t + 12345;\n}\n')
+        self.write(self.exports, 'functions.tsv',
+                   '401000\tOther::Name\t100\n401100\tFoo::Baz\t200\n'
+                   '401200\tFoo::Stub\t50\n401400\tFoo::Inl\t40\n')
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.snap()['recovered']['functions'], 3)
+        self.assertIn('0x401000  Foo::Bar  Other::Name', r.stderr)
+        self.assertNotIn('Foo::Baz', r.stderr)
+
+    def test_trace_counts_only_with_a_frida_source(self):
+        self.write(self.repo, 'docs/evidence/401100.md',
+                   '---\nkind: trace\ntrace_source: wso fork note\n---\nx\n')
+        self.compute()
+        self.assertEqual(self.snap()['verified']['functions'], 1)
+        self.write(self.repo, 'docs/evidence/401100.md',
+                   '---\nkind: trace\ntrace_source: frida probe orig:ab\n---\nx\n')
+        self.compute()
+        self.assertEqual(self.snap()['verified']['by_kind']['trace'], 1)
+
+    def test_gate_runs_the_check_next_to_the_map(self):
+        with open(os.path.join(ROOT, 'tools', 'gates.sh')) as f:
+            gates = f.read()
+        self.assertIn('step "recovery status" python3 -I tools/re_status.py --check', gates)
+        self.assertLess(gates.index('step "subsystem map"'),
+                        gates.index('step "recovery status"'))
 
 
 if __name__ == '__main__':

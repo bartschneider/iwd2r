@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-24",
+  "ghidra": {
+    "functions": 11728,
+    "bytes": 3953190,
+    "excluded": {
+      "seh_funclets": 19632,
+      "thunks": 7
+    }
+  },
+  "recovered": {
+    "functions": 6530,
+    "bytes": 3165581
+  },
+  "verified": {
+    "functions": 332,
+    "bytes": 474546,
+    "by_kind": {
+      "oracle": 178,
+      "replay": 153,
+      "trace": 1
+    }
+  },
+  "scenarios": [
+    "action_bar",
+    "biography",
+    "chargen_replay",
+    "equip_shots",
+    "first_fight",
+    "inventory",
+    "level_up",
+    "replay_click",
+    "save_load_screens",
+    "walk_and_talk",
+    "world_entry",
+    "world_map"
+  ]
+}
