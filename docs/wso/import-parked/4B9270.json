@@ -1,0 +1,1 @@
+{"address": "0x4B9270", "name": "CAbilityId::operator=", "file": "src/CButtonData.cpp", "batch": "i011", "needs": "world_entry: not measured (no Frida hook: no entry for CAbilityId::operator= in our map); ours reading matches the decompile"}
