@@ -2397,6 +2397,12 @@ class Driver:
         for a in ([r['address'] for r in batch.get('rows', [])] + list(verdicts)
                   + list(listed) + list(self._kept) + list(batch.get('measured_deps') or {})):
             addrs.setdefault(key(a), a)
+        try:
+            for _p, a, _n in ce.touched(worktree, self.base):
+                addrs.setdefault(key('0x%X' % a), '0x%X' % a)
+        except Exception as e:
+            self.log('%s: evidence spelling: cannot list the touched functions (%r)'
+                     % (batch_id, e))
         problems, moves = [], []
         for k in sorted(addrs):
             rel, old = ce.canonical_evidence(worktree, k)
@@ -2404,9 +2410,11 @@ class Driver:
             have = os.path.isfile(os.path.join(worktree, rel))
             if (have and odd) or len(odd) > 1:
                 first = [rel] if have else []
-                problems.append('two evidence files for 0x%s: %s; keep one, delete the other'
-                                % (k.upper(), ' and '.join(first + odd) if len(first + odd) < 3
-                                   else ', '.join(first + odd)))
+                files = first + odd
+                problems.append('two evidence files for 0x%s: %s; keep one, delete the %s'
+                                % (k.upper(), ' and '.join(files) if len(files) < 3
+                                   else ', '.join(files),
+                                   'other' if len(files) < 3 else 'others'))
             elif old:
                 moves.append((old, rel))
         if not moves:
@@ -2418,16 +2426,23 @@ class Driver:
         for old, new in moves:
             r = git('mv', '--', old, new)
             if r.returncode != 0:
+                # an untracked (or half-tracked) file: move it, then track the new name
                 try:
                     os.rename(os.path.join(worktree, old), os.path.join(worktree, new))
-                    git('add', '-A', '--', old, new)
                 except OSError as e:
                     problems.append('cannot rename %s to %s (%s); rename it' % (old, new, e))
                     continue
+                git('add', '--', new)
+                git('rm', '-q', '--cached', '--ignore-unmatch', '--', old)
             done.append((old, new))
             self.log('%s: evidence spelling: %s -> %s' % (batch_id, old, os.path.basename(new)))
         if done:
-            paths = [p for pair in done for p in pair]
+            paths = []
+            for old, new in done:
+                paths.append(new)
+                # the old name only when HEAD still carries it (a tracked file)
+                if git('cat-file', '-e', 'HEAD:' + old).returncode == 0:
+                    paths.append(old)
             r = git('commit', '-q', '-m', 'evidence: canonical file names for %d row(s)'
                     % len(done), '--', *paths)
             if r.returncode != 0:

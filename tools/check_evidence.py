@@ -197,7 +197,8 @@ def misspelt_evidence(repo, address):
     the working tree (the canonical one is not among them)."""
     folder = os.path.join(repo, EVIDENCE_DIR)
     names = os.listdir(folder) if os.path.isdir(folder) else []
-    return [f'{EVIDENCE_DIR}/{n}' for n in misspelt_in(names, address)]
+    return [f'{EVIDENCE_DIR}/{n}' for n in misspelt_in(names, address)
+            if os.path.isfile(os.path.join(folder, n))]
 
 
 def canonical_evidence(repo, address):

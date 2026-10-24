@@ -1780,6 +1780,8 @@ class CheckEvidenceTest(unittest.TestCase):
         self.assertEqual(ce.canonical_evidence(self.repo, 0x78A2F0), (ev + '78A2F0.md', None))
         self.assertEqual(ce.misspelt_evidence(self.repo, 0x78A2F0), [ev + '0x78a2f0.md'])
         self.assertEqual(ce.misspelt_evidence(self.repo, 0x78A2F1), [])
+        os.makedirs(os.path.join(self.repo, ev, '0x78A2F1.md'))
+        self.assertEqual(ce.misspelt_evidence(self.repo, 0x78A2F1), [])
 
     def test_unchanged_passes(self):
         self.commit()
@@ -12140,6 +12142,59 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(ev, '0x404000.md')))
         self.assertEqual(self.git('rev-list', '--count', 'HEAD', cwd=self.wt).stdout, n)
         self.assertFalse([l for l in self.logs if 'evidence spelling' in l])
+
+    def test_driver_check_renames_an_untracked_misspelt_file_and_commits_it(self):
+        d, batch = self._kept_without_evidence_at_the_merge_base()
+        self.git('rm', '-q', 'docs/evidence/404000.md', cwd=self.wt)
+        self.git('commit', '-qm', 'gone', cwd=self.wt)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '0x404000.md'), self.T_EVIDENCE)
+        _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x404000 ours matches\n')
+        self.assertFalse([p for p in probs if 'not committed' in p or 'does not exist' in p],
+                         probs)
+        self.assertEqual(self._head_subject(), 'evidence: canonical file names for 1 row(s)')
+        self.assertEqual(self.git('ls-files', 'docs/evidence/404000.md', cwd=self.wt).stdout.strip(),
+                         'docs/evidence/404000.md')
+        self.assertEqual(self.git('status', '--porcelain', cwd=self.wt).stdout, '')
+
+    def test_driver_check_renames_a_touched_dependency_named_nowhere_in_the_report(self):
+        d, batch = self._kept_without_evidence_at_the_merge_base()
+        _write(os.path.join(self.wt, 'src', 'D.cpp'),
+               '// 0x40ABCD\nint Dep::Go(int a)\n{\n  return a;\n}\n')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '0x40abcd.md'), self.T_EVIDENCE)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'dependency imported', cwd=self.wt)
+        d._check('b011', self.wt, '## Imported\nimported 0x40ABCD trace\n')
+        self.assertTrue(os.path.isfile(os.path.join(self.wt, 'docs', 'evidence', '40ABCD.md')))
+        self.assertFalse(os.path.exists(os.path.join(self.wt, 'docs', 'evidence', '0x40abcd.md')))
+        self.assertEqual(self._head_subject(), 'evidence: canonical file names for 1 row(s)')
+
+    def test_driver_check_rename_commit_leaves_unrelated_dirty_files_alone(self):
+        d, batch = self._kept_without_evidence_at_the_merge_base()
+        _write(os.path.join(self.wt, 'docs', 'notes.txt'), 'one\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'notes', cwd=self.wt)
+        self.git('mv', 'docs/evidence/404000.md', 'docs/evidence/0x404000.md', cwd=self.wt)
+        self.git('commit', '-qm', 'misspell', cwd=self.wt)
+        _write(os.path.join(self.wt, 'docs', 'notes.txt'), 'two\n')
+        _write(os.path.join(self.wt, 'docs', 'stray.txt'), 'x\n')
+        d._check('b011', self.wt, '## Kept\nkept 0x404000 ours matches\n')
+        self.assertEqual(self._head_subject(), 'evidence: canonical file names for 1 row(s)')
+        self.assertEqual(self.git('show', '--name-only', '--no-renames', '--format=', 'HEAD', cwd=self.wt
+                                  ).stdout.split(), ['docs/evidence/0x404000.md',
+                                                     'docs/evidence/404000.md'])
+        st = self.git('status', '--porcelain', cwd=self.wt).stdout
+        self.assertIn(' M docs/notes.txt', st)
+        self.assertIn('?? docs/stray.txt', st)
+
+    def test_driver_check_three_evidence_files_wording(self):
+        d, batch = self._kept_without_evidence_at_the_merge_base()
+        _write(os.path.join(self.wt, 'docs', 'evidence', '0x404000.md'), self.T_EVIDENCE)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '0X404000.md'), self.T_EVIDENCE)
+        _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x404000 ours matches\n')
+        text = ('two evidence files for 0x404000: docs/evidence/404000.md, '
+                'docs/evidence/0X404000.md, docs/evidence/0x404000.md; keep one, '
+                'delete the others')
+        self.assertIn(text, probs)
 
     def test_driver_missing_evidence_texts_name_the_canonical_path(self):
         d, batch = self._kept_without_evidence_at_the_merge_base()
