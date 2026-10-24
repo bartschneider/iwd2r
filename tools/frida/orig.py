@@ -85,7 +85,7 @@ def build_js(spec: dict) -> str:
     if bases:
         blocks.append(bases)
     blocks.append(CRASH_JS)
-    blocks.append(hooks.hooks_js(all_hooks))
+    blocks.append(hooks.hooks_js(all_hooks, bool(spec.get("count_only"))))
     blocks.append(hooks.install_dump_js(all_hooks))
     blocks.append(hooks.hit_counts_js(all_hooks))
     blocks.append("send({ tag: 'ready', hooks: %d });" % len(all_hooks))

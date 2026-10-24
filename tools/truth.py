@@ -1436,6 +1436,13 @@ trace_source_line = trace_source
 
 CMAKE_ANCHOR = 'cases/store_spell.cpp'   # the last case file of oracle/CMakeLists.txt's runner
 FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk')
+# Promoted on 2026-10-23 (MATCH at every checkpoint); they join the phase once
+# the coverage map includes them and the phase picks scenarios by coverage
+# (Task 12), so a batch does not pay 18 launches where 6 did.
+PROMOTED_SCENARIOS = ('action_bar', 'equip_shots', 'inventory', 'save_load_screens',
+                      'level_up', 'world_map')
+# UI-only scenarios (no world play): used when a row's file is a CScreen*.
+FRIDA_UI_SCENARIOS = ('biography',)
 
 
 class OracleError(RuntimeError):

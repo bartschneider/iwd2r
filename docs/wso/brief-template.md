@@ -41,8 +41,11 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    `kind:` (`kind: oracle` or `kind: replay`), and exactly one line in the body
    saying the outcome:
    - a disagreement: `disagreed with WSO at {{fork_base7}}: <what differed>; case <id> decides`
-   - an agreement on closer reading: `corroborated by WSO at {{fork_base7}}` (and leave
-     the evidence kind as it was)
+   - an agreement on closer reading: `corroborated by WSO at {{fork_base7}}: <one line>; case <id> decides`
+     (and leave the evidence kind as it was)
+
+   Both forms end with `; case <id> decides`, naming the case of your verdict
+   line; the driver's checks refuse a verdict row whose evidence lacks it.
 3. **Bundles first.** Read the bundle for a function before its source; do not read a whole `src/*.cpp` the bundle covers.
 4. **Adopted fork bodies carry the trailer.** When a row is decided for the
    fork, the copied body keeps its `Imported-From: WillScarlettOhara/iwd2-re@{{fork_base7}}`
