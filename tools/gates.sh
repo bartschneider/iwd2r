@@ -19,9 +19,10 @@
 # succeeds). --summary-fixture runs two trivial steps and the summary (tests).
 # Exit status: 3 for --no-wait with the lock held, 4 when flock itself fails.
 # Docs-only fast path: when --base is given and the branch changed no engine
-# input against it (may_skip below, an allow-list: what the engine build, ctest and the
-# replay/scenario tests read, plus the gate itself), the linux-gcc, linux-clang
-# and structural parity steps print `skipped (docs-only change against BASE)`
+# input against it (may_skip below is an allow-list of the paths that none of
+# the engine build, ctest, the replay/scenario tests or the gate itself read;
+# any other path runs the full gate), the linux-gcc, linux-clang and
+# structural parity steps print `skipped (docs-only change against BASE)`
 # and the summary says `gates: docs-only fast path`; every other step runs.
 # --full forces the full gate; without --base (CI's default) it is always full;
 # a BASE that is not an ancestor of HEAD, or that cannot be diffed, is full.

@@ -2299,7 +2299,7 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
     pool, wall (seconds), tokens ({input, cached, output}) and tool_calls
     each add a line when given (rulings R10, R61); undecided maps address
     to the (side, reason) of a row left for a probe (ruling R73); gate
-    ('full' or 'docs-only', from the batch) adds a `gate:` line."""
+    ('full', 'docs-only' or 'unknown', from the batch) adds a `gate:` line."""
     wave = _tool('wave')
     known = _tool('triage').CLASSES
     order = [c for c in known if c in classes] + sorted(
