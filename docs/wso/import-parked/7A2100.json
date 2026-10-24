@@ -1,0 +1,1 @@
+{"address": "0x7A2100", "name": "CNetworkWindow::CheckIncomingQueue", "file": "src/CNetwork.cpp", "batch": "i007", "needs": "world_entry: not measured (called on one side only in world_entry); ours reading matches the decompile"}

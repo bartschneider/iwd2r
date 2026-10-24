@@ -924,7 +924,7 @@
     "i007": {
       "assigned_at": "2026-10-24T05:56:10+00:00",
       "branch": "p3/wso-i007",
-      "closed_at": null,
+      "closed_at": "2026-10-24T08:28:56+00:00",
       "files": [
         "src/CResFile.cpp",
         "src/CScreenCreateChar.cpp",
@@ -1105,7 +1105,29 @@
           "their_len": 1097
         }
       ],
-      "status": "assigned",
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i008": {
+      "assigned_at": "2026-10-24T07:10:47+00:00",
+      "branch": "p3/wso-i008",
+      "closed_at": "2026-10-24T08:07:09+00:00",
+      "files": [
+        "src/CScreenStore.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x671FA0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenStore.cpp",
+          "measured_body": "caec9d570204fd5090a34e2e16dd5a4d7be12a7aedad908176d617a8eee37a2a",
+          "name": "CScreenStore::EngineGameUninit",
+          "our_len": 25,
+          "their_len": 43
+        }
+      ],
+      "status": "closed",
       "verdicts": {}
     }
   }

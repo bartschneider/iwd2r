@@ -1,0 +1,1 @@
+{"address": "0x791150", "name": "CChitin::InitGraphics", "file": "src/CChitin.cpp", "batch": "i007", "needs": "world_entry: not measured (evidence not rewritable: [Errno 2] No such file or directory: '/home/thier/iwd2-re-worktrees/p3-wso-i007/docs/evidence/791150.md'); ours reading matches the decompile"}

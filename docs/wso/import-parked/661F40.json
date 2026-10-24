@@ -1,0 +1,1 @@
+{"address": "0x661F40", "name": "CScreenSinglePlayer::CheckCharacterButtons", "file": "src/CScreenSinglePlayer.cpp", "batch": "i007", "needs": "world_entry: not measured (evidence not rewritable: [Errno 2] No such file or directory: '/home/thier/iwd2-re-worktrees/p3-wso-i007/docs/evidence/661F40.md'); ours reading matches the decompile"}

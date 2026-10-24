@@ -1,0 +1,1 @@
+{"address": "0x781AC0", "name": "CAliasList::ResolveFileName", "file": "src/CAliasList.cpp", "batch": "i007", "needs": "ours differs from the exe (world_entry): differs in world_entry: event 4: original {\"ret\": 1, \"tag\": \"fn_781AC0_ret\"}, ours {\"ret\": 0, \"tag\": \"fn_781AC0_ret\"}; import his body in a later batch"}
