@@ -543,6 +543,13 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                 state_of = {id(r): cov_mod.status_of(cov, r['address'],
                                                      cov_mod.row_scenarios(cov, [r]))
                             for r in eligible}
+                # a row Frida refuses everywhere queues as it did before the
+                # status existed (unknown); so does one refused in some
+                # scenarios and dead in the rest
+                state_of = {id(r): ('unknown' if state_of[id(r)] == 'unhookable'
+                                    or (state_of[id(r)] == 'dead' and cov_mod.refused_in(
+                                        cov, r['address'], cov_mod.row_scenarios(cov, [r])))
+                                    else state_of[id(r)]) for r in eligible}
                 count = {id(r): len(cov_mod.covered(cov, r['address'])) for r in eligible}
             except (TypeError, AttributeError, ValueError, KeyError) as e:
                 state_of = None

@@ -943,6 +943,7 @@ def unmeasured_needs(run, left=()):
 
 
 COVERAGE_NOT_HIT = 'coverage: no scenario hits it'
+COVERAGE_UNHOOKABLE = 'Frida refuses the hook; coverage'
 
 
 def unmeasured(address, run, park):
@@ -2403,8 +2404,10 @@ class Driver:
             # original): no build, no launch; the same shape the run's
             # verdicts have, read by the loop below.
             hit_text = '%s; consulted %s' % (COVERAGE_NOT_HIT, ', '.join(self._frida_consulted))
-            self._frida_got = {key(r['address']): ('not-exercised', hit_text)
-                               for r in rows}
+            self._frida_got = {key(r['address']): (
+                ('not measured', COVERAGE_UNHOOKABLE)
+                if key(r['address']) in self._frida_unhookable else ('not-exercised', hit_text))
+                for r in rows}
             return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
                                         {}, {}, verdicts, importing, mb)
         sigs = {}
@@ -2477,6 +2480,11 @@ class Driver:
                                        'exception' % refused)
         if cached is None and key_hex:
             self._frida_cache_write(batch_id, cache_path, key_hex, run_scenarios, traces, info)
+        # a row coverage says Frida cannot hook reads so unless the phase itself
+        # measured it (equal or different: a crash recorded as different, a hook
+        # the original now accepts) -- that verdict is never masked
+        got.update({k: ('not measured', COVERAGE_UNHOOKABLE) for k in self._frida_unhookable
+                    if got.get(k, ('',))[0] not in ('equal', 'different')})
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
@@ -2686,14 +2694,17 @@ class Driver:
 
     def _coverage_scenarios(self, batch_id, rows):
         """(scenarios to run, skip): the phase's candidates (truth.scenarios_for)
-        narrowed by the coverage map.  With a usable map a candidate runs when
-        it hits at least one row or has not measured one (unknown forces it
-        in); when none does, skip is True (every row is dead in every
-        candidate: no build, no launch).  Without a usable map every
-        candidate runs."""
+        narrowed by the coverage map (coverage.cover_plan).  With a usable map
+        the scenarios run are a greedy minimal cover of the rows some fresh
+        scenario hits, plus every candidate that neither measured nor refused
+        a row no fresh scenario hits (unknown); a row Frida refuses in every
+        candidate is unhookable and forces nothing.  When nothing runs, skip is
+        True (every row is dead or unhookable: no build, no launch).  Without
+        a usable map every candidate runs."""
         truth = _tool('truth')
         cands = list(truth.scenarios_for(rows, [r.get('file') for r in rows]))
         self._frida_ran = (cands, [])
+        self._frida_unhookable = set()
         try:
             cov_mod = _tool('coverage')
             path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
@@ -2707,21 +2718,31 @@ class Driver:
                     self.log('%s: frida: coverage map not used (%s)' % (batch_id, why))
                 self.log('%s: frida: no usable coverage map; running every scenario' % batch_id)
                 return cands, False
-            run = [sc for sc in cands
-                   if any(cov_mod.status_of(cov, r['address'], [sc]) != 'dead' for r in rows)]
+            plan = cov_mod.cover_plan(cov, rows, cands)
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
             self.log('%s: frida: coverage map unreadable (%s)' % (batch_id, _one_line(repr(e), 200)))
             self.log('%s: frida: no usable coverage map; running every scenario' % batch_id)
             return cands, False
+        run, left = plan['run'], plan['left']
+        unhook = plan['unhookable']
+        self._frida_unhookable = {_tool('wave')._addr_key(a) for a in unhook}
         if not run:
             self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
             self._frida_consulted = list(cands)
+            if unhook:
+                self._log_unhookable(batch_id, unhook)
             return [], True
-        left = [sc for sc in cands if sc not in run]
         self._frida_ran = (list(run), left)
-        self.log('%s: frida: scenarios by coverage: %s (left out: %s)'
-                 % (batch_id, ', '.join(run), ', '.join(left) or 'none'))
+        self.log('%s: frida: scenarios by coverage: %s (cover %d of %d rows; left out: %s)'
+                 % (batch_id, ', '.join(run), plan['covered'], plan['total'],
+                    ', '.join(left) or 'none'))
+        if unhook:
+            self._log_unhookable(batch_id, unhook)
         return run, False
+
+    def _log_unhookable(self, batch_id, unhook):
+        self.log('%s: frida: %d row(s) Frida refuses in the original: %s'
+                 % (batch_id, len(unhook), ', '.join(unhook)))
 
     def _import_rows(self, batch_id, batch, worktree, mb_sha):
         """The functions an import batch's Frida phase measures: its rows
@@ -2798,6 +2819,9 @@ class Driver:
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
                 a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
+        elif status == 'not measured' and detail == COVERAGE_UNHOOKABLE:
+            text = ('%s: not measured (%s); the phase does not run again in this batch, so '
+                    'park it: %s' % (a, detail, park_text(a, mb, 'not measured (%s)' % detail)))
         else:
             # scenario failed, not measured: nothing measured the row, and the
             # close would refuse it with no retry left.
