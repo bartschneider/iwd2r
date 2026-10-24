@@ -766,7 +766,7 @@ BOOL CBaldurMessage::SendFullSettingsToClients(const CString& sPlayerName)
             pMessage,
             dwSize);
     } else {
-        g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+        g_pChitin->cNetwork.SendSpecificMessage(CString(""),
             CNetwork::SEND_ALL_PLAYERS | CNetwork::SEND_GUARANTEED | CNetwork::SEND_JOINING_PLAYERS,
             MSG_TYPE_MPSETTINGS,
             MSG_SUBTYPE_MPSETTINGS_FULLSET,
@@ -1681,7 +1681,7 @@ BOOLEAN CBaldurMessage::SendArbitrationLockStatus(BOOLEAN bStatus, unsigned char
     *reinterpret_cast<unsigned char*>(pMessage + nMsgPtr) = a2;
     nMsgPtr += sizeof(unsigned char);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_ALL_PLAYERS | CNetwork::SEND_GUARANTEED,
         MSG_TYPE_MPSETTINGS,
         MSG_SUBTYPE_MPSETTINGS_LOCK_STATUS,
@@ -1753,7 +1753,7 @@ BOOLEAN CBaldurMessage::SendArbitrationLockAllowInput(BOOLEAN bAllowInput)
     *reinterpret_cast<BOOLEAN*>(pMessage + nMsgPtr) = bAllowInput;
     nMsgPtr += sizeof(BOOLEAN);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_ALL_PLAYERS | CNetwork::SEND_GUARANTEED,
         MSG_TYPE_MPSETTINGS,
         MSG_SUBTYPE_MPSETTINGS_LOCK_ALLOW_INPUT,
@@ -2374,7 +2374,7 @@ BOOL CBaldurMessage::ObjectAdd(LONG localObjectID, BYTE nObjectType, BYTE* pObje
         cnt += dwObjectDataSize;
     }
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_OBJECT,
         MSG_SUBTYPE_OBJECT_ADD,
@@ -2480,7 +2480,7 @@ BOOLEAN CBaldurMessage::RequestClientSignal(BYTE signalToSend)
     *reinterpret_cast<BOOLEAN*>(pData + nMsgPtr) = CInfGame::byte_8E7528;
     nMsgPtr += sizeof(BOOLEAN);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_SIGNAL,
         MSG_SUBTYPE_SIGNAL_REQUEST,
@@ -2753,7 +2753,7 @@ BOOLEAN CBaldurMessage::SendProgressBarStatus(LONG nActionProgress, LONG nAction
     *reinterpret_cast<DWORD*>(pData + nMsgPtr) = nSecondsToTimeout;
     nMsgPtr += sizeof(DWORD);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_PROGRESSBAR,
         MSG_SUBTYPE_PROGRESSBAR_STATUS,
@@ -3261,7 +3261,7 @@ BOOLEAN CBaldurMessage::PauseAnnounceStatus(BOOLEAN bHardPauseStatus, BOOLEAN bP
     *reinterpret_cast<PLAYER_ID*>(pMessage + cnt) = idPauser;
     cnt += sizeof(PLAYER_ID);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_PAUSING,
         MSG_SUBTYPE_PAUSING_ANNOUNCE,
@@ -3609,7 +3609,7 @@ BOOLEAN CBaldurMessage::AnnounceJournalEntry(STRREF strText, INT nChapter, LONG 
     *reinterpret_cast<LONG*>(pByteMessage + cnt) = nTime;
     cnt += sizeof(LONG);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_JOURNAL,
         MSG_SUBTYPE_JOURNAL_ANNOUNCE,
@@ -3806,7 +3806,7 @@ BOOLEAN CBaldurMessage::AnnounceJournalUserEntry(CString szText, BYTE nCharacter
     *reinterpret_cast<DWORD*>(pByteMessage + cnt) = nIndex;
     cnt += sizeof(DWORD);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_JOURNAL,
         MSG_SUBTYPE_JOURNAL_ANNOUNCE_USER_ENTRY,
@@ -4002,7 +4002,7 @@ BOOLEAN CBaldurMessage::AnnounceJournalEntryChange(CString szText, BYTE nCharact
     *reinterpret_cast<DWORD*>(pByteMessage + cnt) = nIndex;
     cnt += sizeof(DWORD);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_JOURNAL,
         MSG_SUBTYPE_JOURNAL_ANNOUNCE_CHANGE,
@@ -4175,7 +4175,7 @@ BOOLEAN CBaldurMessage::AnnounceBiography(BYTE nFixedPartyId, CString szBio)
     *reinterpret_cast<BYTE*>(pByteMessage + cnt) = nFixedPartyId;
     cnt += sizeof(BYTE);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_BIOGRAPHY,
         MSG_SUBTYPE_BIOGRAPHY_CHANGE_ANNOUNCE,
@@ -4266,7 +4266,7 @@ BOOLEAN CBaldurMessage::StartDeleteAreaPoll(CString sAreaString, BOOLEAN bResend
     memcpy(pMessage + cnt, sAreaString, nLength);
     cnt += nLength;
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_DELETEAREA,
         MSG_SUBTYPE_DELETEAREA_POLL,
@@ -4334,7 +4334,7 @@ BOOLEAN CBaldurMessage::ResolveDeleteAreaPoll(CString sAreaString, BOOLEAN bResu
     *reinterpret_cast<BYTE*>(pMessage + cnt) = bResult;
     cnt += sizeof(BYTE);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_DELETEAREA,
         MSG_SUBTYPE_DELETEAREA_RESULT,
@@ -5177,7 +5177,7 @@ BOOL CBaldurMessage::SendSettingsNightmareMode(const CString& sPlayerName)
             &bNightmareMode,
             sizeof(bNightmareMode));
     } else {
-        g_pChitin->cNetwork.SendSpecificMessage(CString(""), // re-lint: disable RE002 (narrow literals are the norm in this tree)
+        g_pChitin->cNetwork.SendSpecificMessage(CString(""),
             CNetwork::SEND_ALL_PLAYERS | CNetwork::SEND_GUARANTEED | CNetwork::SEND_JOINING_PLAYERS,
             MSG_TYPE_MPSETTINGS,
             MSG_SUBTYPE_MPSETTINGS_NIGHTMAREMODE,
