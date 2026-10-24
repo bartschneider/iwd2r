@@ -13,8 +13,9 @@ compute   reads the Ghidra function table (<exports>/functions.tsv, tab
 --markdown prints the block for the committed docs/re-status.json.
 
 Denominator: the table minus `Unwind@`, `Catch@`, `Finally@` funclets and
-`thunk_` thunks. Recovered: the address has a // 0xADDR marker on a function
-whose body in src is not a stub (tools/xrec.py stubby). Verified: recovered
+`thunk_` thunks. Recovered: a standalone // 0xADDR marker in src/*.cpp or *.h
+precedes a definition whose body is not a stub (xrec.stubby, with one-line
+return/assignment bodies counted as real). Verified: recovered
 and the evidence file's kind is oracle, replay or trace. A scenario counts as
 matched when scenarios/<name>.txt has a <name>.expect.json beside it, the
 checkpoints of the original's state dumps (scenarios/pending/ is not counted).
@@ -24,6 +25,7 @@ import glob
 import importlib.util
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,16 +65,99 @@ def read_table(path):
     return rows
 
 
-def recovered_addresses(repo):
-    xrec = _load('xrec')
-    out = set()
-    for path in sorted(glob.glob(os.path.join(repo, 'src', '**', '*.cpp'),
-                                 recursive=True)):
-        with open(path, encoding='utf-8', errors='replace') as f:
-            text = f.read()
-        for address, body in xrec.funcs(text).values():
-            if address and not xrec.stubby(body):
-                out.add(_norm(address))
+MARKER = re.compile(r'^\s*//\s*(0x[0-9A-Fa-f]+)\s*$')
+ASSIGN = re.compile(r'[^=!<>]=[^=]')
+
+
+def _mask(text):
+    """Comments and string/char literals as spaces, offsets kept."""
+    pat = re.compile(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', re.S)
+    return pat.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
+
+
+def is_stub(body, stubby):
+    """xrec's rule, except that a body under 40 characters holding a return or
+    an assignment is a real one-liner (TODO, NotImplemented and assert(false
+    still make a stub whatever the length)."""
+    if not stubby(body):
+        return False
+    if ('TODO' in body or 'NotImplemented' in body
+            or 'assert(false' in body.replace(' ', '')):
+        return True
+    return not (len(body) < 40 and ('return' in body or ASSIGN.search(body)))
+
+
+def _name(head):
+    """Our function name from a definition head (text up to its `{`)."""
+    head = head.split('(', 1)[0]
+    m = re.search(r'(operator\s*\S+|[~\w:]+)\s*$', head.strip())
+    return m.group(1).replace(' ', '') if m else ''
+
+
+def markers(text, stubby):
+    """[(address, our name, stub?)] for every standalone // 0xADDR marker that
+    precedes a function definition. A marker followed by another marker, or by
+    a declaration or data definition (`;` or `=` before any body), is none."""
+    lines = text.split('\n')
+    masked = _mask(text)
+    starts = []
+    pos = 0
+    for ln in lines:
+        starts.append(pos)
+        pos += len(ln) + 1
+    mlines = masked.split('\n')
+    out = []
+    for i, ln in enumerate(lines):
+        m = MARKER.match(ln)
+        if not m:
+            continue
+        j = i + 1
+        while j < len(lines) and not mlines[j].strip() and not MARKER.match(lines[j]):
+            j += 1
+        if j >= len(lines) or MARKER.match(lines[j]):
+            continue
+        k, paren = starts[j], 0
+        end = len(masked)
+        while k < end:
+            c = masked[k]
+            if c == '(':
+                paren += 1
+            elif c == ')':
+                paren -= 1
+            elif paren == 0 and c in ';=':
+                k = -1
+                break
+            elif paren == 0 and c == '{':
+                break
+            k += 1
+        if k < 0 or k >= end:
+            continue
+        depth, e = 0, k
+        while e < end:
+            if masked[e] == '{':
+                depth += 1
+            elif masked[e] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            e += 1
+        body = re.sub(r'\s+', '', masked[k:e + 1])
+        out.append((m.group(1), _name(masked[starts[j]:k]), is_stub(body, stubby)))
+    return out
+
+
+def recovered_functions(repo):
+    """{normalised address: our name} of every marker with a non-stub body."""
+    stubby = _load('xrec').stubby
+    out = {}
+    for ext in ('cpp', 'h'):
+        for path in sorted(glob.glob(os.path.join(repo, 'src', '**', '*.' + ext),
+                                     recursive=True)):
+            with open(path, encoding='utf-8', errors='replace') as f:
+                text = f.read()
+            for address, name, stub in markers(text, stubby):
+                if not stub:
+                    out.setdefault(_norm(address), name)
     return out
 
 
@@ -81,7 +166,10 @@ def evidence_kinds(repo):
     out = {}
     for path in glob.glob(os.path.join(repo, 'docs', 'evidence', '*.md')):
         with open(path, encoding='utf-8', errors='replace') as f:
-            kind = ce.front_matter(f.read()).get('kind')
+            fm = ce.front_matter(f.read())
+        kind = fm.get('kind')
+        if kind == 'trace' and not fm.get('trace_source', '').startswith('frida '):
+            kind = 'fork-trace'  # the fork's measurement, not ours
         out[_norm(os.path.basename(path)[:-3])] = kind
     return out
 
@@ -104,7 +192,19 @@ def compute(repo, exports):
                  if n.startswith('thunk_') and not n.startswith(FUNCLETS))
     den = [(a, s) for a, n, s in rows
            if not n.startswith(FUNCLETS) and not n.startswith('thunk_')]
-    rec = recovered_addresses(repo)
+    recfn = recovered_functions(repo)
+    rec = set(recfn)
+    names = {a: n for a, n, _ in rows}
+    mismatched = sorted(
+        (a, recfn[a], names[a]) for a in rec & set(names)
+        if recfn[a] and recfn[a] != names[a]
+        and not names[a].startswith(('FUN_', 'sub_')))
+    if mismatched:
+        print('warning: %d recovered addresses whose function name differs '
+              'from the Ghidra name (address, ours, Ghidra):' % len(mismatched),
+              file=sys.stderr)
+        for a, ours, theirs in mismatched:
+            print(f'  0x{a}  {ours}  {theirs}', file=sys.stderr)
     kinds = evidence_kinds(repo)
     recovered = [(a, s) for a, s in den if a in rec]
     verified = [(a, s) for a, s in recovered if kinds.get(a) in KINDS]
@@ -132,7 +232,7 @@ def render(s):
     names = ', '.join(f'`{n}`' for n in s['scenarios'])
     return '\n'.join([
         BEGIN,
-        f"Generated by `tools/re_status.py compute` on {s['at']}; "
+        f"Generated by `tools/re_status.py compute` on {s['at']} UTC; "
         "`--check` in the gate keeps it current.",
         '',
         '| Measure | Value | What it counts |',
@@ -143,15 +243,16 @@ def render(s):
         f"SEH funclets and {ex['thunks']:,} thunks. |",
         f"| Functions recovered | **{_pct(r['functions'], g['functions'])}** "
         f"({r['functions']:,} / {g['functions']:,}) | By count, same "
-        "denominator; a function counts once its body is more than a stub. |",
+        "denominator; a function counts once its body is more than a stub (a TODO, an empty or assert(false) body). |",
         f"| Verified against the original | "
         f"**{_pct(v['functions'], g['functions'])}** ({v['functions']:,} / "
         f"{g['functions']:,}; {v['bytes']:,} bytes) | Recovered functions whose "
         f"evidence is an oracle case ({k['oracle']:,}), a replay checkpoint "
-        f"({k['replay']:,}) or a Frida trace ({k['trace']:,}); the rest rest "
-        "on a reading of the decompile. |",
-        f"| Scenarios matched | {len(s['scenarios'])} | {names}: replayed "
-        "identically to the original at every checkpoint. |",
+        f"({k['replay']:,}) or a Frida trace of our build against the original ({k['trace']:,}); the rest "
+        "depend on a reading of the decompile. |",
+        f"| Scenarios matched | {len(s['scenarios'])} | {names}: scenarios "
+        "with recorded original state dumps (`scenarios/*.expect.json`), "
+        "replayed identically at every checkpoint. |",
         END])
 
 

@@ -17778,6 +17778,60 @@ class ReStatusTest(unittest.TestCase):
         self.assertIn('functions.tsv', r.stderr)
         self.assertNotIn('Traceback', r.stderr)
 
+    def test_marker_parser(self):
+        rs = load_tool('re_status')
+        stubby = load_tool('xrec').stubby
+        body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
+        src = (
+            '// 0x1000\nint A::F(int x)\n{\n    ' + body + '}\n'
+            '// 0x1001\nint A::F(char x)\n{\n    ' + body + '}\n'
+            '// 0x1002\nstatic int ReadBand_Fmt20(int x)\n{\n    ' + body + '}\n'
+            '// 0x1003\nB::B(int a)\n    : Base(a), m_x(0)\n{\n    ' + body + '}\n'
+            '// 0x1004\nint g_table[] = {1, 2, 3};\n'
+            '// 0x1005\n// 0x1006\nint C::G()\n{\n    ' + body + '}\n'
+            '// 0x1007).\n// see above\n'
+            '// 0x1008\n\n// note\nint D::H()\n{\n    ' + body + '}\n'
+            '// 0x1009\nbool E::Caps() const { return m_bCapsLockKeyOn; }\n'
+            '// 0x100A\nvoid E::T()\n{\n    // TODO: Incomplete\n}\n'
+            '// 0x100B\nvoid E::U() const;\n'
+            '// 0x100C\nvoid E::V()\n{\n    assert(false);\n}\n'
+            '// 0x100D\nvoid E::W()\n{\n}\n')
+        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        real = {a for a, (n, s) in got.items() if not s}
+        self.assertEqual(real, {'0x1000', '0x1001', '0x1002', '0x1003', '0x1006',
+                                '0x1008', '0x1009'})
+        self.assertEqual(got['0x1000'][0], 'A::F')
+        self.assertEqual(got['0x1002'][0], 'ReadBand_Fmt20')
+        self.assertEqual(got['0x1003'][0], 'B::B')
+        self.assertEqual(got['0x1009'][0], 'E::Caps')
+        for a in ('0x1004', '0x1005', '0x1007', '0x100B'):
+            self.assertNotIn(a, got)
+        for a in ('0x100A', '0x100C', '0x100D'):
+            self.assertTrue(got[a][1], a)
+
+    def test_header_inline_body_counts_and_name_mismatch_warns(self):
+        self.write(self.repo, 'src/Foo.h',
+                   '// 0x401400\nint Foo::Inl(int x)\n{\n    int t = x * 2 + 1;\n'
+                   '    t += x;\n    return t + 12345;\n}\n')
+        self.write(self.exports, 'functions.tsv',
+                   '401000\tOther::Name\t100\n401100\tFoo::Baz\t200\n'
+                   '401200\tFoo::Stub\t50\n401400\tFoo::Inl\t40\n')
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.snap()['recovered']['functions'], 3)
+        self.assertIn('0x401000  Foo::Bar  Other::Name', r.stderr)
+        self.assertNotIn('Foo::Baz', r.stderr)
+
+    def test_trace_counts_only_with_a_frida_source(self):
+        self.write(self.repo, 'docs/evidence/401100.md',
+                   '---\nkind: trace\ntrace_source: wso fork note\n---\nx\n')
+        self.compute()
+        self.assertEqual(self.snap()['verified']['functions'], 1)
+        self.write(self.repo, 'docs/evidence/401100.md',
+                   '---\nkind: trace\ntrace_source: frida probe orig:ab\n---\nx\n')
+        self.compute()
+        self.assertEqual(self.snap()['verified']['by_kind']['trace'], 1)
+
     def test_gate_runs_the_check_next_to_the_map(self):
         with open(os.path.join(ROOT, 'tools', 'gates.sh')) as f:
             gates = f.read()

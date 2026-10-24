@@ -9,15 +9,15 @@
     }
   },
   "recovered": {
-    "functions": 5679,
-    "bytes": 3006059
+    "functions": 6502,
+    "bytes": 3159216
   },
   "verified": {
-    "functions": 313,
-    "bytes": 452894,
+    "functions": 332,
+    "bytes": 474546,
     "by_kind": {
-      "oracle": 171,
-      "replay": 141,
+      "oracle": 178,
+      "replay": 153,
       "trace": 1
     }
   },
