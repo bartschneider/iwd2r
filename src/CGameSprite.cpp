@@ -10515,6 +10515,8 @@ void CGameSprite::EquipAll(BOOL animationOnly)
                 v1 = TRUE;
             }
         }
+
+        m_equipment.m_items[m_equipment.m_selectedWeapon]->Release();
     }
 
     BYTE v3 = 2 * (m_nWeaponSet + 22);
