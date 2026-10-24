@@ -1,0 +1,1 @@
+{"address": "0x641270", "name": "CScreenMap::TimerAsynchronousUpdate", "file": "src/CScreenMap.cpp", "batch": "i014", "needs": "the panel-2 pick loop structure: the exe (raw 0x641549-0x641660) releases the GetShare handle on every SUCCESS path and breaks after the first valid pick; ours and the fork release only when the pick matches and never break"}

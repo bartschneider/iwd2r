@@ -1,0 +1,7 @@
+{
+  "address": "0x7A9DB0",
+  "name": "CSound::Play",
+  "file": "src/CSound.cpp",
+  "batch": "i016",
+  "needs": "ours is also wrong against the exe, and his body does not fix it. exe 0x7a9db0: gate returns FALSE when *(g_pSoundMixer+0x3c)==0 (ours tests the inverted condition, bailing when m_bMixerInitialized is set); stores 1 to this+0x14 (m_bPositionedSound, store at 0x7a9e04; ours never stores it, only the ctor zeroes it at +0x14); and in the m_nType==2 branch walks *(mixer+0x88) calling CVoice::GetChannel (0x7aac70) and CVoice::IsSoundPlaying, exiting when GetChannel()==this->m_nChannel (+0x40) && IsSoundPlaying — both ours and his body test CVoice::GetLooping there instead. Import his body with all three corrected."
+}
