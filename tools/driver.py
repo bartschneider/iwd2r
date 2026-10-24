@@ -5046,7 +5046,9 @@ class Driver:
         if self.kind == 'verdicts':
             # disagreements.json too: add and diff --cached skip it unchanged
             paths = [self.state_path, self.report_path, self.probe_path,
-                     self.disagreements_path, self.triage_path]
+                     self.disagreements_path, self.triage_path,
+                     os.path.join(os.path.dirname(self.disagreements_path),
+                                  'coverage.pending.json')]
         elif self.kind == 'probes':
             # its own state, the wave state the rows were resolved into, the
             # scorecard (its `probes:` line), the probe list and the gaps found
@@ -5608,6 +5610,21 @@ class Driver:
         m = re.match(r'recompare: (\d+) new rows', text)
         return int(m.group(1)) if rc == 0 and m else 0
 
+    def _log_pending_coverage(self):
+        """Task 27: one line when `wave.py recompare` left candidates for a
+        coverage pass; the driver never launches that pass itself."""
+        path = os.path.join(os.path.dirname(self.disagreements_path),
+                            'coverage.pending.json')
+        try:
+            with open(path, encoding='utf-8') as f:
+                n = len(json.load(f))
+        except (OSError, ValueError, TypeError):
+            return
+        if n:
+            self.log('coverage: %d candidate(s) pending (run `python3 -I '
+                     'tools/wave.py coverage --pending`); their batches run '
+                     'every scenario until then' % n)
+
     def _base_key(self):
         """What the last green run is keyed on: the base's HEAD sha and the
         working-tree listing of tests/ and tools/ (status lines, with the
@@ -5680,6 +5697,7 @@ class Driver:
 
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
+        self._log_pending_coverage()
         triage = (self.triage_path
                   if _tool('wave').QUEUES[self.queue]['triage'] else None)
         try:
@@ -6225,6 +6243,7 @@ class Driver:
         cuts.  One thread per busy worker; this thread only assigns, under
         the lock, and collects the finished ones."""
         done = queue_mod.Queue()
+        self._log_pending_coverage()
         pending = list(resume)
         # A batch in flight at the last stop may also read as a cleared
         # exception (its status entry keeps outcome: exception after a

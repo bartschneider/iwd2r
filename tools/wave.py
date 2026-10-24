@@ -25,6 +25,7 @@ The coordinator's wave loop, one command each::
                                                 # adopts the fork body, the Frida phase decides
     python3 tools/wave.py close p001 --kind probes
     python3 tools/wave.py coverage [--scenarios a,b] [--chunk N] [--addresses FILE] [--dry]
+    python3 tools/wave.py coverage --pending [--chunk N] [--dry]   # measure what recompare queued
                                                 # original-exe hit map per scenario
     python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
     python3 tools/wave.py run --clear b011      # the coordinator's retry of an exception
@@ -586,11 +587,11 @@ def _probe_reoffer(row, disagreements_path, coverage_path, coverage_root, repo):
 def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                  coverage_path, coverage_root, repo, include_uncovered):
     """(eligible rows, rows without an address, coverage note, None) for one
-    category, or ([], 0, None, (rc, message)) when it offers nothing."""
+    category, or ([], [], None, (rc, message)) when it offers nothing."""
     def in_category(r):
         return r.get('category') == category
 
-    no_addr = sum(1 for r in rows if in_category(r) and not r.get('address'))
+    no_addr = [r for r in rows if in_category(r) and not r.get('address')]
     candidates = []
     seen = set()
     for r in rows:
@@ -602,11 +603,11 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
     eligible = [r for r in candidates if r['file'] not in owned]
     if not eligible:
         if candidates:
-            return [], 0, None, (2, 'nothing left to assign: %d row%s wait%s on files '
+            return [], [], None, (2, 'nothing left to assign: %d row%s wait%s on files '
                                  'owned by assigned batches or claimed by streams\n'
                                  % (len(candidates), 's' if len(candidates) != 1 else '',
                                     '' if len(candidates) != 1 else 's'))
-        return [], 0, None, (2, f'nothing left: every {category} row is assigned or decided\n')
+        return [], [], None, (2, f'nothing left: every {category} row is assigned or decided\n')
     eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
                                  r['file'], r['name']))
     coverage_note = None
@@ -657,7 +658,7 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                                  % (len(unknown) + len(stale_hit)))
                 coverage_note = '\n'.join(notes) or None
                 if not eligible:
-                    return [], 0, None, (2, 'nothing left: every remaining import row is '
+                    return [], [], None, (2, 'nothing left: every remaining import row is '
                                          'exercised by no scenario (--include-uncovered '
                                          'offers them anyway)\n')
     return eligible, no_addr, coverage_note, None
@@ -859,9 +860,13 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
             continue
         lines.append(f'{i:2}. {r["address"]}  {r["name"]}  {r["file"]}  '
                      f'theirs {r["their_len"]} / ours {r["our_len"]}')
+    global _NOADDR_LOGGED
     if no_addr:
-        lines.append(f'(skipped {no_addr} row'
-                     f'{"s" if no_addr != 1 else ""} without an address)')
+        lines.append(f'(skipped {len(no_addr)} row'
+                     f'{"s" if len(no_addr) != 1 else ""} without an address)')
+        if not _NOADDR_LOGGED:      # the list once per process, the count every cut
+            _NOADDR_LOGGED = True
+            lines.append(unaddressed_text(no_addr).rstrip('\n'))
     if triage_path is None and not importing and not probing:
         return 0, '\n'.join(lines) + '\n'
     lines.append(f'worktree {wt} ({how})')
@@ -1818,10 +1823,101 @@ def _write_rows(path, rows):
         raise
 
 
+_labels_module = None
+_NOADDR_LOGGED = False      # `next` has listed the address-less rows in this process
+
+
+def _labels():
+    """tools/ghidra/labels.py (the `// 0x<ADDRESS>` header-comment parser
+    check_evidence and gen_map rest on), loaded by path."""
+    global _labels_module
+    if _labels_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'wave_labels', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                        'ghidra', 'labels.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _labels_module = module
+    return _labels_module
+
+
+def address_from_header(source_text, name):
+    """'0x<ADDR>' of the function `name` (qualified) defined in
+    source_text under a `// 0x<ADDR>` header comment, or None when it is
+    not there or two definitions carry the name (an overload: ambiguous)."""
+    lines = source_text.splitlines()
+    lab = _labels()
+    found = {a for _, _, a, n in lab.definitions(lines) if n == name}
+    # an overload without a header comment makes the one that has one
+    # ambiguous: count every definition of the name, commented or not
+    if sum(1 for l in lines if lab._definition_name(l) == name) > 1:
+        return None
+    return '0x%X' % found.pop() if len(found) == 1 else None
+
+
+def fill_addresses(rows, source_of):
+    """Fill `address` in place on each row that has none, from the header
+    comment of the row's function in OUR source file (source_of(file) is
+    the file's text, '' when absent).  Returns (filled, still): the rows
+    that got an address and the rows that still have none."""
+    cache, filled, still = {}, [], []
+    for r in rows:
+        if r.get('address'):
+            continue
+        f = r.get('file')
+        if f not in cache:
+            cache[f] = (source_of(f) or '') if f else ''
+        a = address_from_header(cache[f], r.get('name') or '') if cache[f] else None
+        if a:
+            r['address'] = a
+            filled.append(r)
+        else:
+            still.append(r)
+    return filled, still
+
+
+def unaddressed(rows, categories=None):
+    """The rows without an address (in `categories` when given)."""
+    return [r for r in rows if not r.get('address')
+            and (categories is None or r.get('category') in categories)]
+
+
+def unaddressed_text(rows):
+    """The listing recompare and next print for rows that cannot be
+    batched; '' when there are none."""
+    if not rows:
+        return ''
+    return ('rows without an address (not batchable): %d\n' % len(rows)
+            + ''.join('  %s  %s\n' % (r.get('name'), r.get('file')) for r in rows))
+
+
+def pending_candidates(rows, known, decided, at):
+    """The coverage pending entries for the candidate-category rows with
+    an address in the exe's .text that the map (`known` addresses) has no
+    opinion on and no verdict decides."""
+    cov = _coverage()
+    out, seen = [], set()
+    for r in rows:
+        if r.get('category') not in cov.CATEGORIES or not r.get('address'):
+            continue
+        try:
+            a = cov.norm(r['address'])
+        except (TypeError, ValueError):
+            continue
+        if (a in seen or a in known or _addr_key(a) in decided
+                or not cov.TEXT_START <= int(a, 16) < cov.TEXT_END):
+            continue
+        seen.add(a)
+        out.append({'address': a, 'name': r.get('name'), 'file': r.get('file'),
+                    'category': r.get('category'), 'at': at})
+    return out
+
+
 def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
               repo=ROOT, tip=FORK_REMOTE + '/main', fetch=True,
               base=COMMON_BASE, ours='first', category=DEFAULT_CATEGORY,
-              triage_path=None, triage_show=None):
+              triage_path=None, triage_show=None, source_of=None,
+              coverage_path=None, pending_path=None):
     """Compare our tree with the fork's tip and queue what is new.
 
     Fetches the fork remote (fetch=True), resolves tip, runs xrec
@@ -1838,7 +1934,16 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
     disagreements file) it is regenerated through triage.regen_triage at the
     new fork_base: closed rows keep their classes, an open row of a class
     the calibration now disables becomes ambiguous.  The calibration and the
-    demotions are appended to the message; the caller commits the file."""
+    demotions are appended to the message; the caller commits the file.
+
+    Task 27: a row without an address (new from xrec or already in the file)
+    gets it from the `// 0x<ADDRESS>` header comment of its function in our
+    source (source_of(file), default the file at `ours`); the rest are
+    listed (`rows without an address (not batchable)`), never dropped.  The
+    candidate-category rows the coverage map (coverage_path, default
+    coverage.json beside the file) has no opinion on are recorded in
+    pending_path (default coverage.pending.json beside it), merged with
+    what is there; no map, nothing recorded."""
     if fetch:
         r = subprocess.run(['git', '-C', repo, 'fetch', '--quiet', FORK_REMOTE],
                            capture_output=True, text=True)
@@ -1852,6 +1957,9 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
         theirs = _xrec_rows(repo, base, sha, ours)
     except (RuntimeError, OSError, ValueError) as e:
         return 2, f'recompare: {e}\n'
+    if source_of is None:
+        source_of = lambda f: _git_show(repo, ours, f)
+    filled, _ = fill_addresses(theirs, source_of)
     with _filelock().hold(os.path.join(
             os.path.dirname(os.path.abspath(state_path)), 'claims.json.lock'),
             'wave recompare'):
@@ -1921,6 +2029,32 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
                 else:
                     new += 1
                 rows[i] = r
+        # A new row nothing could name stays in the file (next lists it);
+        # it is not a "new row" for the count, it cannot be batched.
+        have_nameless = {(r.get('name'), r.get('file')) for r in rows
+                         if not r.get('address')}
+        for r in theirs:
+            if (not r.get('address') and r.get('category') in _coverage().CATEGORIES
+                    and (r.get('name'), r.get('file')) not in have_nameless):
+                have_nameless.add((r.get('name'), r.get('file')))
+                rows.append(r)
+        # Rows already in the file without an address (an earlier recompare
+        # could not name them): the same resolution, in place.
+        filled += fill_addresses(rows, source_of)[0]
+        listed = unaddressed(rows, _coverage().CATEGORIES)
+        docs_dir = os.path.dirname(os.path.abspath(disagreements_path))
+        cov_path = coverage_path or os.path.join(docs_dir, 'coverage.json')
+        pend_path = pending_path or os.path.join(docs_dir, 'coverage.pending.json')
+        added, pending_total = [], None
+        cov_map = _coverage().read(cov_path)
+        if cov_map is not None:
+            cov_mod = _coverage()
+            have_pending = cov_mod.read_pending(pend_path)
+            queued_p = {cov_mod.norm(e['address']) for e in have_pending}
+            added = [e for e in pending_candidates(
+                theirs + rows, cov_mod.known_addresses(cov_map), decided,
+                _now()) if e['address'] not in queued_p]
+            pending_total = len(have_pending) + len(added)
         tri_out, tri_lines = None, []
         tri_path = triage_path or os.path.join(
             os.path.dirname(os.path.abspath(disagreements_path)), 'triage.json')
@@ -1930,10 +2064,12 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
             try:
                 with open(tri_path, encoding='utf-8') as f:
                     committed = json.load(f)
+                # a row without an address cannot be classified
+                rows_a = [r for r in rows if r.get('address')]
                 cal = tri.calibrate(state, tri.calibration_triage(
-                    state, rows, sha, show=show))
+                    state, rows_a, sha, show=show))
                 tri_out = tri.regen_triage(
-                    state, rows, committed, sha, ours, cal, show=show,
+                    state, rows_a, committed, sha, ours, cal, show=show,
                     log=tri_lines.append)
             except (OSError, ValueError, KeyError) as e:
                 return 2, f'recompare: triage regeneration failed: {e}\n'
@@ -1945,12 +2081,22 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
                              state.get('fork_base') or DEFAULT_FORK_BASE)
         # xrec's own format, so an unchanged file stays byte-identical.
         _write_rows(disagreements_path, rows)
+        if added:
+            _write_rows(pend_path, have_pending + added)
         state['fork_base'] = sha
         save_state(state_path, state)
         if tri_out is not None:
             tri._write_atomic(tri_path, tri_out)
     text = (f'recompare: {new} new rows at {sha[:7]} '
             f'({queued} already queued, {done} decided)\n')
+    if filled:
+        text += (f'address from our header comment: {len(filled)} row(s): '
+                 + ', '.join(f'{r["name"]} {r["address"]}' for r in filled) + '\n')
+    text += unaddressed_text(listed)
+    if added:
+        text += (f'coverage: {len(added)} new candidate(s) recorded in '
+                 f'{os.path.basename(pend_path)} ({pending_total} pending); '
+                 f'run `python3 -I tools/wave.py coverage --pending`\n')
     if tri_out is not None:
         text += (f'triage: regenerated {os.path.basename(tri_path)} at '
                  f'{sha[:7]} ({len(tri_out)} rows)\n'
@@ -2447,6 +2593,13 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
             return 2, f'probe state {probe_path}: {e}\n'
     section = scorecard_text(state, imp_state, parked, probe_line)
     section += '\n' + coverage_line(os.path.dirname(os.path.abspath(state_path))) + '\n'
+    try:
+        with open(os.path.join(docs, 'disagreements.json'), encoding='utf-8') as f:
+            noaddr = len(unaddressed(json.load(f), _coverage().CATEGORIES))
+    except (OSError, ValueError, TypeError, AttributeError):
+        noaddr = 0
+    if noaddr:
+        section += (f'\nWave 1 rows without an address (not batchable): {noaddr}\n')
     if audit_path is None:
         audit_path = os.path.join(
             os.path.dirname(os.path.abspath(state_path)), 'audit.json')

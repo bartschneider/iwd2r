@@ -8332,6 +8332,33 @@ class WaveTest(unittest.TestCase):
                         and r['class'] in tri.AUTO_OURS}
         self.assertLessEqual(open_present, tri.enabled_classes(cal))
 
+    def test_recompare_regenerates_triage_with_a_row_that_has_no_address(self):
+        R = self._row
+        tri = self.wave._triage()
+        self.write_disagreements([R('0x1000'), self._noaddr('Nameless::Fn')])
+        tpath = os.path.join(os.path.dirname(self.disagreements), 'triage.json')
+        with open(tpath, 'w') as f:
+            json.dump([], f)
+        seen = []
+
+        def fake(todo, fork, ours, **kw):
+            seen.extend(todo)
+            self.assertTrue(all(r.get('address') for r in todo))
+            return [dict(r, **{'class': 'ambiguous', 'reason': 'x'}) for r in todo]
+        with mock.patch.object(tri, 'triage_rows', fake):
+            rc, out = self._recompare([R('0x2000')], triage_show=lambda ref, path: '')
+        self.assertEqual(rc, 0, out)
+        with open(tpath) as f:
+            got = json.load(f)
+        self.assertTrue(got and all(r.get('address') for r in got))
+        self.assertIn('Nameless::Fn', out)       # still listed as not batchable
+
+    def test_an_uncommented_overload_keeps_a_commented_one_unresolved(self):
+        src = '// 0x4026D0\nvoid Dup::Go()\n{\n}\n\nvoid Dup::Go(int x)\n{\n}\n'
+        self.assertIsNone(self.wave.address_from_header(src, 'Dup::Go'))
+        self.assertEqual(self.wave.address_from_header(
+            '// 0x4026D0\nvoid Dup::Go()\n{\n}\n', 'Dup::Go'), '0x4026D0')
+
     def test_recompare_without_triage_file_leaves_none(self):
         R = self._row
         self.write_disagreements([R('0x1000')])
@@ -8353,6 +8380,108 @@ class WaveTest(unittest.TestCase):
         with open(self.disagreements) as f:
             self.assertEqual(f.read(), before)
         self.assertFalse(os.path.exists(self.state))
+
+    # -- Task 27: addresses from header comments, the pending coverage list --
+
+    SRC_A = (
+        '#include "A.h"\n\n// 0x402660\nCResStore::CResStore()\n{\n}\n\n'
+        '// 0x4026C0\nvoid CResStore::Parse(int a)\n{\n}\n\n'
+        '// 0x4026D0\nvoid Dup::Go()\n{\n}\n\n// 0x4026E0\nvoid Dup::Go(int x)\n{\n}\n')
+
+    def _noaddr(self, name, file='src/A.cpp', cat='both_changed_differ'):
+        return dict(file=file, name=name, category=cat, their_len=5, our_len=5)
+
+    def test_recompare_fills_a_missing_address_from_our_header_comment(self):
+        self.write_disagreements([])
+        rows = [self._noaddr('CResStore::Parse')]
+        src = lambda f: self.SRC_A if f == 'src/A.cpp' else ''
+        rc, out = self._recompare(rows, source_of=src)
+        self.assertEqual(rc, 0, out)
+        with open(self.disagreements) as f:
+            got = json.load(f)
+        self.assertEqual([r.get('address') for r in got if r['name'] == 'CResStore::Parse'],
+                         ['0x4026C0'])
+        self.assertIn('recompare: 1 new rows', out)
+        self.assertIn('CResStore::Parse 0x4026C0', out)
+        self.assertNotIn('not batchable', out)
+
+    def test_recompare_lists_and_counts_rows_it_cannot_resolve(self):
+        rows = [self._noaddr('CResEffect::Parse'), self._noaddr('Dup::Go')]
+        self.write_disagreements([self._noaddr('Old::Gone', 'src/Z.cpp')])
+        src = lambda f: self.SRC_A
+        rc, out = self._recompare(rows, source_of=src)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('rows without an address (not batchable): 3', out)
+        self.assertIn('  CResEffect::Parse  src/A.cpp', out)
+        self.assertIn('  Dup::Go  src/A.cpp', out)        # an overload is ambiguous
+        self.assertIn('  Old::Gone  src/Z.cpp', out)      # already in the file: still listed
+        # nothing dropped: all three are on file, once, and a rerun adds no copy
+        rc, out = self._recompare(rows, source_of=src)
+        self.assertIn('rows without an address (not batchable): 3', out)
+        with open(self.disagreements, encoding='utf-8') as f:
+            on_file = json.load(f)
+        self.assertEqual(sum(1 for r in on_file if not r.get('address')), 3)
+        report = os.path.join(self.tmp, 'report.md')
+        rc, _ = self.wave.write_scorecard(self.state, report, triage_path=os.path.join(self.tmp, 'none'),
+                                          calibration_path=None, repo=self.tmp)
+        self.assertEqual(rc, 0)
+        with open(report) as f:
+            self.assertIn('rows without an address (not batchable): 3', f.read())
+
+    def test_next_lists_the_rows_it_skips_for_lack_of_an_address(self):
+        rc, out = self.next(size=2)
+        self.assertEqual(rc, 0, out)
+        self.assertIn('(skipped 1 row without an address)', out)
+        self.assertIn('rows without an address (not batchable): 1', out)
+        noaddr = [r for r in _WAVE_ROWS if not r.get('address') and r.get('category') == 'both_changed_differ']
+        self.assertEqual(len(noaddr), 1)
+        self.assertIn('  %s  %s' % (noaddr[0]['name'], noaddr[0]['file']), out)
+
+    def test_next_lists_the_address_less_rows_once_per_process(self):
+        self.wave._NOADDR_LOGGED = False
+        rc, first = self.next(size=1)
+        self.assertIn('not batchable', first)
+        rc, second = self.next(size=1)
+        self.assertIn('(skipped 1 row without an address)', second)
+        self.assertNotIn('not batchable', second)
+
+    def _cov_map(self, hooked):
+        path = os.path.join(os.path.dirname(self.disagreements), 'coverage.json')
+        with open(path, 'w') as f:
+            json.dump({'exe': 'x', 'scenarios_sha': 's', 'at': '2026-10-24T00:00:00Z',
+                       'scenarios': {'world_entry': {'sha': 'q', 'hooks': len(hooked), 'refused': [],
+                                                     'failed_chunks': [], 'measured': len(hooked),
+                                                     'hooked': hooked, 'hits': {}}}}, f)
+
+    def test_recompare_writes_and_merges_the_pending_coverage_list(self):
+        R = self._row
+        pend = os.path.join(os.path.dirname(self.disagreements), 'coverage.pending.json')
+        self.write_disagreements([])
+        self._cov_map(['0x402000'])
+        rows = [R('0x402000'), R('0x403000'), R('0x403000'),
+                R('0x404000', cat='theirs_changed_ours_base'), R('0x405000', cat='same'),
+                R('0x10')]                                  # outside .text: not measurable
+        rc, out = self._recompare(rows)
+        self.assertEqual(rc, 0, out)
+        with open(pend) as f:
+            got = json.load(f)
+        self.assertEqual([(e['address'], e['category']) for e in got],
+                         [('0x403000', 'both_changed_differ'),
+                          ('0x404000', 'theirs_changed_ours_base')])
+        for e in got:
+            self.assertEqual(set(e), {'address', 'name', 'file', 'category', 'at'})
+        self.assertIn('coverage: 2 new candidate(s)', out)
+        # merged with the existing list: a second recompare adds only the new
+        rc, out = self._recompare(rows + [R('0x406000', cat='only_theirs')])
+        with open(pend) as f:
+            got2 = json.load(f)
+        self.assertEqual([e['address'] for e in got2], ['0x403000', '0x404000', '0x406000'])
+        self.assertEqual(got2[:2], got)
+        # no coverage map: nothing is recorded (every row would be "new")
+        os.unlink(os.path.join(os.path.dirname(self.disagreements), 'coverage.json'))
+        os.unlink(pend)
+        self._recompare(rows)
+        self.assertFalse(os.path.exists(pend))
 
     def test_recompare_counts_category_changes_and_keeps_shape(self):
         R = self._row
@@ -14487,6 +14616,40 @@ class DriverTest(unittest.TestCase):
         self.assertIn('recompare: 0 new rows at bbbbbbb (3 already queued, '
                       '9 decided)', logs)
 
+    def test_driver_logs_the_pending_coverage_line_at_start_and_before_each_cut(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'),
+               json.dumps([{'address': '0x1'}, {'address': '0x2'}, {'address': '0x3'}]))
+        cuts = iter([(0, self.CUT), self.NOTHING])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        d.recompare = lambda *a, **kw: (0, 'recompare: 0 new rows at bbbbbbb (0 already queued, 0 decided)\n')
+        d.run_batch = lambda bid, resume=None: 'closed'
+        logs = []
+        d.log = logs.append
+        d.run()
+        line = ('coverage: 3 candidate(s) pending (run `python3 -I tools/wave.py coverage '
+                '--pending`); their batches run every scenario until then')
+        self.assertGreaterEqual(logs.count(line), 3)    # start + two cuts
+        self.assertEqual(logs[logs.index(line) + 1:].count(line) + 1, logs.count(line))
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'), '[]\n')
+        logs.clear()
+        cuts = iter([self.NOTHING])
+        d._recompared = False
+        d.run()
+        self.assertFalse([l for l in logs if l.startswith('coverage:')])
+
+    def test_the_pending_line_also_precedes_the_cut_after_a_recompare(self):
+        d = self._driver(worker=driver.FakeWorker(self.REPORT))
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'),
+               json.dumps([{'address': '0x1'}]))
+        cuts = iter([self.NOTHING, (0, self.CUT)])
+        d.next_batch = lambda *a, **kw: next(cuts)
+        d.recompare = lambda *a, **kw: (0, 'recompare: 4 new rows at bbbbbbb (0 already queued, 0 decided)\n')
+        logs = []
+        d.log = logs.append
+        self.assertEqual(d._cut()[0], 'b011')
+        self.assertEqual(len([l for l in logs if l.startswith('coverage: 1 candidate(s) pending')]), 2)
+
     def test_driver_cuts_again_when_recompare_finds_rows(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
         cuts = iter([self.NOTHING, (0, self.CUT), self.NOTHING, self.NOTHING])
@@ -17054,11 +17217,14 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(sorted(names), ['docs/wso/disagreements.json',
                                          'docs/wso/probe-list.json'])
         _write(d.disagreements_path, '[{"address": "0x2"}]\n')
+        _write(os.path.join(os.path.dirname(d.disagreements_path), 'coverage.pending.json'),
+               '[{"address": "0x2"}]\n')
         d._recompared = True
         with mock.patch.dict(os.environ, self.GIT_ENV):
             d._commit_state('b011')
         names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
-        self.assertEqual(names, ['docs/wso/disagreements.json'])
+        self.assertEqual(sorted(names), ['docs/wso/coverage.pending.json',
+                                         'docs/wso/disagreements.json'])
 
     def test_an_undecided_row_beside_a_verdict_row_keeps_the_other(self):
         d = self._undecided_driver('')
@@ -22076,6 +22242,93 @@ class CoverageTest(unittest.TestCase):
                             ([{'address': '0x1', 'file': 'src/CGame.cpp'}], ['src/CScreenX.cpp'])):
             self.assertEqual(truth.scenarios_for(rows, files),
                              tuple(truth.FRIDA_SCENARIOS) + tuple(truth.FRIDA_UI_SCENARIOS))
+
+    def test_pending_pass_measures_only_the_pending_candidates_merges_empties_and_commits(self):
+        import io
+        from unittest import mock
+        env = dict(GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t', GIT_COMMITTER_NAME='t',
+                   GIT_COMMITTER_EMAIL='t@t', GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        git = lambda *a: subprocess.run(['git', '-C', self.tmp, *a], capture_output=True,
+                                        text=True, env=dict(os.environ, **env))
+        git('init', '-q')
+        old = self.cov({'world_entry': {'0x401000': 4}})
+        ppath = os.path.join(self.tmp, 'docs', 'wso', 'coverage.pending.json')
+        _write(ppath, json.dumps([
+            {'address': '0x408000', 'name': 'N', 'file': 'src/N.cpp', 'category': 'only_theirs', 'at': 'x'},
+            {'address': '0x409000', 'name': 'M', 'file': 'src/M.cpp', 'category': 'only_theirs', 'at': 'x'}]))
+        git('add', '-A')
+        git('commit', '-q', '-m', 'base')
+        # --dry prints the plan and touches nothing
+        out = io.StringIO()
+        self.assertEqual(coverage.main(['--pending', '--dry', '--scenarios', 'world_entry'],
+                                       root=self.tmp, out=out), 0)
+        self.assertIn('2 pending candidate(s), 1 launch(es)', out.getvalue())
+        self.assertEqual(len(json.load(open(ppath))), 2)
+        inner = self._status_fake(self.tmp, {('world_entry', 1): [
+            'HITS fn_408000 7\nHITS fn_409000 0\nHITS-FINAL yes\nRESULT: CLEAN\n']})
+        hooked = []
+
+        def fake(cmd, **kw):
+            with open(cmd[cmd.index('--probe') + 1]) as f:
+                hooked.append(sorted(h['addr'] for h in json.load(f)['hooks']))
+            return inner(cmd, **kw)
+        fake.calls = inner.calls
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, env):
+            rc = coverage.main(['--pending', '--scenarios', 'world_entry'], root=self.tmp,
+                               run_=fake, out=out)
+        self.assertEqual(rc, 0, out.getvalue())
+        # only the pending addresses were hooked (one launch, two hooks)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(hooked, [['0x408000', '0x409000']])
+        merged = json.load(open(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')))
+        we = merged['scenarios']['world_entry']
+        self.assertEqual(we['hits'], {'0x401000': 4, '0x408000': 7})   # old kept, new added
+        self.assertTrue({'0x408000', '0x409000'} <= set(we['hooked']))
+        self.assertEqual(we['sha'], old['scenarios']['world_entry']['sha'])
+        self.assertEqual(merged['scenarios']['first_fight'], old['scenarios']['first_fight'])
+        self.assertEqual(json.load(open(ppath)), [])
+        self.assertEqual(git('log', '-1', '--format=%s').stdout.strip(),
+                         'coverage: 2 pending candidates measured')
+        self.assertTrue(git('log', '-1', '--format=%B').stdout.rstrip().endswith(
+            'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'))
+        self.assertEqual(sorted(git('show', '--format=', '--name-only', 'HEAD').stdout.split()),
+                         ['docs/wso/coverage.json', 'docs/wso/coverage.pending.json'])
+        # a failed chunk merges nothing and keeps the list
+        _write(ppath, json.dumps([{'address': '0x40A000', 'name': 'K', 'file': 'f',
+                                   'category': 'only_theirs', 'at': 'x'}]))
+        fake = self._status_fake(self.tmp, {('world_entry', 1): [None]})
+        out = io.StringIO()
+        self.assertEqual(coverage.main(['--pending', '--scenarios', 'world_entry'], root=self.tmp,
+                                       run_=fake, out=out), 1)
+        self.assertEqual(len(json.load(open(ppath))), 1)
+        self.assertIn('nothing merged', out.getvalue())
+
+    def test_pending_pass_refuses_a_stale_or_absent_scenario(self):
+        import io
+        self.cov({})
+        ppath = os.path.join(self.tmp, 'docs', 'wso', 'coverage.pending.json')
+        _write(ppath, json.dumps([{'address': '0x408000', 'name': 'N', 'file': 'f',
+                                   'category': 'only_theirs', 'at': 'x'}]))
+        launched = []
+        run = lambda *a, **kw: launched.append(a) or None
+        # absent: the map has no 'brand_new'
+        out = io.StringIO()
+        rc = coverage.main(['--pending', '--scenarios', 'world_entry,brand_new'],
+                           root=self.tmp, run_=run, out=out)
+        self.assertEqual(rc, 1)
+        self.assertIn('brand_new', out.getvalue())
+        self.assertIn('full `wave.py coverage`', out.getvalue())
+        # stale: a scenario file changed since the entry was stamped
+        _write(os.path.join(self.tmp, 'scenarios', 'first_fight.txt'), 'edited\nquit\n')
+        out = io.StringIO()
+        rc = coverage.main(['--pending', '--scenarios', 'world_entry,first_fight'],
+                           root=self.tmp, run_=run, out=out)
+        self.assertEqual(rc, 1)
+        self.assertIn('first_fight', out.getvalue())
+        self.assertNotIn('world_entry is', out.getvalue())
+        self.assertEqual(launched, [])
+        self.assertEqual(len(json.load(open(ppath))), 1)      # list kept
 
     def test_a_partial_pass_merges_into_the_existing_map(self):
         path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
