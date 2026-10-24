@@ -829,7 +829,7 @@ void CScreenCharacter::UpdateSavingThrows(CUIControlTextDisplay* pText, CDerived
             (LPCSTR)FetchString(17381), // "Reflex"
             DStats.m_nSaveVSReflex,
             (LPCSTR)FetchString(39802), // "Traps"
-            nTrapSenseBonus);
+            DStats.m_nSaveVSReflex + nTrapSenseBonus);
     } else {
         UpdateText(pText,
             "%s: %+d",
