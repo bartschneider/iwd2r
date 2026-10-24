@@ -9350,10 +9350,19 @@ class TriageTest(unittest.TestCase):
         # the calibration enables may have no open row left to carry it
         # (2026-10-24: rename-only enabled on its one closed sample, no open
         # row renames only), so the file is not required to show it.
+        # Only OPEN rows matter: a closed row keeps the class it was decided
+        # under (regen_triage keeps committed entries with a recorded
+        # verdict), and a wave-boundary recompare can later move the fork
+        # base so that the class loses its calibration sample (2026-10-24:
+        # fork-stub, after b029's recompare moved fork_base to ee42010d).
+        decided = {a.upper() for b in state['batches'].values()
+                   if b.get('status') == 'closed'
+                   for a in (b.get('verdicts') or {})}
         present = frozenset(r['class'] for r in committed
-                            if r['class'] in triage.AUTO_OURS)
+                            if r['class'] in triage.AUTO_OURS
+                            and r['address'].upper() not in decided)
         self.assertLessEqual(present, enabled,
-                             'triage.json applies a class the calibration disables')
+                             'triage.json applies a class the calibration disables to an open row')
 
     def test_flipped_fork_row_reported_even_when_class_is_disabled(self):
         state = {'batches': {'b': {'status': 'closed', 'rows': [{'address': '0x401000'}],
