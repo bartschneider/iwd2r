@@ -10902,7 +10902,8 @@ class DriverTest(unittest.TestCase):
         d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
         d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
         findings = d._frida_phase('b011', batch, self.wt, {})
-        text = 'coverage: no scenario hits it'
+        text = ('coverage: no scenario hits it; consulted '
+                + ', '.join(driver._tool('truth').FRIDA_SCENARIOS))
         self.assertEqual(len(findings), len(d._frida_got))
         self.assertTrue(findings)
         self.assertEqual(set(d._frida_got.values()), {('not-exercised', text)})
@@ -17625,6 +17626,10 @@ class CoverageTest(unittest.TestCase):
             ('first_fight', 2): [None, None]})                             # failed twice
         res = coverage.run(['world_entry', 'first_fight'], chunk=2, run=fake, root=self.tmp,
                            addresses=addrs)
+        self.assertEqual(res['world_entry'].pop('sha'), coverage.entry_sha('world_entry', self.tmp))
+        self.assertEqual(res['first_fight'].pop('sha'), coverage.entry_sha('first_fight', self.tmp))
+        for r in res.values():
+            r.pop('scenarios_sha')
         self.assertEqual(res['world_entry'], {
             'hooks': 3, 'refused': ['fn_402000'], 'failed_chunks': [],
             'hits': {'0x401000': 5, '0x403000': 2}, 'hooked': ['0x401000', '0x403000']})
@@ -17657,9 +17662,9 @@ class CoverageTest(unittest.TestCase):
 
     def test_stale_follows_the_scenario_set(self):
         data = self.cov({'world_entry': {}})
-        self.assertFalse(coverage.stale(data, self.tmp))
+        self.assertEqual(data['scenarios_sha'], coverage.scenarios_sha(self.tmp))
         _write(os.path.join(self.tmp, 'scenarios', 'extra.txt'), 'quit\n')
-        self.assertTrue(coverage.stale(data, self.tmp))     # the global sha is information only
+        self.assertNotEqual(data['scenarios_sha'], coverage.scenarios_sha(self.tmp))   # information only
         path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
         cov, _why = coverage.check(path, self.tmp)
         self.assertEqual(cov['stale'], [])                  # another scenario's file: not stale
@@ -17847,6 +17852,91 @@ class CoverageTest(unittest.TestCase):
         cov = coverage.check(path, self.tmp)[0]
         self.assertEqual(cov['stale'], ['inventory'])
 
+    def _old_format_map(self, hits=None):
+        data = self.cov(hits or {})
+        for r in data['scenarios'].values():
+            del r['sha']
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        _write(path, json.dumps(data))
+        return path, data
+
+    def test_restamp_stamps_an_old_map_only_when_the_files_are_unchanged(self):
+        import io
+        path, data = self._old_format_map()
+        self.assertEqual(coverage.check(path, self.tmp)[1][:19], 'map has no fresh ph')
+        out = io.StringIO()
+        self.assertEqual(coverage.main(['--restamp'], root=self.tmp, out=out), 0)
+        self.assertIn('stamped', out.getvalue())
+        cov = coverage.usable(path, self.tmp)
+        self.assertIsNotNone(cov)
+        self.assertEqual(cov['stale'], [])
+        self.assertEqual(coverage.read(path)['at'], data['at'])
+        # a second call: nothing to stamp
+        self.assertEqual(coverage.restamp(path, self.tmp)[0], 0)
+        # a mismatch is refused and the map left untouched
+        path, data = self._old_format_map()
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'changed\nquit\n')
+        before = _slurp(path)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(coverage.main(['--restamp'], root=self.tmp, out=io.StringIO()), 1)
+        self.assertIn('re-run the pass', err.getvalue())
+        self.assertEqual(_slurp(path), before)
+        # an entry that already carries a sha is left alone
+        path, data = self._old_format_map()
+        data['scenarios']['inventory']['sha'] = 'keep'
+        _write(path, json.dumps(data))
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'quit\n')
+        data['scenarios_sha'] = coverage.scenarios_sha(self.tmp)
+        _write(path, json.dumps(data))
+        self.assertEqual(coverage.restamp(path, self.tmp)[0], 0)
+        self.assertEqual(coverage.read(path)['scenarios']['inventory']['sha'], 'keep')
+
+    def test_a_scenario_edited_mid_pass_is_not_stamped_fresh(self):
+        path = os.path.join(self.tmp, 'docs', 'wso', 'coverage.json')
+        inner = self._status_fake(self.tmp, {('world_entry', 1): [
+            'HITS fn_401000 1\nHITS-FINAL yes\nRESULT: CLEAN\n']})
+        before = coverage.entry_sha('world_entry', self.tmp)
+
+        def fake(cmd, **kw):
+            _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'edited during\nquit\n')
+            return inner(cmd, **kw)
+        res = coverage.run(['world_entry'], chunk=5, run=fake, root=self.tmp,
+                           addresses=['0x401000'])
+        data = coverage.write(path, res, self.tmp)
+        self.assertEqual(data['scenarios']['world_entry']['sha'], before)
+        self.assertNotEqual(before, coverage.entry_sha('world_entry', self.tmp))
+        self.assertEqual(coverage.stale_entries(coverage.read(path), self.tmp), ['world_entry'])
+
+    def test_stale_hits_rank_between_fresh_hits_and_unknown_but_never_decide(self):
+        data = self.cov({'first_fight': {'0x403000': 1}, 'world_entry': {'0x401000': 5}},
+                        hooked=['0x401000', '0x403000'])
+        # 0x401000 hit only by world_entry, which goes stale; 0x403000 hit fresh;
+        # 0x405000/6/7 unknown (not hooked anywhere)
+        _write(os.path.join(self.tmp, 'scenarios', 'world_entry.txt'), 'changed\nquit\n')
+        rc, out = self.next_import()
+        self.assertEqual(rc, 0, out)
+        got = self.rows_of(out)
+        self.assertEqual(got[:2], ['0x403000', '0x401000'])
+        # a row whose only hit is stale is not left out as dead
+        self.assertIn('0x401000', got)
+
+    def test_a_stale_ui_entry_still_makes_its_scenario_a_candidate(self):
+        data = self.cov({})
+        data['scenarios']['biography'] = dict(data['scenarios']['world_entry'], sha='old',
+                                              hits={'0x402000': 2})
+        _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
+        cov = coverage.check(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), self.tmp)[0]
+        self.assertEqual(cov['stale'], ['biography'])
+        rows = [{'address': '0x402000', 'file': 'src/CGameSprite.cpp'}]
+        self.assertEqual(coverage.row_scenarios(cov, rows),
+                         list(truth.FRIDA_SCENARIOS) + ['biography'])
+        self.assertEqual(coverage.covered(cov, '0x402000', ['biography']), [])
+        self.assertEqual(coverage.covered(cov, '0x402000', ['biography'], include_stale=True),
+                         ['biography'])
+        # and it reads unknown (it runs), not dead
+        self.assertEqual(coverage.status_of(cov, '0x402000', ['biography']), 'unknown')
+
     def test_next_offers_a_screen_row_only_the_ui_scenario_hits(self):
         data = self.cov({})
         data['scenarios']['biography'] = dict(data['scenarios']['world_entry'],
@@ -17954,6 +18044,10 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('Coverage: 2 of 6 candidate functions exercised by %d scenarios (2026-10-24)' % len(truth.FRIDA_SCENARIOS) + '',
                       _slurp(report))
+        _write(os.path.join(self.tmp, 'scenarios', 'inventory.txt'), 'changed\n')
+        self.wave.write_scorecard(*args)
+        self.assertIn('exercised by %d scenarios (1 stale) (2026-10-24)'
+                      % (len(truth.FRIDA_SCENARIOS) - 1), _slurp(report))
 
 
 if __name__ == '__main__':

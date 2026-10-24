@@ -632,17 +632,22 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
                 coverage_note = 'coverage: map unreadable (%r); candidate order unchanged' % (e,)
             if state_of is not None:
                 hit = [r for r in eligible if state_of[id(r)] == 'hit']
-                unknown = [r for r in eligible if state_of[id(r)] == 'unknown']
+                # stale hits rank above unknown but never decide: such a row is
+                # unknown for the leave-out decision
+                stale_hit = [r for r in eligible if state_of[id(r)] == 'unknown'
+                             and cov_mod.covered(cov, r['address'], include_stale=True)]
+                unknown = [r for r in eligible if state_of[id(r)] == 'unknown'
+                           and r not in stale_hit]
                 dead = [r for r in eligible if state_of[id(r)] == 'dead']
                 hit.sort(key=lambda r: -count[id(r)])   # stable: size order within a count
-                eligible = hit + unknown + (dead if include_uncovered else [])
+                eligible = hit + stale_hit + unknown + (dead if include_uncovered else [])
                 notes = []
                 if not include_uncovered:
                     notes.append('coverage: %d candidate row(s) left out as exercised by no '
                                  'scenario' % len(dead))
-                if unknown:
+                if unknown or stale_hit:
                     notes.append('coverage: %d row(s) kept that no scenario measured (unknown)'
-                                 % len(unknown))
+                                 % (len(unknown) + len(stale_hit)))
                 coverage_note = '\n'.join(notes) or None
                 if not eligible:
                     return 2, ('nothing left: every remaining import row is exercised by no '
@@ -1804,8 +1809,10 @@ def coverage_line(folder=None):
     try:
         cands = cov_mod.candidates(os.path.join(folder, 'disagreements.json'))
         hit = sum(1 for a in cands if cov_mod.covered(cov, a))
-        return 'Coverage: %d of %d candidate functions exercised by %d scenarios (%s)' % (
-            hit, len(cands), len(cov['scenarios']), str(cov.get('at', ''))[:10])
+        stale = [s for s in cov.get('stale', ()) if s in cov['scenarios']]
+        return 'Coverage: %d of %d candidate functions exercised by %d scenarios%s (%s)' % (
+            hit, len(cands), len(cov['scenarios']) - len(stale),
+            ' (%d stale)' % len(stale) if stale else '', str(cov.get('at', ''))[:10])
     except (OSError, ValueError, TypeError, AttributeError, KeyError):
         return 'Coverage: not measured (map unreadable)'
 

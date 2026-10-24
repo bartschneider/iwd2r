@@ -151,6 +151,10 @@ def run(scenarios, chunk=DEFAULT_CHUNK, run=subprocess.run, root=ROOT,
     probe = os.path.join(truth.FRIDA_DIR, 'probe.py')
     parts = chunks(addresses, chunk)
     results = {}
+    # What each scenario's files are before the first launch: a scenario
+    # edited mid-pass must not be stamped fresh.
+    shas = {s: entry_sha(s, root) for s in scenarios}
+    whole = scenarios_sha(root)
     with tempfile.TemporaryDirectory() as tmp:
         paths = []
         for i, part in enumerate(parts, 1):
@@ -159,7 +163,8 @@ def run(scenarios, chunk=DEFAULT_CHUNK, run=subprocess.run, root=ROOT,
                 json.dump(dict(table(part)['original'], count_only=True), f, indent=1)
             paths.append(p)
         for s in scenarios:
-            res = {'hooks': 0, 'refused': [], 'failed_chunks': [], 'hits': {}, 'hooked': []}
+            res = {'hooks': 0, 'refused': [], 'failed_chunks': [], 'hits': {}, 'hooked': [],
+                   'sha': shas[s], 'scenarios_sha': whole}
             for i, part in enumerate(parts, 1):
                 out = 'coverage-%s-%d.jsonl' % (s, i)
                 reason = 'coverage %s chunk %d/%d: %d hooks' % (s, i, len(parts), len(part))
@@ -275,6 +280,31 @@ def stale_note(cov, root=ROOT, names=None):
             're-run): %s' % ('y' if len(st) == 1 else 'ies', ', '.join(st))) if st else None
 
 
+def restamp(path, root=ROOT):
+    """(rc, text): stamp the entries of an old-format map (no `sha`) with the
+    scenario files' current sha, but only when the map's recorded global
+    scenarios_sha is the current one (every scenario file is byte-identical to
+    what the pass measured); else refuse.  Entries with a sha are left alone."""
+    cov = read(path)
+    if cov is None:
+        return 1, 'coverage --restamp: no map at %s\n' % path
+    todo = [s for s, r in sorted(cov['scenarios'].items())
+            if isinstance(r, dict) and not r.get('sha')]
+    if not todo:
+        return 0, 'coverage --restamp: every entry already carries a sha; nothing to stamp\n'
+    now = scenarios_sha(root)
+    if cov.get('scenarios_sha') != now:
+        return 1, ('coverage --restamp: the map recorded scenarios_sha %s but the scenario files '
+                   'are %s now (a scenario changed since the pass); re-run the pass\n'
+                   % (cov.get('scenarios_sha'), now))
+    for s in todo:
+        cov['scenarios'][s]['sha'] = entry_sha(s, root)
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(cov, f, indent=1)
+        f.write('\n')
+    return 0, 'coverage --restamp: stamped %s\n' % ', '.join(todo)
+
+
 def write(path, results, root=ROOT, exe=None, merge=True):
     """Write the map.  An existing map at path is merged (merge=True): the
     scenarios in results replace their entries, the others are kept as they
@@ -282,9 +312,10 @@ def write(path, results, root=ROOT, exe=None, merge=True):
     `scenarios_sha` are recomputed."""
     old = read(path) if merge else None
     data = {'exe': exe if exe is not None else (old.get('exe') if old else exe_sha()),
-            'scenarios_sha': scenarios_sha(root),
+            'scenarios_sha': next((r['scenarios_sha'] for r in results.values()
+                                   if r.get('scenarios_sha')), None) or scenarios_sha(root),
             'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'scenarios': {s: {'sha': entry_sha(s, root), 'hooks': r['hooks'], 'refused': r['refused'],
+            'scenarios': {s: {'sha': r.get('sha') or entry_sha(s, root), 'hooks': r['hooks'], 'refused': r['refused'],
                               'failed_chunks': r['failed_chunks'],
                               'measured': len(r.get('hooked', ())),
                               'hooked': list(r.get('hooked', ())),
@@ -310,11 +341,12 @@ def read(path):
     return data if isinstance(data, dict) and isinstance(data.get('scenarios'), dict) else None
 
 
-def covered(cov, address, scenarios=None):
+def covered(cov, address, scenarios=None, include_stale=False):
     """Names of the scenarios whose hits include the address (limited to
-    `scenarios` when given)."""
+    `scenarios` when given).  A stale entry's hits rank and join but never
+    decide: they count only with include_stale."""
     a = norm(address)
-    stale = cov.get('stale', ())
+    stale = () if include_stale else cov.get('stale', ())
     return [s for s, r in sorted(cov['scenarios'].items())
             if (scenarios is None or s in scenarios) and s not in stale
             and a in r.get('hits', {})]
@@ -340,19 +372,15 @@ def status_of(cov, address, scenarios):
     return 'unknown'
 
 
-def stale(cov, root=ROOT):
-    return cov.get('scenarios_sha') != scenarios_sha(root)
-
-
 def row_scenarios(cov, rows):
     """The Frida phase's candidate scenarios for rows (dicts with 'address'
     and 'file'): truth.scenarios_for, plus every UI scenario the map says
-    hits one of the rows (a sprite function only the biography screen
+    hits one of the rows (a stale entry's hits count: it then runs as unknown) (a sprite function only the biography screen
     reaches)."""
     t = _load('truth')
     cands = list(t.scenarios_for(rows, [r.get('file') for r in rows]))
     for sc in t.FRIDA_UI_SCENARIOS:
-        if sc not in cands and any(covered(cov, r['address'], [sc]) for r in rows):
+        if sc not in cands and any(covered(cov, r['address'], [sc], include_stale=True) for r in rows):
             cands.append(sc)
     return cands
 
@@ -391,7 +419,7 @@ def usable(path, root=ROOT):
 
 
 def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
-    scenarios, chunk, addrs, dry = None, DEFAULT_CHUNK, None, False
+    scenarios, chunk, addrs, dry, restamp_ = None, DEFAULT_CHUNK, None, False, False
     it = iter(argv)
     for a in it:
         if a == '--scenarios':
@@ -406,9 +434,15 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
             addrs = next(it, None)
         elif a == '--dry':
             dry = True
+        elif a == '--restamp':
+            restamp_ = True
         else:
             print('wave coverage: unknown option %s' % a, file=sys.stderr)
             return 2
+    if restamp_:
+        rc, text = restamp(os.path.join(root, COVERAGE_REL), root)
+        (out if rc == 0 else sys.stderr).write(text)
+        return rc
     if scenarios is None:
         scenarios = default_scenarios()
     try:

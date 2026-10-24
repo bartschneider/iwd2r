@@ -909,7 +909,6 @@ def parse_undecided(text):
     return out
 
 
-FRIDA_SCENARIOS_TEXT = ', '.join(_tool('truth').FRIDA_SCENARIOS)
 # The history rule's way to undo one function (first's 021a6cb0): the
 # function is edited back, never the whole file put back, which would
 # discard the other rows' changes in a shared file.  %s is the merge base.
@@ -945,8 +944,6 @@ COVERAGE_NOT_HIT = 'coverage: no scenario hits it'
 
 def unmeasured(address, run, park):
     return '%s: exercised by no scenario (%s); park it: %s' % (address, ', '.join(run), park)
-
-
 
 
 def _merge_base(worktree, base):
@@ -2399,7 +2396,8 @@ class Driver:
             # No scenario of the phase hits any row (the coverage map of the
             # original): no build, no launch; the same shape the run's
             # verdicts have, read by the loop below.
-            self._frida_got = {key(r['address']): ('not-exercised', COVERAGE_NOT_HIT)
+            hit_text = '%s; consulted %s' % (COVERAGE_NOT_HIT, ', '.join(self._frida_consulted))
+            self._frida_got = {key(r['address']): ('not-exercised', hit_text)
                                for r in rows}
             return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
                                         {}, {}, verdicts, importing, mb)
@@ -2533,6 +2531,7 @@ class Driver:
             return cands, False
         if not run:
             self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
+            self._frida_consulted = list(cands)
             return [], True
         left = [sc for sc in cands if sc not in run]
         self._frida_ran = (list(run), left)
@@ -2609,7 +2608,7 @@ class Driver:
         elif status == 'not-exercised':
             run, left = getattr(self, '_frida_ran', None) or (
                 list(_tool('truth').FRIDA_SCENARIOS), [])
-            needs = ('not-exercised (%s)' % detail if detail == COVERAGE_NOT_HIT
+            needs = ('not-exercised (%s)' % detail if detail.startswith(COVERAGE_NOT_HIT)
                      else unmeasured_needs(run, left))
             text = unmeasured(a, run, park_text(a, mb, needs))
         elif status == 'skipped':
