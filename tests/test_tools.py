@@ -16519,6 +16519,74 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(exc['problems']), 1)
         self.assertIn('the coordinator resolves it', exc['problems'][0])
 
+    def test_map_only_conflict_merge_message_has_no_conflicts_comment(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'docs', 'MAP.md'), 'branch\n')
+        d, wt = self._t26_driver(base_files={'docs/MAP.md': 'base\n'}, on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves('first\n', 'docs/MAP.md')
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, [])
+        body = self.git('log', '-1', '--format=%B', cwd=wt).stdout
+        self.assertNotIn('Conflicts', body)
+        self.assertNotIn('#', body)
+        self.assertIn(driver.STATE_COMMIT_TRAILER, body)
+
+    def test_ledger_commit_count_ignores_the_pre_check_merge(self):
+        d, wt = self._t26_driver()
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            d._check('b011', wt, self._T26_REPORT)
+        self.assertIn('(1 commit)', d._commits('p3/wso-b011'))
+
+    def test_settle_closed_takes_the_landing_lock(self):
+        d, wt = self._t26_driver()
+        d.LANDING_POLL = 0.05
+        d._has_ledger_entry = lambda b: True
+        d._commit_state = lambda b: None
+        order = []
+        d.push = lambda: (order.append('push'), None)[1]
+        state = d.load_state(d.state_path)
+        state['batches']['b011']['status'] = 'closed'
+        d._stage('b011', 'close')
+        t = threading.Thread(target=lambda: d._settle_closed('b011'))
+        with filelock.hold(d._landing_path(), 'test'):
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d).get('current') or {}).get('note') == \
+                        driver.WAITING_LANDING_NOTE:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail('did not wait for the landing lock')
+            self.assertEqual(order, [])
+        t.join(10)
+        self.assertEqual(order, ['push'])
+
+    def test_stop_while_waiting_clears_the_waiting_note(self):
+        d1, d2 = self._t26_two_drivers()
+        d2._stage('b012', 'close')
+        d2.LANDING_POLL = 0.05
+
+        def waiter():
+            try:
+                with d2._landing_lock('b012'):
+                    pass
+            except driver._Stop:
+                pass
+        with filelock.hold(d2._landing_path(), 'test'):
+            t = threading.Thread(target=waiter)
+            t.start()
+            for _ in range(100):
+                if (self._status_or_empty(d2).get('current') or {}).get('note'):
+                    break
+                time.sleep(0.05)
+            d2._stopping = True
+            t.join(10)
+        st = self._status(d2)
+        self.assertNotIn('note', st['current'])
+        self.assertNotIn('note', st['running']['b012'])
+
     def _t26_two_drivers(self):
         d1 = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
                                ids=('b011', 'b012'))

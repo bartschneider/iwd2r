@@ -4213,7 +4213,7 @@ class Driver:
         tip = self._git('rev-parse', '--verify', branch).stdout.strip()
         if not mb or not tip:
             return 'unknown (%s..%s)' % (self.base, branch)
-        n = self._git('rev-list', '--count', '%s..%s' % (mb, tip)).stdout.strip()
+        n = self._git('rev-list', '--count', '--no-merges', '%s..%s' % (mb, tip)).stdout.strip()
         return '%s..%s (%s commit%s)' % (mb[:8], tip[:8], n, '' if n == '1' else 's')
 
     def _worker_of(self, name):
@@ -4300,8 +4300,8 @@ class Driver:
                      branch).returncode == 0:
             return None, []
         self._union_merge_attributes()
-        how = ['-m', message + '\n\n' + STATE_COMMIT_TRAILER + '\n'] if message \
-            else ['--no-edit']
+        how = ['-m', message + '\n\n' + STATE_COMMIT_TRAILER + '\n',
+               '--cleanup=strip'] if message else ['--no-edit', '--cleanup=strip']
         r = subprocess.run(['git', '-C', worktree, 'merge', *how, '-q',
                             self.base], capture_output=True, text=True)
         if r.returncode != 0 and self._only_map_conflicts(worktree):
@@ -4311,7 +4311,8 @@ class Driver:
             if r.returncode == 0:
                 r = self._git_in(worktree, 'add', '--', 'docs/MAP.md')
             if r.returncode == 0:
-                r = self._git_in(worktree, 'commit', '-q', '--no-edit')
+                r = self._git_in(worktree, 'commit', '-q', '--no-edit',
+                                '--cleanup=strip')
         if r.returncode == 0:
             self.log('%s: %s merged into it before %s' % (branch, self.base, when))
             return None, []
@@ -4381,23 +4382,28 @@ class Driver:
         gate's own lock (tools/gates.sh, .gates.lock) is a different file
         and stays: it serialises gates for every caller of gates.sh."""
         path = self._landing_path()
-        with contextlib.ExitStack() as stack:
-            noted = False
-            while True:
-                if self._stopping:
-                    raise _Stop()
-                try:
-                    stack.enter_context(_tool('filelock').hold(
-                        path, 'driver landing', timeout=self.LANDING_POLL))
-                    break
-                except TimeoutError:
-                    if not noted:
-                        noted = True
-                        self.log('%s: waiting for the landing lock' % batch_id)
-                        self._note(batch_id, WAITING_LANDING_NOTE)
-            if noted:
+        noted = False
+        try:
+            with contextlib.ExitStack() as stack:
+                while True:
+                    if self._stopping:
+                        raise _Stop()
+                    try:
+                        stack.enter_context(_tool('filelock').hold(
+                            path, 'driver landing', timeout=self.LANDING_POLL))
+                        break
+                    except TimeoutError:
+                        if not noted:
+                            noted = True
+                            self.log('%s: waiting for the landing lock' % batch_id)
+                            self._note(batch_id, WAITING_LANDING_NOTE)
+                if noted:
+                    noted = False
+                    self._note(batch_id, None)
+                yield
+        finally:
+            if noted:              # a stop (or an error) while waiting
                 self._note(batch_id, None)
-            yield
 
     STOP_WAIT = 30     # seconds a stop waits for a git write in progress
 
@@ -5331,7 +5337,7 @@ class Driver:
                 pool=batch.get('pool')))
             self.log('%s: closed by the last run without its ledger entry; '
                      'entry written' % batch_id)
-        with self._lock:
+        with self._landing_lock(batch_id), self._lock:
             self._commit_state(batch_id)
             err = self.push()
         self._finish(batch_id, 'closed')
