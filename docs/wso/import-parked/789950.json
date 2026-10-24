@@ -1,0 +1,7 @@
+{
+  "address": "0x789950",
+  "name": "CResFile::AddCacheCount",
+  "file": "src/CResFile.cpp",
+  "batch": "i016",
+  "needs": "world_entry: not measured (called on one side only in world_entry); ours reading matches the decompile"
+}
