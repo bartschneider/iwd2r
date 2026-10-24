@@ -5684,7 +5684,7 @@
     "b021": {
       "assigned_at": "2026-10-23T23:22:04+00:00",
       "branch": "p3/wso-b021",
-      "closed_at": null,
+      "closed_at": "2026-10-24T02:01:39+00:00",
       "files": [
         "src/CNetwork.cpp",
         "src/CGameContainer.cpp",
@@ -5880,7 +5880,7 @@
           "their_len": 120
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {
         "0x40E0C0": {
           "case": "dump-40E0C0",
