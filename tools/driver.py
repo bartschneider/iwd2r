@@ -11,6 +11,7 @@ import contextlib
 import datetime
 import fcntl
 import glob
+import hashlib
 import json
 import importlib.util
 import os
@@ -1727,12 +1728,14 @@ class Driver:
                  base='first', log=None, frida=False, frida_map=None,
                  oracle_run=None, frida_run=None, frida_build=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
-                 queue='wave1', runner=None, clock=None, max_batches=None):
+                 queue='wave1', runner=None, clock=None, max_batches=None,
+                 frida_cache=True):
         wave = _tool('wave')
         if queue not in wave.QUEUES:
             raise ValueError('unknown queue %r (one of %s)' % (
                 queue, ', '.join(wave.QUEUES)))
         self.repo = repo
+        self.frida_cache = frida_cache
         self.state_path = state_path
         self.queue = queue
         self.kind = wave.QUEUES[queue]['kind']
@@ -2371,7 +2374,8 @@ class Driver:
         with no status on either side, state dumps the replay schema refuses)
         raises _StageError('frida'): the
         batch's exception, nothing measured, parked or rewritten.  It runs
-        once per batch, never again.  Returns the findings."""
+        once per batch, never again unless something it measured changed
+        (a retry reuses frida-cache.json, see _frida_cache_key).  Returns the findings."""
         self._frida_got = {}
         self._frida_notes = {}
         self._frida_ran = None
@@ -2401,7 +2405,6 @@ class Driver:
                                for r in rows}
             return self._frida_findings(batch_id, worktree, rows, dict(self._frida_got), {},
                                         {}, {}, verdicts, importing, mb)
-        checkout, map_path, why = self._frida_target(batch_id, worktree)
         sigs = {}
         for r in rows:
             text, _err = wave._read_evidence(self.repo, batch['branch'], r['address'])
@@ -2413,6 +2416,29 @@ class Driver:
                              'gives none)' % (batch_id, r['address']))
             if sig:
                 sigs[r['address']] = sig
+        # A retried batch reuses the phase's results when nothing it measured
+        # changed (frida-cache.json in the batch's driver folder).  The key is
+        # taken before the build: the table is a function of the rows, their
+        # signatures, the scenarios and the map, and the map of a build is a
+        # function of the tree ids (or, with --frida-map, of that file).
+        key_hex = self._frida_cache_key(worktree, rows, sigs, run_scenarios)
+        cache_path = os.path.join(self.driver_dir, batch_id, 'frida-cache.json')
+        cached = self._frida_cache_read(batch_id, cache_path, key_hex, run_scenarios)
+        if cached is not None:
+            self.log('%s: frida: results reused from %s (key %s)' % (
+                batch_id, cached['at'], key_hex[:12]))
+            traces = cached['traces']
+            info = {'typed_from': dict(cached.get('typed_from') or {}),
+                    'typed_slots': {k: list(v) for k, v in (cached.get('typed_slots') or {}).items()}}
+            got = truth.frida_verdicts(traces, rows, cached.get('skipped') or {}, info=info)
+            got = {key(a): v for a, v in got.items()}
+            self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
+                               for r in rows}
+            self._frida_notes = {key(a): list(n) for a, n in (info.get('notes') or {}).items()}
+            exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
+            return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
+                                        verdicts, importing, mb)
+        checkout, map_path, why = self._frida_target(batch_id, worktree)
         traces = {}
 
         def run_frida(batch_id, table, scenarios):
@@ -2450,6 +2476,7 @@ class Driver:
                                        '(tooling out of step, not the rows): %s; no row was '
                                        'measured, parked or rewritten; fix it and clear this '
                                        'exception' % refused)
+        self._frida_cache_write(batch_id, cache_path, key_hex, run_scenarios, traces, info)
         self._frida_got = {key(r['address']): got.get(key(r['address']), ('skipped', 'no result'))
                            for r in rows}
         # Frequency-only differences are caller findings: ledger lines in
@@ -2458,6 +2485,73 @@ class Driver:
         exact = {key(a): list(v) for a, v in (info.get('exact') or {}).items()}
         return self._frida_findings(batch_id, worktree, rows, got, traces, info, exact,
                                     verdicts, importing, mb)
+
+    def _frida_cache_key(self, worktree, rows, sigs, scenarios):
+        """sha256 hex over what the phase measures: the worktree's src, compat,
+        oracle and platform tree ids (the inputs of its x86 build, hence of
+        the map and the hook RVAs), with --frida-map that file's bytes, the
+        rows (address, name), their signatures (the hook typing), and the
+        sorted scenario list."""
+        h = hashlib.sha256()
+        for sub in ('src', 'compat', 'oracle', 'platform'):
+            r = subprocess.run(['git', '-C', worktree, 'rev-parse', 'HEAD:' + sub],
+                               capture_output=True, text=True)
+            h.update(('%s=%s\n' % (sub, r.stdout.strip() if r.returncode == 0 else '-')).encode())
+        if self.frida_map:
+            try:
+                with open(self.frida_map, 'rb') as f:
+                    h.update(b'map=' + os.path.abspath(self.frida_map).encode() + b' ' + hashlib.sha256(f.read()).hexdigest().encode() + b'\n')
+            except OSError:
+                h.update(b'map=unreadable\n')
+        h.update(json.dumps({'rows': sorted((r['address'], r.get('name')) for r in rows),
+                             'sigs': sigs, 'scenarios': sorted(scenarios)},
+                            sort_keys=True, default=str).encode())
+        return h.hexdigest()
+
+    def _frida_cache_read(self, batch_id, path, key_hex, scenarios):
+        """The cache entry when reuse applies (same key and scenario set),
+        else None (one log line when the file exists but cannot be used as
+        a cache)."""
+        if not self.frida_cache:
+            return None
+        try:
+            with open(path, encoding='utf-8') as f:
+                cached = json.load(f)
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as e:
+            self.log('%s: frida: cache %s unreadable (%s); running the phase' % (
+                batch_id, path, _one_line(repr(e), 120)))
+            return None
+        if not (isinstance(cached, dict) and isinstance(cached.get('traces'), dict)
+                and isinstance(cached.get('at'), str)):
+            self.log('%s: frida: cache %s unreadable (wrong shape); running the phase' % (
+                batch_id, path))
+            return None
+        if cached.get('key') != key_hex or sorted(cached.get('scenarios') or []) != sorted(scenarios):
+            return None
+        return cached
+
+    def _frida_cache_write(self, batch_id, path, key_hex, scenarios, traces, info):
+        """Store a phase that produced verdicts: key, time, scenarios, the
+        traces frida_run returned (event lists included) and what
+        frida_verdicts needs beside them (typed_from, typed_slots, skipped).
+        Not serialisable as is: logged, no cache."""
+        try:
+            text = json.dumps({
+                'key': key_hex,
+                'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'scenarios': sorted(scenarios), 'traces': traces,
+                'typed_from': info.get('typed_from') or {},
+                'typed_slots': info.get('typed_slots') or {},
+                'skipped': info.get('skipped') or {}}, indent=1)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.write(text)
+            os.replace(tmp, path)
+        except (TypeError, ValueError, OSError) as e:
+            self.log('%s: frida: results not cached (%s)' % (batch_id, _one_line(repr(e), 120)))
 
     def _frida_findings(self, batch_id, worktree, rows, got, traces, info, exact, verdicts,
                         importing, mb):
@@ -4227,6 +4321,10 @@ def _parse(argv):
                    help='run the batched Frida differential path after the worker '
                         '(default: docs/wso/truth-calibration.json frida_default; '
                         'off when that file is missing)')
+    p.add_argument('--frida-cache', action=argparse.BooleanOptionalAction, default=True,
+                   help='reuse the Frida results of an earlier phase of the same batch when '
+                        'its tree ids, rows, signatures and scenarios are unchanged '
+                        '(--no-frida-cache always runs)')
     p.add_argument('--frida-map',
                    help='override: measure an existing x86 build (the exe beside this '
                         'iwd2r.map, at <checkout>/' + X86_MAP_REL + ') instead of '
@@ -4342,7 +4440,7 @@ def _build(args, repo):
         d = Driver(repo, state, worker, reviewer, ledger, status,
                    aoe_session=args.aoe_session, seed=args.seed,
                    budget=args.budget, dry_run=args.dry_run, frida=frida,
-                   frida_map=args.frida_map, pools=pools,
+                   frida_map=args.frida_map, frida_cache=args.frida_cache, pools=pools,
                    workers_by_pool=workers_by_pool,
                    reviewers_by_pool=reviewers_by_pool,
                    budgets=args.budgets, queue=queue,
