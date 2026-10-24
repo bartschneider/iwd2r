@@ -2534,8 +2534,9 @@ class Driver:
         try:
             h.update('\n'.join(self._worktree_listing(worktree)).encode())
             root = truth.ROOT
-            names = ['tools/truth.py', 'tools/oracle.py', 'oracle/replay/schema.json',
-                     'oracle/replay/screens.json']
+            names = ['tools/truth.py', 'tools/oracle.py', 'tools/minischema.py',
+                     'oracle/replay/schema.json', 'oracle/replay/screens.json',
+                     'oracle/replay/known_differences.json']   # the dumps verdict's inputs
             names += sorted('tools/frida/' + n for n in os.listdir(os.path.join(root, 'tools', 'frida'))
                             if n.endswith('.py')) if os.path.isdir(os.path.join(root, 'tools', 'frida')) else []
             for rel in names:
