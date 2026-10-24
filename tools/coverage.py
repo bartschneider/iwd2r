@@ -227,8 +227,27 @@ def exe_sha():
     return _sha(_load('oracle').VANILLA_EXE)
 
 
-def write(path, results, root=ROOT, exe=None):
-    data = {'exe': exe if exe is not None else exe_sha(),
+def default_scenarios():
+    """The scenarios a pass measures by default: the phase's world scenarios
+    and the UI-only ones."""
+    t = _load('truth')
+    return list(t.FRIDA_SCENARIOS) + list(t.FRIDA_UI_SCENARIOS)
+
+
+def kept_scenarios(path, scenarios):
+    """The scenarios of the existing map at path that a pass over
+    `scenarios` leaves as they are (a merge keeps them)."""
+    old = read(path)
+    return [s for s in sorted(old['scenarios']) if s not in scenarios] if old else []
+
+
+def write(path, results, root=ROOT, exe=None, merge=True):
+    """Write the map.  An existing map at path is merged (merge=True): the
+    scenarios in results replace their entries, the others are kept as they
+    are (whatever sha they were measured under), the exe is kept, and `at` and
+    `scenarios_sha` are recomputed."""
+    old = read(path) if merge else None
+    data = {'exe': exe if exe is not None else (old.get('exe') if old else exe_sha()),
             'scenarios_sha': scenarios_sha(root),
             'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'scenarios': {s: {'hooks': r['hooks'], 'refused': r['refused'],
@@ -238,6 +257,9 @@ def write(path, results, root=ROOT, exe=None):
                               'hits': {a: n for a, n in sorted(
                                   r['hits'].items(), key=lambda kv: int(kv[0], 16)) if n}}
                           for s, r in results.items()}}
+    if old:
+        kept = {s: r for s, r in old['scenarios'].items() if s not in results}
+        data['scenarios'] = dict(sorted({**kept, **data['scenarios']}.items()))
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, 'w', encoding='utf-8', newline='\n') as f:
         json.dump(data, f, indent=1)
@@ -338,7 +360,7 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
             print('wave coverage: unknown option %s' % a, file=sys.stderr)
             return 2
     if scenarios is None:
-        scenarios = list(_load('truth').FRIDA_SCENARIOS)
+        scenarios = default_scenarios()
     try:
         addresses = (read_addresses(addrs) if addrs else
                      candidates(os.path.join(root, 'docs', 'wso', 'disagreements.json')))
@@ -354,6 +376,9 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
                 out.write('coverage: dropped %d address(es) outside .text [0x%X, 0x%X): %s\n'
                           % (len(other), TEXT_START, TEXT_END, ', '.join(other)))
         out.write(_tooling_line() + '\n')
+        kept = kept_scenarios(os.path.join(root, COVERAGE_REL), scenarios)
+        if kept:
+            out.write('coverage: would keep from the existing map: %s\n' % ', '.join(kept))
         for s, i, n, k in launches:
             out.write('coverage %s chunk %d/%d: %d hooks\n' % (s, i, n, k))
         return 0
@@ -363,8 +388,10 @@ def main(argv, root=ROOT, run_=subprocess.run, out=sys.stdout):
     path = os.path.join(root, COVERAGE_REL)
     if failed:
         path = os.path.join(os.path.dirname(path), 'coverage.failed.json')
-    data = write(path, results, root)
+    data = write(path, results, root, merge=not failed)
     for s, r in data['scenarios'].items():
+        if s not in results:
+            continue
         out.write('%s: %d of %d hooks hit, %d refused, %d failed chunk(s)\n'
                   % (s, len(r['hits']), r['hooks'], len(r['refused']), len(r['failed_chunks'])))
     if failed:

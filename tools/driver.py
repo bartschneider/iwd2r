@@ -909,7 +909,7 @@ def parse_undecided(text):
     return out
 
 
-FRIDA_SCENARIOS_TEXT = 'world_entry, first_fight, walk_and_talk'
+FRIDA_SCENARIOS_TEXT = ', '.join(_tool('truth').FRIDA_SCENARIOS)
 # The history rule's way to undo one function (first's 021a6cb0): the
 # function is edited back, never the whole file put back, which would
 # discard the other rows' changes in a shared file.  %s is the merge base.
@@ -2379,7 +2379,8 @@ class Driver:
             rows = [r for r in self._open_rows(batch) if key(r['address']) not in self._probe]
         if not rows:
             return []
-        if self._coverage_skips(batch_id, rows):
+        run_scenarios, skip = self._coverage_scenarios(batch_id, rows)
+        if skip:
             # No scenario of the phase hits any row (the coverage map of the
             # original): no build, no launch; the same shape the run's
             # verdicts have, read by the loop below.
@@ -2417,7 +2418,8 @@ class Driver:
             with open(map_path, encoding='utf-8', errors='replace') as f:
                 map_text = f.read()
             self._stage(batch_id, 'frida')
-            got = truth.frida_batch(batch_id, rows, sigs, map_text, run_frida=run_frida,
+            got = truth.frida_batch(batch_id, rows, sigs, map_text, scenarios=run_scenarios,
+                                    run_frida=run_frida,
                                     headers=truth._our_headers(worktree), info=info)
             got = {key(a): v for a, v in got.items()}
         except Exception as e:
@@ -2485,28 +2487,37 @@ class Driver:
             self._commit_trace_evidence(batch_id, worktree, written)
         return findings
 
-    def _coverage_skips(self, batch_id, rows):
-        """True when a usable coverage map exists and every row (a dependency
-        included) was measured by every scenario the phase runs and hit by
-        none; a row nobody measured is unknown and keeps the phase."""
+    def _coverage_scenarios(self, batch_id, rows):
+        """(scenarios to run, skip): the phase's candidates (truth.scenarios_for)
+        narrowed by the coverage map.  With a usable map a candidate runs when
+        it hits at least one row or has not measured one (unknown forces it
+        in); when none does, skip is True (every row is dead in every
+        candidate: no build, no launch).  Without a usable map every
+        candidate runs."""
+        truth = _tool('truth')
+        cands = list(truth.scenarios_for(rows, [r.get('file') for r in rows]))
         try:
             cov_mod = _tool('coverage')
             path = os.path.join(self.repo, cov_mod.COVERAGE_REL)
             cov, why = cov_mod.check(path, self.repo)
             if cov is None:
                 if os.path.exists(path):
-                    self.log('%s: frida: coverage map not used (%s); running as usual'
-                             % (batch_id, why))
-                return False
-            phase = _tool('truth').FRIDA_SCENARIOS
-            if any(cov_mod.status_of(cov, r['address'], phase) != 'dead' for r in rows):
-                return False
+                    self.log('%s: frida: coverage map not used (%s)' % (batch_id, why))
+                self.log('%s: frida: no usable coverage map; running every scenario' % batch_id)
+                return cands, False
+            run = [sc for sc in cands
+                   if any(cov_mod.status_of(cov, r['address'], [sc]) != 'dead' for r in rows)]
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
-            self.log('%s: frida: coverage map unreadable (%s); running as usual'
-                     % (batch_id, _one_line(repr(e), 200)))
-            return False
-        self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
-        return True
+            self.log('%s: frida: coverage map unreadable (%s)' % (batch_id, _one_line(repr(e), 200)))
+            self.log('%s: frida: no usable coverage map; running every scenario' % batch_id)
+            return cands, False
+        if not run:
+            self.log('%s: frida: skipped, coverage says no scenario exercises any row' % batch_id)
+            return [], True
+        left = [sc for sc in cands if sc not in run]
+        self.log('%s: frida: scenarios by coverage: %s (left out: %s)'
+                 % (batch_id, ', '.join(run), ', '.join(left) or 'none'))
+        return run, False
 
     def _import_rows(self, batch_id, batch, worktree, mb_sha):
         """The functions an import batch's Frida phase measures: its rows
