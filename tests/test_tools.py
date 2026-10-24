@@ -16575,6 +16575,111 @@ class WaveResolveTest(unittest.TestCase):
             self.assertFalse(os.path.exists(report))
 
 
+class WaveUndecideTest(unittest.TestCase):
+    """wave.py undecide (a batch row onto the probe list) and line-buffered
+    output."""
+
+    setUp = WaveResolveTest.setUp
+    ROW = WaveResolveTest.ROW
+    resolve = WaveResolveTest.resolve
+    probe_list = WaveResolveTest.probe_list
+
+    def repo(self, status='assigned', probes=()):
+        self.root = os.path.join(self.tmp, 'repo')
+        shutil.rmtree(self.root, ignore_errors=True)
+        wso = os.path.join(self.root, 'docs', 'wso')
+        first = dict(self.ROW, address='0x643CC0', name='Render')
+        _write(os.path.join(wso, 'disagreements.json'),
+               json.dumps([first, self.ROW]))
+        self.state = os.path.join(wso, 'wave-state.json')
+        self.wave.save_state(self.state, {'batches': {'b011': {
+            'rows': [first, dict(self.ROW)],
+            'files': ['src/CGameSprite.cpp'],
+            'branch': 'p3/wso-b011', 'status': status, 'assigned_at': 't',
+            'verdicts': {'0x716E80': {'side': 'ours', 'case': 'probe-1',
+                                      'losing_kind': 'trace'}}}}})
+        _write(os.path.join(wso, 'probe-list.json'), json.dumps(list(probes)))
+        _write(os.path.join(self.root, 'docs', 'evidence', '716E80.md'),
+               '---\nkind: oracle\n---\n\ndisagreed with WSO at e8dd16a: x; '
+               'case probe-9 decides\n')
+
+    def undecide(self, batch='b011', addr='0x716E80', reading='fork',
+                 reason='cannot decide'):
+        return self.wave.undecide(batch, addr, reading, reason,
+                                  self.state, self.root)
+
+    def snapshot(self):
+        out = []
+        for p in (self.state, os.path.join(self.root, 'docs', 'wso',
+                                           'probe-list.json')):
+            with open(p, 'rb') as f:
+                out.append(f.read())
+        return out
+
+    def refuses(self, **kw):
+        before = self.snapshot()
+        rc, out = self.undecide(**kw)
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(self.snapshot(), before)
+        return out
+
+    def test_undecide_moves_row_and_resolve_returns_it(self):
+        self.repo()
+        rc, out = self.undecide()
+        self.assertEqual(rc, 0, out)
+        self.assertIn('dropped its verdict', out)
+        self.assertIn('merge base', out)
+        self.assertIn('resolve', out)
+        b = self.wave.load_state(self.state)['batches']['b011']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x643CC0'])
+        self.assertEqual(b['verdicts'], {})
+        entry, = self.probe_list()
+        self.assertEqual(sorted(entry), ['address', 'at', 'batch', 'file',
+                                         'name', 'reading', 'reason', 'source'])
+        self.assertEqual((entry['source'], entry['batch'], entry['reading'],
+                          entry['reason'], entry['file'], entry['name']),
+                         ('coordinator', 'b011', 'fork', 'cannot decide',
+                          'src/CGameSprite.cpp', 'CGameSprite::sub_716E80'))
+        rc, out = self.resolve(case='probe-9')
+        self.assertEqual(rc, 0, out)
+        b = self.wave.load_state(self.state)['batches']['b011']
+        self.assertEqual([r['address'] for r in b['rows']],
+                         ['0x643CC0', '0x716E80'])
+        self.assertEqual(self.probe_list(), [])
+
+    def test_undecide_refusals_write_nothing(self):
+        self.repo()
+        self.assertIn('no batch b999', self.refuses(batch='b999'))
+        self.assertIn('not a row', self.refuses(addr='0x111111'))
+        self.assertIn('fork or neither', self.refuses(reading='ours'))
+        self.assertIn('reason', self.refuses(reason=' '))
+        self.repo(status='closed')
+        self.assertIn('b011 is closed; a closed row is reopened through the '
+                      'probe list by hand', self.refuses())
+        self.repo(probes=[{'address': '0x716e80', 'at': 't', 'batch': 'b011',
+                           'file': 'f', 'name': 'n', 'reading': 'fork',
+                           'reason': 'r', 'source': 'worker'}])
+        self.assertIn('already on the probe list', self.refuses())
+
+    def test_main_line_buffers_when_not_a_tty(self):
+        for tty, calls in ((False, 2), (True, 0)):
+            with mock.patch.object(sys, 'stdout') as so, \
+                 mock.patch.object(sys, 'stderr') as se:
+                so.isatty.return_value = tty
+                se.isatty.return_value = tty
+                self.wave.main(['bogus-command'])
+            got = so.reconfigure.call_count + se.reconfigure.call_count
+            self.assertEqual(got, calls)
+            if not tty:
+                so.reconfigure.assert_called_with(line_buffering=True)
+
+    def test_coverage_dry_to_a_pipe_still_prints(self):
+        r = subprocess.run([sys.executable, '-I', os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', 'tools',
+            'wave.py'), 'coverage', '--dry'], capture_output=True, text=True)
+        self.assertTrue(r.stdout or r.stderr)
+
+
 class WaveCloseRulesTest(unittest.TestCase):
     """Task 16: close refuses dump-decided fork/neither verdicts, syncs the
     base before it merges, and the checked-out base follows the ref."""

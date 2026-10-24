@@ -4349,6 +4349,7 @@ def _clear(batch_id, repo, queue='wave1'):
 
 
 def main(argv=None, repo=None):
+    _tool('wave')._line_buffer()
     repo = repo or _tool('wave').ROOT
     args, err = _parse(sys.argv[1:] if argv is None else argv)
     if err is None:
