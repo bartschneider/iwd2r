@@ -19496,14 +19496,16 @@ INT CGameSprite::sub_73CD00(CGameSprite* target, CItem* curWeapon, const ITEM_AB
 
     // A weapon (or its launcher) named ZZ<c><d>... has a bonus of <d> - 5
     // (skipping 0) against a race (a letter) or an alignment (a digit).
+    // NOTE: The prefix test ignores case: the exe's compare helper folds
+    // 'A'..'Z' before comparing ("zz..." matches too).
     STATIC_73CD00_FOUND = FALSE;
-    if (strncmp(reinterpret_cast<const char*>(curWeapon->cResRef.GetResRef()), "ZZ", 2) == 0) {
+    if (strnicmp(reinterpret_cast<const char*>(curWeapon->cResRef.GetResRef()), "ZZ", 2) == 0) {
         STATIC_73CD00_FOUND = TRUE;
         strncpy(STATIC_73CD00_RESREF, reinterpret_cast<const char*>(curWeapon->cResRef.GetResRef()), 8);
     }
 
     if (pLauncher != NULL) {
-        if (strncmp(reinterpret_cast<const char*>(pLauncher->cResRef.GetResRef()), "ZZ", 2) == 0) {
+        if (strnicmp(reinterpret_cast<const char*>(pLauncher->cResRef.GetResRef()), "ZZ", 2) == 0) {
             STATIC_73CD00_FOUND = TRUE;
             strncpy(STATIC_73CD00_RESREF, reinterpret_cast<const char*>(pLauncher->cResRef.GetResRef()), 8);
         }
@@ -19519,15 +19521,21 @@ INT CGameSprite::sub_73CD00(CGameSprite* target, CItem* curWeapon, const ITEM_AB
 
         BOOL bMatch = FALSE;
         if (isalpha(static_cast<unsigned char>(STATIC_73CD00_RESREF[2]))) {
-            if (BANE_RACES[toupper(static_cast<unsigned char>(STATIC_73CD00_RESREF[2])) - 'A'] == target->m_typeAI.m_nRace) {
+            INT nIndex = toupper(static_cast<unsigned char>(STATIC_73CD00_RESREF[2])) - 'A';
+            if (nIndex >= 0 && nIndex < 26
+                && BANE_RACES[nIndex] == target->m_typeAI.m_nRace) {
                 bMatch = TRUE;
             }
         } else if (isdigit(static_cast<unsigned char>(STATIC_73CD00_RESREF[2]))) {
             // NOTE: The original's table has entries for '0' to '5'; '6' to
-            // '9' read the bytes after it (BANE_ALIGNMENTS keeps them).
-            const DWORD* pEntry = BANE_ALIGNMENTS[STATIC_73CD00_RESREF[2] - '0'];
-            if ((pEntry[0] & target->m_typeAI.m_nAlignment) == pEntry[1]) {
-                bMatch = TRUE;
+            // '9' read the bytes after it ("ÿÿÿÿSPECIALABILITYNAME..."),
+            // whose mask 0xFFFFFFFF never matches an alignment byte.
+            INT nIndex = STATIC_73CD00_RESREF[2] - '0';
+            if (nIndex >= 0 && nIndex < 6) {
+                const DWORD* pEntry = BANE_ALIGNMENTS[nIndex];
+                if ((pEntry[0] & target->m_typeAI.m_nAlignment) == pEntry[1]) {
+                    bMatch = TRUE;
+                }
             }
         } else {
             // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjCreatureAI.cpp

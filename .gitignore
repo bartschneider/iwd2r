@@ -404,3 +404,6 @@ oracle/runs/
 *.SAV
 .gates.lock
 docs/wso/claims.json.lock
+
+# ctest output a worker leaves behind when it runs the engine tests in a batch worktree
+Testing/
