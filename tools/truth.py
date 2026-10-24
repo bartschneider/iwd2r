@@ -1435,7 +1435,7 @@ trace_source_line = trace_source
 # ---- the oracle path, end to end -------------------------------------------------
 
 CMAKE_ANCHOR = 'cases/store_spell.cpp'   # the last case file of oracle/CMakeLists.txt's runner
-FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk', 'action_bar', 'equip_shots', 'inventory')
+FRIDA_SCENARIOS = ('world_entry', 'first_fight', 'walk_and_talk', 'action_bar', 'equip_shots', 'inventory', 'save_load_screens')
 # UI-only scenarios (no world play): used when a row's file is a CScreen*.
 FRIDA_UI_SCENARIOS = ('biography',)
 
