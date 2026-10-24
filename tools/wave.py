@@ -973,6 +973,10 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
              .replace('{{files}}', files)
              .replace('{{rows}}', rows)
              .replace('{{bundle}}', bundle))
+    base_rows = any(r.get('category') == 'theirs_changed_ours_base' for r in batch['rows'])
+    brief = (brief.replace('{{base_body}}', BASE_BODY_PARAGRAPH.replace('{{id}}', batch_id)
+                                if base_rows else '')
+             .replace('{{kept_report}}', KEPT_REPORT_PARAGRAPH if base_rows else ''))
     return 0, brief
 
 
@@ -1327,6 +1331,16 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 # Imported means changed: a body left (or put back) as the
                 # stub cannot close on any evidence, and only touched
                 # functions have their trace_source checked by the gate.
+                if (k not in touched and row.get('outcome') == 'kept'
+                        and row.get('category') == 'theirs_changed_ours_base'):
+                    # Kept (Task 19): ours already matches the original, so the
+                    # body is untouched; what the row needs instead is the
+                    # Frida phase's measurement of it, kind: trace.
+                    bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text)
+                    if bar or not frida_trace(text):
+                        problems.append(f'{row["address"]}: kept but not measured; park it or '
+                                        f'import it')
+                    continue
                 if k not in touched:
                     problems.append(f'row {row["address"]} not imported: body unchanged '
                                     f'against {mb[:12] if mb else base}; import it or park '
@@ -1733,12 +1747,37 @@ def deciding_kind(case):
     return 'trace'
 
 
+BASE_BODY_PARAGRAPH = (
+    "For a row where ours is the base body, the same rules apply with one\n"
+    "addition: the base body may be right and his change wrong. Read the\n"
+    "original. If his body is the one it confirms, import it. If ours already\n"
+    "matches the original, do NOT park the row and do NOT touch its body: write\n"
+    "(or keep) `docs/evidence/<ADDRESS>.md` (`kind: read-only`, your reading of why\n"
+    "ours matches, and in the `## WSO delta` section the sentence `corroborated by\n"
+    "WSO at <sha>: <what he changed and why ours is right>; case\n"
+    "kept-{{id}}-<ADDRESS> decides`), commit it, and list the row under `## Kept`\n"
+    "in your report. The Frida phase then measures our body against the original\n"
+    "and, when they are equal, the driver records trace evidence for it. Park the\n"
+    "row only when his body contradicts the original and ours is wrong too\n"
+    "(`needs` says what), when it depends on a function outside the batch, or\n"
+    "when you cannot settle it. A stub row is never kept.\n\n")
+
+KEPT_REPORT_PARAGRAPH = (
+    "Base-body rows you keep as ours go under a section headed `## Kept`, one line\n"
+    "per row, never also under `## Imported`:\n"
+    "\n"
+    "    kept <0xADDR> <one-line reason>\n"
+    "\n")
+
+
 def _import_tally(state, import_state=None, parked=None):
-    """'imports: stubs N imported / M parked; base-body N imported / M
-    parked' over the rows of the closed import batches (ids i<NNN>) of
-    `state` and `import_state`, split by each row's category (none: a
-    stub); a row with a docs/wso/import-parked entry (`parked`, address
-    keys) is parked, any other closed row imported.  None without any."""
+    """'imports: stubs N imported / K kept / M parked; base-body N imported /
+    K kept / M parked' over the rows of the closed import batches (ids
+    i<NNN>) of `state` and `import_state`, split by each row's category
+    (none: a stub); a row with a docs/wso/import-parked entry (`parked`,
+    address keys) is parked, a row the Frida phase measured equal and
+    recorded outcome kept is kept (measured), any other closed row
+    imported.  None without any."""
     parked = parked or {}
     seen = {}
     for st in (state, import_state):
@@ -1749,13 +1788,13 @@ def _import_tally(state, import_state=None, parked=None):
                 seen[(bid, _addr_key(r.get('address')))] = r
     if not seen:
         return None
-    n = {'stubs': [0, 0], 'base-body': [0, 0]}
+    n = {'stubs': [0, 0, 0], 'base-body': [0, 0, 0]}
     for (bid, key), r in seen.items():
         which = ('base-body' if r.get('category') == 'theirs_changed_ours_base'
                  else 'stubs')
-        n[which][1 if key in parked else 0] += 1
-    return ('imports: stubs %d imported / %d parked; base-body %d imported / %d parked'
-            % (*n['stubs'], *n['base-body']))
+        n[which][2 if key in parked else 1 if r.get('outcome') == 'kept' else 0] += 1
+    return ('imports: stubs %d imported / %d kept / %d parked; '
+            'base-body %d imported / %d kept / %d parked' % (*n['stubs'], *n['base-body']))
 
 
 def scorecard_text(state, import_state=None, parked=None):

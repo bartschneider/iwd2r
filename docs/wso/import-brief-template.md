@@ -20,13 +20,7 @@ Rows, biggest first. Each says what ours is: a stub, or the base body.
 
 {{rows}}
 
-For a row where ours is the base body, the same rules apply with one
-addition: the base body may be right and his change wrong. "Ours already
-matches the original" is a legitimate park, with
-`needs: "ours already matches the exe: <what you checked>"`;
-a row is imported only when his body is the one the original confirms.
-
-Context bundles (one per row; read these before the source):
+{{base_body}}Context bundles (one per row; read these before the source):
 
 {{bundle}}
 
@@ -105,8 +99,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
 
    `needs` names what was tried. Commit all three changes together. Every
    row you do not park must be imported: its body changed against the merge
-   base. A row whose body you leave as ours (ours already matches, or you
-   refused his body) is parked too, with `needs` saying why.
+   base. A row whose body you leave as ours because you refused his body is
+   parked too, with `needs` saying why.
    A row that was parked and unparked before carries an earlier attempt in that
    batch's branch history (`git log --all -- docs/evidence/<ADDRESS>.md` finds
    it); read it, do not trust it.
@@ -114,7 +108,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
    `close --kind import`, which requires every row imported and at trace or
-   better (or parked), and every dependency you imported likewise.
+   better (or parked, or kept and measured), and every dependency you imported likewise.
    **Dependencies.** A stub dependency that sits inside your own files is
    imported with the row, in its own commit with its own trailer, and with
    its own `docs/evidence/<ADDR>.md` (`kind: read-only` plus `exemption:`,
@@ -153,6 +147,6 @@ Write a section headed `## Imported`, with one line per function:
 
     imported <0xADDR> <evidence kind>
 
-Then list the commits you made, the evidence files you wrote and anything you
+{{kept_report}}Then list the commits you made, the evidence files you wrote and anything you
 could not import. Do not write a `## Verdicts` section. You do not
 fast-forward anything yourself; the driver records and closes.

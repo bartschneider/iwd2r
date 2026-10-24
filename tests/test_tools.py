@@ -9929,6 +9929,76 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(driver.parse_undecided(text),
                          {'0x401000': ('fork', 'a'), '0x2': ('neither', 'b')})
 
+    def test_parse_kept(self):
+        text = ('## Imported\nimported 0x1 trace\n\n## Kept\n'
+                'kept 0x716e80 ours matches: the exe skips the ability too\n'
+                '- `Kept 0X02 the base guard is right`\n3. kept 0x0403000  x y \n'
+                '\n## Notes\nkept nonsense here\n')
+        self.assertEqual(driver.parse_kept(text), {
+            '0x716E80': 'ours matches: the exe skips the ability too',
+            '0x2': 'the base guard is right', '0x403000': 'x y'})
+        self.assertEqual(driver.parse_kept(self.REPORT), {})
+        self.assertEqual(driver.parse_kept('## Kept\n```text\nkept 0x1 r\n```\n'), {'0x1': 'r'})
+
+    def test_parse_kept_rejects_malformed_duplicate_and_imported_rows(self):
+        for bad in ('kept 0x1\n', 'kept 0x1 \n', 'ours is right\n', 'imported 0x1 trace\n'):
+            with self.assertRaises(driver.ReportError, msg=bad):
+                driver.parse_kept('## Kept\n' + bad)
+        with self.assertRaises(driver.ReportError) as cm:
+            driver.parse_kept('## Kept\nkept 0x401000 a\nkept 0x0401000 b\n')
+        self.assertIn('duplicate kept line', str(cm.exception))
+        with self.assertRaises(driver.ReportError) as cm:
+            driver.parse_kept('## Imported\nimported 0x401000 trace\n## Kept\nkept 0x401000 a\n')
+        self.assertIn('both ## Imported and ## Kept', str(cm.exception))
+
+    def test_mechanical_checks_kept_and_parked_rows(self):
+        d = self._mc_repo({'401000': 'kind: read-only', '402000': 'x'})
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'theirs_changed_ours_base'},
+            {'address': '0x402000', 'category': 'theirs_real_ours_stub'},
+            {'address': '0x403000', 'category': 'theirs_changed_ours_base'}]}
+        wave = driver._tool('wave')
+        ce = driver._tool('check_evidence')
+
+        def run(**kw):
+            with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'), \
+                    mock.patch.object(ce, 'touched', return_value=kw.pop('touched', [])):
+                return [p for p in driver.mechanical_checks(
+                    batch, d, {}, run=self._mc_run(0, []), kind='import', **kw)
+                    if 'first' not in p.split(':')[0] and not p.startswith('git ')]
+        # a parked row whose evidence still exists: close's exact wording
+        _write(os.path.join(d, 'docs', 'wso', 'import-parked', '402000.json'), json.dumps(
+            {'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        self.assertEqual(run(), [
+            '0x402000: parked (docs/wso/import-parked/402000.json) but '
+            'docs/evidence/402000.md still exists; delete it'])
+        os.unlink(os.path.join(d, 'docs', 'evidence', '402000.md'))
+        self.assertEqual(run(), [])
+        # kept: fine with evidence and the base body; each misuse is a problem
+        self.assertEqual(run(kept=['0x401000']), [])
+        probs = run(kept=['0x401000', '0x402000', '0x403000', '0x999000'],
+                    touched=[('src/A.cpp', 0x401000, 'F')])
+        self.assertEqual(len(probs), 4, probs)
+        self.assertTrue(any(p.startswith('0x401000: listed under ## Kept but its body changed '
+                                         'against first') for p in probs), probs)
+        self.assertTrue(any(p.startswith('0x402000: listed under ## Kept but ours is a stub')
+                            for p in probs), probs)
+        self.assertTrue(any('0x402000: both kept and parked' not in p and
+                            p.startswith('0x403000: listed under ## Kept but '
+                                         'docs/evidence/403000.md does not exist') for p in probs))
+        self.assertTrue(any(p.startswith('0x999000: kept line for an address outside') for p in probs))
+        # a base-body row both kept and parked
+        _write(os.path.join(d, 'docs', 'wso', 'import-parked', '401000.json'), json.dumps(
+            {'address': '0x401000', 'name': 'n', 'file': 'f', 'batch': 'i009', 'needs': 'x'}))
+        probs = run(kept=['0x401000'])
+        self.assertTrue(any(p.startswith('0x401000: parked') for p in probs), probs)
+        self.assertTrue(any(p.startswith('0x401000: both kept and parked') for p in probs), probs)
+
+    def test_fix_round_rule_for_imports_names_kept(self):
+        imp = driver.fix_prompt('i005', 'checks', 'p3/wso-i005', 'BRIEF', ['p'], 'import')
+        self.assertIn('`## Kept`', imp)
+        self.assertIn('kept <0xADDR> <one-line reason>', imp)
+
     def test_credits_of_uses_both_formulas(self):
         lines = [json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
                  'usage': {'input_tokens': 10000, 'cache_read_input_tokens': 100000, 'output_tokens': 1000}}})]
@@ -11456,6 +11526,66 @@ class DriverTest(unittest.TestCase):
                            ('0x403000', 'Rules::Tick')):
             self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
                 os.path.join(ev, addr[2:] + '.md'))), addr)
+
+    def test_driver_frida_phase_measures_kept_rows_and_records_them(self):
+        trace = TruthTest._trace
+        d, batch = self._import_phase_driver()
+        d._kept = {'0x401000': 'ours matches', '0x402000': 'ours matches',
+                   '0x403000': 'ours matches'}
+        # the batch is in the import state: an equal kept row is recorded there
+        with open(self.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [dict(r) for r in batch['rows']]
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        seen = []
+
+        def frida_run(b, table, scenarios, **kw):
+            seen.append(sorted(h['name'] for h in table['original']['hooks']))
+            return self._file_traces(scenarios, trace(('fn_401000', 7, 3), ('fn_402000', 7, 3)),
+                                     trace(('fn_401000', 7, 3), ('fn_402000', 7, 4)))
+        d.frida_run = frida_run
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(seen, [['fn_401000', 'fn_402000', 'fn_403000']])
+        # equal: trace evidence for our body, recorded as kept
+        fields = load_tool('check_evidence').front_matter(
+            _slurp(os.path.join(self.wt, 'docs', 'evidence', '401000.md')))
+        self.assertEqual(fields['kind'], 'trace')
+        self.assertIn('frida b011-world_entry orig:', fields['trace_source'])
+        with open(self.state_path) as f:
+            outcomes = {r['address']: r.get('outcome') for r in json.load(f)['batches']['b011']['rows']}
+        self.assertEqual(outcomes, {'0x401000': 'kept', '0x402000': None, '0x403000': None})
+        # different: the worker's fix-round finding
+        diff = [f for f in findings if f.startswith('0x402000:')]
+        self.assertEqual(len(diff), 1, findings)
+        self.assertIn('ours differs from the original at ', diff[0])
+        self.assertIn('import his body if it is the one the original confirms, else park with '
+                      'the difference', diff[0])
+        # not exercised: parked with the stated needs
+        idle = [f for f in findings if f.startswith('0x403000:')]
+        self.assertEqual(len(idle), 1, findings)
+        self.assertIn('docs/wso/import-parked/403000.json', idle[0])
+        self.assertIn('needs "not exercised; ours reading matches the decompile"', idle[0])
+        self.assertEqual(len(findings), 2)
+
+    def test_driver_check_parses_kept_and_import_rows_carry_the_mark(self):
+        d, batch = self._import_phase_driver()
+        d._kept = {'0x401000': 'x'}
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertEqual({r['address']: r.get('kept') for r in rows},
+                         {'0x401000': True, '0x402000': None, '0x403000': None})
+        # evidence unchanged since the merge base stands for an imported row,
+        # but a kept row is measured whatever its evidence says
+        _write(os.path.join(self.wt, 'docs', 'evidence', '403000.md'),
+               self.git('show', 'first:docs/evidence/403000.md').stdout)
+        self.git('commit', '-qam', 'as at the merge base', cwd=self.wt)
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertEqual(sorted(r['address'] for r in rows), ['0x401000', '0x402000'])
+        d._kept = {'0x403000': 'x'}
+        rows = d._import_rows('b011', batch, self.wt, mb)
+        self.assertIn('0x403000', [r['address'] for r in rows])
 
     def test_driver_frida_phase_hooks_dependencies_imported_with_a_row(self):
         trace = TruthTest._trace
@@ -17316,6 +17446,53 @@ class WaveCloseRulesTest(unittest.TestCase):
     PARKED = [{'address': '0x643CD0', 'name': 'Draw', 'file': 'src/A.cpp', 'batch': 'b001',
                'needs': 'world_entry, first_fight, walk_and_talk'}]
 
+    def _kept_ready(self, evidence_kind='trace', category='theirs_changed_ours_base',
+                    outcome='kept'):
+        """Draw (0x643CD0) kept: no body change, evidence trace (or not), the
+        state row marked kept; Render imported."""
+        self._import_ready(trace=('0x643CC0', '0x643CD0') if evidence_kind == 'trace' else ('0x643CC0',),
+                           evidence=() if evidence_kind == 'trace' else ('0x643CD0',))
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            if r['address'] == '0x643CD0':
+                r['category'] = category
+                r['outcome'] = outcome
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_import_close_accepts_a_kept_row_measured_trace(self):
+        self._kept_ready()
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_refuses_a_kept_row_without_trace(self):
+        self._kept_ready(evidence_kind='replay')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
+        # a trace the driver did not write does not measure it either
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: fn\nkind: trace\n'
+               'trace_source: WillScarlettOhara/iwd2-re@abc docs/x-recovery.md\n---\n')
+        self.commit_worktree('trace not from frida')
+        rc, out = self.close(kind='import')
+        self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
+
+    def test_import_close_never_keeps_a_stub_row(self):
+        self._kept_ready(category='theirs_real_ours_stub')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('row 0x643CD0 not imported: body unchanged', out)
+        self.assertNotIn('kept but not measured', out)
+
+    def test_import_close_still_refuses_an_unmarked_untouched_row(self):
+        self._kept_ready(outcome=None)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('row 0x643CD0 not imported: body unchanged', out)
+
     def test_import_close_accepts_parked_rows(self):
         self._import_ready(parked=self.PARKED)
         rc, out = self.close(kind='import')
@@ -18830,8 +19007,38 @@ class ImportSecondSourceTest(unittest.TestCase):
                 bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
             self.assertEqual(rc, 0, text)
             self.assertIn('; ' + label + ')', text)
-            self.assertIn('ours already matches the exe: <what you checked>', text)
+            self.assertEqual('ours is the base body' in text.split('Context bundles')[0]
+                             and 'do NOT park the row' in text, bid == 'i002')
             self.assertNotIn('{{', text)
+
+    def test_scorecard_counts_kept_rows_apart(self):
+        wave = self.wave
+        st = {'batches': {'i001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'category': self.BASE, 'outcome': 'kept'},
+            {'address': '0x2', 'category': self.BASE},
+            {'address': '0x3', 'category': self.BASE, 'outcome': 'kept'},
+            {'address': '0x4'}]}}}
+        self.assertEqual(
+            wave._import_tally(st, None, {'3': {}}),
+            'imports: stubs 1 imported / 0 kept / 0 parked; '
+            'base-body 1 imported / 1 kept / 1 parked')
+
+    def test_brief_renders_the_kept_instructions_for_base_body_rows_only(self):
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
+        self.next_import()
+        self.next_import()
+        texts = {}
+        for bid in ('i001', 'i002'):
+            rc, texts[bid] = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, texts[bid])
+            self.assertNotIn('{{', texts[bid])
+        for needle in ('## Kept', 'kept <0xADDR> <one-line reason>', 'do NOT park the row',
+                       'corroborated by\nWSO at <sha>: <what he changed and why ours is right>; case\n'
+                       'kept-i002-<ADDRESS> decides', 'A stub row is never kept'):
+            self.assertIn(needle, texts['i002'])
+            self.assertNotIn(needle, texts['i001'])
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')
@@ -18862,7 +19069,7 @@ class ImportSecondSourceTest(unittest.TestCase):
             os.path.join(self.tmp, 'no-triage.json'), None, os.path.join(self.tmp, 'no-audit'),
             repo=self.tmp)
         self.assertEqual(rc, 0, out)
-        self.assertIn('imports: stubs 1 imported / 1 parked; base-body 2 imported / 1 parked',
+        self.assertIn('imports: stubs 1 imported / 0 kept / 1 parked; base-body 2 imported / 0 kept / 1 parked',
                       _slurp(report))
         # the import state itself as the state file counts once
         rc, out = self.wave.write_scorecard(
@@ -18870,7 +19077,7 @@ class ImportSecondSourceTest(unittest.TestCase):
             os.path.join(self.tmp, 'no-triage.json'), None, os.path.join(self.tmp, 'no-audit'),
             repo=self.tmp)
         self.assertEqual(rc, 0, out)
-        self.assertIn('imports: stubs 1 imported / 1 parked; base-body 2 imported / 1 parked',
+        self.assertIn('imports: stubs 1 imported / 0 kept / 1 parked; base-body 2 imported / 0 kept / 1 parked',
                       _slurp(report))
 
 
