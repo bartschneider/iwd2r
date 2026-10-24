@@ -377,6 +377,20 @@ def parked_rel(address):
     return f'{IMPORT_PARKED_DIR}/{_addr_key(address).upper()}.json'
 
 
+def parked_stem_key(name):
+    """The address key of a parked file's name (`0x401000.json`, `401000.JSON`
+    and `401000.json` all name 401000): the one spelling rule of the folder."""
+    stem = name[:-len('.json')] if name.lower().endswith('.json') else name
+    return _addr_key(stem.lower())
+
+
+def parked_path_key(rel):
+    """The address key of a repo path under docs/wso/import-parked/, else None."""
+    head, _, name = rel.rpartition('/')
+    return parked_stem_key(name) if head == IMPORT_PARKED_DIR and name.lower().endswith(
+        '.json') else None
+
+
 def _parked_rows(worktree):
     """({address key: entry}, problem or None) of the worktree's
     docs/wso/import-parked/<ADDR>.json files: the rows import batches
@@ -410,7 +424,7 @@ def _parked_rows(worktree):
             problems.append(f'{rel} records address {entry["address"]}; name the file '
                             f'after its row ({parked_rel(entry["address"])})')
             continue
-        out[_addr_key(stem.lower())] = entry
+        out[parked_stem_key(name)] = entry
     return out, ('; '.join(problems) or None)
 
 
@@ -984,7 +998,12 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
     base_rows = any(r.get('category') == 'theirs_changed_ours_base' for r in batch['rows'])
     brief = (brief.replace('{{base_body}}', BASE_BODY_PARAGRAPH.replace('{{id}}', batch_id)
                                 if base_rows else '')
-             .replace('{{kept_report}}', KEPT_REPORT_PARAGRAPH if base_rows else ''))
+             .replace('{{kept_report}}', KEPT_REPORT_PARAGRAPH if base_rows else '')
+             .replace('{{kept_refusal}}', KEPT_REFUSAL if base_rows else '')
+             .replace('{{kept_measured}}', KEPT_MEASURED if base_rows else '')
+             .replace('{{kept_rule4}}', KEPT_RULE4_EXCEPTION if base_rows else '')
+             .replace('{{kept_close}}', KEPT_CLOSE if base_rows else '')
+             .replace('{{refusal_rule}}', REFUSAL_MIXED if base_rows else REFUSAL_STUB))
     return 0, brief
 
 
@@ -1336,6 +1355,12 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                         f'"corroborated by WSO at <sha>" line names this '
                         f'batch\'s pin {batch["fork_base"][:7]}')
             else:
+                if (wt is not None and row.get('measured_body') and frida_trace(text)
+                        and _check_evidence().body_digest(
+                            wt, row['address'], row.get('file')) != row['measured_body']):
+                    problems.append(f'{row["address"]}: body changed after the Frida phase; '
+                                    f'park it or edit it back to the measured body')
+                    continue
                 # Imported means changed: a body left (or put back) as the
                 # stub cannot close on any evidence, and only touched
                 # functions have their trace_source checked by the gate.
@@ -1760,16 +1785,41 @@ BASE_BODY_PARAGRAPH = (
     "For a row where ours is the base body, the same rules apply with one\n"
     "addition: the base body may be right and his change wrong. Read the\n"
     "original. If his body is the one it confirms, import it. If ours already\n"
-    "matches the original, do NOT park the row and do NOT touch its body: list\n"
-    "it under `## Kept` in your report, one line `kept <0xADDR> <one-line\n"
-    "reason>`. Write no evidence file for it and no verdict phrase anywhere: the\n"
-    "Frida phase measures our body against the original and, when they are\n"
-    "equal, the driver writes the trace evidence. If his body contradicts the\n"
-    "original, ours stays and the row goes under `## Kept` with the reason\n"
-    "`fork body contradicts the exe: <what differs>`; you never park it for\n"
-    "that. Park the row only when ours is wrong too (`needs` says what),\n"
-    "when it depends on a function outside the batch, or when you cannot settle\n"
-    "it. A stub row is never kept.\n\n")
+    "matches the original, do NOT park the row and do NOT touch its body: write\n"
+    "(or keep) `docs/evidence/<ADDRESS>.md` (`kind: read-only`, with an\n"
+    "`exemption:` that gives your reading, what you checked against the\n"
+    "disassembly; no verdict phrase and no frida line), commit it, and list the\n"
+    "row under `## Kept` in your report, one line `kept <0xADDR> <one-line\n"
+    "reason>`. The Frida phase then measures our body against the original and,\n"
+    "when they are equal, the driver rewrites that file to `kind: trace`. If his\n"
+    "body contradicts the original, ours stays and the row goes under `## Kept`\n"
+    "with the reason `fork body contradicts the exe: <what differs>`; a row you\n"
+    "leave as ours is never parked by you for that. Park the row only when ours\n"
+    "is wrong too (`needs` says what), when it depends on a function outside the\n"
+    "batch, or when you cannot settle it. A stub row is never kept.\n\n")
+
+# The template's `## Kept` pieces, rendered for batches that hold base-body rows
+# only (a stub batch has no `## Kept` section to write).
+KEPT_REFUSAL = (" For a base-body row that refusal is a `## Kept` line with that reason,\n"
+                "   not a park.")
+KEPT_MEASURED = (
+    " For a base-body row you listed under `## Kept`, when the driver finds OUR\n"
+    "   body behaves differently from the original, the finding names the scenario\n"
+    "   and the difference: park the row with `needs` of `\"ours differs from the\n"
+    "   exe (<scenario>): <difference>; import his body in a later batch\"` (the\n"
+    "   body was never changed, so there is nothing to edit back: delete its\n"
+    "   evidence file and write the parked file). An import in the fix round\n"
+    "   cannot be measured (the phase runs once), so it is not offered. A base-body\n"
+    "   row you imported that comes back different parks as any import does.")
+KEPT_RULE4_EXCEPTION = ", except a base-body row you list under `## Kept`"
+KEPT_CLOSE = ", or kept and measured"
+REFUSAL_STUB = (" A row whose body you leave as ours because you refused his body is\n"
+                "   parked too, with `needs` saying why.")
+REFUSAL_MIXED = (" A row whose body you leave as ours because you refused his body: for\n"
+                 "   a STUB row (ours is a stub) refusing still parks it, with `needs`\n"
+                 "   saying why; for a BASE-BODY row, refusing his body means ours stays\n"
+                 "   and the row goes under `## Kept` with the reason (`fork body\n"
+                 "   contradicts the exe: <what differs>`), never parked by you.")
 
 KEPT_REPORT_PARAGRAPH = (
     "Base-body rows you keep as ours go under a section headed `## Kept`, one line\n"

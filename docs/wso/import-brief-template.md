@@ -40,8 +40,8 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    `docs/wso/import-parked/<ADDRESS>.json` (address in caps, no `0x`, the
    same stem as its evidence file; one JSON object
    `{address, name, file, batch, needs}`) with `needs` of
-   `"fork body contradicts the exe: <what differs>"`. Three of seven fork
-   bodies in batch i002 did.
+   `"fork body contradicts the exe: <what differs>"`.{{kept_refusal}} Three of
+   seven fork bodies in batch i002 did.
 2. **Every commit that brings in his code carries exactly this trailer**, one
    per commit, as the last line of the message:
 
@@ -85,13 +85,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    driver, committed on your branch. Every other outcome (different,
    exercised by no scenario, no hook, a failed or unmeasured scenario)
    cannot close: the phase runs once per batch, so park the row in your fix
-   round, with the `needs` the finding names. For a base-body row you listed
-   under `## Kept`, when the driver finds OUR body behaves differently from
-   the original, the finding names the difference: park the row with `needs`
-   of `"ours differs from the exe (<scenario>): <difference>; import his body
-   in a later batch"` (edit nothing back: the body was never changed). An
-   import in the fix round cannot be measured (the phase runs once), so it
-   is not offered.
+   round, with the `needs` the finding names.{{kept_measured}}
    **Parking a row.** Edit that function back to the merge base's body
    (`git show <merge-base>:<path>` shows it; `git merge-base first HEAD`
    names the merge base; do not replace a file that holds other rows'
@@ -105,12 +99,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
 
    `needs` names what was tried. Commit all three changes together. Every
    row you do not park must be imported (its body changed against the merge
-   base), except a base-body row you list under `## Kept`. A row whose body
-   you leave as ours because you refused his body: for a STUB row (ours is a
-   stub) refusing still parks it, with `needs` saying why; for a BASE-BODY
-   row, refusing his body means ours stays and the row goes under `## Kept`
-   with the reason (`fork body contradicts the exe: <what differs>`), never
-   parked by you.
+   base){{kept_rule4}}.{{refusal_rule}}
    A row that was parked and unparked before carries an earlier attempt in that
    batch's branch history (`git log --all -- docs/evidence/<ADDRESS>.md` finds
    it); read it, do not trust it.
@@ -118,7 +107,7 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    so write no `verdict` lines, no deciding case ids and no "disagreed with
    WSO" or "corroborated by WSO" phrase. The driver closes the batch with
    `close --kind import`, which requires every row imported and at trace or
-   better (or parked, or kept and measured), and every dependency you imported likewise.
+   better (or parked{{kept_close}}), and every dependency you imported likewise.
    **Dependencies.** A stub dependency that sits inside your own files is
    imported with the row, in its own commit with its own trailer, and with
    its own `docs/evidence/<ADDR>.md` (`kind: read-only` plus `exemption:`,
