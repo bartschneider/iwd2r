@@ -2288,7 +2288,7 @@ def _side_case(v):
 
 def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
                  ignored=None, pool=None, wall=None, tokens=None,
-                 tool_calls=None, transcript=None, undecided=None):
+                 tool_calls=None, transcript=None, undecided=None, gate=None):
     """The templated progress.md entry for one batch.
 
     batch carries 'id'; verdicts maps address to a wave-state verdict or a
@@ -2298,7 +2298,8 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
     because the row was triage-decided (a line only when there are any).
     pool, wall (seconds), tokens ({input, cached, output}) and tool_calls
     each add a line when given (rulings R10, R61); undecided maps address
-    to the (side, reason) of a row left for a probe (ruling R73)."""
+    to the (side, reason) of a row left for a probe (ruling R73); gate
+    ('full', 'docs-only' or 'unknown', from the batch) adds a `gate:` line."""
     wave = _tool('wave')
     known = _tool('triage').CLASSES
     order = [c for c in known if c in classes] + sorted(
@@ -2331,6 +2332,8 @@ def ledger_entry(batch, verdicts, classes, review, commits, credits, now=None,
         '- commits %s' % commits,
         '- credits unknown' if credits is None else '- credits %.0f' % credits,
     ]
+    if gate:
+        lines.append('- gate: %s' % gate)
     if pool:
         lines.append('- pool %s' % pool)
     if wall is not None:
@@ -5597,7 +5600,7 @@ class Driver:
             dict(batch, id=batch_id), batch_verdicts,
             self._classes(batch_id, batch), review, commits, self._credits(),
             ignored=self._ignored, undecided=self._undecided,
-            **self._figure_kw())
+            gate=batch.get('gate'), **self._figure_kw())
         if self.kind == 'probes':
             entry += self._probe_ledger_lines(batch)
         kept = [(side, a, d) for a, (side, _c) in sorted(verdicts.items())
@@ -5929,7 +5932,7 @@ class Driver:
                 (reviewed, 'recovered after the last run stopped between '
                            'close and ledger'),
                 'unknown..%s (recovered)' % (tip[:8] or batch['branch']), None,
-                pool=batch.get('pool')))
+                pool=batch.get('pool'), gate=batch.get('gate')))
             self.log('%s: closed by the last run without its ledger entry; '
                      'entry written' % batch_id)
         with self._landing_lock(batch_id), self._lock:
