@@ -46,6 +46,9 @@ VERDICT_RE = re.compile(
     r'^verdict (0[xX][0-9a-fA-F]+) (ours|fork|neither) case (\S+)$', re.IGNORECASE)
 UNDECIDED_RE = re.compile(
     r'^undecided\s+(0[xX][0-9a-fA-F]+)\s+(fork|neither)\s+(\S.*)$', re.IGNORECASE)
+KEPT_RE = re.compile(
+    r'^kept\s+(0[xX][0-9a-fA-F]+)\s+(\S.*)$', re.IGNORECASE)
+IMPORTED_RE = re.compile(r'^imported\s+(0[xX][0-9a-fA-F]+)\b', re.IGNORECASE)
 MARKER_RE = re.compile(r'^(?:[-*]|\d+\.)\s+')
 
 
@@ -939,6 +942,43 @@ def parse_undecided(text):
     return out
 
 
+def parse_kept(text):
+    """Parse the '## Kept' section of an import report into {addr: reason}
+    (Task 19): base-body rows whose body the worker found already matches
+    the original, so it neither imported nor parked them.  Same tolerance as
+    parse_undecided; a missing section is {}.  A row cannot be both kept and
+    imported (a `## Imported` line), and a duplicate kept line is refused."""
+    out, imported = {}, set()
+    section = None
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if line.startswith('#'):
+            section = line.lstrip('#').strip().lower()
+            continue
+        if not line or re.fullmatch(r'```[^`]*', line):
+            continue
+        cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
+        if section == 'imported':
+            m = IMPORTED_RE.match(cand)
+            if m:
+                imported.add('0x%X' % int(m.group(1), 16))
+            continue
+        if section != 'kept':
+            continue
+        m = KEPT_RE.match(cand)
+        if not m:
+            raise ReportError('line %d: malformed kept line: %r' % (n, raw))
+        addr = '0x%X' % int(m.group(1), 16)
+        if addr in out:
+            raise ReportError('line %d: duplicate kept line for %s' % (n, addr))
+        out[addr] = m.group(2).strip()
+    both = sorted(set(out) & imported)
+    if both:
+        raise ReportError('%s listed under both ## Imported and ## Kept; a row is one or the '
+                          'other' % ', '.join(both))
+    return out
+
+
 # The history rule's way to undo one function (first's 021a6cb0): the
 # function is edited back, never the whole file put back, which would
 # discard the other rows' changes in a shared file.  %s is the merge base.
@@ -947,17 +987,43 @@ EDIT_BACK = ("edit that function back to the merge base's body (`git show %s:<pa
 SHARED_FILE = "do not replace a file that holds other rows' changes"
 
 
-def park_text(address, mb, needs):
+# The needs of a kept row the Frida phase could not measure (Task 19): parked
+# so a later scenario can confirm it.
+KEPT_UNMEASURED = 'not exercised; ours reading matches the decompile'
+KEPT_EDITED_NEEDS = 'kept row edited then put back; not measured'
+OFF_KEPT = ', and take the row off `## Kept`'
+
+
+def kept_needs(scenarios, detail=None):
+    """The `needs` of a kept row nothing measured: the not-exercised wording
+    when there is no detail, else '<scenarios>: not measured (<detail>); ours
+    reading matches the decompile'."""
+    if not detail:
+        return KEPT_UNMEASURED
+    if not isinstance(scenarios, str):
+        scenarios = ', '.join(scenarios)
+    return '%s: not measured (%s); ours reading matches the decompile' % (scenarios, detail)
+
+
+def park_text(address, mb, needs, edit_back=True, kept=False):
     """How a worker parks one import row (the import brief's rule): the
     function edited back, its evidence deleted, its own file under
     docs/wso/import-parked/ (one per row, so parallel batches never
-    conflict), one commit."""
+    conflict), one commit.  A kept row's body was never changed
+    (`edit_back` False): nothing to edit back, two changes in the commit.  A
+    `kept` row also leaves the report's ## Kept section (a row both parked and
+    kept is a check problem)."""
     stem = address[2:].upper() if address.lower().startswith('0x') else address.upper()
     # needs as a JSON string literal: a diff detail carries quotes of its own.
+    if not edit_back:
+        return ('the body was never changed, so edit nothing back: delete docs/evidence/%s.md, '
+                'write docs/wso/import-parked/%s.json {"address", "name", "file", "batch", '
+                '"needs"} with needs %s, and commit the two together%s'
+                % (stem, stem, json.dumps(needs), OFF_KEPT if kept else ''))
     return ('%s, delete docs/evidence/%s.md, write docs/wso/import-parked/%s.json '
             '{"address", "name", "file", "batch", "needs"} with needs %s, and commit '
-            'the three together; %s' % (EDIT_BACK % mb, stem, stem, json.dumps(needs),
-                                        SHARED_FILE))
+            'the three together%s; %s' % (EDIT_BACK % mb, stem, stem, json.dumps(needs),
+                                          OFF_KEPT if kept else '', SHARED_FILE))
 
 
 def unmeasured_needs(run, left=()):
@@ -1088,7 +1154,8 @@ def _write_trace_evidence(path, probe, orig_path, ours_path):
 
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                       kind='verdicts', transcript=None, covered_files=(),
-                      probe=(), base='first', undecided=(), frida_lines=None):
+                      probe=(), base='first', undecided=(), frida_lines=None,
+                      kept=()):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
@@ -1105,7 +1172,12 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     it too is a problem.  For an import batch, an evidence file changed
     against the merge base whose trace_source is a frida line the driver did
     not write (`frida_lines`, {address key: line} of the lines its Frida
-    phase wrote) is a problem: the driver writes frida evidence."""
+    phase wrote) is a problem: the driver writes frida evidence.  Also for an
+    import batch: a parked row (a docs/wso/import-parked file) whose
+    docs/evidence file still exists is a problem (close's own wording), and a
+    `kept` row (the report's ## Kept section, address keys) must be a
+    base-body row of the batch, unparked, with its body unchanged and an
+    evidence file."""
     wave = _tool('wave')
     problems = []
     if transcript:
@@ -1232,6 +1304,7 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         problems.append(bad)
     if kind == 'import':
         problems += _foreign_frida_lines(worktree, changed, frida_lines or {})
+        problems += _kept_and_parked_problems(batch, worktree, base, kept, key, changed)
     outside = sorted(p for p in changed if not _path_allowed(p))
     if outside:
         # These files hold no batch row, so the whole file goes back, from
@@ -1257,6 +1330,93 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
         if proc.returncode != 0:
             problems.append('%s failed (exit %s); last lines: %s; fix it and '
                             'rerun' % (label, proc.returncode, _tail(proc)))
+    return problems
+
+
+def _measured_body_problems(batch, worktree, parked, key, moved=None):
+    """A row the Frida phase wrote trace evidence for (`measured_body` in the
+    batch state: the digest of its body then) whose body on the branch is now
+    another one: its trace measured a body that is not the one that lands.
+    A dependency (`measured_deps`) is held to it only while the batch still
+    changes it against the merge base (`moved`, address keys; None: every
+    one), as close does: edited back to the merge base's body it is no longer
+    the batch's."""
+    ce = _tool('check_evidence')
+    out = []
+    for r in batch.get('rows', []):
+        want = r.get('measured_body')
+        if want and key(r['address']) not in parked and \
+                ce.body_digest(worktree, r['address'], r.get('file')) != want:
+            out.append('%s: body changed after the Frida phase; park it or edit it back to the '
+                       'measured body' % r['address'])
+    for k, want in sorted((batch.get('measured_deps') or {}).items()):
+        if moved is not None and k not in moved:
+            continue
+        if k not in parked and ce.body_digest(worktree, '0x' + k) != want:
+            out.append('0x%s: body changed after the Frida phase; park it or edit it back to '
+                       'the measured body' % k.upper())
+    return out
+
+
+def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()):
+    """The import checks on parked and kept rows (Task 19).  A parked row's
+    evidence file must be gone: close refuses it, so the worker's own fix
+    round removes it; that covers the batch's own rows and the parked files
+    this branch added or changed against the merge base (`changed_paths`): a
+    parked file `first` already carried, for a row outside the batch, is not
+    this batch's problem.  A kept row must be a base-body row of the batch,
+    not parked, with the merge base's body and an evidence file."""
+    wave = _tool('wave')
+    problems = []
+    parked, _bad = wave._parked_rows(worktree)
+    rows = {key(r['address']): r for r in batch.get('rows', [])}
+    changed_keys = {wave.parked_path_key(p) for p in changed_paths} - {None}
+    for k in sorted(parked):
+        if k not in rows and k not in changed_keys:
+            continue
+        rel = wave._evidence_rel(k)
+        if os.path.isfile(os.path.join(worktree, rel)):
+            addr = rows[k]['address'] if k in rows else '0x' + k.upper()
+            problems.append('%s: parked (%s) but %s still exists; delete it'
+                            % (addr, wave.parked_rel(k), rel))
+    moved = None
+    if kept or batch.get('measured_deps'):
+        try:
+            moved = {key('0x%X' % a) for _p, a, _n in
+                     _tool('check_evidence').touched(worktree, base)}
+        except Exception as e:
+            what = ('whether the kept rows kept our bodies' if kept
+                    else 'which dependencies the batch still changes')
+            problems.append('cannot tell %s (%r); fix it and rerun' % (what, e))
+    problems += _measured_body_problems(batch, worktree, parked, key, moved)
+    if not kept:
+        return problems
+    moved = moved or set()
+    mb = _merge_base(worktree, base)
+    for a in sorted(kept, key=key):
+        k = key(a)
+        row = rows.get(k)
+        if row is None:
+            problems.append('%s: kept line for an address outside this batch; remove that '
+                            'line' % a)
+        elif row.get('category') != 'theirs_changed_ours_base':
+            problems.append('%s: listed under ## Kept but ours is a stub there; a stub is '
+                            'never kept: import it or park it' % a)
+        elif k in parked:
+            problems.append('%s: both kept and parked (%s); keep one (delete the parked '
+                            'file, or take the row off ## Kept)' % (a, wave.parked_rel(k)))
+        else:
+            if k in moved:
+                problems.append('%s: listed under ## Kept but its body changed against %s; keep '
+                                'the change and move the row to ## Imported (take it off '
+                                '## Kept), or edit it back and park it (`needs`: `%s`): %s'
+                                % (a, base, KEPT_EDITED_NEEDS, park_text(
+                                    a, mb, KEPT_EDITED_NEEDS, kept=True)))
+            if not os.path.isfile(os.path.join(worktree, wave._evidence_rel(k))):
+                problems.append('%s: listed under ## Kept but %s does not exist; write it '
+                                '(kind read-only, an exemption: giving your reading of why '
+                                'ours matches; no verdict phrase, no frida line) and commit '
+                                'it' % (a, wave._evidence_rel(k)))
     return problems
 
 
@@ -1455,7 +1615,10 @@ FIX_REPORT_RULES = {
                "`## Imported` with one `imported <0xADDR> <evidence kind>` line per "
                "function, then the commits you made, the evidence files you wrote and "
                "anything you could not import (the rows you parked, with their parked "
-               "files)."),
+               "files). A base-body row you keep as ours (its body already matches the "
+               "original) is listed under `## Kept` as `kept <0xADDR> <one-line reason>`, "
+               "never also under `## Imported`; repeat `## Kept` for the kept rows you did "
+               "not park, a parked row leaves it."),
 }
 
 
@@ -1869,6 +2032,7 @@ class Driver:
     _worker_ran = _per_thread('worker_ran')
     _ignored = _per_thread('ignored')
     _undecided = _per_thread('undecided')
+    _kept = _per_thread('kept')
     _probe = _per_thread('probe')
     _frida_got = _per_thread('frida_got')
     _frida_notes = _per_thread('frida_notes')
@@ -2155,6 +2319,7 @@ class Driver:
         recorded, never checked, never a reason to review."""
         self._ignored = {}
         self._undecided = {}
+        self._kept = {}
         try:
             parsed = parse_report(report)
         except ReportError as e:
@@ -2168,7 +2333,16 @@ class Driver:
             return {}, ['report: %s; fix that line under ## Undecided (one '
                         '"undecided <0xADDR> <fork|neither> <one-line '
                         'reason>" per row)' % e]
+        if self.kind == 'import':
+            try:
+                self._kept = parse_kept(report)
+            except ReportError as e:
+                return {}, ['report: %s; fix that line under ## Kept (one "kept <0xADDR> '
+                            '<one-line reason>" per row, for a base-body row you leave as '
+                            'ours; never also under ## Imported)' % e]
         self._stage(batch_id, 'checks')
+        if self.kind == 'import':
+            self._clear_kept_outcomes(batch_id, self._kept)
         batch = self.load_state(self.state_path)['batches'][batch_id]
         key = _tool('wave')._addr_key
         auto = {key(a) for a, v in batch.get('verdicts', {}).items()
@@ -2203,6 +2377,7 @@ class Driver:
             kw['undecided'] = sorted(listed)
             if self.kind == 'import':
                 kw['frida_lines'] = self._frida_lines(batch_id)
+                kw['kept'] = sorted(self._kept)
             return verdicts, self.mechanical_checks(
                 dict(batch, id=batch_id), worktree, verdicts, **kw)
         except OSError as e:
@@ -2686,7 +2861,8 @@ class Driver:
         key = _tool('wave')._addr_key
         truth = _tool('truth')
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
-        findings, written = [], []
+        findings, written, kept_ok = [], [], []
+        digests = {}
         for r in rows:
             k = key(r['address'])
             status, detail = got.get(k, ('skipped', 'no result'))
@@ -2706,6 +2882,12 @@ class Driver:
                     findings.append(finding)
                 elif status == 'equal':
                     written.append(r['address'])
+                    digests[r['address']] = _tool('check_evidence').body_digest(
+                        worktree, r['address'], r.get('file'))
+                if r.get('kept'):
+                    # recorded whatever the outcome: close lets it close as
+                    # kept only with this batch's trace, else refuses it
+                    kept_ok.append(r['address'])
                 continue
             # The phase measured the batch's own build: the body on the branch
             # is the recorded side's (ours or neither keep ours', a fork verdict
@@ -2718,7 +2900,73 @@ class Driver:
                                     r['address'], side, detail))
         if written:
             self._commit_trace_evidence(batch_id, worktree, written)
+        if kept_ok or digests:
+            self._record_kept(batch_id, kept_ok, digests)
         return findings
+
+    def _clear_measured(self, batch_id):
+        """Drop the phase's records (rows[].outcome, rows[].measured_body, the
+        batch's measured_deps) of an earlier run of the batch."""
+        with self._lock:
+            state = self.load_state(self.state_path)
+            batch = state['batches'].get(batch_id)
+            if batch is None:
+                return
+            dirty = batch.pop('measured_deps', None) is not None
+            for r in batch.get('rows', []):
+                for f in ('outcome', 'measured_body'):
+                    if f in r:
+                        del r[f]
+                        dirty = True
+            if dirty:
+                _tool('wave').save_state(self.state_path, state)
+
+    def _clear_kept_outcomes(self, batch_id, kept):
+        """A row missing from the current ## Kept loses a recorded 'kept'
+        outcome (a retry, or a fix round that took the row off the section)."""
+        key = _tool('wave')._addr_key
+        keep = {key(a) for a in kept}
+        with self._lock:
+            state = self.load_state(self.state_path)
+            batch = state['batches'].get(batch_id)
+            if batch is None:
+                return
+            dirty = False
+            for r in batch.get('rows', []):
+                if r.get('outcome') == 'kept' and key(r['address']) not in keep:
+                    del r['outcome']
+                    dirty = True
+            if dirty:
+                _tool('wave').save_state(self.state_path, state)
+
+    def _record_kept(self, batch_id, addresses, digests=None):
+        """rows[].outcome = 'kept' in the import state for the kept rows the
+        phase measured (whatever came back: only a row whose trace evidence
+        was written closes as kept), and rows[].measured_body (the digest of
+        the body each trace-evidenced row had) for `digests`; a batch the
+        state does not hold (a hand-built fixture) is left alone."""
+        key = _tool('wave')._addr_key
+        want = {key(a) for a in addresses}
+        with self._lock:
+            state = self.load_state(self.state_path)
+            batch = state['batches'].get(batch_id)
+            if batch is None:
+                return
+            have = {key(a): d for a, d in (digests or {}).items() if d}
+            rowkeys = {key(r['address']) for r in batch.get('rows', [])}
+            for k, d in have.items():
+                if k not in rowkeys:
+                    # a dependency imported with the batch: its body is held
+                    # to the measured one like a row's
+                    batch.setdefault('measured_deps', {})[k] = d
+            for r in batch.get('rows', []):
+                if key(r['address']) in want:
+                    r['outcome'] = 'kept'
+                if key(r['address']) in have:
+                    # the body the trace measured (sha256 of its source text):
+                    # the check and the close refuse a different one
+                    r['measured_body'] = have[key(r['address'])]
+            _tool('wave').save_state(self.state_path, state)
 
     def _coverage_scenarios(self, batch_id, rows):
         """(scenarios to run, skip): the phase's candidates (truth.scenarios_for)
@@ -2783,12 +3031,15 @@ class Driver:
         that are not parked, plus every function the batch touched against
         the merge base that carries a `// 0xADDR` marker (a stub dependency
         imported with a row: it is hooked and held to the same bar), less
-        those whose evidence stands as written (wave.kept_evidence)."""
+        those whose evidence stands as written (wave.kept_evidence).  For a
+        kept row a frida trace another batch wrote does not stand
+        (wave.other_batch_trace): it measured that batch's body."""
         wave = _tool('wave')
         key = wave._addr_key
         parked, bad = wave._parked_rows(worktree)
         if bad:
             self.log('%s: frida: parked rows: %s' % (batch_id, bad))
+        kept = {key(a) for a in (getattr(self, '_kept', None) or {})}
         rows = [dict(r) for r in batch.get('rows', []) if key(r['address']) not in parked]
         seen = {key(r['address']) for r in batch.get('rows', [])} | set(parked)
         try:
@@ -2797,6 +3048,15 @@ class Driver:
             touched = []
             self.log('%s: frida: cannot tell which functions the batch touched (%s)'
                      % (batch_id, _one_line(repr(e), 200)))
+        # A kept row is a base-body row whose body is untouched against the
+        # merge base; any other row on the list is measured as an import, with
+        # no outcome (the mechanical check already tells the worker).
+        moved = {key('0x%X' % addr) for _p, addr, _n in touched}
+        for r in rows:
+            k = key(r['address'])
+            if (k in kept and k not in moved
+                    and r.get('category') == 'theirs_changed_ours_base'):
+                r['kept'] = True
         for path, addr, name in touched:
             k = key('0x%X' % addr)
             if k not in seen:
@@ -2813,11 +3073,23 @@ class Driver:
                     text = f.read()
             except OSError:
                 text = None
+            # evidence that stands as written (an oracle case, a fork note, a
+            # file unchanged since the merge base) is not measured or rewritten,
+            # a kept row's included: it closes on that evidence
             why = text is not None and wave.kept_evidence(
                 worktree, mb_sha, r['address'], r.get('name', ''), text)
+            if why and r.get('kept') and wave.other_batch_trace(text, batch_id):
+                # unchanged since the merge base, but another batch's frida
+                # trace: it measured the body that batch had, and nothing ties
+                # it to the one here, so a kept row is measured again
+                self.log('%s: frida %s kept on another batch\'s frida trace (%s); measured again'
+                         % (batch_id, r['address'], wave._frida_probe(text)))
+                why = None
             if why:
                 self.log('%s: frida %s kept as written (%s); not measured'
                          % (batch_id, r['address'], why))
+                if r.get('kept'):
+                    self._record_kept(batch_id, [r['address']])
             else:
                 out.append(r)
         return out
@@ -2828,9 +3100,19 @@ class Driver:
         else the finding that parks it (the phase runs once per batch, so
         nothing else can measure it)."""
         a = row['address']
+        kept = bool(row.get('kept'))
+        def park(needs):
+            return park_text(a, mb, needs, edit_back=not kept, kept=kept)
         dep = (' It is a dependency you imported with the batch: park the rows that need '
                'it with it.' if row.get('dependency') else '')
         if status == 'equal' and cite is None:
+            if kept:
+                run = self._ran_scenarios()
+                return ('%s: ours is equal to the original only up to a frequency difference '
+                        '(%s); no scenario compared exactly, so no trace evidence can cite '
+                        'one, and the phase does not run again in this batch, so park it: %s'
+                        % (a, detail, park(kept_needs(run, 'frequency difference only: %s'
+                                                                  % detail)))) + dep
             # Equal only as a prefix (frequency-only): no run compared exactly,
             # and a compare=0 citation of a run that did not would be false.
             return ('%s: equal only up to a frequency difference (%s); no scenario compared '
@@ -2838,30 +3120,47 @@ class Driver:
                     'again in this batch, so park it: %s' % (a, detail, park_text(
                         a, mb, 'frida frequency only, no exact compare: %s' % detail))) + dep
         if status == 'equal':
-            err = self._trace_evidence(batch_id, worktree, row, cite, traces, mb)
+            err = self._trace_evidence(batch_id, worktree, row, cite, traces, mb, kept)
             return err + dep if err else None
-        if status == 'different':
+        if status == 'different' and kept:
+            shown = re.findall(r'(?:^differs in |; )([A-Za-z0-9_]+): ', detail) \
+                or self._ran_scenarios()
+            text = ('%s: our body differs from the original (%s); the base body was never '
+                    'changed, so edit nothing back, and the phase does not run again in this '
+                    'batch, so an import of his body cannot be measured: park it: %s'
+                    % (a, detail, park('ours differs from the exe (%s): %s; import '
+                                            'his body in a later batch'
+                                            % (', '.join(shown), detail))))
+        elif status == 'different':
             text = ('%s: the Frida trace diff shows the imported body different from the '
                     'original (%s); the phase does not run again in this batch, so park it: %s'
-                    % (a, detail, park_text(a, mb, 'frida different: %s' % detail)))
+                    % (a, detail, park('frida different: %s' % detail)))
         elif status == 'not-exercised':
             run, left = getattr(self, '_frida_ran', None) or (
                 list(_tool('truth').FRIDA_SCENARIOS), [])
             needs = ('not-exercised (%s)' % detail if detail.startswith(COVERAGE_NOT_HIT)
                      else unmeasured_needs(run, left))
-            text = unmeasured(a, run, park_text(a, mb, needs))
+            if kept:
+                needs = kept_needs(run)
+            text = unmeasured(a, run, park(needs))
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
-                a, detail, park_text(a, mb, 'no Frida hook: %s' % detail))
+                a, detail, park(kept_needs(self._ran_scenarios(), 'no Frida hook: %s' % detail)
+                                if kept else 'no Frida hook: %s' % detail))
         elif status == 'not measured' and detail == COVERAGE_UNHOOKABLE:
             text = ('%s: not measured (%s); the phase does not run again in this batch, so '
-                    'park it: %s' % (a, detail, park_text(a, mb, 'not measured (%s)' % detail)))
+                    'park it: %s' % (a, detail, park(
+                        kept_needs(self._ran_scenarios(), detail) if kept
+                        else 'not measured (%s)' % detail)))
         else:
             # scenario failed, not measured: nothing measured the row, and the
             # close would refuse it with no retry left.
             needs = _one_line('%s: %s' % (status, detail), 300)
+            if kept:
+                needs = kept_needs(self._ran_scenarios(), _one_line(
+                    detail if status == 'not measured' else '%s: %s' % (status, detail), 200))
             text = ('%s: the Frida phase gave "%s" (%s); the phase does not run again in this '
-                    'batch, so park it: %s' % (a, status, detail, park_text(a, mb, needs)))
+                    'batch, so park it: %s' % (a, status, detail, park(needs)))
         return text + dep
 
     def _frida_target(self, batch_id, worktree):
@@ -2911,7 +3210,11 @@ class Driver:
             return None
         return m.group(1) if m else None
 
-    def _trace_evidence(self, batch_id, worktree, row, scenario, traces, mb):
+    def _ran_scenarios(self):
+        return (getattr(self, '_frida_ran', None) or (
+            list(_tool('truth').FRIDA_SCENARIOS), []))[0]
+
+    def _trace_evidence(self, batch_id, worktree, row, scenario, traces, mb, kept=False):
         """Rewrite one equal import row's evidence to kind: trace, citing
         `scenario`'s run (one whose compare returned 0); None, or the finding
         that says why it could not be."""
@@ -2927,13 +3230,16 @@ class Driver:
                     'match (%s); trace evidence comes only from a run whose dumps match and '
                     'the phase does not run again in this batch, so park it: %s' % (
                         row['address'], scenario, (dumps or {}).get('detail') or 'not compared',
-                        park_text(row['address'], mb,
-                                  'not measured: dumps not shown to match in %s' % scenario)))
+                        park_text(row['address'], mb, kept_needs(
+                            scenario, 'dumps not shown to match') if kept
+                            else 'not measured: dumps not shown to match in %s' % scenario,
+                            edit_back=not kept, kept=kept)))
         if not (orig and ours and os.path.isfile(orig) and os.path.isfile(ours)):
             return ('%s: measured equal in %s but its trace files are missing; the phase does '
                     'not run again in this batch, so park it: %s' % (
                         row['address'], scenario, park_text(
-                            row['address'], mb, 'frida trace files missing')))
+                            row['address'], mb, kept_needs(scenario, 'trace files missing')
+                            if kept else 'frida trace files missing', edit_back=not kept, kept=kept)))
         path = os.path.join(worktree, wave._evidence_rel(row['address']))
         try:
             _write_trace_evidence(path, '%s-%s' % (batch_id, scenario), orig, ours)
@@ -2941,7 +3247,9 @@ class Driver:
             return ('%s: its evidence could not be rewritten to kind: trace (%s); the phase does '
                     'not run again in this batch, so park it: %s' % (
                         row['address'], e, park_text(
-                            row['address'], mb, 'evidence not rewritable: %s' % e)))
+                            row['address'], mb, kept_needs(
+                                scenario, 'evidence not rewritable: %s' % e) if kept
+                            else 'evidence not rewritable: %s' % e, edit_back=not kept, kept=kept)))
         return None
 
     def _frida_lines(self, batch_id):
@@ -3447,6 +3755,10 @@ class Driver:
                 batch_id, batch, worktree,
                 self._saved_verdicts(batch_id, batch) if stage == 'record' else {},
                 (False, 'retry at %s: worker and review not run again' % stage))
+        if self.kind == 'import':
+            # the worker runs again and so does the phase: nothing recorded by
+            # an earlier run (outcome kept, measured bodies) carries over
+            self._clear_measured(batch_id)
         self._stage(batch_id, 'brief')
         try:
             rc, brief = self.render_brief(
