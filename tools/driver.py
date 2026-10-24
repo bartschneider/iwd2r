@@ -48,6 +48,8 @@ UNDECIDED_RE = re.compile(
     r'^undecided\s+(0[xX][0-9a-fA-F]+)\s+(fork|neither)\s+(\S.*)$', re.IGNORECASE)
 KEPT_RE = re.compile(
     r'^kept\s+(0[xX][0-9a-fA-F]+)\s+(\S.*)$', re.IGNORECASE)
+CANDIDATE_RE = re.compile(
+    r'^candidate\s+(0[xX][0-9a-fA-F]+)\s+(fork|neither)\s+(\S.*)$', re.IGNORECASE)
 IMPORTED_RE = re.compile(r'^imported\s+(0[xX][0-9a-fA-F]+)\b', re.IGNORECASE)
 MARKER_RE = re.compile(r'^(?:[-*]|\d+\.)\s+')
 
@@ -947,6 +949,36 @@ def parse_undecided(text):
     return out
 
 
+def parse_candidates(text):
+    """Parse the '## Candidates' section of a probe report into {addr: (side,
+    reason)} (Task 28): `candidate <0xADDR> fork <reason>` for a row whose fork
+    body the worker adopted, `candidate <0xADDR> neither <reason>` for one it
+    did not build.  Same tolerance as parse_undecided (address-free prose is
+    skipped, a mangled line fails); a missing section is {}; a duplicate line
+    is refused."""
+    out = {}
+    in_section = False
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if line.startswith('#'):
+            in_section = line.lstrip('#').strip().lower() == 'candidates'
+            continue
+        if not in_section or not line or re.fullmatch(r'```[^`]*', line):
+            continue
+        cand = MARKER_RE.sub('', line, count=1).strip().strip('`').strip()
+        m = CANDIDATE_RE.match(cand)
+        if not m:
+            if not re.search(r'0[xX][0-9a-fA-F]+', cand) and \
+                    not cand.lower().startswith('candidate'):
+                continue
+            raise ReportError('line %d: malformed candidate line: %r' % (n, raw))
+        addr = '0x%X' % int(m.group(1), 16)
+        if addr in out:
+            raise ReportError('line %d: duplicate candidate line for %s' % (n, addr))
+        out[addr] = (m.group(2).lower(), m.group(3).strip())
+    return out
+
+
 def parse_kept(text):
     """Parse the '## Kept' section of an import report into {addr: reason}
     (Task 19): base-body rows whose body the worker found already matches
@@ -1224,7 +1256,7 @@ def _undo_trace_evidence(path, saved_text, batch_id=None):
 def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                       kind='verdicts', transcript=None, covered_files=(),
                       probe=(), base='first', undecided=(), frida_lines=None,
-                      kept=(), tests=True):
+                      kept=(), tests=True, candidates=None):
     """Problems that stop a batch before any review; [] when clean.
 
     Each problem says what failed and how to fix it (it is the worker's
@@ -1248,7 +1280,9 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     base-body row of the batch, unparked, with its body unchanged and an
     evidence file.  `tests` False skips the three test steps at the end (the
     worker's selfcheck runs the rest); the worker's `.report.md` draft is never
-    an uncommitted path."""
+    an uncommitted path.  A probe batch (kind 'probes', Task 28) has no verdict
+    lines; `candidates` ({addr: (side, reason)} of the report's ## Candidates)
+    must account for every row (_probe_candidate_problems)."""
     wave = _tool('wave')
     problems = []
     if transcript:
@@ -1258,12 +1292,16 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     row_keys = {key(r['address']) for r in rows}
     given = {key(a): a for a in verdicts}
     und = {key(a): a for a in undecided}
-    if kind == 'import':
+    if kind in ('import', 'probes'):
         if und:
             problems.append('Undecided is for wave-1 batches; remove the '
                             '## Undecided section')
+        if kind == 'probes' and given:
+            problems.append('a probe batch has no verdict lines (the driver decides every '
+                            'row); remove them and the ## Verdicts section: %s'
+                            % ', '.join(sorted(given.values())))
         rows, given, und = [], {}, {}
-    if kind != 'import':
+    if kind not in ('import', 'probes'):
         for k, a in sorted(given.items()):
             side, case = verdicts[a][0], verdicts[a][1]
             if side in ('fork', 'neither') and \
@@ -1378,6 +1416,8 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
                                      None if kind == 'import' or not mbs else mbs[0])
     if kind == 'import':
         problems += _kept_and_parked_problems(batch, worktree, base, kept, key, changed)
+    if kind == 'probes':
+        problems += _probe_candidate_problems(batch, worktree, base, candidates, key)
     outside = sorted(p for p in changed if not _path_allowed(p))
     if outside:
         # These files hold no batch row, so the whole file goes back, from
@@ -1496,6 +1536,113 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
     return problems
 
 
+def _mb_evidence_kind(worktree, base, rel):
+    """The `kind:` of an evidence file at the merge base of the worktree's HEAD
+    and `base`, or None (no file, no kind)."""
+    r = subprocess.run(['git', '-C', worktree, 'show', '%s:%s' % (_merge_base(worktree, base), rel)],
+                       capture_output=True, text=True)
+    m = _tool('wave').KIND_RE.search(r.stdout) if r.returncode == 0 else None
+    return m.group(1) if m else None
+
+
+def _probe_candidate_problems(batch, worktree, base, candidates, key):
+    """The probe batch's checks (Task 28), in the worker's terms.  Every row
+    needs one `candidate` line (none for an address outside the batch).  Before
+    the Frida phase a `fork` candidate has its body changed against the merge
+    base (adopted) and an evidence file that does not carry a frida case, a
+    `neither` candidate its body untouched.  After it (the row's recorded
+    `outcome`): resolved keeps the body the phase measured; kept or found must
+    be back on our body, evidence file included.  No function outside the
+    batch's rows may change."""
+    wave = _tool('wave')
+    ce = _tool('check_evidence')
+    problems = []
+    cand = {key(a): (a, sc) for a, sc in (candidates or {}).items()}
+    rows = {key(r['address']): r for r in batch.get('rows', [])}
+    for k, (a, _sc) in sorted(cand.items()):
+        if k not in rows:
+            problems.append('%s: candidate line for an address outside this batch; remove that '
+                            'line' % a)
+    try:
+        touched = {key('0x%X' % addr): name for _p, addr, name in ce.touched(worktree, base)}
+    except Exception as e:
+        return problems + ['cannot tell which bodies the batch changed (%r); fix it and rerun' % (e,)]
+    mb = _merge_base(worktree, base)
+    for k, r in sorted(rows.items()):
+        a = r['address']
+        rel = '%s/%s.md' % (wave.EVIDENCE_DIR, k.upper())
+        path = os.path.join(worktree, rel)
+        text = None
+        if os.path.isfile(path):
+            with open(path, encoding='utf-8') as f:
+                text = f.read()
+        if k not in cand:
+            problems.append('%s: not accounted for in the report; list it under ## Candidates '
+                            '(`candidate %s fork <reason>` once you adopted the fork body, '
+                            '`candidate %s neither <reason>` for a row you did not build)'
+                            % (a, a, a))
+            continue
+        side = cand[k][1][0]
+        outcome = r.get('outcome')
+        if outcome in ('resolved', 'fork-equal'):
+            want = r.get('measured_body')
+            if want and ce.body_digest(worktree, a, r.get('file')) != want:
+                problems.append('%s: body changed after the Frida phase; edit it back to the '
+                                'body the "frida: trace evidence" commit measured' % a)
+            continue
+        if outcome in ('kept', 'found') or side == 'neither':
+            if k in touched:
+                problems.append('%s: stays on the probe list with our body but its function is '
+                                'changed against %s; %s and commit; %s.'
+                                % (a, base, EDIT_BACK % mb, SHARED_FILE))
+            if outcome in ('kept', 'found'):
+                was = subprocess.run(['git', '-C', worktree, 'show', '%s:%s' % (mb, rel)],
+                                     capture_output=True, text=True)
+                if was.returncode == 0 and text != was.stdout:
+                    problems.append('%s: stays on the probe list; put %s back as the merge base '
+                                    'has it (`git show %s:%s` shows it) and commit'
+                                    % (a, rel, mb, rel))
+                elif was.returncode != 0 and text is not None:
+                    problems.append('%s: stays on the probe list and the merge base has no %s; '
+                                    'delete it and commit' % (a, rel))
+            continue
+        if r.get('reading') == 'neither':
+            problems.append('%s: its reading is `neither`, which adopting a body cannot test; '
+                            'list it as `candidate %s neither <reason>` and leave its body ours'
+                            % (a, a))
+            continue
+        kind = wave.KIND_RE.search(text) if text is not None else None
+        have = kind.group(1) if kind else None
+        was = _mb_evidence_kind(worktree, base, rel)
+        bad = next((x for x in (have, was) if x not in (None, 'read-only')), None)
+        if bad:
+            problems.append('%s: evidence is kind %s (%s); a fork candidate needs kind: '
+                            'read-only both on the branch and at the merge base (the driver '
+                            'rewrites it to trace). List the row as `candidate %s neither '
+                            'evidence is kind %s; needs a hand ruling`, edit its body back and '
+                            'put %s back as the merge base has it'
+                            % (rel, bad, 'on the branch' if bad == have else 'at the merge base',
+                               a, bad, rel))
+            continue
+        if k not in touched:
+            problems.append('%s: listed as `candidate fork` but its body is unchanged against %s; '
+                            'adopt the fork body, or list the row as `candidate %s neither '
+                            '<reason>`' % (a, base, a))
+        if text is None:
+            problems.append('%s: missing; write %s (caps, no 0x) and commit it' % (rel, rel))
+        elif re.search(r'case\s+frida-%s-' % re.escape(batch.get('id') or 'p'), text):
+            problems.append('%s: carries a `case frida-...` sentence; the driver writes the '
+                            'deciding case when the Frida phase decides, remove it' % rel)
+        elif not wave.KIND_RE.search(text):
+            problems.append("%s: no 'kind:' line in the front matter; add 'kind: read-only'" % rel)
+    for k, name in sorted(touched.items()):
+        if k not in rows:
+            problems.append('0x%s (%s): changed against %s but not a row of this batch; a probe '
+                            "batch changes only its rows' functions; %s and commit"
+                            % (k.upper(), name, base, EDIT_BACK % mb))
+    return problems
+
+
 def _foreign_frida_lines(worktree, changed, frida_lines, merge_base=None):
     """Problems for the evidence files among `changed` whose trace_source is
     a frida line the driver's phase did not write (frida_lines); with
@@ -1545,8 +1692,10 @@ DEFAULT_POOL = 'glm=claude-glm:glm-5.3-flash[1m]:2'
 # The short form NAME[:WORKERS] of the two known pool names, per queue.
 POOL_DEFAULTS = {
     'glm': {'wave1': ('claude-glm', 'glm-5.3-flash[1m]'),
-            'import': ('claude-glm', 'glm-5.3-flash[1m]')},
-    'claude': {'wave1': ('claude', 'sonnet'), 'import': ('claude', 'haiku')},
+            'import': ('claude-glm', 'glm-5.3-flash[1m]'),
+            'probes': ('claude-glm', 'glm-5.3-flash[1m]')},
+    'claude': {'wave1': ('claude', 'sonnet'), 'import': ('claude', 'haiku'),
+               'probes': ('claude', 'sonnet')},
 }
 # A pool's reviewer model unless --reviewer-model says otherwise; any
 # other pool reviews with its own worker model.
@@ -1700,6 +1849,11 @@ FIX_REPORT_RULES = {
                  "verdict line: keep our body and list it under `## Undecided` as "
                  "`undecided <0xADDR> <fork|neither> <one-line reason>`. Never write "
                  "`ours` for such a row."),
+    'probes': ("This is a probe batch: do not write a `## Verdicts` or `## Undecided` section. "
+               "Write the full `## Candidates` section again, one line for every row: "
+               "`candidate <0xADDR> fork <one-line reason>` for a row whose fork body you "
+               "adopted (and that still stands), `candidate <0xADDR> neither <one-line reason>` "
+               "for a row you did not build or whose body you edited back."),
     'import': ("This is an import batch: do not write a `## Verdicts` section at all, "
                "not even an empty one or a placeholder line. Report as the brief says: "
                "`## Imported` with one `imported <0xADDR> <evidence kind>` line per "
@@ -1718,7 +1872,7 @@ def fix_prompt(batch_id, stage, branch, brief, problems, kind='verdicts'):
     then the original brief."""
     return FIX_PROMPT.format(
         id=batch_id, stage=stage, branch=branch, brief=brief,
-        report_rule=FIX_REPORT_RULES['import' if kind == 'import' else 'verdicts'],
+        report_rule=FIX_REPORT_RULES[kind if kind in ('import', 'probes') else 'verdicts'],
         selfcheck_rule=SELFCHECK_RULE.format(id=batch_id),
         problems='\n'.join('- ' + p for p in problems))
 
@@ -1784,8 +1938,9 @@ def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
     The batch id gives the kind (b: verdicts, i: import) and the state file;
     nothing is edited."""
     wave = _tool('wave')
-    kind = 'import' if batch_id[:1] == 'i' else 'verdicts'
-    state_rel = 'docs/wso/%s-state.json' % ('import' if kind == 'import' else 'wave')
+    kind = {'i': 'import', 'p': 'probes'}.get(batch_id[:1], 'verdicts')
+    state_rel = 'docs/wso/%s-state.json' % {'import': 'import', 'probes': 'probe'}.get(
+        kind, 'wave')
     try:
         batch = wave.load_state(os.path.join(worktree, state_rel))['batches'].get(batch_id)
     except (OSError, ValueError) as e:
@@ -1805,8 +1960,19 @@ def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
     except ReportError as e:
         return ['report: %s; fix that line under ## Undecided (one "undecided <0xADDR> '
                 '<fork|neither> <one-line reason>" per row)' % e]
-    kept, imported = {}, set()
-    if kind == 'import':
+    kept, imported, candidates = {}, set(), {}
+    if kind == 'probes':
+        try:
+            candidates = parse_candidates(report)
+        except ReportError as e:
+            return ['report: %s; fix that line under ## Candidates (one "candidate <0xADDR> '
+                    '<fork|neither> <one-line reason>" per row)' % e]
+        if _heading_present(report, 'verdicts', 'undecided'):
+            problems.append('report: a probe report has no ## Verdicts or ## Undecided section; '
+                            'remove it (the driver decides every row; report the rows under '
+                            '## Candidates)')
+        parsed, listed = {}, {}
+    elif kind == 'import':
         try:
             kept = parse_kept(report)
         except ReportError as e:
@@ -1836,8 +2002,9 @@ def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
                 problems.append('%s: not accounted for in the report; list it under '
                                 '## Imported (`imported %s <evidence kind>`), under ## Kept, '
                                 'or park it (docs/wso/import-parked/)' % (r['address'], r['address']))
-    spelling, odd = _spelling_problems(worktree, base, batch,
-                                       list(parsed) + list(listed) + list(kept) + list(imported))
+    spelling, odd = _spelling_problems(
+        worktree, base, batch,
+        list(parsed) + list(listed) + list(kept) + list(imported) + list(candidates))
     # frida lines the driver's own commits wrote (a fix round) are not the worker's
     mb = _merge_base(worktree, base)
     frida = {}
@@ -1869,7 +2036,8 @@ def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
                 break
     checks = mechanical_checks(
         dict(batch, id=batch_id), worktree, parsed, run=run, kind=kind, base=base,
-        undecided=sorted(listed), frida_lines=frida, kept=sorted(kept), tests=False)
+        undecided=sorted(listed), frida_lines=frida, kept=sorted(kept), tests=False,
+        candidates=candidates)
     gone = {'docs/evidence/%s.md: missing;' % k.upper() for k in odd}
     checks = [p for p in checks if not any(p.startswith(g) for g in gone)]
     return problems + spelling + [' '.join(p.split()) for p in checks]
@@ -1960,6 +2128,23 @@ fixed before the batch closes on its own line starting exactly
 Anything else is advisory: write it without that prefix. When nothing
 blocks, say so in one line.
 """
+
+RESUME_PREAMBLE_PROBES = """Resume: batch {id} {why}. This run takes the batch up again in
+the same worktree, on `{branch}`. The work done so far is on that branch:
+`git log {base}..{branch}`, and `git status` for anything not committed
+(a `{wip}` commit, if one is still there, holds what a park saved). Build on it: do not redo
+finished work, and do not rewrite that history.{reset}
+
+Your report still carries the full `## Candidates` section: one
+`candidate <0xADDR> fork|neither <reason>` line for every row of the batch.
+No `## Verdicts` section: the driver decides every row.
+
+The original brief follows.
+
+---
+
+"""
+
 
 RESUME_PREAMBLE = """Resume: batch {id} {why}. This run takes the batch up again in
 the same worktree, on `{branch}`. The work done so far is on that branch:
@@ -2163,6 +2348,11 @@ def dry_report(batch):
     """The dry run's canned report: every row a worker must decide (class
     ambiguous, or no class and no verdict yet), all ours, case dry-<addr>."""
     decided = batch.get('verdicts', {})
+    if any(r.get('reading') for r in batch.get('rows', [])):
+        # a probe batch (Task 28): nothing adopted, every row reported as not built
+        return '\n'.join(['# dry run', '', '## Candidates', ''] + [
+            'candidate %s neither dry run: nothing adopted' % r['address']
+            for r in batch.get('rows', [])]) + '\n'
     lines = ['# dry run', '', '## Verdicts', '']
     for r in batch.get('rows', []):
         cls = r.get('class')
@@ -2240,6 +2430,7 @@ class _BatchContext(threading.local):
         self.worker_ran = []    # this batch's worker runs: really ran
         self.ignored = {}
         self.undecided = {}     # address -> (side, reason) the worker listed (R73)
+        self.candidates = {}    # address -> (side, reason) of a probe report's ## Candidates
         self.probe = {}         # address key -> (side, case) the oracle passed
         self.frida_got = {}     # address key -> (status, detail) of its one Frida run
         self.frida_notes = {}   # address key -> [frequency-only notes] (ledger lines)
@@ -2407,6 +2598,7 @@ class Driver:
     _ignored = _per_thread('ignored')
     _undecided = _per_thread('undecided')
     _kept = _per_thread('kept')
+    _candidates = _per_thread('candidates')
     _probe = _per_thread('probe')
     _frida_got = _per_thread('frida_got')
     _frida_notes = _per_thread('frida_notes')
@@ -2695,6 +2887,7 @@ class Driver:
         self._ignored = {}
         self._undecided = {}
         self._kept = {}
+        self._candidates = {}
         try:
             parsed = parse_report(report)
         except ReportError as e:
@@ -2715,6 +2908,12 @@ class Driver:
                 return {}, ['report: %s; fix that line under ## Kept (one "kept <0xADDR> '
                             '<one-line reason>" per row, for a base-body row you leave as '
                             'ours; never also under ## Imported)' % e]
+        if self.kind == 'probes':
+            try:
+                self._candidates = parse_candidates(report)
+            except ReportError as e:
+                return {}, ['report: %s; fix that line under ## Candidates (one "candidate '
+                            '<0xADDR> <fork|neither> <one-line reason>" per row)' % e]
         self._stage(batch_id, 'checks')
         if not self.dry_run:
             merge_problems = self._merge_before_checks(batch_id, worktree)
@@ -2722,7 +2921,7 @@ class Driver:
                 return {}, merge_problems
         if self.kind == 'import':
             self._clear_kept_outcomes(batch_id, self._kept)
-        if self.kind != 'import' and not self.dry_run:
+        if self.kind == 'verdicts' and not self.dry_run:
             self._withdraw_changed(batch_id, worktree)
         batch = self.load_state(self.state_path)['batches'][batch_id]
         key = _tool('wave')._addr_key
@@ -2751,11 +2950,13 @@ class Driver:
                 self.log('%s: %s decided by the oracle probe; its undecided '
                          'line is dropped' % (batch_id, addr))
                 del listed[addr]
-        self._undecided = {} if self.kind == 'import' else dict(listed)
+        self._undecided = {} if self.kind in ('import', 'probes') else dict(listed)
         try:
-            spelling = self._canonical_evidence_names(batch_id, worktree, batch, verdicts,
-                                                      listed)
+            spelling = self._canonical_evidence_names(
+                batch_id, worktree, batch, verdicts, dict(listed, **self._candidates))
             kw = {'kind': 'import'} if self.kind == 'import' else {}
+            if self.kind == 'probes':
+                kw = {'kind': 'probes', 'candidates': dict(self._candidates)}
             kw['probe'] = sorted(self._probe)
             kw['undecided'] = sorted(listed)
             kw['frida_lines'] = self._frida_lines(batch_id)
@@ -3945,6 +4146,317 @@ class Driver:
             self.log('%s: trace evidence not committed: %s' % (
                 batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
 
+    # -- the probe queue (Task 28) -----------------------------------------------
+
+    PROBE_STATE_SIBLING = 'wave-state.json'
+
+    @property
+    def wave_state_path(self):
+        """The wave-1 state file the probe queue resolves rows into (beside the
+        probe state)."""
+        return os.path.join(os.path.dirname(os.path.abspath(self.state_path)),
+                            self.PROBE_STATE_SIBLING)
+
+    def _probe_listed(self):
+        """{address key: entry} of docs/wso/probe-list.json."""
+        wave = _tool('wave')
+        entries, err = wave._load_list(self.probe_path, 'probe list', missing_ok=True)
+        if err:
+            raise ValueError(err.strip())
+        return {wave._addr_key(e['address']): e for e in entries}
+
+    def _probe_list_edit(self, address, reason=None, append=None, stamp=None):
+        """Refresh (`reason`) or extend (`append`, once) the reason of a probe
+        list entry, and stamp `probed` (batch, scenarios that ran, `hits` the map
+        gave the row, pin, `hand` for a row only a pin move re-offers) so `next`
+        offers the row again only for a new hitting scenario or a moved pin;
+        False when the row is not on the list."""
+        wave = _tool('wave')
+        with self._lock:
+            entries, err = wave._load_list(self.probe_path, 'probe list', missing_ok=True)
+            if err:
+                raise ValueError(err.strip())
+            for e in entries:
+                if wave._addr_key(e['address']) != wave._addr_key(address):
+                    continue
+                if reason is not None:
+                    e['reason'] = reason
+                elif append and append not in e.get('reason', ''):
+                    e['reason'] = (e.get('reason', '').rstrip() + '; ' + append).lstrip('; ')
+                if stamp is not None:
+                    e['probed'] = stamp
+                wave._save_json(self.probe_path, entries)
+                return True
+        return False
+
+    def _probe_outcomes(self, batch_id, outcomes):
+        """rows[].outcome (and measured_body / case) of the probe state:
+        {address: {field: value}}; a field set to None is dropped."""
+        key = _tool('wave')._addr_key
+        want = {key(a): f for a, f in outcomes.items()}
+        with self._lock:
+            state = self.load_state(self.state_path)
+            batch = state['batches'].get(batch_id)
+            if batch is None:
+                return
+            for r in batch.get('rows', []):
+                for f, v in (want.get(key(r['address'])) or {}).items():
+                    if v is None:
+                        r.pop(f, None)
+                    else:
+                        r[f] = v
+            _tool('wave').save_state(self.state_path, state)
+
+    def _probed_stamp(self, batch_id, row, batch, scenarios, hand=False):
+        """The `probed` stamp of a probe-list entry the phase refreshed: the
+        batch, the scenarios that ran for it, the scenarios the coverage map
+        says hit it (`hits`: what `next` compares a later map with), the pin its
+        body came from, and `hand` for a row only a person can rule on."""
+        stamp = {'batch': batch_id, 'scenarios': sorted(scenarios or ()),
+                 'hits': _tool('wave').probe_hits(row, self.disagreements_path, None,
+                                                  self.repo, self.repo),
+                 'pin': row.get('fork_base') or batch.get('fork_base')
+                 or _tool('wave').DEFAULT_FORK_BASE}
+        if hand:
+            stamp['hand'] = True
+        return stamp
+
+    def _record_probe_rows(self, batch_id, worktree):
+        """The record stage of a probe batch: every `fork-equal` row (decided by
+        the Frida phase, checks and review passed) goes through resolve_probe
+        (fork, measured frida, the losing kind the phase saw) and becomes
+        `resolved`.  A body that moved since the phase measured it is a
+        failure; a row already off the probe list with a wave-state verdict on
+        its case (a retry of this stage) is only marked.  Returns the failures."""
+        wave = _tool('wave')
+        ce = _tool('check_evidence')
+        key = wave._addr_key
+        failed = []
+        batch = self.load_state(self.state_path)['batches'][batch_id]
+        for r in batch.get('rows', []):
+            if r.get('outcome') != 'fork-equal':
+                continue
+            a, k = r['address'], key(r['address'])
+            if r.get('measured_body') and ce.body_digest(
+                    worktree, a, r.get('file')) != r['measured_body']:
+                failed.append('%s: body changed after the Frida phase; not recorded' % a)
+                continue
+            with self._lock:
+                on_list = k in self._probe_listed()
+                wave_state = self.load_state(self.wave_state_path)
+                done = any(v.get('side') == 'fork' and v.get('case') == r.get('case')
+                           for b in wave_state['batches'].values()
+                           for ad, v in (b.get('verdicts') or {}).items() if key(ad) == k)
+                if on_list or not done:
+                    rc, text = wave.resolve_probe(
+                        a, 'fork', r['case'], state_path=self.wave_state_path, repo=self.repo,
+                        measured='frida', losing_kind=r.get('losing_kind') or 'read-only',
+                        evidence_root=worktree)
+                    if rc != 0:
+                        failed.append('%s: resolve_probe failed: %s' % (a, text.strip()))
+                        continue
+                    self.log('%s: %s' % (batch_id, text.rstrip()))
+            self._probe_outcomes(batch_id, {a: {'outcome': 'resolved'}})
+        return failed
+
+    def _probe_gap(self, batch_id, row, scenario, detail):
+        """An engine-gaps.json entry (the shape remeasure writes) in the repo
+        the driver commits with the state; one per row and batch."""
+        wave = _tool('wave')
+        with self._lock:
+            path, gaps = self._remeasure_json_list(self.repo, self.ENGINE_GAPS_REL)
+            if any(g.get('address') == row['address'] and g.get('found_by') == batch_id
+                   for g in gaps if isinstance(g, dict)):
+                return
+            gaps.append({'address': row['address'], 'name': row.get('name', ''),
+                         'scenario': scenario, 'detail': detail, 'found_by': batch_id,
+                         'at': _now()})
+            wave._save_json(path, gaps)
+
+    def _deciding_sentence(self, worktree, address, pin, case, scenario):
+        """Append `disagreed with WSO at <pin>: ...; case <case> decides` under
+        the row's `## WSO delta` when the file lacks it (the worker wrote the
+        delta paragraph and never the case)."""
+        wave = _tool('wave')
+        path = os.path.join(worktree, wave._evidence_rel(address))
+        with open(path, encoding='utf-8', newline='') as f:
+            text = f.read()
+        tail = 'case %s decides' % case
+        if any(l.rstrip().rstrip('.').endswith(tail) for l in text.splitlines()):
+            return False
+        line = ('disagreed with WSO at %s: ours differed from the fork body; the fork body, '
+                'built into this branch, behaves like the exe in the Frida trace of %s; '
+                'case %s decides' % (pin, scenario, case))
+        eol = '\r\n' if '\r\n' in text else '\n'
+        new = wave._under_heading(text.replace('\r\n', '\n'), wave.WSO_DELTA_HEAD, line)
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write(new.replace('\n', eol) if eol != '\n' else new)
+        return True
+
+    def _probe_back_text(self, worktree, address, why):
+        """The fix-round problem of a row that stays on the list while the
+        branch still carries the adopted body."""
+        wave = _tool('wave')
+        mb_sha = wave.merge_base_sha(worktree, self.base)
+        mb = mb_sha[:12] if mb_sha else self.base
+        return ('%s: %s; the row stays on the probe list: %s and commit; put '
+                '%s back as the merge base has it (`git show %s:%s` shows it; delete it when '
+                'the merge base has none) and commit; %s.'
+                % (address, why, EDIT_BACK % mb, wave._evidence_rel(address), mb,
+                   wave._evidence_rel(address), SHARED_FILE))
+
+    def _probe_phase(self, batch_id, batch, worktree):
+        """After the worker of a probe batch: the Frida phase over the rows whose
+        fork body the worker adopted (`candidate <addr> fork`, body changed
+        against the merge base, still on the probe list), then per row:
+
+        - equal (the dump guard held, trace evidence written): the evidence
+          is rewritten to kind: trace by the same writer wave 1 uses (probe
+          `<batch>-<scenario>`), the deciding sentence `...; case
+          frida-<batch>-<scenario> decides` is added under `## WSO delta`
+          when missing, committed, and the row's probe-state record becomes
+          outcome `fork-equal` (case, measured_body, losing_kind from the
+          evidence the merge base had).  Nothing is recorded in the wave state
+          or on the probe list here: the record stage of `_land` (after the
+          checks and the review) calls resolve_probe;
+        - different: the fork body is wrong too: the finding is appended to
+          the entry's reason, an engine-gaps.json entry written, the body to
+          go back to ours (a problem for the fix round);
+        - anything else (not exercised, no hook, not measured): the entry's
+          reason is refreshed (`not exercised by <scenarios>; needs an oracle
+          case`), the body to go back.
+
+        `neither` candidates are not built or measured; their entries keep the
+        worker's reason.  Returns the fix-round problems."""
+        wave = _tool('wave')
+        key = wave._addr_key
+        ce = _tool('check_evidence')
+        self._frida_got = {}
+        self._frida_notes = {}
+        self._wave_notes = {}
+        self._frida_ran = None
+        if self.dry_run:
+            return []
+        batch = self.load_state(self.state_path)['batches'][batch_id]
+        cands = {key(a): sc for a, sc in (self._candidates or {}).items()}
+        listed = self._probe_listed()
+        try:
+            touched = {key('0x%X' % a) for _p, a, _n in ce.touched(worktree, self.base)}
+        except Exception as e:
+            raise _StageError('frida', 'cannot tell which bodies the batch changed (%s); no row '
+                                       'was measured; fix it and clear this exception'
+                              % _one_line(repr(e), 200)) from None
+        outcomes, fork_rows = {}, []
+        for r in batch.get('rows', []):
+            k = key(r['address'])
+            if k not in listed:
+                continue           # resolved by an earlier run of this batch
+            if r.get('outcome') == 'fork-equal':
+                continue           # decided by an earlier phase; the checks and the record
+                #                    stage refuse a body that moved since
+            outcomes[r['address']] = {'outcome': None, 'measured_body': None, 'case': None,
+                                      'losing_kind': None}
+            side, reason = cands.get(k, (None, None))
+            if side == 'neither':
+                # not built, not measured: the entry stays, its reason refreshed
+                self._probe_list_edit(r['address'], reason=reason, stamp=self._probed_stamp(
+                    batch_id, r, batch, [], hand=True))
+                outcomes[r['address']]['outcome'] = 'kept'
+                self.log('%s: %s stays on the probe list (candidate neither: %s)' % (
+                    batch_id, r['address'], reason))
+            elif side == 'fork' and k in touched and self._evidence_kind(
+                    worktree, r['address']) == 'read-only' and _mb_evidence_kind(
+                    worktree, self.base, wave._evidence_rel(r['address'])) in (None, 'read-only'):
+                fork_rows.append(dict(r))
+        self._probe_outcomes(batch_id, outcomes)
+        if not fork_rows:
+            return []
+        if not self.frida:
+            raise _StageError('frida', 'a probe batch is decided by the Frida phase and this run '
+                                       'has none (--frida); nothing was measured or resolved; '
+                                       'rerun with --frida and clear this exception')
+        got_written = {}
+
+        def commit(written, cites, findings):
+            got_written['rows'] = list(written)
+            got_written['cites'] = list(cites)
+        self._frida_phase(batch_id, batch, worktree,
+                          {r['address']: ('fork', '') for r in fork_rows},
+                          rows=fork_rows, commit=commit)
+        wkeys = {key(a): c for a, c in zip(got_written.get('rows', []),
+                                           got_written.get('cites', []))}
+        mb_sha = wave.merge_base_sha(worktree, self.base)
+        problems, resolved, decided = [], [], []
+        for r in fork_rows:
+            a, k = r['address'], key(r['address'])
+            status, detail = self._frida_got.get(k, ('skipped', 'no result'))
+            ran = self._ran_scenarios()
+            if status == 'equal' and k in wkeys:
+                cite = wkeys[k]
+                case = 'frida-%s-%s' % (batch_id, cite)
+                pin = r.get('fork_base') or batch.get('fork_base') or wave.DEFAULT_FORK_BASE
+                sentence = None
+                try:
+                    self._deciding_sentence(worktree, a, pin, case, cite)
+                except Exception as e:     # the trace evidence is committed whatever happens
+                    sentence = e
+                    self.log('%s: %s: the deciding sentence could not be written (%r)' % (
+                        batch_id, a, e))
+                    problems.append('%s: the deciding sentence could not be written (%r); add '
+                                    '`disagreed with WSO at %s: ...; case %s decides` under '
+                                    '## WSO delta' % (a, e, pin, case))
+                resolved.append((r, case, cite))
+                continue
+            if status == 'equal':
+                why = self._wave_notes.get(k) or 'no reason recorded'
+                note = 'equal to the exe but no trace evidence was written (%s); needs an ' \
+                       'oracle case' % why
+                outcome = 'kept'
+            elif status == 'different':
+                m = re.search(r'differs in ([A-Za-z0-9_]+)', detail)
+                scenario = m.group(1) if m else (ran[0] if ran else '')
+                note = 'fork body differs from the exe in %s: %s' % (scenario or 'a scenario',
+                                                                       detail)
+                self._probe_gap(batch_id, r, scenario, detail)
+                outcome = 'found'
+            elif status == 'not-exercised':
+                names = (list(getattr(self, '_frida_consulted', None) or ran)
+                         if detail.startswith(COVERAGE_NOT_HIT) else ran)
+                note = 'not exercised by %s; needs an oracle case' % ', '.join(names)
+                outcome = 'kept'
+            elif status == 'skipped':
+                note = 'no Frida hook (%s); needs an oracle case' % detail
+                outcome = 'kept'
+            else:
+                note = 'not measured (%s: %s); needs an oracle case' % (status, detail)
+                outcome = 'kept'
+            # a body known to differ must not be re-adopted for a new scenario
+            stamp = self._probed_stamp(batch_id, r, batch, ran, hand=outcome == 'found')
+            if outcome == 'found':
+                self._probe_list_edit(a, append=note, stamp=stamp)
+            else:
+                self._probe_list_edit(a, reason=note, stamp=stamp)
+            self._probe_outcomes(batch_id, {a: {'outcome': outcome}})
+            self.log('%s: %s stays on the probe list (%s)' % (batch_id, a, note))
+            problems.append(self._probe_back_text(worktree, a, note))
+        if resolved:
+            self._commit_trace_evidence(
+                batch_id, worktree, [r['address'] for r, _c, _s in resolved],
+                'frida: trace evidence for %d row(s) measured equal (%s)' % (
+                    len(resolved), ', '.join(sorted({sc for _r, _c, sc in resolved}))))
+        for r, case, _scenario in resolved:
+            a = r['address']
+            rel = wave._evidence_rel(a)
+            was = self._git_in(worktree, 'show', '%s:%s' % (mb_sha or self.base, rel))
+            m = wave.KIND_RE.search(was.stdout) if was.returncode == 0 else None
+            self._probe_outcomes(batch_id, {a: {
+                'outcome': 'fork-equal', 'case': case,
+                'losing_kind': m.group(1) if m else 'read-only',
+                'measured_body': ce.body_digest(worktree, a, r.get('file'))}})
+            self.log('%s: %s decided for the fork (case %s); recorded at the record stage'
+                     % (batch_id, a, case))
+        return problems
+
     # -- remeasure: a Frida-only pass over closed rows (Task 20 part B) ----
 
     ENGINE_GAPS_REL = 'docs/wso/engine-gaps.json'
@@ -4156,6 +4668,11 @@ class Driver:
         batch = self.load_state(self.state_path)['batches'][batch_id]
         out = {key(a): _side_case(v) for a, v in batch.get('verdicts', {}).items()}
         out.update({key(a): sc for a, sc in verdicts.items()})
+        if self.kind == 'probes':
+            # the rows the phase decided for the fork are verdicts-to-be: review is
+            # mandatory (fork rows) and lists them
+            out.update({key(r['address']): ('fork', r.get('case', ''))
+                        for r in batch.get('rows', []) if r.get('outcome') == 'fork-equal'})
         return out
 
     def _fix(self, batch_id, batch, worker, worktree, stage, problems, brief, label):
@@ -4550,7 +5067,15 @@ class Driver:
         if self.kind == 'verdicts':
             # disagreements.json too: add and diff --cached skip it unchanged
             paths = [self.state_path, self.report_path, self.probe_path,
-                     self.disagreements_path, self.triage_path]
+                     self.disagreements_path, self.triage_path,
+                     os.path.join(os.path.dirname(self.disagreements_path),
+                                  'coverage.pending.json')]
+        elif self.kind == 'probes':
+            # its own state, the wave state the rows were resolved into, the
+            # scorecard (its `probes:` line), the probe list and the gaps found
+            paths = [self.state_path, self.wave_state_path, self.report_path,
+                     self.probe_path, self.disagreements_path,
+                     os.path.join(self.repo, self.ENGINE_GAPS_REL)]
         else:    # the import queue: its state (never a scorecard)
             paths = [self.state_path]
         paths.append(self.import_list_path)   # ours-stub rows leave wave 1 for it
@@ -4577,6 +5102,14 @@ class Driver:
             return fail(r)
         if git('diff', '--cached', '--quiet', '--', *rels).returncode == 0:
             return None
+        if self.kind == 'probes':
+            rows = self.load_state(self.state_path)['batches'][batch_id]['rows']
+            msg = 'probe-state: close %s (resolved %d, kept on list %d)\n\n%s\n' % (
+                batch_id, sum(1 for r in rows if r.get('outcome') == 'resolved'),
+                sum(1 for r in rows if r.get('outcome') in ('kept', 'found')),
+                STATE_COMMIT_TRAILER)
+            r = git('commit', '-q', '-m', msg, '--', *rels)
+            return fail(r) if r.returncode != 0 else None
         sides = [v.get('side') for v in self.load_state(self.state_path)[
             'batches'][batch_id]['verdicts'].values()]
         msg = '%s: close %s (ours %d, fork %d, neither %d)\n\n%s\n' % (
@@ -4585,6 +5118,21 @@ class Driver:
             sides.count('neither'), STATE_COMMIT_TRAILER)
         r = git('commit', '-q', '-m', msg, '--', *rels)
         return fail(r) if r.returncode != 0 else None
+
+    def _probe_ledger_lines(self, batch):
+        """The probe batch's tallies for its ledger entry: resolved, kept on
+        the list, findings (the fork body differs from the exe)."""
+        rows = batch.get('rows', [])
+        res = [r for r in rows if r.get('outcome') == 'resolved']
+        found = [r for r in rows if r.get('outcome') == 'found']
+        kept = [r for r in rows if r.get('outcome') in ('kept', 'found')]
+        lines = '- probes: resolved %d, kept on list %d, findings %d\n' % (
+            len(res), len(kept), len(found))
+        lines += ''.join('- probe resolved %s: case %s\n' % (r['address'], r.get('case'))
+                         for r in res)
+        lines += ''.join('- probe finding %s: fork body differs from the exe\n' % r['address']
+                         for r in found)
+        return lines
 
     def _wip_tip(self, batch_id, branch):
         """The branch tip's sha when it is the driver's own unpushed WIP
@@ -4624,6 +5172,16 @@ class Driver:
         return tip
 
     def _resume_preamble(self, batch_id, batch, why, worktree=None):
+        if self.kind == 'probes':
+            tip = self._wip_tip(batch_id, batch['branch'])
+            if tip is not None:
+                tip = self._undo_wip(worktree, tip)
+            return RESUME_PREAMBLE_PROBES.format(
+                id=batch_id, why=why, branch=batch['branch'], base=self.base,
+                wip=WIP_MESSAGE, reset='' if tip is None else (
+                    ' The driver undid its own `%s` commit before resuming: the previous '
+                    'work is staged in the worktree, no git command needed. Commit it with '
+                    'proper messages and its `Imported-From:` trailers.' % WIP_MESSAGE))
         key = _tool('wave')._addr_key
         recorded = sorted(batch.get('verdicts', {}).items(),
                           key=lambda kv: key(kv[0]))
@@ -4769,7 +5327,9 @@ class Driver:
             return self._exception(batch_id, 'checks', problems)
         # Frida runs once, here, clean check or not; what it finds joins the
         # one fix round (ruling R58).
-        problems = problems + self._frida_phase(batch_id, batch, worktree, verdicts)
+        problems = problems + (self._probe_phase(batch_id, batch, worktree)
+                               if self.kind == 'probes' else
+                               self._frida_phase(batch_id, batch, worktree, verdicts))
         if recorded is not None and problems and \
                 [p for p in problems if p != UNCHANGED_PROBLEM] == \
                 [p for p in recorded if p != UNCHANGED_PROBLEM]:
@@ -4948,6 +5508,13 @@ class Driver:
                               'raised %r' % (e,))
         if failed:
             return self._exception(batch_id, 'record', failed)
+        if self.kind == 'probes':
+            try:
+                failed = self._record_probe_rows(batch_id, worktree)
+            except Exception as e:
+                failed = ['recording the probe rows raised %r' % (e,)]
+            if failed:
+                return self._exception(batch_id, 'record', failed)
         with self._lock:
             for addr, (side, case) in sorted(verdicts.items()):
                 measured = self._measured_for(addr, side)
@@ -5003,24 +5570,36 @@ class Driver:
                     l.strip() for l in text.splitlines() if l.strip()])
             self.log(text.rstrip())
             with self._lock, self._writing():
-                if self.kind == 'verdicts':
+                if self.kind in ('verdicts', 'probes'):
                     # The import queue has no verdicts: its state must not
-                    # overwrite wave 1's scorecard.
+                    # overwrite wave 1's scorecard.  The probe queue's rows were
+                    # resolved into wave 1's state; its scorecard gains the
+                    # `probes:` line.
                     try:
                         rc, text = self.write_scorecard(
-                            self.state_path, self.report_path, self.triage_path,
-                            calibration_path=self.calibration_path)
+                            self.state_path if self.kind == 'verdicts'
+                            else self.wave_state_path, self.report_path, self.triage_path,
+                            calibration_path=self.calibration_path,
+                            **({'repo': self.repo} if self.kind == 'probes' else {}))
                         self.log(text.rstrip())
                     except Exception as e:   # the batch is closed; the scorecard can wait
                         self.log('scorecard not written: %r' % (e,))
                 self._commit_state(batch_id)
                 err = self.push()
         batch = self.load_state(self.state_path)['batches'][batch_id]
+        if self.kind == 'probes':
+            # the decided rows are verdicts of the original batches: fork, on a frida case
+            batch_verdicts = {r['address']: ('fork', r.get('case', ''))
+                              for r in batch['rows'] if r.get('outcome') == 'resolved'}
+        else:
+            batch_verdicts = batch['verdicts']
         entry = ledger_entry(
-            dict(batch, id=batch_id), batch['verdicts'],
+            dict(batch, id=batch_id), batch_verdicts,
             self._classes(batch_id, batch), review, commits, self._credits(),
             ignored=self._ignored, undecided=self._undecided,
             **self._figure_kw())
+        if self.kind == 'probes':
+            entry += self._probe_ledger_lines(batch)
         kept = [(side, a, d) for a, (side, _c) in sorted(verdicts.items())
                 for st, d in [self._frida_got.get(_tool('wave')._addr_key(a), ('', ''))]
                 if st == 'different']
@@ -5054,6 +5633,21 @@ class Driver:
         self.log(text.rstrip())
         m = re.match(r'recompare: (\d+) new rows', text)
         return int(m.group(1)) if rc == 0 and m else 0
+
+    def _log_pending_coverage(self):
+        """Task 27: one line when `wave.py recompare` left candidates for a
+        coverage pass; the driver never launches that pass itself."""
+        path = os.path.join(os.path.dirname(self.disagreements_path),
+                            'coverage.pending.json')
+        try:
+            with open(path, encoding='utf-8') as f:
+                n = len(json.load(f))
+        except (OSError, ValueError, TypeError):
+            return
+        if n:
+            self.log('coverage: %d candidate(s) pending (run `python3 -I '
+                     'tools/wave.py coverage --pending`); their batches run '
+                     'every scenario until then' % n)
 
     def _base_key(self):
         """What the last green run is keyed on: the base's HEAD sha and the
@@ -5127,6 +5721,7 @@ class Driver:
 
     def _cut(self):
         """(batch_id, None) for a batch cut and triaged, else (None, exit)."""
+        self._log_pending_coverage()
         triage = (self.triage_path
                   if _tool('wave').QUEUES[self.queue]['triage'] else None)
         try:
@@ -5672,6 +6267,7 @@ class Driver:
         cuts.  One thread per busy worker; this thread only assigns, under
         the lock, and collects the finished ones."""
         done = queue_mod.Queue()
+        self._log_pending_coverage()
         pending = list(resume)
         # A batch in flight at the last stop may also read as a cleared
         # exception (its status entry keeps outcome: exception after a
@@ -5887,10 +6483,12 @@ def _parse(argv):
         description='Run the wave batches: cut, triage, worker, checks, '
                     'review, close, push, ledger.')
     p.add_argument('--queue', choices=sorted(wave.QUEUES), default='wave1',
-                   help='wave1 (both_changed_differ, b<NNN>) or import '
+                   help='wave1 (both_changed_differ, b<NNN>), import '
                         '(theirs_real_ours_stub, then theirs_changed_ours_base, '
                         'then only_theirs, '
-                        'and the import list, i<NNN>)')
+                        'and the import list, i<NNN>) or probes (the probe '
+                        "list's rows, p<NNN>: the fork body adopted, the Frida "
+                        'phase decides)')
     p.add_argument('--pool', action='append', default=[], metavar='SPEC',
                    help='NAME=WRAPPER:MODEL[:WORKERS], or the short form '
                         'NAME[:WORKERS] of glm or claude; repeatable '
