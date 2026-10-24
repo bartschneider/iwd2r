@@ -370,7 +370,22 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   cut is adopted again. The one aoe line per exception is
   `driver: <id> exception at <stage>; see <status file>`, never problem text.
 
-- `--queue wave1|import`: which list to work (default `wave1`). `wave1`
+- `--queue wave1|import|probes`: which list to work (default `wave1`).
+  `probes` (Task 28) is `docs/wso/probe-state.json`: batches `p<NNN>`
+  (branch `p3/wso-p<NNN>`, status `driver/status-probes.json`, brief
+  `probe-brief-template.md`) of up to 20 rows of `docs/wso/probe-list.json`.
+  The worker adopts the fork body for each `fork` row (report section
+  `## Candidates`: `candidate <0xADDR> fork|neither <reason>`; a `neither` row
+  is not built); the Frida phase decides it. Equal: the evidence becomes
+  `kind: trace`, the driver adds `...; case frida-<batch>-<scenario> decides`
+  under `## WSO delta` and records the row through `resolve_probe` (fork,
+  measured frida) so it returns to its original batch. Different: the finding
+  is appended to the entry's `reason`, an entry goes to
+  `docs/wso/engine-gaps.json`, and the fix round puts our body back. Not
+  exercised: the entry stays, its reason refreshed. `close --kind probes`
+  needs every row resolved or back on the list with our body; the scorecard
+  gains a `probes: resolved N, on list M` line. A row already held by a probe
+  batch is not cut again. `wave1`
   is `docs/wso/wave-state.json`: the `both_changed_differ` rows, triaged,
   batch ids `b<NNN>`, brief `brief-template.md`, closed with verdicts.
   `import` is `docs/wso/import-state.json`: the `theirs_real_ours_stub`
