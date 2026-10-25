@@ -2406,7 +2406,7 @@
     "i015": {
       "assigned_at": "2026-10-24T21:15:25+00:00",
       "branch": "p3/wso-i015",
-      "closed_at": null,
+      "closed_at": "2026-10-25T00:05:03+00:00",
       "files": [
         "src/CScreenSinglePlayer.cpp",
         "src/CDimm.cpp",
@@ -2415,6 +2415,7 @@
         "src/CScreenConnection.cpp",
         "src/CGameEffect.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -2611,7 +2612,7 @@
           "their_len": 574
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i016": {
@@ -2823,6 +2824,185 @@
         }
       ],
       "status": "closed",
+      "verdicts": {}
+    },
+    "i017": {
+      "assigned_at": "2026-10-24T23:39:00+00:00",
+      "branch": "p3/wso-i017",
+      "closed_at": null,
+      "files": [
+        "src/CVisibility.cpp",
+        "src/CVariableHash.cpp",
+        "src/CButtonData.cpp",
+        "src/CGameSprite.cpp",
+        "src/CBaldurChitin.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/CMultiplayerSettings.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x551770",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::CVisibilityMap",
+          "our_len": 201,
+          "their_len": 261
+        },
+        {
+          "address": "0x550B60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVariableHash.cpp",
+          "name": "CNamedCreatureVariableHash::ClearAll",
+          "our_len": 194,
+          "their_len": 194
+        },
+        {
+          "address": "0x504630",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CButtonData.cpp",
+          "name": "CAbilityId::CAbilityId",
+          "our_len": 138,
+          "their_len": 165
+        },
+        {
+          "address": "0x7071F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetIdleSequence",
+          "our_len": 122,
+          "their_len": 129
+        },
+        {
+          "address": "0x551800",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::~CVisibilityMap",
+          "our_len": 60,
+          "their_len": 92
+        },
+        {
+          "address": "0x720B50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_720B50",
+          "our_len": 5660,
+          "their_len": 5740
+        },
+        {
+          "address": "0x714410",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::InitQuickSpellData",
+          "our_len": 3257,
+          "their_len": 3290
+        },
+        {
+          "address": "0x704770",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RenderMarkers",
+          "our_len": 3169,
+          "their_len": 3174
+        },
+        {
+          "address": "0x728BC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ResolveInstants",
+          "our_len": 2137,
+          "their_len": 2141
+        },
+        {
+          "address": "0x71D4B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetQuickWeapon",
+          "our_len": 1737,
+          "their_len": 1795
+        },
+        {
+          "address": "0x726570",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_726570",
+          "our_len": 1449,
+          "their_len": 1459
+        },
+        {
+          "address": "0x714DB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::InitQuickItemData",
+          "our_len": 1122,
+          "their_len": 1183
+        },
+        {
+          "address": "0x713FE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetSelectedWeaponButton",
+          "our_len": 1012,
+          "their_len": 1044
+        },
+        {
+          "address": "0x553290",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVisibility.cpp",
+          "name": "CVisibilityMap::PrivateAddCharacter",
+          "our_len": 646,
+          "their_len": 668
+        },
+        {
+          "address": "0x425840",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CBaldurChitin.cpp",
+          "name": "CBaldurChitin::OnMultiplayerSessionClose",
+          "our_len": 348,
+          "their_len": 353
+        },
+        {
+          "address": "0x71B3B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CheckToolTipItem",
+          "our_len": 261,
+          "their_len": 269
+        },
+        {
+          "address": "0x726150",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteGroupedSpellList::sub_726150",
+          "our_len": 89,
+          "their_len": 102
+        },
+        {
+          "address": "0x550B30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVariableHash.cpp",
+          "name": "CNamedCreatureVariableHashEntry::sub_550B30",
+          "our_len": 70,
+          "their_len": 70
+        },
+        {
+          "address": "0x518650",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::sub_518650",
+          "our_len": 54,
+          "their_len": 69
+        },
+        {
+          "address": "0x518690",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::sub_518690",
+          "our_len": 57,
+          "their_len": 64
+        }
+      ],
+      "status": "assigned",
       "verdicts": {}
     }
   }
