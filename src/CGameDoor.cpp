@@ -9,6 +9,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CTiledObject.h"
+#include "CTimerWorld.h"
 #include "CPathSearch.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
@@ -891,6 +892,37 @@ void CGameDoor::Marshal(CAreaFileDoorObject** pDoorObject)
     (*pDoorObject)->m_strNotPickable = m_strNotPickable;
 }
 
+// 0x487530
+BOOLEAN CGameDoor::CompressTime(DWORD deltaTime)
+{
+    if (static_cast<DWORD>(m_drawPoly) < deltaTime) {
+        m_drawPoly = 0;
+    } else {
+        m_drawPoly = static_cast<SHORT>(m_drawPoly - deltaTime);
+    }
+    if (deltaTime > static_cast<DWORD>(CTimerWorld::TIMESCALE_MSEC_PER_SEC
+            * CTimerWorld::TIMESCALE_SEC_PER_MIN * CTimerWorld::TIMESCALE_MIN_PER_HOUR)) {
+        if ((m_dwFlags & 1) != 0 && (m_dwFlags & 0x20) == 0
+            && m_pArea->m_search.CanToggleDoor(m_pClosedSearch, m_nClosedSearch)
+            && rand() % 5 != 0) {
+            m_dwFlags &= ~1;
+            m_pos = m_ptOpenDest;
+            m_tiledObject.m_wAIState = CTiledObject::STATE_SECONDARY_TILE;
+            if (m_pOpenSearch != NULL) {
+                m_pArea->m_search.RemoveDoor(m_pOpenSearch, m_nOpenSearch);
+            }
+            if (m_pClosedSearch != NULL) {
+                m_pArea->m_search.AddDoor(m_pClosedSearch, m_nClosedSearch, (m_dwFlags & 0x400) != 0);
+            }
+            if (g_pBaldurChitin->cNetwork.GetSessionHosting() == TRUE) {
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(new CMessageDoorStatus(this, m_id, m_id), FALSE);
+            }
+        }
+        m_dwFlags &= ~0x1000;
+    }
+    return TRUE;
+}
+
 // 0x48B350
 void CGameDoor::SetDrawPoly(SHORT time)
 {
@@ -1059,6 +1091,13 @@ static BYTE ToggleDoorSoundPriority(const CPoint& ptListener, const CPoint& pos)
         nPriority = 0;
     }
     return static_cast<BYTE>(nPriority);
+}
+
+// 0x47D7F0
+BOOLEAN CGameDoor::DoAIUpdate(BOOLEAN active, LONG counter)
+{
+    // Folded with CGameContainer::DoAIUpdate at 0x47D7F0.
+    return active && (counter & m_AISpeed) == (m_AISpeed & m_id);
 }
 
 // 0x489680
