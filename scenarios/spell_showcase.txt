@@ -1,0 +1,718 @@
+# Task 37's scenario: a three-sorcerer party whose way through the start
+# area (AR1000) ends with twelve spells cast at one goblin, to exercise
+# the projectile and effect rows (CProjectile, IcewindCVisualEffect).
+#
+# The party is produced by the scenario itself, but not through the cheat
+# console: the console's edit control never processes Enter in our engine
+# (CUIControlEdit::OnEditReturn is empty; docs/followups.md), so no input
+# sequence can type into it. The console being unreachable was ruled on
+# and the equivalent is what first_fight.txt already proved: character
+# generation, where a sorcerer's four spell picks make the quickslots
+# that the Cast Spell bar shows. Three characters, Aria, Bram and Cade,
+# are generated here (Elf, Sorcerer, Chaotic Good, the same abilities,
+# skills and feat as first_fight's Probe), each with four different
+# spells: twelve of the eighteen level-1 wizard/sorcerer spells in all.
+#
+# The walk to the fight is first_fight.txt's, verbatim, with Aria as the
+# leader. Seed 1 (from first_fight): the goblin (1000_Goblin_01, 10GOB,
+# 4 hit points) at 511,763 comes into view on leg 6 (Enemy Sighted
+# auto-pause), the party stops at 519,902 after Space and the goblin
+# comes to 504,882 to attack, its first attack auto-pausing the game
+# (Attacked, 0x2). Centred on Aria (view 119,686) she is at screen
+# 400,216 and the goblin at 385,196.
+#
+# While paused, twelve casts are given: the Cast Spell bar (179,463; the
+# bar's buttons at x 27 + 38 * n), each sorcerer's spells in the order
+# they were picked in (the quickslots keep pick order), then a target.
+# The target comes from the spell's ability actionType (SPELL_ABILITY
+# +0x0C, IcewindMisc::CreateButtonData): 1 targets a creature (click the
+# goblin at 390,188, or key 1 to 3 for a party member), 4 targets ground
+# (click north of the party at 386,120: world 505,806, away from the
+# party for Grease's and Sleep's areas and their radius, Sleep further
+# out at 386,90: world 505,776), and 5 needs no target (the slot itself
+# fires). A caster's portrait key is pressed once per switch only: the
+# key of an already-solely-selected member is a portrait double-click
+# and opens the character record instead.
+#
+# Space ends the pause and the queue plays out: Magic Missile and Ice
+# Dagger fly at the goblin (1d4+1 and 1d4 damage on 4 hit points), the
+# cones and areas land north of the party, the self and friend spells
+# (Shield, Minor Mirror Image, Mage Armor, Eagle's Splendor, Larloch's
+# Minor Drain, Charm Person) land on the casters and the goblin. The
+# rolls (damage, Grease slips, Charm) are past the pass gate: only
+# experience points and enemy hit points are compared.
+#
+# About 10,900 frames with three character generations: real input
+# (play.py --vm) plays them in real time, 30 a second, about 360 s;
+# the sandbox's slower screens need more:
+# timeout: 900
+wait 150
+checkpoint menu
+# New Game (645,262), Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100). The sandbox's screens are
+# slower than a replay's, so the waits around them are longer.
+click 645 262
+wait 180
+click 537 562
+wait 150
+click 530 100
+wait 150
+checkpoint a_chargen
+# Gender (400,128): Male (400,286), Next (536,562) to Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint a_male
+click 536 562
+wait 30
+checkpoint a_appearance
+# Next keeps the first portrait and returns to the main menu.
+click 536 562
+wait 30
+checkpoint a_gender_done
+# Race (400,163): Elf (400,198), which is a Moon Elf, then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint a_elf
+click 536 562
+wait 30
+checkpoint a_race_done
+# Class (400,198): Sorcerer (400,443), then Next.
+click 400 198
+wait 30
+click 400 443
+wait 20
+checkpoint a_sorcerer
+click 536 562
+wait 30
+checkpoint a_class_done
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint a_chaotic_good
+click 536 562
+wait 30
+checkpoint a_alignment_done
+# Abilities (400,268): CHA 10 to 16, STR 10 to 12, CON 8 to 10, as in
+# first_fight.
+click 400 268
+wait 30
+checkpoint a_abilities
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+checkpoint a_cha_up
+click 499 170
+wait 15
+click 499 170
+wait 15
+click 499 242
+wait 15
+click 499 242
+wait 15
+checkpoint a_str_con_up
+# Next with points left asks; Yes (338,331) keeps them.
+click 536 562
+wait 30
+checkpoint a_points_prompt
+click 338 331
+wait 30
+checkpoint a_abilities_done
+# Skills (400,303): Concentration's + (499,276) four times, then Next.
+click 400 303
+wait 30
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 536 562
+wait 30
+checkpoint a_skills_done
+# Feats: Combat Casting's + (499,384), then Next goes on to the Arcane
+# Spell Selection.
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint a_feats_done
+# Aria's spells (the 6 by 4 grid from 293,179 by 43 by 43-44): Magic
+# Missile (465,222), Shield (379,265), Burning Hands (293,179), Grease
+# (293,222); then Next back to the main menu.
+click 465 222
+wait 15
+click 379 265
+wait 15
+click 293 179
+wait 15
+click 293 222
+wait 15
+checkpoint a_spells_chosen
+click 536 562
+wait 30
+checkpoint a_spells_done
+# Appearance (400,338): Next through Sound to the main menu.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Name (400,373): type Aria, Done (458,268).
+click 400 373
+wait 30
+type Aria
+wait 15
+click 458 268
+wait 30
+checkpoint a_named
+# Next (536,562) finishes her and shows Party Formation.
+click 536 562
+wait 60
+checkpoint a_party_formation
+# The second slot's Create Character (530,170).
+click 530 170
+wait 150
+checkpoint b_chargen
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint b_male
+click 536 562
+wait 30
+checkpoint b_appearance
+click 536 562
+wait 30
+checkpoint b_gender_done
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint b_elf
+click 536 562
+wait 30
+checkpoint b_race_done
+click 400 198
+wait 30
+click 400 443
+wait 20
+checkpoint b_sorcerer
+click 536 562
+wait 30
+checkpoint b_class_done
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint b_chaotic_good
+click 536 562
+wait 30
+checkpoint b_alignment_done
+click 400 268
+wait 30
+checkpoint b_abilities
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+checkpoint b_cha_up
+click 499 170
+wait 15
+click 499 170
+wait 15
+click 499 242
+wait 15
+click 499 242
+wait 15
+checkpoint b_str_con_up
+click 536 562
+wait 30
+checkpoint b_points_prompt
+click 338 331
+wait 30
+checkpoint b_abilities_done
+click 400 303
+wait 30
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 536 562
+wait 30
+checkpoint b_skills_done
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint b_feats_done
+# Bram's spells: Ice Dagger (336,222), Color Spray (465,179), Minor
+# Mirror Image (508,222), Sleep (465,265).
+click 336 222
+wait 15
+click 465 179
+wait 15
+click 508 222
+wait 15
+click 465 265
+wait 15
+checkpoint b_spells_chosen
+click 536 562
+wait 30
+checkpoint b_spells_done
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+click 400 373
+wait 30
+type Bram
+wait 15
+click 458 268
+wait 30
+checkpoint b_named
+click 536 562
+wait 60
+checkpoint b_party_formation
+# The third slot's Create Character (530,240).
+click 530 240
+wait 150
+checkpoint c_chargen
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint c_male
+click 536 562
+wait 30
+checkpoint c_appearance
+click 536 562
+wait 30
+checkpoint c_gender_done
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint c_elf
+click 536 562
+wait 30
+checkpoint c_race_done
+click 400 198
+wait 30
+click 400 443
+wait 20
+checkpoint c_sorcerer
+click 536 562
+wait 30
+checkpoint c_class_done
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint c_chaotic_good
+click 536 562
+wait 30
+checkpoint c_alignment_done
+click 400 268
+wait 30
+checkpoint c_abilities
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+checkpoint c_cha_up
+click 499 170
+wait 15
+click 499 170
+wait 15
+click 499 242
+wait 15
+click 499 242
+wait 15
+checkpoint c_str_con_up
+click 536 562
+wait 30
+checkpoint c_points_prompt
+click 338 331
+wait 30
+checkpoint c_abilities_done
+click 400 303
+wait 30
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 536 562
+wait 30
+checkpoint c_skills_done
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint c_feats_done
+# Cade's spells: Larloch's Minor Drain (379,222), Mage Armor (422,222),
+# Charm Person (336,179), Eagle's Splendor (508,179).
+click 379 222
+wait 15
+click 422 222
+wait 15
+click 336 179
+wait 15
+click 508 179
+wait 15
+checkpoint c_spells_chosen
+click 536 562
+wait 30
+checkpoint c_spells_done
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+click 400 373
+wait 30
+type Cade
+wait 15
+click 458 268
+wait 30
+checkpoint c_named
+click 536 562
+wait 60
+checkpoint c_party_formation
+# Done (634,507) starts the game on the chapter screen; its Done (514,549)
+# loads the start area into the world screen.
+click 634 507
+wait 150
+checkpoint chapter
+click 514 549
+wait 150
+checkpoint world
+wait 300
+checkpoint world_settled
+# The opening dialog (Hedron, entry 0), as in first_fight.
+checkpoint opening_dialog
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
+# Centre the view on Aria (the right panel's first portrait, double
+# click), as first_fight does: the legs below need the view exact.
+origin ui
+click 528 460
+click 528 460
+wait 10
+# Click-to-move on the deck.
+origin screen
+click 314 224
+wait 90
+checkpoint moved
+# Hedron's circle: the party walks up and his dialog opens at entry 34
+# with 5 responses.
+move 497 217
+wait 5
+click 497 217
+wait 90
+checkpoint dialog
+origin ui
+click 260 424
+wait 60
+click 220 399
+wait 60
+checkpoint dialog_end
+# Leg 1: centre on Aria, walk to below the gangplank.
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 56 312
+wait 150
+# Leg 2: centre, walk along the dock.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 80 174
+wait 150
+# Leg 3: centre, walk towards the west; Reig stops the party with his
+# dialog.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 144 180
+wait 150
+checkpoint reig_dialog
+# Reig's dialog, as in first_fight.
+origin ui
+click 290 386
+wait 60
+click 340 399
+wait 60
+click 398 583
+wait 60
+click 398 583
+wait 60
+click 398 583
+wait 60
+click 340 424
+wait 60
+click 300 399
+wait 60
+click 230 386
+wait 60
+click 398 583
+wait 60
+click 250 386
+wait 60
+click 250 386
+wait 60
+click 300 450
+wait 60
+checkpoint reig_farewell
+click 230 386
+wait 90
+checkpoint reig_done
+# Leg 4: centre on Aria, walk past Reig and Jon.
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 85 113
+wait 150
+# Leg 5: centre, walk to in front of the houses.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 80 342
+wait 150
+# Leg 6: centre on Aria and walk west on the path south of the houses;
+# the goblin comes into view and the game auto-pauses (Enemy Sighted).
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 128 269
+wait 150
+checkpoint leg6
+# Leg 7: the game is paused already. Centre and give the walk to the
+# north-south path the goblin stands on.
+origin ui
+click 528 460
+click 528 460
+wait 10
+origin screen
+click 160 82
+wait 150
+checkpoint goblin_sighted
+shot goblin_sighted
+# Space ends the pause. The party walks on; the goblin's script brings it
+# to attack. Its first attack auto-pauses the game (Attacked, 0x2).
+key SPACE
+wait 80
+checkpoint engaged
+shot engaged
+wait 120
+checkpoint attacked
+shot attacked
+# Centre on Aria (view 119,686: her at 400,216, the goblin at 385,196)
+# and queue the twelve casts while paused. Aria's four: Magic Missile
+# (slot 1, at the goblin 390,188), Shield (slot 2, needs no target),
+# Burning Hands (slot 3, ground north 386,120), Grease (slot 4, ground
+# north 386,120).
+origin ui
+click 528 460
+click 528 460
+wait 10
+key 1
+wait 20
+click 179 463
+wait 20
+click 27 463
+wait 20
+origin screen
+move 390 188
+wait 5
+click 390 188
+wait 20
+origin ui
+shot a1_queued
+click 179 463
+wait 20
+click 65 463
+wait 30
+shot a2_queued
+click 179 463
+wait 20
+click 103 463
+wait 20
+origin screen
+move 386 120
+wait 5
+click 386 120
+wait 20
+origin ui
+shot a3_queued
+click 179 463
+wait 20
+click 141 463
+wait 20
+origin screen
+move 386 120
+wait 5
+click 386 120
+wait 20
+origin ui
+shot a4_queued
+# Bram's four (his key, once): Ice Dagger (slot 1, at the goblin), Color
+# Spray (slot 2, ground north), Minor Mirror Image (slot 3, no target),
+# Sleep (slot 4, ground further north 386,90).
+key 2
+wait 20
+click 179 463
+wait 20
+click 27 463
+wait 20
+origin screen
+move 390 188
+wait 5
+click 390 188
+wait 20
+origin ui
+shot b1_queued
+click 179 463
+wait 20
+click 65 463
+wait 20
+origin screen
+move 386 120
+wait 5
+click 386 120
+wait 20
+origin ui
+shot b2_queued
+click 179 463
+wait 20
+click 103 463
+wait 30
+shot b3_queued
+click 179 463
+wait 20
+click 141 463
+wait 20
+origin screen
+move 386 90
+wait 5
+click 386 90
+wait 20
+origin ui
+shot b4_queued
+# Cade's four (his key, once): Larloch's Minor Drain (slot 1, at the
+# goblin), Mage Armor (slot 2, at Aria: key 1 while armed), Charm Person
+# (slot 3, at the goblin), Eagle's Splendor (slot 4, at Aria: key 1).
+key 3
+wait 20
+click 179 463
+wait 20
+click 27 463
+wait 20
+origin screen
+move 390 188
+wait 5
+click 390 188
+wait 20
+origin ui
+shot c1_queued
+click 179 463
+wait 20
+click 65 463
+wait 20
+key 1
+wait 20
+shot c2_queued
+click 179 463
+wait 20
+click 103 463
+wait 20
+origin screen
+move 390 188
+wait 5
+click 390 188
+wait 20
+origin ui
+shot c3_queued
+click 179 463
+wait 20
+click 141 463
+wait 20
+key 1
+wait 20
+shot c4_queued
+# Space ends the pause and the twelve casts play out: projectiles fly,
+# cones and areas land, the self and friend effects stick. Thirty
+# seconds of casting and aftermath.
+key SPACE
+wait 900
+checkpoint cast_done
+shot cast_done
+wait 150
+checkpoint fight_done
+shot fight_done
+quit
