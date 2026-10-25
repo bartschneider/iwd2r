@@ -1,0 +1,1 @@
+{"address": "0x559540", "name": "CWorldMap::GetAreaPosition", "file": "src/CWorldMap.cpp", "batch": "i020", "needs": "first_fight, world_map, biography: not measured (address-like untyped argument a1 (271508056 vs 138206912); type it from the header); ours reading matches the decompile"}
