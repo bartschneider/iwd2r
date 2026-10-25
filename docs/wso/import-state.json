@@ -3735,6 +3735,7 @@
           "file": "src/CGameSprite.cpp",
           "name": "CGameSprite::CheckAranceFailure",
           "our_len": 129,
+          "outcome": "kept",
           "their_len": 140
         },
         {
@@ -3752,51 +3753,62 @@
     "i022": {
       "assigned_at": "2026-10-25T02:27:59+00:00",
       "branch": "p3/wso-i022",
-      "closed_at": null,
+      "closed_at": "2026-10-25T05:23:51+00:00",
       "files": [
         "src/CUIControlTextDisplay.cpp",
         "src/CInfCursor.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
           "address": "0x4E2660",
           "category": "theirs_changed_ours_base",
           "file": "src/CUIControlTextDisplay.cpp",
+          "measured_body": "2cbe335566f764bfc443037d6d96764b644a20f5a15cd6588b429f561d9baee8",
           "name": "CUIControlTextDisplay::OnMouseMove",
           "our_len": 541,
+          "outcome": "kept",
           "their_len": 630
         },
         {
           "address": "0x5981D0",
           "category": "theirs_changed_ours_base",
           "file": "src/CInfCursor.cpp",
+          "measured_body": "93f665d6c6b9e5ceb85d4ff147340050fc8565f6d52e2b6ddc9d298a73ec0063",
           "name": "CInfToolTip::GetFrame",
           "our_len": 544,
+          "outcome": "kept",
           "their_len": 546
         },
         {
           "address": "0x598770",
           "category": "theirs_changed_ours_base",
           "file": "src/CInfCursor.cpp",
+          "measured_body": "0e2e40f03d74ec8d9d7b30003768b16f00837a0b24419099dcad228bf72745ff",
           "name": "CInfToolTip::RenderText",
           "our_len": 509,
+          "outcome": "kept",
           "their_len": 503
         },
         {
           "address": "0x4E2550",
           "category": "theirs_changed_ours_base",
           "file": "src/CUIControlTextDisplay.cpp",
+          "measured_body": "b27f68c9828c402ab893b3e1d1187f4f4a4e48445a6772d5dfa40eabb5b634c3",
           "name": "CUIControlTextDisplay::OnButtonLClick",
           "our_len": 269,
+          "outcome": "kept",
           "their_len": 393
         },
         {
           "address": "0x4E2600",
           "category": "theirs_changed_ours_base",
           "file": "src/CUIControlTextDisplay.cpp",
+          "measured_body": "ad73a2e0d7b2f37c42eb8cb966ed6ba2ba7c0f88f08039c15eeaebe6bb369e5c",
           "name": "CUIControlTextDisplay::OnLButtonUp",
           "our_len": 102,
+          "outcome": "kept",
           "their_len": 183
         },
         {
@@ -3808,7 +3820,7 @@
           "their_len": 991
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i023": {
