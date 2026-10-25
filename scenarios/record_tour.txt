@@ -1,0 +1,635 @@
+# Task 36's scenario: a tour of the record screen and its neighbours. It
+# starts the way world_entry.txt does, but makes two characters -- Probe
+# the fighter, then Wiz the wizard in the second slot, so the spellbook
+# has known spells and slots to press -- clears the opening dialog, and
+# then opens every harmless button and tab it can find: the record's (R)
+# folder tabs, text scrollbar, portrait, Information (both its
+# scrollbars and its own Cancel), Biography, Export's
+# Cancel (its Done would write a character file), the whole Customize
+# menu and the panels behind it, and Rest; the journal's (J) chapters
+# and scrollbar -- its Rest is left out, our engine asserts on the
+# popup it would raise; the spellbook's (S) portrait switch, class tabs,
+# levels, a spell memorised and unmemorised again, a right-clicked
+# description, scrollbar and Rest; the inventory's (I) double-click, the
+# staff's item history with its scrollbar, Abilities, Use (a quarterstaff
+# has nothing to use), Done, the colour picker, the second weapon set,
+# the ground slots and their scrollbar, and Rest. Rest is denied in the
+# start area, so it only ever shows the one-button error popup; the
+# cancel of the three-button rest popup is always clicked first, because
+# every screen's error-OK rect lies inside its rest popup's first button.
+# Nothing levels, exports, writes a file or rests. Coordinates for
+# Resolution=800.
+#
+# The sandbox waits are world_entry.txt's.
+#
+# timeout: 900
+wait 150
+checkpoint menu
+# New Game (645,262), then Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100). The waits are long enough for
+# Windows Sandbox, where these screens come up more slowly: a click before
+# Party Formation is up leaves the party empty and Done disabled.
+click 645 262
+wait 180
+click 537 562
+wait 150
+click 530 100
+wait 150
+checkpoint chargen
+# Gender (400,128): Male (400,286), Next (536,562) to Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+checkpoint male
+click 536 562
+wait 30
+checkpoint appearance
+# Next keeps the first portrait and returns to the main menu.
+click 536 562
+wait 30
+checkpoint gender_done
+# Race (400,163): Elf (400,198), which is a Moon Elf, then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+checkpoint elf
+click 536 562
+wait 30
+checkpoint race_done
+# Class (400,198): Fighter (400,268), then Next.
+click 400 198
+wait 30
+click 400 268
+wait 20
+checkpoint fighter
+click 536 562
+wait 30
+checkpoint class_done
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+checkpoint chaotic_good
+click 536 562
+wait 30
+checkpoint alignment_done
+# Abilities (400,268): + at x 499 and - at x 517, rows at y 170 (STR),
+# 206 (DEX), 242 (CON), 278 (INT), 314 (WIS), 350 (CHA).
+click 400 268
+wait 30
+checkpoint abilities
+click 499 170
+wait 20
+checkpoint str_up_1
+click 499 170
+wait 20
+checkpoint str_up_2
+click 499 170
+wait 20
+checkpoint str_up_3
+click 499 242
+wait 20
+checkpoint con_up
+click 517 278
+wait 20
+checkpoint int_down
+click 517 350
+wait 20
+checkpoint cha_down
+# Next (536,562) with points left asks "You have some unallocated points
+# left. Are you sure you want to continue?"; Yes (338,331) keeps the
+# abilities and returns to the main menu, which offers Skills.
+click 536 562
+wait 30
+checkpoint points_prompt
+click 338 331
+wait 30
+checkpoint abilities_done
+# Skills (400,303): Intimidate's + (499,420) four times, then Next
+# (536,562), which goes on to Feats.
+click 400 303
+wait 30
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 499 420
+wait 15
+click 536 562
+wait 30
+checkpoint skills_done
+# Feats: Blind-Fight's + (499,168) and Dash's + (499,384), then Next back
+# to the main menu.
+click 499 168
+wait 15
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint feats_done
+# Appearance (400,338): Next keeps the colours and goes on to Sound; Next
+# keeps the voice and returns to the main menu.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Name (400,373): type Probe, Done (458,268).
+click 400 373
+wait 30
+type Probe
+wait 15
+click 458 268
+wait 30
+checkpoint named
+# Next (536,562) finishes the character and shows Party Formation.
+click 536 562
+wait 60
+checkpoint party_formation
+
+# Party Formation again: the second slot's Create Character (530,170).
+click 530 170
+wait 150
+checkpoint wizard_chargen
+# Gender (400,128): Male (400,286), Next to Appearance, Next back.
+click 400 128
+wait 30
+click 400 286
+wait 20
+click 536 562
+wait 30
+click 536 562
+wait 30
+checkpoint wizard_gender_done
+# Race (400,163): Elf (400,198), then Next.
+click 400 163
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+checkpoint wizard_race_done
+# Class (400,198): Wizard (400,479). The Wizard row summons the
+# specialization popup (panel 12) on top of the class panel: pick the
+# first school (400,164), Done (536,562) dismisses both popups (case 12
+# does DismissPopup twice), so one Done returns to the main menu.
+click 400 198
+wait 30
+click 400 479
+wait 30
+checkpoint wizard_spec_open
+click 400 164
+wait 30
+click 536 562
+wait 30
+checkpoint wizard_class_done
+# Alignment (400,233): Chaotic Good (400,198), then Next.
+click 400 233
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+checkpoint wizard_alignment_done
+# Abilities (400,268): INT's + (499,278) twice. Points are left over, so
+# Next asks and Yes (338,331) keeps them, as with Probe.
+click 400 268
+wait 30
+checkpoint wizard_abilities
+click 499 278
+wait 20
+checkpoint wizard_int_up_1
+click 499 278
+wait 20
+checkpoint wizard_int_up_2
+click 536 562
+wait 30
+click 338 331
+wait 30
+checkpoint wizard_abilities_done
+# Skills (400,303): INT 11 gives 8 points. Concentration's + (499,276)
+# and Lore's + (499,492) four times each; surplus clicks are no-ops, and
+# Skills Done only opens the feats panel once the points are spent.
+click 400 303
+wait 30
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 492
+wait 15
+click 499 492
+wait 15
+click 499 492
+wait 15
+click 499 492
+wait 15
+click 536 562
+wait 30
+checkpoint wizard_skills_done
+# Feats: like the fighter, a level-1 wizard has two points (FeatLvl 1 +
+# FeatClas wizard level 1 = 1), so Blind-Fight's + (499,168) and Dash's +
+# (499,384) both go in. A wizard's feats Done chains to the arcane spells
+# panel (case 55 summons popup 7), so no step click; with a point unspent
+# the Done stays disabled and the whole tail would stall on this popup.
+click 499 168
+wait 15
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint wizard_feats_done
+# Arcane spells (popup 7): Auto Pick (398,357) fills the specialist's
+# spell picks, Done (536,562) moves a non-sorcerer to the memorize panel
+# (popup 16).
+click 398 357
+wait 30
+checkpoint wizard_arcane_done
+click 536 562
+wait 30
+# Memorize (popup 16): the 6x2 grid, one click per cell across the first
+# row and the second row's start; cells past the needed slots are guarded
+# no-ops. Done returns to the main menu.
+click 293 179
+wait 15
+click 336 179
+wait 15
+click 379 179
+wait 15
+click 422 179
+wait 15
+click 465 179
+wait 15
+click 508 179
+wait 15
+click 293 223
+wait 15
+click 336 223
+wait 15
+click 536 562
+wait 30
+checkpoint wizard_memorized
+# Appearance (400,338): Next through Sound back to the main menu.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Name (400,373): type Wiz, Done (458,268), Next to Party Formation, both
+# slots filled.
+click 400 373
+wait 30
+type Wiz
+wait 15
+click 458 268
+wait 30
+checkpoint wizard_named
+click 536 562
+wait 60
+checkpoint party_full
+# Done (634,507), the chapter screen's Done (514,549), the start area.
+click 634 507
+wait 150
+checkpoint chapter
+click 514 549
+wait 150
+checkpoint world
+wait 300
+checkpoint world_settled
+# The opening dialog (Hedron, entry 0), as in inventory.txt: "No, we're
+# here to stay" (1), "Do you know where I can go to sign on with the
+# Targos guard?" (4), "Where can I find Lord Ulbrec?" (1), "All right.
+# Thanks for your help" (1), Continue, "We'll be careful. Farewell,
+# Hedron." (1) ends it.
+checkpoint opening_dialog
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
+shot world_clean
+# The character record (keymap R).
+key R
+wait 60
+checkpoint record_open
+shot record
+# The folder tabs: General (467,37), Equipment (549,37), Skills and Feats
+# (631,37), Miscellaneous (713,37).
+click 467 37
+wait 20
+click 549 37
+wait 20
+click 631 37
+wait 20
+click 713 37
+wait 20
+checkpoint record_folders
+# The text scrollbar (774,211).
+click 774 211
+wait 20
+# The portrait (125,244) shows the next member; twice is back to Probe.
+click 125 244
+wait 20
+click 125 244
+wait 20
+# Information (314,319): the popup spans the screen down to y=433, so it
+# is closed with its own Cancel (399,393), never a click below it. First
+# both of its scrollbars: the text one's arrows at (410,76) and (410,354),
+# and the right one's at (726,77) and (726,354).
+click 314 319
+wait 30
+checkpoint record_info
+shot record_info
+click 410 76
+wait 20
+click 410 354
+wait 20
+click 726 77
+wait 20
+click 726 354
+wait 20
+click 399 393
+wait 30
+# Biography (314,346) is a read-only viewer with the one button (400,370).
+click 314 346
+wait 30
+checkpoint record_bio
+shot record_bio
+click 400 370
+wait 30
+# Export (314,373): Cancel (331,465), never Done, which would write a
+# character file.
+click 314 373
+wait 30
+checkpoint record_export
+shot record_export
+click 331 465
+wait 30
+# Customize (314,400): Appearance (399,109), Sounds (399,147), Script
+# (399,186), Biography (399,225), Done (464,361).
+click 314 400
+wait 30
+checkpoint customize_menu
+shot customize_menu
+# Appearance's Custom Portraits (394,406) opens the picker; Cancel
+# (274,507) leaves it, Cancel (326,438) leaves Appearance.
+click 399 109
+wait 30
+click 394 406
+wait 30
+checkpoint record_portraits
+shot record_portraits
+click 274 507
+wait 30
+click 326 438
+wait 30
+# Sounds: Play (399,283), Cancel (331,465).
+click 399 147
+wait 30
+checkpoint record_sounds
+click 399 283
+wait 30
+click 331 465
+wait 30
+# Script: Cancel (324,465); nothing is picked.
+click 399 186
+wait 30
+checkpoint record_script
+shot record_script
+click 324 465
+wait 30
+# The biography editor: Revert (466,354), Cancel (333,385); nothing is
+# typed, so Done's save has nothing to save anyway.
+click 399 225
+wait 30
+checkpoint record_bio_editor
+shot record_bio_editor
+click 466 354
+wait 20
+click 333 385
+wait 30
+click 464 361
+wait 30
+checkpoint record_customize_done
+# Rest (718,512) is denied here: the error popup's OK (390,290) lies
+# inside the rest popup's first button (y 302), so the cancel (390,362)
+# comes first; whichever popup is up, both clicks leave it dismissed.
+click 718 512
+wait 30
+click 390 362
+wait 20
+click 390 290
+wait 30
+checkpoint record_rest
+key ESCAPE
+wait 60
+# The journal (keymap J).
+key J
+wait 60
+checkpoint journal_open
+shot journal
+# Chapter next (548,37) and previous (483,37): only the prologue is
+# written, so neither moves.
+click 548 37
+wait 20
+click 483 37
+wait 20
+checkpoint journal_chapters
+# The text scrollbar (733,216).
+click 733 216
+wait 20
+checkpoint journal_scrolled
+# No Rest here. A denied rest summons GUIJRNL popup 7, whose only button
+# is control 0, but our engine's ResetErrorPanel asks control 1 for it
+# (CScreenJournal.cpp:814 asserts and blocks on a MessageBox); the
+# original at 0x6374ab asks the loop counter, control 0 like every other
+# screen's error panel. Until that line is fixed the click would freeze
+# the run, so the journal's Rest is left to the fix.
+key ESCAPE
+wait 60
+# The spellbook (keymap S): it opens on Probe, who has no spells.
+key S
+wait 60
+checkpoint spellbook_fighter
+shot spellbook_fighter
+# The portrait (125,244) switches to Wiz's book.
+click 125 244
+wait 30
+checkpoint spellbook_wizard
+shot spellbook_wizard
+# The class tabs (324,31) and (432,31), and the spell scrollbar (714,244).
+click 324 31
+wait 20
+click 432 31
+wait 20
+click 714 244
+wait 20
+checkpoint spellbook_tabs
+# Spell level 1 (761,81): the first known spell (510,96) into the first
+# slot (307,94), and back out -- a filled level asks first, and Yes
+# (456,257) answers it.
+click 761 81
+wait 20
+click 510 96
+wait 20
+checkpoint spellbook_memorised
+shot spellbook_memorised
+click 307 94
+wait 20
+click 456 257
+wait 30
+checkpoint spellbook_level1
+# Spell level 2 (761,120): Wiz has nothing there yet, and the presses
+# still land on the page's buttons.
+click 761 120
+wait 20
+click 510 96
+wait 20
+click 307 94
+wait 20
+click 456 257
+wait 30
+checkpoint spellbook_level2
+# Back on level 1, a right-click on the known spell opens its
+# description: the scrollbar (589,256), then Done (400,432).
+click 761 81
+wait 20
+rclick 510 96
+wait 30
+checkpoint spellbook_info
+shot spellbook_info
+click 589 256
+wait 20
+click 400 432
+wait 30
+# Rest: the error OK (394,257) sits just below the rest popup's first
+# row and just above its second, so either order is safe.
+click 718 512
+wait 30
+click 394 257
+wait 20
+click 397 306
+wait 30
+checkpoint spellbook_rest
+key ESCAPE
+wait 60
+# The inventory (keymap I).
+key I
+wait 60
+checkpoint inventory_open
+shot inventory
+# A double-click on the empty first backpack slot (269,317): the handler
+# runs and finds no item.
+click 269 317
+click 269 317
+wait 20
+# The staff in the first set's weapon slot (618,67), right-clicked: the
+# item history popup, its scrollbar (630,279)...
+rclick 618 67
+wait 30
+checkpoint item_history
+shot item_history
+click 630 279
+wait 20
+# ...Abilities (242,459): a button (290,103), the scrollbar (524,287),
+# Cancel (331,386)...
+click 242 459
+wait 30
+checkpoint item_abilities
+shot item_abilities
+click 290 103
+wait 20
+click 524 287
+wait 20
+click 331 386
+wait 30
+# ...Use (401,459) -- a quarterstaff has nothing to use, so it is a
+# silent no-op -- and the history's Done (560,459).
+click 401 459
+wait 20
+checkpoint item_use
+click 560 459
+wait 30
+# The colour slot (528,212): a swatch (333,153), then the close (403,323).
+click 528 212
+wait 30
+checkpoint inventory_colors
+shot inventory_colors
+click 333 153
+wait 20
+click 403 323
+wait 30
+# inventory.txt's moves: the staff out to the backpack, into the second
+# set's weapon slot, that set selected, and back to the first.
+click 618 67
+wait 20
+click 269 317
+wait 30
+checkpoint second_set_unequipped
+click 269 317
+wait 20
+click 725 67
+wait 20
+click 691 66
+wait 30
+checkpoint second_set
+click 725 67
+wait 20
+click 618 67
+wait 20
+click 584 66
+wait 30
+checkpoint first_set
+# Dropped on the ground (590,317); the ground scrollbar (661,358); the
+# world, where the staff lies at Probe's feet, and back in.
+click 618 67
+wait 20
+click 590 317
+wait 30
+checkpoint dropped
+shot dropped
+click 661 358
+wait 20
+key ESCAPE
+wait 60
+checkpoint world_dropped
+key I
+wait 60
+click 590 317
+wait 20
+click 618 67
+wait 30
+checkpoint picked_up
+# Rest, as in the record: the rest popup's cancel (399,355) first,
+# because the error popup's OK (396,302) lies inside its first button.
+click 718 512
+wait 30
+click 399 355
+wait 20
+click 396 302
+wait 30
+checkpoint inventory_rest
+key ESCAPE
+wait 60
+checkpoint world_end
+shot record_tour_done
+quit
