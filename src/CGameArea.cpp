@@ -5625,12 +5625,15 @@ void CGameArea::SetDay()
     } else {
         if (g_pChitin->cDimm.GetMemoryAmount() == 1) {
             m_sndAmbientDay.SetResRef(CResRef(m_headerSound.m_dayAmbient), TRUE, TRUE);
-            if (m_sndAmbientDay.GetResRef() != "") {
-                m_sndAmbientDay.SetLoopingFlag(TRUE);
-                m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
-                m_sndAmbientDay.SetVolume(m_sndAmbientDayVolume * m_sndAmbientVolume / 100);
-                m_sndAmbientDay.Play(FALSE);
-            }
+        } else {
+            m_sndAmbientDay.SetResRef(CResRef(m_headerSound.m_dayAmbientExtended), TRUE, TRUE);
+        }
+
+        if (m_sndAmbientDay.GetResRef() != "") {
+            m_sndAmbientDay.SetLoopingFlag(TRUE);
+            m_sndAmbientDay.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
+            m_sndAmbientDay.SetVolume(m_sndAmbientDayVolume * m_sndAmbientVolume / 100);
+            m_sndAmbientDay.Play(FALSE);
         }
     }
 
