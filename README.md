@@ -211,6 +211,7 @@ The batch driver described under [Run](#run) runs on one Windows host driven fro
 
 ### What you need.
 
+- **Claude Code**, the `claude` CLI (2.1 or later), on the WSL side. Every worker, reviewer and fix round is a headless Claude Code session in print mode (`claude -p`), and the driver only orchestrates them. With an Anthropic subscription or API key you run the pool as `--pool claude:N` (Sonnet on wave 1 and probes, Haiku on imports, Sonnet as reviewer) and need no wrapper at all; the GLM Coding Plan route in the Workers subsection is the cheaper default this repository runs on.
 - **A Windows 11 Pro host with Windows Sandbox enabled, and WSL2 (Ubuntu).** The repository and the tools live on the WSL side; the sandbox, the oracle runner and the game run on the Windows side. One-time sandbox setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`.
 - The original needs DirectPlay; the sandbox ships only stub files, so the host must have DirectPlay enabled, as it is for the original game.
   The driver copies the host's 32-bit files over the sandbox's stubs at logon, inside the sandbox only.
@@ -252,9 +253,9 @@ git worktree add -q -b p3/wso-<id> <main worktree>-worktrees/p3-wso-<id> <first 
 - Each worktree builds on Windows in its own folder, so parallel batches never share a build tree:
   - `%USERPROFILE%\iwd2r-build` for the `first` worktree, `%USERPROFILE%\iwd2r-build-<folder>` for the others, `IWD2R_WIN_CHECKOUT` overriding.
 
-### Workers: the GLM Coding Plan and the `claude-glm` wrapper.
+### Workers: Claude Code sessions, through the `claude` pool or the GLM Coding Plan wrapper.
 
-The driver runs headless Claude Code sessions against Z.ai's Anthropic-compatible endpoint through a wrapper named `claude-glm` on `PATH`. The wrapper is not in the repo; to work with the driver it must:
+Workers are headless Claude Code sessions. The simplest pool is `--pool claude:N`: the `claude` CLI logged into an Anthropic account, nothing else to install. The default pool, `glm`, runs the same sessions against Z.ai's Anthropic-compatible endpoint through a wrapper named `claude-glm` on `PATH`. The wrapper is not in the repo; to work with the driver it must:
 
 - keep its own config dir, `~/.claude-glm` (`CLAUDE_GLM_CONFIG_DIR` moves it), mirroring `~/.claude` — the driver reads worker transcripts from `<config dir>/projects`, and worker config must never land in your interactive one;
 - point `ANTHROPIC_BASE_URL` at `https://api.z.ai/api/anthropic` and put the GLM Coding Plan's token in `ANTHROPIC_AUTH_TOKEN`;

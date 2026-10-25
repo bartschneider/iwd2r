@@ -329,6 +329,37 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "p004": {
+      "assigned_at": "2026-10-25T05:06:04+00:00",
+      "branch": "p3/wso-p004",
+      "closed_at": "2026-10-25T05:18:25+00:00",
+      "files": [
+        "src/CBaldurChitin.cpp"
+      ],
+      "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x4258D0",
+          "at": "2026-10-23T19:47:36+00:00",
+          "category": "probe_list",
+          "file": "src/CBaldurChitin.cpp",
+          "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+          "name": "CBaldurChitin::OnMultiplayerSessionOpen",
+          "origin": "b014",
+          "our_len": 1206,
+          "outcome": "kept",
+          "reading": "fork",
+          "reason": "the exe's third chat clear (+0x1C90 \u2192 FUN_0064d690) is missing from our body; deciding it needs a multiplayer-session trace and dump evidence cannot carry a fork (rule 1)",
+          "released": true,
+          "source": "worker",
+          "their_len": 1292
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
