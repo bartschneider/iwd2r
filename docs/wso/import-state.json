@@ -3035,7 +3035,7 @@
     "i018": {
       "assigned_at": "2026-10-25T00:06:04+00:00",
       "branch": "p3/wso-i018",
-      "closed_at": null,
+      "closed_at": "2026-10-25T02:26:54+00:00",
       "files": [
         "src/CDimm.cpp",
         "src/CScreenSinglePlayer.cpp",
@@ -3044,6 +3044,7 @@
         "src/CGameEffect.cpp",
         "src/CInfCursor.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -3225,7 +3226,7 @@
           "their_len": 826
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i019": {
@@ -3621,6 +3622,110 @@
           "name": "CWorldMap::GetAreaPosition",
           "our_len": 127,
           "their_len": 131
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "i021": {
+      "assigned_at": "2026-10-25T02:25:45+00:00",
+      "branch": "p3/wso-i021",
+      "closed_at": null,
+      "files": [
+        "src/CScreenInventory.cpp",
+        "src/CGameSprite.cpp",
+        "src/CScreenWorldMap.cpp",
+        "src/CGameAIBase.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x6312D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::SwapWithWeaponSet",
+          "our_len": 1551,
+          "their_len": 1563
+        },
+        {
+          "address": "0x6FF410",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::MoveToBack",
+          "our_len": 1111,
+          "their_len": 1121
+        },
+        {
+          "address": "0x714130",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetWeaponButton",
+          "our_len": 1053,
+          "their_len": 1085
+        },
+        {
+          "address": "0x69FFC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorldMap.cpp",
+          "name": "CScreenWorldMap::GetMarkerPosition",
+          "our_len": 1036,
+          "their_len": 1084
+        },
+        {
+          "address": "0x71B7A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Unequip",
+          "our_len": 786,
+          "their_len": 791
+        },
+        {
+          "address": "0x71A0E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71A0E0",
+          "our_len": 748,
+          "their_len": 751
+        },
+        {
+          "address": "0x69A4D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorldMap.cpp",
+          "name": "CScreenWorldMap::SetMapView",
+          "our_len": 581,
+          "their_len": 592
+        },
+        {
+          "address": "0x6A05A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorldMap.cpp",
+          "name": "CUIControlButtonWorldMapDone::OnLButtonClick",
+          "our_len": 235,
+          "their_len": 237
+        },
+        {
+          "address": "0x73B740",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GetCriticalHitBonus",
+          "our_len": 156,
+          "their_len": 153
+        },
+        {
+          "address": "0x7243F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CheckAranceFailure",
+          "our_len": 129,
+          "their_len": 140
+        },
+        {
+          "address": "0x6F2C30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::GetHelpRange",
+          "our_len": 41,
+          "their_len": 49
         }
       ],
       "status": "assigned",
