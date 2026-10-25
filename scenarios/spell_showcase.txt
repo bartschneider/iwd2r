@@ -30,9 +30,10 @@
 # (click north of the party at 386,120: world 505,806, away from the
 # party for Grease's and Sleep's areas and their radius, Sleep further
 # out at 386,90: world 505,776), and 5 needs no target (the slot itself
-# fires). A caster's portrait key is pressed once per switch only: the
-# key of an already-solely-selected member is a portrait double-click
-# and opens the character record instead.
+# fires). A caster's portrait key re-selects just that member when the
+# whole party is selected, and for an already-solely-selected member it
+# double-clicks the portrait, which only centres the view
+# (CInfGame::OnPortraitLDblClick) - no record screen opens either way.
 #
 # Space ends the pause and the queue plays out: Magic Missile and Ice
 # Dagger fly at the goblin (1d4+1 and 1d4 damage on 4 hit points), the
@@ -448,6 +449,9 @@ wait 60
 click 250 399
 wait 120
 checkpoint opening_done
+# Select the whole party (OEM_PLUS is '=' , keymap index 37) so Bram
+# and Cade follow Aria on every leg: launch 1 left them on the ship.
+key OEM_PLUS
 # Centre the view on Aria (the right panel's first portrait, double
 # click), as first_fight does: the legs below need the view exact.
 origin ui
@@ -521,7 +525,10 @@ click 250 386
 wait 60
 click 250 386
 wait 60
-click 300 450
+# E12's farewell reply R35 renders one line higher than in first_fight:
+# our 3-PC run suppresses the journal note line, so R35 sits in slot 8
+# (y433-447, measured in runs/20261025-182017 attacked.png), not slot 9.
+click 300 441
 wait 60
 checkpoint reig_farewell
 click 230 386
