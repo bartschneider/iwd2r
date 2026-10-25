@@ -1,0 +1,2 @@
+{"address": "0x5D72C0", "name": "CScreenConnection::EngineDestroyed", "file": "src/CScreenConnection.cpp", "batch": "i023",
+ "needs": "frida frequency only, no exact compare: identical in walk_and_talk"}
