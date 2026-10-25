@@ -5533,12 +5533,12 @@ SHORT CMessageHandler::AddMessage(CMessage* message, BOOL bForcePassThrough, SHO
 // 0x4F7620
 SHORT CMessageHandler::Broadcast(CMessage* message, BOOLEAN bSendMessageToSelf, BOOLEAN bIgnoreObjectControl)
 {
-    LONG targetId = message->m_targetId;
-
     CGameObject* pObject;
+    LONG nTargetId = message->m_targetId;
+
     BYTE rc;
     do {
-        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(targetId,
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nTargetId,
             CGameObjectArray::THREAD_ASYNCH,
             &pObject,
             INFINITE);
@@ -5548,43 +5548,30 @@ SHORT CMessageHandler::Broadcast(CMessage* message, BOOLEAN bSendMessageToSelf, 
         pObject = NULL;
     }
 
-    // Object-control gate: send over the wire only for an object this station
-    // owns, unless the caller waives the check.  Both arms of the binary's
-    // branch run the same queue/delete tail, so it is hoisted below.
     if (bIgnoreObjectControl == TRUE
         || (pObject != NULL
             && (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
                 || g_pChitin->cNetwork.m_idLocalPlayer == pObject->m_remotePlayerID))) {
-        if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
-            && g_pChitin->cNetwork.GetSessionOpen() == TRUE
-            && (bIgnoreObjectControl == TRUE
-                || (pObject != NULL
-                    && g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
-                    && pObject->field_6B == 0))) {
-            BYTE* pData = STATICBUFFER;
-            DWORD dwSize = 0;
-            message->MarshalMessage(&pData, &dwSize);
+        // NOTE: Under a network service provider with a connection
+        // established, the original marshals the message here and sends it to
+        // every other player. Omitted: single player only
+        // (docs/adr/0002-single-player-only.md).
 
-            if (dwSize != 0) {
-                CString sPlayerName;
-                g_pChitin->cNetwork.SendSpecificMessage(sPlayerName,
-                    CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
-                    message->GetMsgType(),
-                    message->GetMsgSubType(),
-                    pData,
-                    dwSize);
-            }
+        if (bSendMessageToSelf == TRUE) {
+            m_messageList.AddTail(message);
+        } else {
+            delete message;
+        }
+    } else {
+        if (bSendMessageToSelf == TRUE) {
+            m_messageList.AddTail(message);
+        } else {
+            delete message;
         }
     }
 
-    if (bSendMessageToSelf == TRUE) {
-        m_messageList.AddTail(message);
-    } else {
-        delete message;
-    }
-
     if (rc == CGameObjectArray::SUCCESS) {
-        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(targetId,
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(nTargetId,
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
     }
