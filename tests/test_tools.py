@@ -16695,15 +16695,39 @@ class DriverTest(unittest.TestCase):
         self.assertIn(driver.EDIT_BACK % 'abc', driver.park_text('0x401000', 'abc', 'x'))
 
     def test_transcript_rejects_wso_ref(self):
-        for cmd in ('git show wso/main:src/A.cpp', 'git show wso/x', 'git diff wso/main -- src',
-                    'git log wso/main --oneline', 'cd x && git diff first..wso/main',
-                    'git show refs/remotes/wso/main:README'):
+        # only the subcommands that put the fork tree on disk (Task 33)
+        for cmd in ('git checkout wso/main', 'git merge wso/main',
+                    'git -C x switch wso/main', 'git cherry-pick wso/main',
+                    'git archive wso/main', 'cd x && git pull wso/main'):
             probs = self._bash(cmd)
             self.assertEqual(len(probs), 1, cmd)
             self.assertIn('wso/', probs[0])
+        # branch with a write flag names the ref, but the history rule
+        # catches it: one problem, not two
+        probs = self._bash('git branch -D wso/main')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('history rewrite', probs[0])
         # a path under docs/wso/ is not a ref
         self.assertEqual(self._bash('git log -- docs/wso/README.md'), [])
         self.assertEqual(self._bash('ls wso/ && git status'), [])
+
+    def test_transcript_reads_a_wso_ref_without_fatality(self):
+        """A read of a wso/ ref is a ledger-line finding, never a problem
+        (i020 lost a review over a fatal `git rev-parse wso/main`)."""
+        for cmd in ('git rev-parse wso/main', 'git show wso/main:src/F11.cpp',
+                    'git log wso/main', 'git diff wso/main',
+                    'git -C x diff wso/main',
+                    'git show remotes/wso/main:src/x.cpp',
+                    'git branch --list wso/main',
+                    'git for-each-ref refs/remotes/wso/main',
+                    'git ls-tree wso/main src', 'git merge-base wso/main HEAD',
+                    'git name-rev wso/main', 'git describe wso/main',
+                    'git cat-file -p wso/main:src/A.cpp'):
+            self.assertEqual(self._bash(cmd), [], cmd)
+            self.assertEqual(driver.transcript_findings(
+                self._tcalls(('Bash', {'command': cmd})), []),
+                [('wso-read', 'transcript: read a wso/ ref (%s)' % cmd,
+                  None)], cmd)
 
     def test_transcript_allows_pinned_sha(self):
         self.assertEqual(self._bash('git show e8dd16a7:src/A.cpp | head -50'), [])
@@ -16782,7 +16806,7 @@ class DriverTest(unittest.TestCase):
              'history rewrite'),
             ("# it's time\nWindowsSandbox.exe run.wsb", 'launch outside'),
             ("# what's here\ncat src/A.cpp", 'cat of src/A.cpp'),
-            ("# what's here\ngit show wso/main:src/A.cpp", 'wso/ ref'),
+            ("# what's here\ngit checkout wso/main", 'wso/ ref'),
             ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
              "git reset --hard", 'history rewrite'),
             ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
@@ -16863,7 +16887,7 @@ class DriverTest(unittest.TestCase):
         d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
-        path = self._tcalls(('Bash', {'command': 'git show wso/main:src/A.cpp'}))
+        path = self._tcalls(('Bash', {'command': 'git checkout wso/main'}))
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             probs = driver.mechanical_checks(
                 batch, d, {'0x76D370': ('ours', 'c')}, transcript=path,
@@ -17307,6 +17331,16 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._status(d)['exceptions'], {})
         self.assertIn('transcript: whole read of src/F11.cpp', self._ledger_text(d))
 
+    def test_reading_a_wso_ref_is_a_ledger_line_only(self):
+        t = self._tcalls(('Bash', {'command': 'git rev-parse wso/main'}))
+        w = self._twork([t])
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertIn('transcript: read a wso/ ref (git rev-parse wso/main)',
+                      self._ledger_text(d))
+
     def test_missing_transcript_is_a_ledger_line(self):
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
@@ -17315,7 +17349,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('transcript: none', self._ledger_text(d))
 
     def test_wso_ref_or_launch_in_a_transcript_is_an_exception_without_a_fix_round(self):
-        for cmd in ('git show wso/main:src/F11.cpp', 'WindowsSandbox.exe run.wsb',
+        for cmd in ('git checkout wso/main', 'WindowsSandbox.exe run.wsb',
                     'git reset --hard'):
             t = self._tcalls(('Bash', {'command': cmd}))
             w = self._twork([t])
@@ -17332,7 +17366,7 @@ class DriverTest(unittest.TestCase):
             return json.load(f)['batches'][bid]
 
     def test_every_transcript_is_checked_not_only_the_fix_rounds(self):
-        bad = self._tcalls(('Bash', {'command': 'git log wso/main'}))
+        bad = self._tcalls(('Bash', {'command': 'git merge wso/main'}))
         clean = self._tcalls(('Bash', {'command': 'ls'}))
         # The first run is the offender; the fix round's transcript is clean.
         w = self._twork([bad, clean])
@@ -17788,7 +17822,7 @@ class DriverTest(unittest.TestCase):
             f.write(json.dumps({'type': 'assistant', 'message': {
                 'id': 'm2', 'usage': {'input_tokens': 100, 'output_tokens': 50},
                 'content': [{'type': 'tool_use', 'id': 't2', 'name': 'Bash',
-                             'input': {'command': 'git show wso/main:x'}},
+                             'input': {'command': 'git checkout wso/main'}},
                             {'type': 'tool_use', 'id': 't3', 'name': 'Bash',
                              'input': {'command': 'ls'}}]}}) + '\n')
         probs = driver.transcript_checks(main, [])
@@ -18484,7 +18518,7 @@ class DriverTest(unittest.TestCase):
     def test_a_transcript_violation_on_the_first_run_does_not_trip_the_breaker(self):
         """R68: the scan runs after the run's bookkeeping, so the run still
         counts as a worker run and its evidence is saved."""
-        bad = self._tcalls(('Bash', {'command': 'git show wso/main:src/F11.cpp'}))
+        bad = self._tcalls(('Bash', {'command': 'git checkout wso/main'}))
         with open(bad, 'a') as f:      # the worker really ran: a successful turn
             f.write(json.dumps(self._turn()) + '\n')
         w = self._twork([bad])

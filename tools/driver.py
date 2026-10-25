@@ -559,6 +559,16 @@ HOUSE_RUNNERS = ('tools/play.py', 'tools/gltrace.py')
 READ_LIMIT = 200      # lines of a covered source file one read may take
 _SEGMENT = re.compile(r'&&|\|\||;|\n')
 _WSO_REF = re.compile(r"(?:(?<=[\s'\"=:.^~@])|(?<=remotes/)|(?<=heads/))wso/")
+# The git subcommands that put the fork tree on disk: a wso/ ref named with
+# one of them is fatal (Task 33). The read-only subcommands, and `branch`
+# without a write flag, only read the ref.
+_WSO_WRITE_SUBS = frozenset((
+    'checkout', 'switch', 'merge', 'rebase', 'cherry-pick', 'reset',
+    'restore', 'read-tree', 'archive', 'worktree', 'pull', 'fetch',
+    'submodule', 'am', 'apply', 'revert'))
+_WSO_READ_SUBS = frozenset((
+    'rev-parse', 'log', 'show', 'diff', 'ls-tree', 'cat-file',
+    'merge-base', 'name-rev', 'describe', 'for-each-ref'))
 _SED_SPAN = re.compile(r"(\d+),(\d+)p")
 _LAUNCH = re.compile(r'\.wsb\b|WindowsSandbox|Start-Process', re.I)
 # A command that sets the desktop override: an assignment (leading word,
@@ -811,10 +821,36 @@ def _is_amend(args):
     return bool(rest) and rest[0] == 'commit' and '--amend' in rest[1:]
 
 
+def _wso_ref_finding(args, short):
+    """The finding for a `git` command naming a wso/ ref: ('wso', ...) when
+    the subcommand is one of _WSO_WRITE_SUBS, which put the fork tree on
+    disk; ('wso-read', ...) for the read-only subcommands and a `branch`
+    without -f/-M/-C/-d/-D (a ledger line, not a problem: i020 lost a review
+    over a fatal `git rev-parse wso/main`); None for anything else — a
+    `branch` with a write flag names the ref only as history rewrite
+    (_history_rewrite catches it)."""
+    rest = list(args)
+    while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
+        rest = rest[2:] if rest[0] in ('-C', '-c') else rest[1:]
+    if not rest:
+        return None
+    sub, rest = rest[0], rest[1:]
+    if sub in _WSO_WRITE_SUBS:
+        return ('wso', 'git command naming a wso/ ref (%s): read the fork '
+                'only at the pinned sha, `git show <sha>:<path>`' % short)
+    if sub in _WSO_READ_SUBS or (sub == 'branch' and not any(
+            a in ('--delete', '--force')
+            or re.fullmatch(r'-[a-zA-Z]*[dDfMC][a-zA-Z]*', a) for a in rest)):
+        return ('wso-read', 'transcript: read a wso/ ref (%s)' % short)
+    return None
+
+
 def transcript_findings(transcript_path, covered_files, tracked=None):
     """[(kind, problem, file)] for the forbidden tool calls in a worker's
-    transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
-    sha is allowed), 'launch' (a .wsb, WindowsSandbox or Start-Process
+    transcript.  kind 'wso' (a git subcommand that puts a wso/ ref on disk,
+    _WSO_WRITE_SUBS; the pinned sha is allowed), 'wso-read' (a git command
+    that only reads a wso/ ref, _WSO_READ_SUBS or a plain `branch`; a ledger
+    line, not a problem), 'launch' (a .wsb, WindowsSandbox or Start-Process
     launch outside HOUSE_RUNNERS), 'read' (a whole-file read of a covered
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
     or head/tail -n over READ_LIMIT; file is the covered file),
@@ -859,10 +895,9 @@ def transcript_findings(transcript_path, covered_files, tracked=None):
                 for i, (cw, args) in enumerate(stages):
                     text = ' '.join(args)
                     if cw == 'git' and _WSO_REF.search(' ' + text):
-                        out.append(('wso', 'git command naming a wso/ ref '
-                                    '(%s): read the fork only at the pinned '
-                                    'sha, `git show <sha>:<path>`'
-                                    % _short(seg), None))
+                        hit = _wso_ref_finding(args, _short(seg))
+                        if hit:
+                            out.append(hit + (None,))
                     if cw == 'git' and _history_rewrite(args, covered, tracked):
                         out.append(('history', 'history rewrite in a worker '
                                     '(%s): workers only add and commit'
@@ -896,9 +931,11 @@ def transcript_findings(transcript_path, covered_files, tracked=None):
 
 
 def transcript_checks(transcript_path, covered_files, tracked=None):
-    """One problem per forbidden worker tool call (transcript_findings)."""
-    return [text for _kind, text, _f in
-            transcript_findings(transcript_path, covered_files, tracked)]
+    """One problem per forbidden worker tool call (transcript_findings); a
+    wso-read (a git read of a wso/ ref) is a ledger line, not a problem."""
+    return [text for kind, text, _f in
+            transcript_findings(transcript_path, covered_files, tracked)
+            if kind != 'wso-read']
 
 
 # The paths a batch may change (ruling R71): anything else on the branch is
@@ -2880,9 +2917,10 @@ class Driver:
 
     def _scan_transcript(self, batch_id, label, res, anchors=(), cwd=None):
         """Every run's transcript, worker, fix rounds and reviewer: a wso/
-        ref, a launch outside the house runners or a history rewrite is a
-        past call nobody can undo, so a `transcript` exception with no fix round; a whole-file
-        read is a ledger line only; a missing transcript is a ledger line."""
+        ref put on disk, a launch outside the house runners or a history
+        rewrite is a past call nobody can undo, so a `transcript` exception
+        with no fix round; a whole-file read or a git read of a wso/ ref is
+        a ledger line only; a missing transcript is a ledger line."""
         lines = self._ctx.transcript_lines
         if not res.transcript:
             lines.append('transcript: none (%s)' % label)
@@ -2897,6 +2935,9 @@ class Driver:
                 line = 'transcript: whole read of %s' % f
                 if line not in lines:
                     lines.append(line)
+            elif kind == 'wso-read':
+                if text not in lines:
+                    lines.append(text)
             elif kind == 'unreadable':
                 lines.append('transcript: unreadable (%s)' % label)
             elif kind == 'history' and (f or '').startswith('amend:') and cwd and \
