@@ -1,0 +1,1 @@
+{"address": "0x7880E0", "name": "CDimm::RequestsPending", "file": "src/CDimm.cpp", "batch": "i018", "needs": "ours differs from the exe (first_fight): differs in first_fight: event 2: original {\"ret\": 1, \"tag\": \"fn_7880E0_ret\"}, ours {\"ret\": 0, \"tag\": \"fn_7880E0_ret\"}; import his body in a later batch"}

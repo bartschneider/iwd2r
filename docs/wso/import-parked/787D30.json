@@ -1,0 +1,1 @@
+{"address": "0x787D30", "name": "CDimm::RemoveFromDirectoryList", "file": "src/CDimm.cpp", "batch": "i018", "needs": "not exercised by any scenario yet; the exe returns TRUE after removing a directory entry from the m_lDirectories list, ours and the fork both return FALSE on every path; re-read when a scenario covers the directory-list removal"}
