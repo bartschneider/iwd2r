@@ -67,6 +67,15 @@ The file name is the address in upper-case hex without `0x`:
   `kind: oracle`; triaged in `rules-math-triage.md`.
 - `ghidra_version`: the Ghidra that produced the decompilation
   (`tools/ghidra/versions.json`).
+- `parity_waiver`: waives a structural-parity RED (`tools/parity/run.py`) a
+  human confirmed against the binary. It may open with a list of the
+  columns it waives — `vtable asm 2026-10-25 i023: <reason>` waives the
+  vtable and asm columns, `vtable: <reason>` just vtable — and with no
+  column token it waives asm only, the column it was introduced for. The
+  column names are run.py's: `asm`, `vtable`, `layout`, `offsets`,
+  `markers`, `lints`. The first token that is not a column name starts the
+  reason, so the value stays one readable sentence and existing waivers
+  keep their meaning.
 
 Then the sections `Decompiled (Ghidra)`, `Callers` (functions referring to
 the entry, with the referring address), `Callees` and `Notes`.

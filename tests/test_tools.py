@@ -9235,9 +9235,10 @@ struct_layout_audit = load_parity_tool('struct_layout_audit')
 
 
 class ParityPreexistTest(unittest.TestCase):
-    """tools/parity/run.py's pre-existing-red downgrade (mask + decision) and
-    struct_layout_audit's phantom-member filter. Pure-function tests: the
-    decision is exercised through a synthetic check function, no git."""
+    """tools/parity/run.py's pre-existing-red downgrade (mask + decision),
+    waiver columns and struct_layout_audit's phantom-member filter.
+    Pure-function tests: the decision is exercised through a synthetic check
+    function, no git."""
 
     HEAD_REPO = '/repo/head'
     BASE_REPO = '/repo/base'
@@ -9382,6 +9383,64 @@ class ParityPreexistTest(unittest.TestCase):
                          {'vtable', 'layout', 'offsets', 'markers', 'lints'})
         # the class-level columns the downgrade may re-run through the class
         self.assertEqual(parity_run.CLASS_COLUMNS, {'vtable', 'layout'})
+
+    # the waiver columns
+    def test_waiver_columns_leading_tokens_name_columns(self):
+        f = parity_run.waiver_columns
+        self.assertEqual(f(''), ['asm'])            # never reached: '' is no waiver
+        self.assertEqual(f('known thin wrapper'), ['asm'])   # today's files
+        self.assertEqual(f('asm red: the 25 callees ...'), ['asm'])  # prose
+        self.assertEqual(f('vtable: reason'), ['vtable'])
+        self.assertEqual(f('vtable asm 2026-10-25 i023: reason'),
+                         ['vtable', 'asm'])
+        self.assertEqual(f('lints layout offsets markers: x y'),
+                         ['lints', 'layout', 'offsets', 'markers'])
+        self.assertEqual(f('vtable::DoAIUpdate confirmed'), ['asm'])
+
+    def test_waive_cell_scopes_the_waiver_to_its_columns(self):
+        cell = (parity_run.RED, ['[WRONGADDR] slot 0x0030: src != bin'])
+
+        def waiver_repo(value):
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            d = os.path.join(tmp.name, 'docs', 'evidence')
+            os.makedirs(d)
+            with open(os.path.join(d, '401000.md'), 'w', encoding='utf-8') as f:
+                f.write('---\naddress: 0x401000\nname: A::f\n'
+                        f'parity_waiver: "{value}"\n---\n')
+            return tmp.name
+
+        text = 'vtable asm 2026-10-25 i023: class red confirmed by hand'
+        repo = waiver_repo(text)
+        for column in ('vtable', 'asm'):
+            verdict, notes = parity_run.waive_cell(column, 0x401000, cell,
+                                                   repo)
+            self.assertEqual(verdict, parity_run.WARNING)
+            self.assertEqual(notes, [*cell[1], f'  waived: {text}'])
+        # a column the waiver does not name stays RED, so does a row with no
+        # evidence file
+        self.assertEqual(parity_run.waive_cell('layout', 0x401000, cell,
+                                               repo), cell)
+        self.assertEqual(parity_run.waive_cell('vtable', 0x402000, cell,
+                                               repo), cell)
+        # no column token: asm only, today's meaning
+        repo = waiver_repo('known thin wrapper')
+        self.assertEqual(parity_run.waive_cell('asm', 0x401000, cell,
+                                               repo)[0], parity_run.WARNING)
+        self.assertEqual(parity_run.waive_cell('vtable', 0x401000, cell,
+                                               repo), cell)
+        # only a RED can be waived
+        self.assertEqual(parity_run.waive_cell(
+            'asm', 0x401000, (parity_run.YELLOW, ['soft']), repo),
+            (parity_run.YELLOW, ['soft']))
+
+    def test_evidence_readme_documents_waiver_columns(self):
+        with open(os.path.join(ROOT, 'docs', 'evidence', 'README.md'),
+                  encoding='utf-8') as f:
+            text = f.read()
+        self.assertIn('parity_waiver', text)
+        self.assertIn('vtable asm', text)   # the column-list form
+        self.assertIn('asm only', text)     # what no column token means
 
     # (c) the phantom-member filter
     HEADER = """\

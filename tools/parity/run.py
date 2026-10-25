@@ -25,13 +25,14 @@ where the columns are:
 Verdicts: GREEN / YELLOW / RED, plus SKIP (check could not run -- no pefile,
 no compiler dump) and WARNING. A WARNING is a RED that does not fail the
 change under test: either a human waived it (`parity_waiver` in the evidence
-file; asm only, the fork's "a human confirms RED"), or this gate re-ran the
-red against --base and it reproduced there -- pre-existing, so the batch did
-not cause it (the vtable/layout columns audit the row's CLASS, so a red they
-raise on a function the change added re-runs through any function of that
-class at base; this gate certifies that a change did not REGRESS parity,
-not that the whole port is complete). RED and ERROR exit 1; everything else
-never fails the run.
+file -- leading tokens naming columns select the columns it waives, and no
+column token means asm only), or this gate re-ran the red against --base and
+it reproduced there -- pre-existing, so the batch did not cause it (the
+vtable/layout columns audit the row's CLASS, so a red they raise on a
+function the change added re-runs through any function of that class at
+base; this gate certifies that a change did not REGRESS parity, not that
+the whole port is complete). RED and ERROR exit 1; everything else never
+fails the run.
 
 Skips (exit 0, never a failure): no vanilla exe at oracle.VANILLA_EXE, a
 base that cannot be diffed, or missing exports (run
@@ -132,6 +133,46 @@ def waiver(repo, address):
     return str(check_evidence.front_matter(text).get('parity_waiver', '') or '')
 
 
+def waiver_columns(value):
+    """The columns a parity_waiver value waives.
+
+    Leading tokens naming a column (an optional `:` included) select them:
+    `vtable asm 2026-10-25 i023: reason` waives both, `vtable: reason` the
+    one. The first token that is not a column is where the prose starts --
+    `asm red: the 25 callees ...` and a bare reason both mean asm, today's
+    meaning, which every existing file keeps.
+    """
+    columns = []
+    for token in value.split():
+        column = token[:-1] if token.endswith(':') else token
+        if column not in COLUMNS:
+            break
+        columns.append(column)
+    return columns or ['asm']
+
+
+def waived(column, repo, address):
+    """The waiver text when the evidence file's waiver covers this column."""
+    w = waiver(repo, address)
+    return w if column in waiver_columns(w) else ''
+
+
+def waive_cell(column, address, cell, repo):
+    """The cell again, or WARNING when the evidence file waives this column.
+
+    Only a RED can be waived. The line is appended and keeps the full text
+    (a `vtable asm` header names what is waived), the way asm's waiver
+    always printed.
+    """
+    verdict, notes = cell
+    if verdict != RED:
+        return cell
+    w = waived(column, repo, address)
+    if not w:
+        return cell
+    return WARNING, [*notes, f'  waived: {w}']
+
+
 # ---- the checks ------------------------------------------------------------
 # Each takes (address, name, ctx) -> (verdict, notes); ctx carries the row's
 # function span, the exports triple and the run-wide caches.
@@ -145,10 +186,6 @@ def asm_check(address, name, ctx):
         where = by_name.get(full)
         notes.append('  missing in src: ' + full +
                      (f' (0x{where:X})' if where else ''))
-    if v == RED:
-        w = waiver(ctx['repo'], address)
-        if w:
-            return WARNING, notes + [f'  waived: {w}']
     return v, notes
 
 
@@ -333,7 +370,7 @@ def run_row(item, repo, exports, exe, lints, lint_cache):
     row = {}
     for column, check in CHECKS:
         cell = run_check(check, address, name, ctx, label=f'{column} check')
-        row[column] = cell
+        row[column] = waive_cell(column, address, cell, repo)
     return address, name, row
 
 
