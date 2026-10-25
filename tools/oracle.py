@@ -812,7 +812,8 @@ def cmd_run(args):
     for name, source, flags, expected_code, pattern in SELFTEST_RUNS:
         target = win_path(exe if source == 'vanilla' else runner)
         r = subprocess.run([runner, target, *flags], cwd=ORACLE_DIR,
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, errors='replace',
+                           timeout=120)
         ok, reason = evaluate_run(expected_code, pattern, r.returncode,
                                   r.stderr)
         print('%s: %s (%s)' % (name, 'PASS' if ok else 'FAIL', reason))
