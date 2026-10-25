@@ -228,6 +228,7 @@ The batch driver described under [Run](#run) runs on one Windows host driven fro
   - `%USERPROFILE%\iwd2r-frida\venv\Scripts\python.exe -m pip install frida==17.24.1` (measured on Python 3.14.8; provisioning is in [docs/frida-tracing.md](docs/frida-tracing.md))
   - `tools/frida/probe.py` maps that venv, read-only, into the sandbox.
 - **Ghidra, only for new decompiles.** `tools/ghidra/setup.sh` installs the pinned Ghidra 12.1.4 ([tools/ghidra/versions.json](tools/ghidra/versions.json)); evidence front matter records `ghidra_version: 12.1.4`.
+- **The `rea` MCP server in `.mcp.json` is optional.** It gives an interactive Claude Code session Ghidra-backed function lookups while exploring; nothing in the pipeline depends on it. The batch workers never load it (the driver starts them with `--strict-mcp-config` and no MCP config), and every decompile in `docs/evidence/` comes from the headless Ghidra scripts under `tools/ghidra/` (`tools/oracle.py evidence`, `tools/ghidra/export_decompiles.py`).
 - **Rough sizes.** The sandbox VM alone is 4096 MB (`MEMORY_MB` in `tools/winsandbox.py`), on top of the two Linux builds a gate runs and the host's own work; the gate timings below were measured on a 24-core box, so plan for that class of machine.
 
 ### What is not in the repo and why.
