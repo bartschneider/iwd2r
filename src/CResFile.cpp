@@ -1,6 +1,7 @@
 #include "CResFile.h"
 
 #include "CChitin.h"
+#include "CUtil.h"
 
 // NOTE: Inlined in `CDimm::CreateKeyTable`.
 CResFile::CResFile()
