@@ -1,9 +1,10 @@
 // Message marshal/unmarshal pairs that no scenario reaches (section 3 of
 // task-34-report.md, rows 21-40). Every case here is pending with a body:
-// the fork has none of these five bodies (no CMessageProjectileTrailingVFX
-// or CMessageContinueDialog class at all, no Marshal/Unmarshal body for
-// CMessageSetVariable and CMessageLoadDialog), so each case pins the
-// original's behavior on its own — the same original-only determinism as
+// the fork has none of these six bodies (no CMessageProjectileTrailingVFX,
+// CMessageContinueDialog or CMessageProjectileImmumityUpdate class at all,
+// no Marshal/Unmarshal body for CMessageSetVariable and CMessageLoadDialog),
+// so each case pins the original's behavior on its own — the same
+// original-only determinism as
 // rules/dstats_ctor_zeroes_decrementing — until the import lands.
 //
 // The engine state these functions touch is one pointer chain:
@@ -40,6 +41,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -55,6 +57,7 @@ constexpr uintptr_t kTrailingVfxUnmarshal = 0x511F40;
 constexpr uintptr_t kSetVariableUnmarshal = 0x50A6C0;
 constexpr uintptr_t kContinueDialogUnmarshal = 0x4FDD30;
 constexpr uintptr_t kLoadDialogUnmarshal = 0x502D60;
+constexpr uintptr_t kImmumityUpdateUnmarshal = 0x515180;
 
 constexpr uintptr_t kBaldurChitin = 0x8CF6DC;
 constexpr size_t kObjectGameOffset = 0x1C54;
@@ -68,11 +71,17 @@ constexpr uint32_t kPoisonDword = 0xCDCDCDCD;
 // Largest member offset each message type accesses (+1), so a fixture block
 // covers every read and write: TrailingVFX reads a WORD at +0x28,
 // ContinueDialog a BYTE at +0x30, LoadDialog a LONG at +0x10, SetVariable a
-// DWORD at +0x1A.
+// DWORD at +0x1A, ImmumityUpdate the 0x1C-byte list at +0xC.
 constexpr size_t kTrailingVfxSize = 0x2C;
 constexpr size_t kSetVariableSize = 0x1E;
 constexpr size_t kContinueDialogSize = 0x34;
 constexpr size_t kLoadDialogSize = 0x14;
+constexpr size_t kImmumityUpdateSize = 0x28;
+// The embedded CImmunitiesProjectile member is the engine's MFC CPtrList:
+// vftable at +0, head/tail/count/free/blocks at +4..+0x14, node-block size
+// at +0x18 (10, the ctor shape at 0x543D08).
+constexpr size_t kImmumityListOffset = 0xC;
+constexpr size_t kImmumityListSize = 0x1C;
 
 uint8_t* OriginalZeroBlock(size_t size)
 {
@@ -800,6 +809,9 @@ void ContinueDialogUnmarshal(CaseContext& ctx)
         run(in);
     }
 
+    // The sweep pins pair2/pair3 to (0, INVALID) - the only miss that keeps
+    // the run going - so it exercises mode 0 only; the pair2-skip and
+    // pair3-abort modes live in the fixed inputs above.
     Picks picks(ctx.seed, 0x556E6D6172436E67ull /* "UnmarCng" */);
     const int rounds = ctx.iterations < 8 ? 8 : ctx.iterations;
     for (int round = 0; round < rounds; ++round) {
@@ -824,16 +836,141 @@ void ContinueDialogUnmarshal(CaseContext& ctx)
     }
 }
 
+// ------- messages/515180 projectile immunity update unmarshal
+
+// CMessageProjectileImmumityUpdate::UnmarshalMessage: pair at +3/+7, DWORD
+// nSize at +0xB (bytes; 4*count keeps the nested cnt assert at 0x4E6DF0
+// quiet), then CImmunitiesProjectile::Unmarshal builds the nested list at
+// this+0xC BEFORE the Find - the decompile's this+0xF is only the wire's
+// payload pointer, pData+3+0xC. Each wire DWORD lands in a list node as the
+// raw VALUE: the new(4) dword the loop allocates is dead before AddTail
+// (0x7FBE4E) even runs, and Marshal (0x4E6DA0) reads node->data without a
+// deref, so the values round-trip without indirection. Find (0x59B300) then
+// misses on the zeroed fixture: the body returns 0, this+4 keeps its poison
+// and this+8 is never touched. The fixture builds the list in the ctor shape
+// (0x543D08): vftable 0x84EBCC, zero links, block size 10 - valid because
+// AddTail/NewNode (0x7FB2C1) never dispatch through the vtable. The
+// zero-entry inputs leave the member poisoned instead: nSize 0 skips the
+// loop before any list access, so every one of the 0x1C bytes must still
+// show its poison.
+void ImmumityUpdateUnmarshal(CaseContext& ctx)
+{
+    struct Input {
+        uint32_t player;
+        uint32_t remote;
+        std::vector<uint32_t> entries; // wire DWORDs, in order
+    };
+    const Input inputs[] = {
+        {0, kInvalidId, {}},
+        {0x0001ABCD, 0x12345678, {0}},
+        {0, kInvalidId, {1, 0, 0xFFFFFFFF, 1}},
+        {0x12345678, 0x9ABCDEF0, {0x80000000, 0x7FFFFFFF}},
+        // 16 entries crosses the first node block (10 per plex).
+        {0xFFFFFFFF, 0, {0xDEADBEEF, 0, 0, 0xCAFEBABE, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+    };
+
+    auto run = [&](const Input& in) {
+        std::string ids;
+        for (uint32_t value : in.entries) {
+            ids += (ids.empty() ? "" : ",") + Hex(value);
+        }
+
+        Wire wire;
+        wire.Header();
+        wire.Pair(in.player, in.remote);
+        wire.U32(static_cast<uint32_t>(in.entries.size() * 4));
+        for (uint32_t value : in.entries) {
+            wire.U32(value);
+        }
+
+        ctx.SetInputs("pair=(" + Hex(in.player) + "," + Hex(in.remote) + ") count="
+                      + Hex(static_cast<uint32_t>(in.entries.size())) + " ids=[" + ids + "]");
+
+        int32_t returned = 0;
+        uint8_t* message = nullptr;
+        ctx.CallOriginal([&] {
+            OriginalGame game;
+            game.Install();
+
+            message = OriginalPoisonBlock(kImmumityUpdateSize);
+            if (!in.entries.empty()) {
+                uint8_t* list = message + kImmumityListOffset;
+                std::memset(list, 0, kImmumityListSize);
+                const uint32_t vftable = 0x84EBCC;
+                std::memcpy(list, &vftable, sizeof(vftable));
+                const uint32_t blockSize = 10;
+                std::memcpy(list + 0x18, &blockSize, sizeof(blockSize));
+            }
+            returned = reinterpret_cast<UnmarshalFn>(kImmumityUpdateUnmarshal)(
+                message, nullptr, reinterpret_cast<const uint8_t*>(wire.bytes.data()),
+                static_cast<uint32_t>(wire.bytes.size()));
+        });
+        ctx.CountInputs(1);
+
+        // The Find miss: return 0, no store into this+4, header untouched.
+        oracle::Compare(ctx, 0, returned);
+        oracle::Compare(ctx, kPoisonDword, ReadU32(message + 4));
+        oracle::Compare(ctx, kPoisonDword, ReadU32(message + 8));
+
+        const uint8_t* list = message + kImmumityListOffset;
+        if (in.entries.empty()) {
+            oracle::Compare(ctx, std::string(kImmumityListSize, kPoison),
+                            ReadBytes(list, kImmumityListSize));
+            return;
+        }
+
+        // The nested list: count, non-empty ends, values in wire order, the
+        // chain linked backwards, the tail's forward link closed.
+        oracle::Compare(ctx, static_cast<uint32_t>(in.entries.size()), ReadU32(list + 0xC));
+        oracle::Compare(ctx, 1u, static_cast<uint32_t>(ReadU32(list + 4) != 0));
+        oracle::Compare(ctx, 1u, static_cast<uint32_t>(ReadU32(list + 8) != 0));
+
+        std::string values;  // node->data in walk order
+        std::string linked;  // a 1 per node whose pPrev is the previous node
+        uintptr_t prev = 0;
+        uintptr_t node = ReadU32(list + 4);
+        for (size_t i = 0; i < in.entries.size() && node != 0; ++i) {
+            const uint8_t* at = reinterpret_cast<const uint8_t*>(node);
+            values += (values.empty() ? "" : ",") + Hex(ReadU32(at + 8));
+            linked += ReadU32(at + 4) == static_cast<uint32_t>(prev) ? "1" : "0";
+            prev = node;
+            node = ReadU32(at);
+        }
+
+        oracle::Compare(ctx, ids, values);
+        oracle::Compare(ctx, std::string(in.entries.size(), '1'), linked);
+        oracle::Compare(ctx, 0u, static_cast<uint32_t>(node));
+        oracle::Compare(ctx, static_cast<uint32_t>(prev), ReadU32(list + 8));
+    };
+
+    for (const Input& in : inputs) {
+        run(in);
+    }
+
+    Picks picks(ctx.seed, 0x556E6D6172496D6Dull /* "UnmarImm" */);
+    const int rounds = ctx.iterations < 8 ? 8 : ctx.iterations;
+    for (int round = 0; round < rounds; ++round) {
+        Input in;
+        in.player = picks.Bits();
+        in.remote = picks.Bits();
+        in.entries.resize(static_cast<size_t>(picks.Between(0, 10)));
+        for (uint32_t& value : in.entries) {
+            value = picks.Bits();
+        }
+        run(in);
+    }
+}
+
 } // namespace
 
 // Rows 21-40 of the section-3 table: all twenty rows are only_theirs, so
 // every case is pending-with-body (original-only, like
-// rules/dstats_ctor_zeroes_decrementing). The other fifteen rows read live
+// rules/dstats_ctor_zeroes_decrementing). The other fourteen rows read live
 // engine state no case can shape: the marshals stop at their first GetShare
 // miss before touching their argument domain (4F8D60, 4FD930, 5004D0,
 // 504070, 50A4D0, 515010, 5154E0, 516910, 516D50, 502B40 — and 5017E0,
 // whose live CAIResponse list is doubly engine-bound) and the unmarshals
-// return 0 before reading the buffer (515180, 515670, 516A80, 501FE0).
+// return 0 before reading the buffer (515670, 516A80, 501FE0).
 
 ORACLE_CASE_PENDING("messages-511D00", TrailingVfxMarshal,
     "ours has no CMessageProjectileTrailingVFX class to marshal; the case pins the original's miss-path wire until the import lands");
@@ -845,3 +982,5 @@ ORACLE_CASE_PENDING("messages-502D60", LoadDialogUnmarshal,
     "ours has no CMessageLoadDialog::UnmarshalMessage body; the case pins the original until the import lands");
 ORACLE_CASE_PENDING("messages-4FDD30", ContinueDialogUnmarshal,
     "ours has no CMessageContinueDialog class; the case pins the original's member writes and abort paths until the import lands");
+ORACLE_CASE_PENDING("messages-515180", ImmumityUpdateUnmarshal,
+    "ours has no CMessageProjectileImmumityUpdate class; the case pins the original's nested list build and Find-miss behavior until the import lands");
