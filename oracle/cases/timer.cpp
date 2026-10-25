@@ -61,16 +61,16 @@ void CheckHour(CaseContext& ctx, uint32_t gameTime)
 void TimerWorldHour(CaseContext& ctx)
 {
     static const uint32_t kTimes[] = {
-        0,            // the day's start
+        0, // the day's start
         4499, 4500, 4501, // the first hour boundary
-        10799,        // just before the third hour
+        10799, // just before the third hour
         359999, 360000, 360001, // the tenth hour boundary
         2159999, 2160000, // the tenth hour of the second day
-        43199999,     // the last second of the day
+        43199999, // the last second of the day
         86399999, 86399999 + 1, // the day boundary itself
-        2147483647u,  // INT_MAX
-        4294918496u,  // 2^32 - one day: back to hour 0
-        4294967295u,  // UINT_MAX
+        2147483647u, // INT_MAX
+        4294918496u, // 2^32 - one day: back to hour 0
+        4294967295u, // UINT_MAX
     };
     for (const uint32_t gameTime : kTimes) {
         CheckHour(ctx, gameTime);

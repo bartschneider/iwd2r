@@ -130,8 +130,8 @@ void CheckSequenceAndFrame(CaseContext& ctx, int16_t sequence, int16_t frame)
 void CheckSndArmor(CaseContext& ctx, int armorCode, unsigned int seed)
 {
     const std::string codeText = armorCode >= 32 && armorCode < 127
-            ? std::string(1, static_cast<char>(armorCode))
-            : std::to_string(armorCode);
+        ? std::string(1, static_cast<char>(armorCode))
+        : std::to_string(armorCode);
     ctx.SetInputs("armor code '" + codeText + "', srand seed " + std::to_string(seed));
 
     const char* originalText = nullptr;
