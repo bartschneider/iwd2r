@@ -5654,15 +5654,12 @@ void CGameArea::SetNight()
     } else {
         if (g_pChitin->cDimm.GetMemoryAmount() == 1) {
             m_sndAmbientNight.SetResRef(CResRef(m_headerSound.m_nightAmbient), TRUE, TRUE);
-        } else {
-            m_sndAmbientNight.SetResRef(CResRef(m_headerSound.m_nightAmbientExtended), TRUE, TRUE);
-        }
-
-        if (m_sndAmbientNight.GetResRef() != "") {
-            m_sndAmbientNight.SetLoopingFlag(TRUE);
-            m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
-            m_sndAmbientNight.SetVolume(m_sndAmbientNightVolume * m_sndAmbientVolume / 100);
-            m_sndAmbientNight.Play(FALSE);
+            if (m_sndAmbientNight.GetResRef() != "") {
+                m_sndAmbientNight.SetLoopingFlag(TRUE);
+                m_sndAmbientNight.SetChannel(1, reinterpret_cast<DWORD_PTR>(this));
+                m_sndAmbientNight.SetVolume(m_sndAmbientNightVolume * m_sndAmbientVolume / 100);
+                m_sndAmbientNight.Play(FALSE);
+            }
         }
     }
 
