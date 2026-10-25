@@ -3730,68 +3730,6 @@
       ],
       "status": "assigned",
       "verdicts": {}
-    },
-    "i022": {
-      "assigned_at": "2026-10-25T03:53:41+00:00",
-      "branch": "p3/wso-i022",
-      "closed_at": null,
-      "files": [
-        "src/CUIControlTextDisplay.cpp",
-        "src/CInfCursor.cpp"
-      ],
-      "pool": "glm",
-      "rows": [
-        {
-          "address": "0x4E2660",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CUIControlTextDisplay.cpp",
-          "name": "CUIControlTextDisplay::OnMouseMove",
-          "our_len": 541,
-          "their_len": 630
-        },
-        {
-          "address": "0x5981D0",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CInfCursor.cpp",
-          "name": "CInfToolTip::GetFrame",
-          "our_len": 544,
-          "their_len": 546
-        },
-        {
-          "address": "0x598770",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CInfCursor.cpp",
-          "name": "CInfToolTip::RenderText",
-          "our_len": 509,
-          "their_len": 503
-        },
-        {
-          "address": "0x4E2550",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CUIControlTextDisplay.cpp",
-          "name": "CUIControlTextDisplay::OnButtonLClick",
-          "our_len": 269,
-          "their_len": 393
-        },
-        {
-          "address": "0x4E2600",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CUIControlTextDisplay.cpp",
-          "name": "CUIControlTextDisplay::OnLButtonUp",
-          "our_len": 102,
-          "their_len": 183
-        },
-        {
-          "address": "0x598D30",
-          "category": "theirs_changed_ours_base",
-          "file": "src/CInfCursor.cpp",
-          "name": "CInfToolTip::SetTextRef",
-          "our_len": 984,
-          "their_len": 991
-        }
-      ],
-      "status": "assigned",
-      "verdicts": {}
     }
   }
 }
