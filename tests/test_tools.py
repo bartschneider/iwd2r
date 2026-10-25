@@ -10729,9 +10729,11 @@ class DriverTest(unittest.TestCase):
             json.dump(state, f)
         self.assertEqual(d._frozen_rows('b011'),
                          [('0x401000', 'Rules::Render'), ('0x403000', 'Rules::Tick')])
-        w = d._fix('b011', batch | {'branch': 'p3/wso-b011'}, self._BatchWorker(credits=0.0),
-                   self.wt, 'checks', ['p'], 'BRIEF b011', 'fix')
-        self.assertIsNotNone(w)
+        fixer = self._BatchWorker(credits=0.0)
+        self.assertIsNotNone(d._fix('b011', batch | {'branch': 'p3/wso-b011'}, fixer,
+                                    self.wt, 'checks', ['p'], 'BRIEF b011', 'fix'))
+        self.assertIn('**Frozen bodies.**', fixer.briefs[-1])
+        self.assertIn('\n- 0x401000 Rules::Render\n- 0x403000 Rules::Tick\n', fixer.briefs[-1])
 
     def test_frozen_rows_of_a_probes_batch_are_the_phase_written_ones(self):
         w = self._BatchWorker(credits=0.0)
@@ -10756,19 +10758,17 @@ class DriverTest(unittest.TestCase):
         batch = state['batches']['b011']
         batch['rows'] = [{'address': '0x402000', 'name': 'Rules::Tick'},
                          {'address': '0x403000', 'name': 'Rules::Other'}]
-        batch['verdicts'] = {'0x402000': {'side': 'ours', 'case': 'dump-1'},
-                             '0x403000': {'side': 'ours', 'case': 'dump-2', 'measured': 'frida'}}
         with open(d.state_path, 'w') as f:
             json.dump(state, f)
+        # the state records `measured` only at close: the phase's result is the source
+        d._frida_got = {'403000': ('equal', 'same'), '402000': ('different', 'x')}
         self.assertEqual(d._frozen_rows('b011'), [('0x403000', 'Rules::Other')])
-        batch['verdicts']['0x403000'].pop('measured')
-        with open(d.state_path, 'w') as f:
-            json.dump(state, f)
+        d._frida_got = {}
         self.assertEqual(d._frozen_rows('b011'), [])
 
     def _section_problems_of(self, d, report):
         _v, probs = d._check('b011', self.wt, report)
-        return [p for p in probs if 'listed under ## ' in p]
+        return [p for p in probs if re.match(r'0x[0-9A-F]+ listed under ## ', p)]
 
     def _mark_kept_outcomes(self):
         with open(self.state_path) as f:
@@ -10800,6 +10800,25 @@ class DriverTest(unittest.TestCase):
         d._kept = {}
         self.assertEqual(self._section_problems_of(
             d, '## Imported\nimported 0x401000 trace\n'), [])
+
+    def test_section_problems_come_with_the_other_check_problems(self):
+        # a batch gets one fix round: the section problem must not hide the rest
+        d, batch = self._kept_phase_driver(kept=())
+        _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked', '403000.json'),
+               json.dumps({'address': '0x403000', 'name': 'n', 'file': 'f', 'batch': 'b011',
+                           'needs': 'x'}))
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'park with evidence left', cwd=self.wt)
+        _v, probs = d._check('b011', self.wt, '## Imported\nimported 0x402000 trace\n')
+        self.assertTrue(any('0x402000 listed under ## Imported' in p for p in probs), probs)
+        self.assertTrue(any('0x403000: parked' in p and 'still exists' in p for p in probs), probs)
+
+    def test_a_push_exception_names_a_failed_state_commit_too(self):
+        self.assertEqual(driver.Driver._push_problems('rejected', None),
+                         ['git push failed: rejected'])
+        self.assertEqual(driver.Driver._push_problems('rejected', 'add refused'),
+                         ['git push failed: rejected',
+                          'the state commit also failed: add refused'])
 
     def test_check_section_rules_exempt_parked_rows(self):
         d, batch = self._kept_phase_driver(kept=())
@@ -13390,9 +13409,8 @@ class DriverTest(unittest.TestCase):
         # measured like an import: trace evidence for the CHANGED body
         self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
             self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
-        # the check tells the worker what to do (the later, fuller check: the early
-        # section check, which says it shorter, has its own tests)
-        d._section_problems = lambda *a: []
+        # the check tells the worker what to do (the fuller check: this row has no
+        # recorded kept outcome, so the early section check leaves it to it)
         _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x401000 ours matches\n')
         mine = [p for p in probs if p.startswith('0x401000: listed under ## Kept but its body changed '
                                                   'against first')]
@@ -14038,7 +14056,6 @@ class DriverTest(unittest.TestCase):
                            'needs': 'x'}))
         self.git('add', '-A', cwd=self.wt)
         self.git('commit', '-qm', 'park with evidence left', cwd=self.wt)
-        d._section_problems = lambda *a: []     # section check has its own tests
         report = '## Imported\nimported 0x401000 trace\n'
         text = ('0x402000: parked (docs/wso/import-parked/402000.json) but '
                 'docs/evidence/402000.md still exists; delete it')
@@ -17947,8 +17964,7 @@ class DriverTest(unittest.TestCase):
         exc = self._status(d)['exceptions']['b011']
         self.assertEqual(exc['stage'], 'state')
         self.assertEqual(exc['problems'][1], driver.Driver.STATE_LANDED)
-        self.assertEqual(len(self.sent), 1)
-        self.assertIn('exception at state', self.sent[0])
+        self.assertEqual(self.sent, [d._exception_line('b011', 'state')])
 
     def test_a_cleared_state_exception_commits_the_state_and_pushes_only(self):
         w = self._BatchWorker(credits=0.0)
