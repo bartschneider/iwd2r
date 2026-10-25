@@ -67,6 +67,7 @@ constexpr uint32_t kVanillaCrtRanges[][2] = {
         cases/store_spell.cpp cases/area_tint.cpp cases/messages.cpp cases/projectile.cpp
         cases/spell_list.cpp cases/effects.cpp cases/store_chat.cpp cases/rule_tables.cpp
         cases/timer.cpp cases/anim_types.cpp cases/aliases.cpp
+        cases/store_spell.cpp cases/area_tint.cpp cases/messages_wire.cpp
         $<TARGET_OBJECTS:iwd2r_engine>)
     target_include_directories(iwd2r_oracle PRIVATE "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/generated")
