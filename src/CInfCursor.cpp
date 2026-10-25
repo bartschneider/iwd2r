@@ -684,16 +684,13 @@ void CInfToolTip::SetTextRef(const STRREF& textRef, const CString& sExtra)
             CUtil::TrimRight(field_5EC[0]);
             nLines = CUtil::SplitString(&m_font,
                 sExtra,
-                // NOTE: full width here (no -8), unlike the other branches (0x598b78).
-                nMaxWidth,
+                nMaxWidth - 8,
                 1,
                 &(field_5EC[1]),
                 FALSE,
                 TRUE,
                 TRUE,
                 -1);
-            // +1 for the pre-set name line in field_5EC[0] (inc bl @ 0x598c66).
-            nLines++;
         } else {
             int pos = CUtil::Find(sExtra, '\n', 0);
             if (pos != -1) {
@@ -708,8 +705,6 @@ void CInfToolTip::SetTextRef(const STRREF& textRef, const CString& sExtra)
                     TRUE,
                     TRUE,
                     -1);
-                // +1 for the pre-set first line in field_5EC[0] (inc bl @ 0x598c66).
-                nLines++;
             } else {
                 nLines = CUtil::SplitString(&m_font,
                     sExtra.Mid(pos + 1),

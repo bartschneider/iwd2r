@@ -1,0 +1,1 @@
+{"address": "0x598940", "name": "CInfToolTip::SetTextRef", "file": "src/CInfCursor.cpp", "batch": "i022", "needs": "no Frida hook: ambiguous: 2 overloads of CInfToolTip::SetTextRef in our map"}
