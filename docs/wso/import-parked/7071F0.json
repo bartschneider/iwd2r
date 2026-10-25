@@ -1,0 +1,2 @@
+{"address": "0x7071F0", "name": "CGameSprite::GetIdleSequence", "file": "src/CGameSprite.cpp", "batch": "i017",
+ "needs": "world_entry: not measured (frequency difference only: identical in world_entry); ours reading matches the decompile"}
