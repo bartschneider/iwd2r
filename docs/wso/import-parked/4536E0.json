@@ -1,0 +1,1 @@
+{"address": "0x4536E0", "name": "CMessage117::GetCommType", "file": "src/CMessage.cpp", "batch": "i026", "needs": "dependency outside the batch's files: src/CMessage.h has no CMessage117 class; the constant body (returns BROADCAST_FORCED_OTHERS = 5, matching the exe) already exists on our folded siblings labelled 0x4536E0 in src/CMessage.cpp."}

@@ -1,0 +1,1 @@
+{"address": "0x4844D0", "name": "CMessageContinueDialog::~CMessageContinueDialog", "file": "src/CMessage.cpp", "batch": "i026", "needs": "dependency outside the batch's files: src/CMessage.h has no CMessageContinueDialog class; the fork body is a deleting dtor (empty dtor plus conditional operator delete) with nothing portable to adopt."}
