@@ -23590,6 +23590,74 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])
         self.assertIn('coverage: map has no fresh phase scenario', out)
 
+    def _oracle_repo(self, evidence, case_ids):
+        """A repo whose `first` holds `evidence` — (stem, file text) pairs —
+        and an oracle registry wiring `case_ids`: the Task 39 cut reads both
+        at the base with git show."""
+        repo = os.path.join(self.tmp, 'repo')
+        os.makedirs(os.path.join(repo, 'oracle', 'cases'), exist_ok=True)
+        for stem, text in evidence:
+            _write(os.path.join(repo, 'docs', 'evidence', stem + '.md'), text)
+        _write(os.path.join(repo, 'oracle', 'cases', 'rules.cpp'),
+               ''.join('ORACLE_CASE("%s", Fn);\n' % c for c in case_ids))
+        _write(os.path.join(repo, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        for cmd in (['git', 'init', '-q', '-b', 'first', repo],
+                    ['git', '-C', repo, 'add', '-A'],
+                    ['git', '-C', repo, 'commit', '-qm', 'oracle evidence']):
+            subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
+        return repo
+
+    def next_from(self, repo, size=2, **kw):
+        imp = os.path.join(self.tmp, 'import-state.json')
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            return self.wave.next_batch(
+                self.dp, imp, size, queue='import', repo=repo,
+                import_path=os.path.join(self.tmp, 'import-list.json'), base='first',
+                coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'), **kw)
+
+    def test_next_import_cuts_an_oracle_backed_row_and_skips_an_uncovered_one(self):
+        # Task 39: a registered oracle case measures a row on its own, so
+        # the cut offers it without --include-uncovered; a row with neither
+        # a scenario nor a case still waits for one
+        repo = self._oracle_repo(
+            (('407000', '---\naddress: 0x407000\nname: G\nkind: oracle\n'
+                        'oracle_case: rules/g\n---\n'),), ['rules/g'])
+        self.cov({'world_entry': {'0x403000': 3}})
+        rc, out = self.next_from(repo)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
+        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        rc, out = self.next_from(self.tmp)     # without a repo nothing is oracle-backed
+        self.assertEqual(self.rows_of(out), ['0x403000'])
+        self.assertIn('coverage: 1 scenario-covered row(s), 0 oracle-backed', out)
+
+    def test_next_import_sorts_an_oracle_backed_row_with_the_covered_rows(self):
+        # ahead of the rows no scenario measured (0x401000 outranks it by
+        # size), and a mismatch record (no kind) backs nothing even with
+        # its case registered: it stays with the unknown rows
+        mismatch = ('---\naddress: 0x401000\nname: A\noracle_case: rules/a\nkind:\n---\n\n'
+                    '## Notes\n\nFinding (runs/20261025-134651): ours returns 0 where the\n'
+                    'original returns 1.\n')
+        repo = self._oracle_repo(
+            (('407000', '---\naddress: 0x407000\nname: G\nkind: oracle\n'
+                        'oracle_case: rules/g\n---\n'),
+             ('401000', mismatch)), ['rules/g', 'rules/a'])
+        self.cov({'world_entry': {'0x403000': 3}},
+                 hooked=[a for a in coverage.candidates(self.dp)
+                         if a not in ('0x401000', '0x407000')])
+        rc, out = self.next_from(repo, size=3)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000', '0x401000'])
+        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
+
     def test_scorecard_carries_the_coverage_line(self):
         state = os.path.join(self.tmp, 'docs', 'wso', 'wave-state.json')
         report = os.path.join(self.tmp, 'report.md')
