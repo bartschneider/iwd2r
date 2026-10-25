@@ -26,10 +26,12 @@ Verdicts: GREEN / YELLOW / RED, plus SKIP (check could not run -- no pefile,
 no compiler dump) and WARNING. A WARNING is a RED that does not fail the
 change under test: either a human waived it (`parity_waiver` in the evidence
 file; asm only, the fork's "a human confirms RED"), or this gate re-ran the
-red against --base and it reproduced there verbatim -- pre-existing, so the
-batch did not cause it (this gate certifies that a change did not REGRESS
-parity, not that the whole port is complete). RED and ERROR exit 1;
-everything else never fails the run.
+red against --base and it reproduced there -- pre-existing, so the batch did
+not cause it (the vtable/layout columns audit the row's CLASS, so a red they
+raise on a function the change added re-runs through any function of that
+class at base; this gate certifies that a change did not REGRESS parity,
+not that the whole port is complete). RED and ERROR exit 1; everything else
+never fails the run.
 
 Skips (exit 0, never a failure): no vanilla exe at oracle.VANILLA_EXE, a
 base that cannot be diffed, or missing exports (run
@@ -73,9 +75,18 @@ LINT_NAMES = ('re_lint', 'lint_extend_cells', 'lint_infinite_loop',
               'lint_twin_symmetry', 'lint_uninit_member')
 
 # The columns a RED is re-run against --base for (the _delegated checks plus
-# markers/lints). asm is excluded: its RED keeps the human `parity_waiver`
-# path in asm_check.
+# markers/lints). asm is excluded: its RED is about the changed body itself
+# and keeps the human `parity_waiver` path.
 DELEGATED_COLUMNS = frozenset(COLUMNS[1:])
+
+# The delegated columns whose finding is about the row's class, not the
+# function that names it: vtable_audit.check and struct_layout_audit.check
+# read the class out of `name` and audit src/<cls>.[ch] alone. A red of
+# theirs on a function the change ADDED still says the class disagreed with
+# the binary before, so it is re-run at base through any function of the
+# class. The other delegated columns (offsets: it disassembles the row's own
+# address) are function-level; a new function's red cannot be pre-existing.
+CLASS_COLUMNS = frozenset(('vtable', 'layout'))
 
 # --exports override for the CLI (load_exports's dirpath argument).
 EXPORTS_DIR = None
@@ -277,6 +288,25 @@ def all_functions(repo):
     return work
 
 
+def class_items(work):
+    """class -> the class's lowest-address work item.
+
+    The class columns re-run a red through any function of the class; the
+    lowest address (rel breaking ties) makes the choice deterministic.
+    Names without `::` have no class.
+    """
+    firsts = {}
+    for item in work:
+        name = item[2]
+        if '::' not in name:
+            continue
+        cls = name.split('::')[0]
+        cur = firsts.get(cls)
+        if cur is None or (item[1], item[0]) < (cur[1], cur[0]):
+            firsts[cls] = item
+    return firsts
+
+
 def make_ctx(item, repo, exports, exe, lints, lint_cache):
     """The check ctx for one row: the row's function span, the exports triple
     and the run-wide caches. The exports triple and the exe are
@@ -302,8 +332,8 @@ def run_row(item, repo, exports, exe, lints, lint_cache):
     ctx = make_ctx(item, repo, exports, exe, lints, lint_cache)
     row = {}
     for column, check in CHECKS:
-        row[column] = run_check(check, address, name, ctx,
-                                label=f'{column} check')
+        cell = run_check(check, address, name, ctx, label=f'{column} check')
+        row[column] = cell
     return address, name, row
 
 
@@ -323,9 +353,12 @@ CHECKS = (
 # extract of the --base tree -- this copy's check code, the base tree's
 # sources; the exports triple and the exe are tree-independent and reused --
 # and a red whose notes match HEAD's once line references are masked is
-# downgraded to WARNING (mechanically: no special-casing of known reds).
-# Anything else -- a red that does not reproduce at base, a check that raises
-# there, a function the change added -- stays RED.
+# downgraded to WARNING (mechanically: no special-casing of known reds). A
+# function the change added has no span of its own at base; a CLASS column's
+# red is re-run through any function of its class there and matches as a
+# subset -- the base may report the extra holes the change filled. Anything
+# else -- a red that does not reproduce at base, a check that raises there,
+# a new function under a function-level column -- stays RED.
 
 def mask_line_refs(text):
     """Mask `L<digits>` line references -- and nothing else.
@@ -342,6 +375,34 @@ def same_after_mask(head_notes, base_notes):
     """Do two note lists agree once line references are masked?"""
     return ([mask_line_refs(n) for n in head_notes]
             == [mask_line_refs(n) for n in base_notes])
+
+
+def is_class_header(note):
+    """vtable_audit's `=== C : B  vtable 0x... (anchors n/m) ===` line."""
+    return note.startswith('=== ') and note.endswith(' ===')
+
+
+def findings_after_mask(notes):
+    """The finding lines of a note list, masked.
+
+    Everything except the vtable header: its anchor counts move with the
+    change (a new slot decl adds an anchor at HEAD), so comparing the
+    headers would fail the class re-run even when no finding is new.
+    """
+    return [mask_line_refs(n) for n in notes if not is_class_header(n)]
+
+
+def same_findings_after_mask(head_notes, base_notes):
+    """Is every HEAD finding already among the base's?
+
+    A class re-run cannot be the verbatim re-run same_after_mask demands:
+    the change under audit moved the class (a new anchor, and the slots the
+    import filled are findings at base but not at HEAD). What "the red
+    reproduces there" means for a class is that nothing HEAD reports is
+    new -- base may report more: the holes this change filled.
+    """
+    head = findings_after_mask(head_notes)
+    return bool(head) and set(head) <= set(findings_after_mask(base_notes))
 
 
 def base_tree(repo, base_ref):
@@ -380,20 +441,24 @@ def base_item(base_repo, rel, address, name):
     return None
 
 
-def downgrade_cell(check, address, name, cell, base_ctx, base_ref):
-    """The cell again, or WARNING when the identical RED reproduces at base.
+def downgrade_cell(check, address, name, cell, base_ctx, base_ref,
+                   match=same_after_mask):
+    """The cell again, or WARNING when the RED reproduces at base.
 
     Only a RED can downgrade: ERROR stays ERROR (a broken check is not
     evidence of anything), and asm never reaches this -- its RED keeps the
-    human `parity_waiver` path. The pre-existing line is prepended so the
-    detail block shows why the cell is only a warning.
+    human `parity_waiver` path. `match` decides what "reproduces" means:
+    same_after_mask for the function's own re-run, and for a class column
+    re-run through the class the subset same_findings_after_mask, because
+    the change itself moved the class. The pre-existing line is prepended
+    so the detail block shows why the cell is only a warning.
     """
     verdict, notes = cell
     if verdict != RED or base_ctx is None:
         return cell
     base_verdict, base_notes = run_check(check, address, name, base_ctx,
                                          label='base re-run')
-    if base_verdict != RED or not same_after_mask(notes, base_notes):
+    if base_verdict != RED or not match(notes, base_notes):
         return cell
     return WARNING, [f'pre-existing at base {base_ref}: red reproduces there',
                      *notes]
@@ -404,7 +469,8 @@ def downgrade_preexisting(rows, work, repo, base_ref, exports, exe, lints):
 
     Extracts the base tree once, only when a delegated RED exists, and
     re-runs just those cells against it. The base lint cache is fresh: the
-    same rel maps to different lines per tree.
+    same rel maps to different lines per tree. A red on a function the
+    change added re-runs through the class instead (class_items above).
     """
     targets = [i for i, (_, _, row) in enumerate(rows)
                for column, (verdict, _) in row.items()
@@ -418,6 +484,7 @@ def downgrade_preexisting(rows, work, repo, base_ref, exports, exe, lints):
         return
     try:
         base_cache = {}
+        base_classes = None
         for i in targets:
             rel, address, name = work[i][:3]
             item = base_item(base_repo, rel, address, name)
@@ -429,9 +496,21 @@ def downgrade_preexisting(rows, work, repo, base_ref, exports, exe, lints):
                 if item is not None:
                     base_ctx = make_ctx(item, base_repo, exports, exe, lints,
                                         base_cache)
+                match = same_after_mask
+                if base_ctx is None and column in CLASS_COLUMNS and \
+                        '::' in name:
+                    cls = name.split('::')[0]
+                    if base_classes is None:
+                        base_classes = class_items(all_functions(base_repo))
+                    proxy = base_classes.get(cls)
+                    if proxy is not None:
+                        base_ctx = make_ctx(proxy, base_repo, exports, exe,
+                                            lints, base_cache)
+                        match = same_findings_after_mask
                 rows[i][2][column] = downgrade_cell(check, address, name,
                                                     rows[i][2][column],
-                                                    base_ctx, base_ref)
+                                                    base_ctx, base_ref,
+                                                    match=match)
     finally:
         shutil.rmtree(base_repo, ignore_errors=True)
 

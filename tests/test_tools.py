@@ -9284,6 +9284,28 @@ class ParityPreexistTest(unittest.TestCase):
         self.assertFalse(parity_run.same_after_mask(
             ['re_lint: L1: x'], []))
 
+    def test_same_findings_after_mask(self):
+        # the class re-run: the header's anchor counts moved with the change
+        # and base reports the hole the import filled -- still a match, the
+        # i023 CGameDoor shape
+        head = ['=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+                '(anchors 10/11) ===',
+                '[WRONGADDR] slot 0x0030: DebugDump src 0x47e040 != bin 0x4876e0',
+                '[MISSING] slot 0x0050: binary overrides -> 0x47d7f0 '
+                '(CGameContainer::DoAIUpdate), no source decl',
+                '[MISSING] slot 0x0078: binary overrides -> 0x486860, no source decl']
+        base = ['=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+                '(anchors 9/10) ===',
+                '[MISSING] slot 0x002c: binary overrides -> 0x487530, no source decl',
+                *head[1:]]
+        self.assertTrue(parity_run.same_findings_after_mask(head, base))
+        # a finding HEAD reports that base lacks is new: no match
+        self.assertFalse(parity_run.same_findings_after_mask(
+            head, [base[0], base[1], base[3]]))
+        # a header alone is not findings
+        self.assertFalse(parity_run.same_findings_after_mask(
+            ['=== C : B  vtable 0x1 ==='], ['=== C : B  vtable 0x1 ===']))
+
     # (b) the downgrade decision, via a synthetic check
     def test_identical_red_downgrades_to_warning(self):
         calls = []
@@ -9358,6 +9380,8 @@ class ParityPreexistTest(unittest.TestCase):
         self.assertNotIn('asm', parity_run.DELEGATED_COLUMNS)
         self.assertEqual(parity_run.DELEGATED_COLUMNS,
                          {'vtable', 'layout', 'offsets', 'markers', 'lints'})
+        # the class-level columns the downgrade may re-run through the class
+        self.assertEqual(parity_run.CLASS_COLUMNS, {'vtable', 'layout'})
 
     # (c) the phantom-member filter
     HEADER = """\
@@ -9394,6 +9418,144 @@ public:
         # pair is gone, and the two real members are in order
         self.assertEqual(verdict, struct_layout_audit.SKIP)
         self.assertNotIn('goes backwards', ' '.join(notes))
+
+
+class ParityClassRedTest(unittest.TestCase):
+    """tools/parity/run.py's class-level pre-existing downgrade: a class
+    red (vtable/layout) on a function the change ADDED re-runs at base
+    through another function of the class. Git fixtures (the base extract
+    is a real archive); the class check is a synthetic check, the way
+    ParityPreexistTest's is."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = os.path.join(tmp.name, 'repo')
+        os.makedirs(self.repo)
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Test')
+        self.git('config', 'user.email', 'test@example.com')
+        self.git('config', 'commit.gpgsign', 'false')
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, check=True,
+                              capture_output=True, text=True).stdout
+
+    def write(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path) or self.repo, exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def commit(self, message='change'):
+        self.git('add', '-A')
+        self.git('commit', '-q', '--allow-empty', '-m', message)
+
+    def downgrade(self, base, rows, work, check):
+        old_checks = parity_run.CHECKS
+        parity_run.CHECKS = (('vtable', check),)
+        self.addCleanup(setattr, parity_run, 'CHECKS', old_checks)
+        parity_run.downgrade_preexisting(rows, work, self.repo, base,
+                                         ({}, {}, {}), None, [])
+
+    def test_class_red_downgrades_through_the_class_at_base(self):
+        # base: the class exists (GetFlags), the imported function does not
+        self.write('src/CGameDoor.cpp',
+                   '// 0x453140\n'
+                   'int CGameDoor::GetFlags(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        # the batch adds CompressTime; the class's vtable red comes with it
+        self.write('src/CGameDoor.cpp',
+                   '// 0x453140\n'
+                   'int CGameDoor::GetFlags(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n'
+                   '\n'
+                   '// 0x487530\n'
+                   'void CGameDoor::CompressTime(DWORD t)\n'
+                   '{\n'
+                   '    m_dwTime = t;\n'
+                   '}\n')
+        self.commit('import')
+        work = parity_run.collect(self.repo, base)
+        self.assertEqual([(rel, a, n) for rel, a, n, *_ in work],
+                         [('src/CGameDoor.cpp', 0x487530,
+                           'CGameDoor::CompressTime')])
+
+        head_notes = [
+            '=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+            '(anchors 10/11) ===',
+            '[WRONGADDR] slot 0x0030: DebugDump src 0x47e040 != bin 0x4876e0',
+            '[MISSING] slot 0x0050: binary overrides -> 0x47d7f0 '
+            '(CGameContainer::DoAIUpdate), no source decl',
+            '[MISSING] slot 0x0078: binary overrides -> 0x486860, no source decl']
+        base_notes = [  # anchors moved, plus the hole the import filled
+            '=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+            '(anchors 9/10) ===',
+            '[MISSING] slot 0x002c: binary overrides -> 0x487530, no source decl',
+            *head_notes[1:]]
+        calls = []
+
+        def check(address, name, ctx):
+            calls.append((address, name, ctx['repo'], ctx['first']))
+            return parity_run.RED, (base_notes if ctx['repo'] != self.repo
+                                    else head_notes)
+
+        rows = [(0x487530, 'CGameDoor::CompressTime',
+                 {'vtable': (parity_run.RED, head_notes)})]
+        self.downgrade(base, rows, work, check)
+
+        verdict, notes = rows[0][2]['vtable']
+        self.assertEqual(verdict, parity_run.WARNING)
+        self.assertEqual(notes[0],
+                         f'pre-existing at base {base}: red reproduces there')
+        self.assertEqual(notes[1:], head_notes)
+        # the re-run went through the class's function at base -- GetFlags,
+        # whose span starts at line 0 of the base tree, not at our span
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 0x487530)
+        self.assertNotEqual(calls[0][2], self.repo)
+        self.assertEqual(calls[0][3], 0)
+
+    def test_class_red_without_a_class_function_at_base_stays_red(self):
+        # the base has no CGameDoor:: function at all: no proxy to re-run
+        # through, so the class red is new with this change
+        self.write('src/CGameSprite.cpp',
+                   '// 0x5845D0\n'
+                   'int CGameSprite::Render(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        self.write('src/CGameDoor.cpp',
+                   '// 0x487530\n'
+                   'void CGameDoor::CompressTime(DWORD t)\n'
+                   '{\n'
+                   '    m_dwTime = t;\n'
+                   '}\n')
+        self.commit('import')
+        work = parity_run.collect(self.repo, base)
+        self.assertEqual([n for _, _, n, *_ in work], ['CGameDoor::CompressTime'])
+        head_notes = ['=== CGameDoor : CGameAIBase  vtable 0x8490b0 '
+                      'len 0xf8 (anchors 1/1) ===',
+                      '[MISSING] slot 0x0030: no source decl']
+        calls = []
+
+        def check(address, name, ctx):
+            calls.append(ctx['repo'])
+            return parity_run.RED, head_notes
+
+        rows = [(0x487530, 'CGameDoor::CompressTime',
+                 {'vtable': (parity_run.RED, head_notes)})]
+        self.downgrade(base, rows, work, check)
+        self.assertEqual(rows[0][2]['vtable'], (parity_run.RED, head_notes))
+        self.assertEqual(calls, [])   # nothing to re-run through
 
 
 class TriageTest(unittest.TestCase):
