@@ -1,0 +1,1 @@
+{"address": "0x69BA70", "name": "CScreenWorldMap::DrawMap", "file": "src/CScreenWorldMap.cpp", "batch": "i019", "needs": "ours differs from the exe (world_map): differs in world_map: event 2: original {\"ret\": 1, \"tag\": \"fn_69BA70_ret\"}, ours {\"ret\": 59, \"tag\": \"fn_69BA70_ret\"}; import his body in a later batch"}
