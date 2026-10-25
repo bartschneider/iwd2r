@@ -3446,7 +3446,7 @@
     "i020": {
       "assigned_at": "2026-10-25T01:46:12+00:00",
       "branch": "p3/wso-i020",
-      "closed_at": null,
+      "closed_at": "2026-10-25T06:18:01+00:00",
       "files": [
         "src/CGameArea.cpp",
         "src/CScreenSave.cpp",
@@ -3461,6 +3461,7 @@
         "src/CMessage.cpp",
         "src/CWorldMap.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -3642,7 +3643,7 @@
           "their_len": 131
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i021": {
