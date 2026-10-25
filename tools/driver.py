@@ -3988,8 +3988,14 @@ class Driver:
                             wave._frida_probe(text)))
                 why = None
             if why:
-                self.log('%s: frida %s kept as written (%s); not measured'
-                         % (batch_id, r['address'], why))
+                if why.startswith('oracle case '):
+                    # Task 39: the case is the row's measurement, so the
+                    # phase neither hooks it nor parks it
+                    self.log('%s: frida %s: oracle-backed; the case is its '
+                             'measurement' % (batch_id, r['address']))
+                else:
+                    self.log('%s: frida %s kept as written (%s); not measured'
+                             % (batch_id, r['address'], why))
                 if r.get('kept'):
                     self._record_kept(batch_id, [r['address']])
             else:
@@ -5604,7 +5610,8 @@ class Driver:
         try:
             rc, brief = self.render_brief(
                 self.template_path, self.state_path, batch_id,
-                bundle_dir=os.path.join(self.driver_dir, 'bundles', batch_id))
+                bundle_dir=os.path.join(self.driver_dir, 'bundles', batch_id),
+                repo=self.repo, base=self.base)
         except Exception as e:
             rc, brief = 1, 'render_brief raised %r' % (e,)
         if rc != 0:
@@ -5723,7 +5730,8 @@ class Driver:
         try:
             rc, brief = self.render_brief(
                 self.template_path, self.state_path, batch_id,
-                bundle_dir=os.path.join(self.driver_dir, 'bundles', batch_id))
+                bundle_dir=os.path.join(self.driver_dir, 'bundles', batch_id),
+                repo=self.repo, base=self.base)
         except Exception as e:
             rc, brief = 1, 'render_brief raised %r' % (e,)
         if rc != 0:
