@@ -554,3 +554,11 @@ void CUIControlButtonMoviesDone::OnLButtonClick(CPoint pt)
     // NOTE: Uninline.
     pMovies->OnDoneButtonClick();
 }
+
+// 0x71E750
+void CScreenMovies::OnLButtonDblClk(CPoint pt)
+{
+    // Empty in the binary: vtable slot 0x6C points at a folded no-op stub
+    // (shared with CBaldurEngine::SetChatEditBoxStatus), distinct from the
+    // base's 0x778900, so the override exists but does nothing.
+}
