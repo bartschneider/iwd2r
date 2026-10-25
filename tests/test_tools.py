@@ -18045,6 +18045,53 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(w.briefs), 2)
         self.assertEqual(self._status(d)['exceptions']['b011']['problems'][1:], first)
 
+    def test_the_breaker_does_not_count_exceptions_that_ran_no_worker(self):
+        """Run 17 (Task 33): a recheck runs no worker, so its exception has
+        no transcript by design.  Three recheck exceptions in a row do not
+        halt the run; three fresh batches whose workers left no transcript
+        still do."""
+        class Bad(_SeqWorker):
+            def run(w, brief, cwd):
+                w.briefs.append(brief)
+                bid = re.search(r'BRIEF (b\d+)', brief).group(1)
+                addr = 0x400000 + int(bid[1:]) * 0x1000
+                return driver.Result(0, '## Verdicts\n\nverdict 0x%X ours case '
+                                        'dump-zzz\n' % addr, real, 0.0, False)
+        w = Bad('')
+        d = self._pool_driver(self._two_pools()[:1], {'a': w},
+                              ids=('b011', 'b012', 'b013', 'b014', 'b015', 'b016'))
+        real = self._jsonl('ran.jsonl', [self._turn()])   # the worker really ran
+        phases = []
+        d._frida_phase = lambda *a, **kw: phases.append(1) or []
+        d.frida = True
+        self.pending = ['b011', 'b012', 'b013']   # b014-016 wait for the contrast
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)          # three checks exceptions
+        self.assertEqual(len(w.briefs), 6)        # each worker and its one fix round
+        st = self._status(d)
+        self.assertEqual([st['exceptions'][b]['stage'] for b in
+                          ('b011', 'b012', 'b013')], ['checks'] * 3)
+        self.assertIsNone(st['halted'])           # the workers really ran
+        for b in ('b011', 'b012', 'b013'):
+            self._clear(d, b)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)          # three rechecks, no worker
+        self.assertEqual(len(w.briefs), 6)        # no worker ran again
+        st = self._status(d)
+        self.assertIsNone(st['halted'])           # the breaker did not trip
+        self.assertEqual([st['exceptions'][b]['stage'] for b in
+                          ('b011', 'b012', 'b013')], ['checks'] * 3)
+        self.assertTrue(all(st['exceptions'][b]['problems'][0] ==
+                            'unchanged after recheck; fix by hand or clear '
+                            'with --rerun' for b in ('b011', 'b012', 'b013')))
+        # the contrast: three fresh batches whose workers leave no transcript
+        d.worker = self._NoReport([None] * 4)
+        self.pending = ['b014', 'b015', 'b016']
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['halted']['reason'],
+                         'breaker: 3 batches without a worker transcript')
+
     def test_a_cleared_review_exception_rechecks_and_reviews_again(self):
         blocking = '## Findings\n\n- BLOCKING: nope\n'
         r = _SeqWorker(blocking, blocking, self.CLEAN_REVIEW, credits=0.0)

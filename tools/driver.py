@@ -6458,13 +6458,17 @@ class Driver:
         # The breaker (rulings R45, R46): a batch exception whose worker
         # never really ran (no transcript, or one with no successful
         # non-synthetic turn) counts; any other batch resets.  Credits are
-        # no signal: a Claude pool's read 0.
+        # no signal: a Claude pool's read 0.  A batch that launched no
+        # worker this run (a recheck, a record or close retry) is excluded
+        # from the count either way (Task 33): its exception has no
+        # transcript by design, so it is no evidence and no counter-signal.
         tripped = False
         with self._lock:
-            if out == 'exception' and not any(self._worker_ran):
+            if out == 'exception' and self._worker_ran \
+                    and not any(self._worker_ran):
                 self._no_transcript += 1
                 tripped = self._no_transcript >= BREAKER_LIMIT
-            else:
+            elif self._worker_ran:
                 self._no_transcript = 0
         if tripped:
             self._halt_run('breaker: %d batches without a worker transcript'
