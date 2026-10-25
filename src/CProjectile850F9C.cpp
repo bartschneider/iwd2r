@@ -3,7 +3,9 @@
 #include "CBaldurChitin.h"
 #include "CGameArea.h"
 #include "CInfGame.h"
+#include "CInfinity.h"
 #include "CParticle.h"
+#include "CUtil.h"
 
 // 0x57CAC0
 CProjectile850F9C::CProjectile850F9C(const CString& sAnimation, const CString& sSound, BYTE nLoops, BYTE nDelay, const IcewindCVisualEffect& visualEffect)
@@ -87,11 +89,86 @@ void CProjectile850F9C::AIUpdate()
 // 0x57CFB0
 void CProjectile850F9C::Render(CGameArea* pArea, CVidMode* pVidMode, int a3)
 {
-    // TODO: Incomplete. The original draws m_glow at the caster through
-    // CInfinity's FX functions.
     (void)pArea;
-    (void)pVidMode;
-    (void)a3;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\IcewindCProjectiles.cpp
+    // __LINE__: 821
+    UTIL_ASSERT(pVidMode != NULL);
+
+    if (m_nDelay != 0) {
+        return;
+    }
+
+    if (!m_pArea->m_visibility.IsTileVisible(m_pArea->m_visibility.PointToTile(m_pos))) {
+        return;
+    }
+
+    CInfinity* pInfinity = &(m_pArea->m_cInfinity);
+    CRect rViewport(pInfinity->nCurrentX,
+        pInfinity->nCurrentY,
+        pInfinity->nCurrentX + pInfinity->rViewPort.Width(),
+        pInfinity->nCurrentY + pInfinity->rViewPort.Height());
+
+    CPoint ptReference;
+    m_glow.GetCurrentCenterPoint(ptReference, FALSE);
+    CSize frameSize;
+    m_glow.GetCurrentFrameSize(frameSize, FALSE);
+
+    CRect rFX;
+    rFX.SetRect(0, 0, frameSize.cx, frameSize.cy);
+
+    CPoint newPos;
+    newPos.x = m_pos.x;
+    newPos.y = m_pArea->GetHeightOffset(m_pos, m_listType) + m_pos.y - m_posZ;
+
+    // The back copy keeps whatever the frame overwrote; a clear fill blanks
+    // it first (picked by the effect's flags).
+    DWORD dwPrepFlags;
+    if (m_visualEffect.m_dwFlags != 0) {
+        dwPrepFlags = CInfinity::FXPREP_COPYFROMBACK;
+    } else {
+        dwPrepFlags = CInfinity::FXPREP_CLEARFILL;
+    }
+
+    CRect rGCBounds;
+    rGCBounds.left = newPos.x - ptReference.x;
+    rGCBounds.top = newPos.y - ptReference.y;
+    rGCBounds.right = rGCBounds.left + rFX.Width();
+    rGCBounds.bottom = rGCBounds.top + rFX.Height();
+
+    CRect rIntersection;
+    rIntersection.IntersectRect(rGCBounds, rViewport);
+    if (rIntersection.IsRectEmpty()) {
+        return;
+    }
+
+    pInfinity->FXPrep(rFX, dwPrepFlags, a3, newPos, ptReference);
+    if (!pInfinity->FXLock(rFX, dwPrepFlags)) {
+        return;
+    }
+
+    pInfinity->FXRender(&m_glow,
+        ptReference.x,
+        ptReference.y,
+        m_visualEffect.m_dwFlags,
+        m_visualEffect.m_nTransValue);
+
+    pInfinity->FXRenderClippingPolys(newPos.x,
+        newPos.y,
+        0,
+        ptReference,
+        rGCBounds,
+        FALSE,
+        dwPrepFlags);
+
+    pInfinity->FXUnlock(dwPrepFlags, NULL, CPoint(0, 0));
+    pInfinity->FXBltFrom(a3,
+        rFX,
+        newPos.x,
+        newPos.y,
+        ptReference.x,
+        ptReference.y,
+        m_visualEffect.m_dwFlags | 0x1);
 }
 
 // 0x57D230
