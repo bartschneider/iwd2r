@@ -803,6 +803,14 @@ def _history_rewrite(args, covered=(), tracked=None):
     return False
 
 
+def _is_amend(args):
+    """True for `git commit --amend`: a rewrite of a commit, not a loss of work."""
+    rest = list(args)
+    while rest and rest[0].startswith('-'):
+        rest = rest[2:] if rest[0] in ('-C', '-c') else rest[1:]
+    return bool(rest) and rest[0] == 'commit' and '--amend' in rest[1:]
+
+
 def transcript_findings(transcript_path, covered_files, tracked=None):
     """[(kind, problem, file)] for the forbidden tool calls in a worker's
     transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
@@ -811,7 +819,10 @@ def transcript_findings(transcript_path, covered_files, tracked=None):
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
     or head/tail -n over READ_LIMIT; file is the covered file),
     'history' (a git command that rewrites history or discards work, see
-    _history_rewrite; terminal like launch) or 'unreadable'.  cat and the launch words count only as a
+    _history_rewrite; terminal like launch; file is 'amend:<command>' for a
+    commit --amend, which the driver forgives when only the worker's own commits
+    moved; deliberately only that verb: rebase, branch -f, push and update-ref
+    can move or publish commits the worker does not own, so they stay fatal) or 'unreadable'.  cat and the launch words count only as a
     command word, and a cat piped into a bounded head/tail/sed is bounded."""
     covered = [c for c in covered_files if c]
     out = []
@@ -855,7 +866,8 @@ def transcript_findings(transcript_path, covered_files, tracked=None):
                     if cw == 'git' and _history_rewrite(args, covered, tracked):
                         out.append(('history', 'history rewrite in a worker '
                                     '(%s): workers only add and commit'
-                                    % _short(seg), None))
+                                    % _short(seg),
+                                    'amend:' + _short(seg) if _is_amend(args) else None))
                     launch = cw in ('windowssandbox', 'start-process', 'start') \
                         or (cw in _LAUNCH_SHELLS and _LAUNCH.search(text))
                     if launch and not _is_runner(seg):
@@ -1446,6 +1458,16 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     return problems
 
 
+def kept_edited_rows(batch, worktree, key):
+    """{address key: address} of the rows the phase recorded `kept` (measured
+    on our body) whose body on the branch is no longer the measured one: they
+    get one message, from the section check (Task 30), nothing else."""
+    ce = _tool('check_evidence')
+    return {key(r['address']): r['address'] for r in batch.get('rows', [])
+            if r.get('outcome') == 'kept' and r.get('measured_body')
+            and ce.body_digest(worktree, r['address'], r.get('file')) != r['measured_body']}
+
+
 def _measured_body_problems(batch, worktree, parked, key, moved=None):
     """A row the Frida phase wrote trace evidence for (`measured_body` in the
     batch state: the digest of its body then) whose body on the branch is now
@@ -1456,9 +1478,10 @@ def _measured_body_problems(batch, worktree, parked, key, moved=None):
     the batch's."""
     ce = _tool('check_evidence')
     out = []
+    edited_kept = kept_edited_rows(batch, worktree, key)
     for r in batch.get('rows', []):
         want = r.get('measured_body')
-        if want and key(r['address']) not in parked and \
+        if want and key(r['address']) not in parked and key(r['address']) not in edited_kept and \
                 ce.body_digest(worktree, r['address'], r.get('file')) != want:
             out.append('%s: body changed after the Frida phase; park it or edit it back to the '
                        'measured body' % r['address'])
@@ -1522,7 +1545,7 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
             problems.append('%s: both kept and parked (%s); keep one (delete the parked '
                             'file, or take the row off ## Kept)' % (a, wave.parked_rel(k)))
         else:
-            if k in moved:
+            if k in moved and k not in kept_edited_rows(batch, worktree, key):
                 problems.append('%s: listed under ## Kept but its body changed against %s; keep '
                                 'the change and move the row to ## Imported (take it off '
                                 '## Kept), or edit it back and park it (`needs`: `%s`): %s'
@@ -1813,7 +1836,7 @@ WIP_MESSAGE = 'WIP: parked by driver'
 # The breaker (ruling R45): this many batch exceptions in a row whose
 # worker never produced a transcript halt the run.
 BREAKER_LIMIT = 3
-STATE_COMMIT_TRAILER = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
+STATE_COMMIT_TRAILER = 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'
 PUSH_ARGS = ('push', 'iwd2r', 'first:main', 'first:first')
 # Exceptions at these stages are not the batch's own: the run stops.
 GLOBAL_STAGES = ('cut', 'push')
@@ -1823,7 +1846,7 @@ FIX_PROMPT = """# Fix round for batch {id}
 
 The driver's {stage} found the problems below in your work on `{branch}`
 (this worktree). Fix every one, commit, and write your report again.
-{report_rule}
+{frozen_rule}{report_rule}
 {selfcheck_rule}
 
 {problems}
@@ -1841,6 +1864,25 @@ SELFCHECK_RULE = ("Before you return: write the report to `.report.md` in the wo
                   "and run it again until it prints `selfcheck: OK`, then return the same text "
                   "as your report.")
 
+# The top of a fix round when the Frida phase measured rows (Task 30): their
+# bodies are evidence, and three fix rounds lost an hour each undoing them.
+FROZEN_RULE = (
+    "**Frozen bodies.** The driver's Frida phase has measured these functions; their "
+    "bodies are evidence now. Do not edit them for any reason \u2014 not for a lint, not "
+    "for parity, not to \"put them back\". A parity RED on one of them is waived with a "
+    "`parity_waiver:` line in its evidence file; a lint WARNING needs no change at all. "
+    "A row listed here stays in the report section the driver put it in (`## Kept` for "
+    "a base-body row measured on our body, `## Imported` for an import, `candidate "
+    "<0xADDR> fork` for a probe row the phase decided).\n{rows}\n\n")
+
+
+def frozen_rule(frozen):
+    """The frozen-bodies block for [(address, name)], '' when there are none."""
+    if not frozen:
+        return ''
+    return FROZEN_RULE.format(rows='\n'.join('- %s %s' % (a, n) for a, n in frozen))
+
+
 FIX_REPORT_RULES = {
     'verdicts': ("Write the full `## Verdicts` section, one line for every row you "
                  "decide, not only the rows you fixed. `## Verdicts` holds verdict lines "
@@ -1849,12 +1891,19 @@ FIX_REPORT_RULES = {
                  "verdict line: keep our body and list it under `## Undecided` as "
                  "`undecided <0xADDR> <fork|neither> <one-line reason>`. Never write "
                  "`ours` for such a row."),
-    'probes': ("This is a probe batch: do not write a `## Verdicts` or `## Undecided` section. "
+    'probes': ("A row the phase decided `fork` keeps its `candidate <0xADDR> fork <reason>` "
+               "line; `neither` is only for a row you did not build, or edited back to the "
+               "merge base because the phase could not measure it. "
+               "This is a probe batch: do not write a `## Verdicts` or `## Undecided` section. "
                "Write the full `## Candidates` section again, one line for every row: "
                "`candidate <0xADDR> fork <one-line reason>` for a row whose fork body you "
                "adopted (and that still stands), `candidate <0xADDR> neither <one-line reason>` "
                "for a row you did not build or whose body you edited back."),
-    'import': ("This is an import batch: do not write a `## Verdicts` section at all, "
+    'import': ("A base-body row the phase measured equal on OUR body stays under `## Kept` "
+               "as `kept <0xADDR> <one-line reason>`; `## Imported` lists only the rows whose "
+               "body you changed, one `imported <0xADDR> <evidence kind>` line each; a row is "
+               "never in both. "
+               "This is an import batch: do not write a `## Verdicts` section at all, "
                "not even an empty one or a placeholder line. Report as the brief says: "
                "`## Imported` with one `imported <0xADDR> <evidence kind>` line per "
                "function, then the commits you made, the evidence files you wrote and "
@@ -1866,12 +1915,13 @@ FIX_REPORT_RULES = {
 }
 
 
-def fix_prompt(batch_id, stage, branch, brief, problems, kind='verdicts'):
+def fix_prompt(batch_id, stage, branch, brief, problems, kind='verdicts', frozen=()):
     """The fix-round prompt: the problems, the report rule for the batch's
     kind (a verdicts batch rewrites ## Verdicts; an import batch has none),
-    then the original brief."""
+    then the original brief.  `frozen` is [(address, name)] of the rows the
+    Frida phase measured: their block opens the round."""
     return FIX_PROMPT.format(
-        id=batch_id, stage=stage, branch=branch, brief=brief,
+        id=batch_id, frozen_rule=frozen_rule(frozen), stage=stage, branch=branch, brief=brief,
         report_rule=FIX_REPORT_RULES[kind if kind in ('import', 'probes') else 'verdicts'],
         selfcheck_rule=SELFCHECK_RULE.format(id=batch_id),
         problems='\n'.join('- ' + p for p in problems))
@@ -2716,6 +2766,7 @@ class Driver:
         <driver folder>/<batch_id>/<label>.*"""
         if self._stopping:     # stopped before this launch: start nothing
             raise _Stop()
+        anchors = self._anchors(cwd)
         try:
             res = worker.run(brief, cwd)
         except OSError as e:
@@ -2751,10 +2802,32 @@ class Driver:
         # Last, after the bookkeeping above: a transcript violation is an
         # exception, but the run it found still counts as a worker run
         # for the breaker and its evidence is saved (ruling R68).
-        self._scan_transcript(batch_id, label, res)
+        self._scan_transcript(batch_id, label, res, anchors, cwd)
         return res
 
-    def _scan_transcript(self, batch_id, label, res):
+    def _anchors(self, cwd):
+        """The commit a worker must not lose: the branch tip before it starts
+        (start_tip; it holds the driver's own `frida: trace evidence` commits
+        too, being their descendant).  [] when cwd is no repository."""
+        try:
+            r = subprocess.run(['git', '-C', cwd, 'rev-parse', '--verify', 'HEAD'],
+                               capture_output=True, text=True)
+        except OSError:
+            return []
+        return [r.stdout.strip()] if r.returncode == 0 and r.stdout.strip() else []
+
+    def _only_own_commits(self, cwd, anchors):
+        """True when every anchor is still an ancestor of the branch tip."""
+        if not anchors:
+            return False
+        try:
+            return all(subprocess.run(
+                ['git', '-C', cwd, 'merge-base', '--is-ancestor', a, 'HEAD'],
+                capture_output=True).returncode == 0 for a in anchors)
+        except OSError:
+            return False
+
+    def _scan_transcript(self, batch_id, label, res, anchors=(), cwd=None):
         """Every run's transcript, worker, fix rounds and reviewer: a wso/
         ref, a launch outside the house runners or a history rewrite is a
         past call nobody can undo, so a `transcript` exception with no fix round; a whole-file
@@ -2775,6 +2848,11 @@ class Driver:
                     lines.append(line)
             elif kind == 'unreadable':
                 lines.append('transcript: unreadable (%s)' % label)
+            elif kind == 'history' and (f or '').startswith('amend:') and cwd and \
+                    self._only_own_commits(cwd, list(anchors)):
+                # an amend of the worker's own commit: nothing the driver or
+                # an earlier run committed moved
+                lines.append('transcript: rewrote only its own commits (%s)' % f[6:])
             else:
                 fatal.append('%s (%s)' % (text, label))
         if fatal:
@@ -2922,8 +3000,15 @@ class Driver:
             merge_problems = self._merge_before_checks(batch_id, worktree)
             if merge_problems:
                 return {}, merge_problems
+        sections = []
         if self.kind == 'import':
-            self._clear_kept_outcomes(batch_id, self._kept)
+            # before any outcome is touched: a section mistake must not cost
+            # the kept outcome the phase recorded (the fix round puts it right);
+            # its problems join the other checks (a batch gets one fix round)
+            sections = [] if self.dry_run else self._section_problems(
+                batch_id, worktree, report)
+            if not sections:
+                self._clear_kept_outcomes(batch_id, self._kept)
         if self.kind == 'verdicts' and not self.dry_run:
             self._withdraw_changed(batch_id, worktree)
         batch = self.load_state(self.state_path)['batches'][batch_id]
@@ -2965,7 +3050,7 @@ class Driver:
             kw['frida_lines'] = self._frida_lines(batch_id)
             if self.kind == 'import':
                 kw['kept'] = sorted(self._kept)
-            return verdicts, spelling + self.mechanical_checks(
+            return verdicts, sections + spelling + self.mechanical_checks(
                 dict(batch, id=batch_id), worktree, verdicts, **kw)
         except OSError as e:
             raise _launch_failed('the mechanical checks', worktree, e) from None
@@ -3605,6 +3690,42 @@ class Driver:
                         dirty = True
             if dirty:
                 _tool('wave').save_state(self.state_path, state)
+
+    def _section_problems(self, batch_id, worktree, report):
+        """The report-section mistakes of an import batch's base-body rows
+        (category theirs_changed_ours_base): a row under ## Imported whose body
+        is unchanged against the merge base, a row under ## Kept whose body
+        changed.  Parked rows are exempt."""
+        wave = _tool('wave')
+        key = wave._addr_key
+        try:
+            touched = {key('0x%X' % a) for _p, a, _n in
+                       _tool('check_evidence').touched(worktree, self.base)}
+        except Exception as e:
+            self.log('%s: sections: cannot tell which functions the batch touched (%s)'
+                     % (batch_id, _one_line(repr(e), 200)))
+            return []
+        parked, _bad = wave._parked_rows(worktree)
+        batch = self.load_state(self.state_path)['batches'][batch_id]
+        base_rows = {key(r['address']) for r in batch.get('rows', [])
+                     if r.get('category') == 'theirs_changed_ours_base'} - set(parked)
+        imported = {key(a) for a in parse_imported(report)} & base_rows
+        # a row the phase recorded as kept and the worker then edited gets the one
+        # line below (edit it back to the measured body); any other kept row whose
+        # body changed gets the brief's two options
+        edited = {k: a for k, a in kept_edited_rows(batch, worktree, key).items()
+                  if k in base_rows}
+        kept = {key(a) for a in self._kept} & base_rows - set(edited)
+        out = ['0x%s listed under ## Imported but its body is unchanged against the merge '
+               'base; list it under ## Kept (it was measured on our body) or import it'
+               % k.upper() for k in sorted(imported - touched)]
+        out += ['0x%s listed under ## Kept but its body changed against the merge base; put '
+                'the body back to the merge base\'s or list it under ## Imported' % k.upper()
+                for k in sorted(kept & touched)]
+        out += ['%s: a kept row the Frida phase measured on our body; its body changed; edit it '
+                'back to the measured body (it is in the frozen block); do not park it and do '
+                'not move it to ## Imported' % a for _k, a in sorted(edited.items())]
+        return out
 
     def _clear_kept_outcomes(self, batch_id, kept):
         """A row missing from the current ## Kept loses a recorded 'kept'
@@ -4678,8 +4799,29 @@ class Driver:
                         for r in batch.get('rows', []) if r.get('outcome') == 'fork-equal'})
         return out
 
+    def _frozen_rows(self, batch_id):
+        """[(address, name)] of the rows the Frida phase measured, whose bodies
+        a fix round must leave alone: an import batch's rows with a
+        measured_body, a probes batch's rows the phase wrote evidence for
+        (the status's frida_written), a verdicts batch's rows the
+        phase measured equal (_frida_got)."""
+        key = _tool('wave')._addr_key
+        batch = self.load_state(self.state_path)['batches'].get(batch_id) or {}
+        rows = batch.get('rows', [])
+        if self.kind == 'import':
+            want = {key(r['address']) for r in rows if r.get('measured_body')}
+        elif self.kind == 'probes':
+            want = set(self._frida_lines(batch_id))
+        else:
+            # measured: 'frida' reaches the state only at record time, after the
+            # fix rounds; the phase's own result says which rows it measured equal
+            want = {k for k, (st, _d) in self._frida_got.items() if st == 'equal'}
+        named = {key(r['address']): (r['address'], r.get('name', '')) for r in rows}
+        return [named.get(k, ('0x' + k.upper(), '')) for k in sorted(want)]
+
     def _fix(self, batch_id, batch, worker, worktree, stage, problems, brief, label):
-        prompt = fix_prompt(batch_id, stage, batch['branch'], brief, problems, self.kind)
+        prompt = fix_prompt(batch_id, stage, batch['branch'], brief, problems, self.kind,
+                            frozen=self._frozen_rows(batch_id))
         self._stage(batch_id, label)
         return self._run(worker, prompt, worktree, batch_id, label)
 
@@ -5040,26 +5182,43 @@ class Driver:
         list goes with either queue's state, and the import queue
         commits its state file (no scorecard).  Skipped in a dry run, with nothing to
         commit, or when a file lies outside that worktree.  Under the
-        lock.  Whatever goes wrong is logged, those paths are unstaged,
-        one aoe line is sent, and the push still happens."""
+        lock.  Whatever goes wrong is logged, those paths are unstaged and
+        the error text is returned; the push still happens (the close has
+        landed) and the caller raises the `state` exception (Task 30)."""
         if self.dry_run:
-            return
+            return None
         rels = []
         try:
             err = self._commit_state_files(batch_id, rels)
         except Exception as e:
             err = 'raised %r' % (e,)
         if err is None:
-            return
+            return None
         self.log('%s: the state commit failed: %s' % (batch_id, err))
         try:
             wt = self.worktree_for(self.repo, self.base)
             if wt and rels:
                 subprocess.run(['git', '-C', wt, 'reset', '-q', '--', *rels],
                                capture_output=True, text=True)
-            self.send(self._exception_line(batch_id, 'state-commit'))
         except Exception as e:
             self.log('%s: state commit cleanup failed: %r' % (batch_id, e))
+        return err
+
+    STATE_LANDED = ('the batch landed on first without its state; fix the cause, then clear '
+                    'this exception so the retry commits and pushes the state')
+
+    @staticmethod
+    def _push_problems(err, state_err):
+        """The push exception's problems; a failed state commit is named too, so
+        clearing it without fixing that cause is a visible choice."""
+        out = ['git push failed: %s' % err]
+        if state_err:
+            out.append('the state commit also failed: %s' % state_err)
+        return out
+
+    def _state_failed(self, batch_id, err):
+        """The `state` exception of a close whose state commit failed."""
+        return self._exception(batch_id, 'state', [err, self.STATE_LANDED])
 
     def _commit_state_files(self, batch_id, rels):
         """None, or why not; `rels` is filled with the paths staged."""
@@ -5242,8 +5401,9 @@ class Driver:
             return self._exception(batch_id, 'state', [
                 'no batch %s in %s' % (batch_id, self.state_path)])
         if batch['status'] != 'assigned':
-            if stage == 'push' and batch['status'] == 'closed':
-                # A cleared push exception: the push again, nothing else.
+            if stage in ('push', 'state') and batch['status'] == 'closed':
+                # A cleared push or state exception: the state commit and the
+                # push again, nothing else.
                 return ('exception' if self._settle_closed(batch_id)
                         else 'closed')
             self.log('%s is %s; nothing to do' % (batch_id, batch['status']))
@@ -5587,7 +5747,7 @@ class Driver:
                         self.log(text.rstrip())
                     except Exception as e:   # the batch is closed; the scorecard can wait
                         self.log('scorecard not written: %r' % (e,))
-                self._commit_state(batch_id)
+                state_err = self._commit_state(batch_id)
                 err = self.push()
         batch = self.load_state(self.state_path)['batches'][batch_id]
         if self.kind == 'probes':
@@ -5614,7 +5774,9 @@ class Driver:
         self._append_ledger(entry)
         self._finish(batch_id, 'closed')
         if err:
-            return self._exception(batch_id, 'push', ['git push failed: %s' % err])
+            return self._exception(batch_id, 'push', self._push_problems(err, state_err))
+        if state_err:
+            return self._state_failed(batch_id, state_err)
         return 'closed'
 
     # -- the loop: cuts and retries -------------------------------------------
@@ -5853,7 +6015,7 @@ class Driver:
                 continue
             st = state['batches'].get(bid, {}).get('status')
             stage = info.get('stage')
-            if st == 'assigned' or (st == 'closed' and stage == 'push'):
+            if st == 'assigned' or (st == 'closed' and stage in ('push', 'state')):
                 out.append(bid)
                 note = (status.get('cleared') or {}).get(bid)
                 note = note if isinstance(note, dict) else {}
@@ -5914,7 +6076,8 @@ class Driver:
     def _settle_closed(self, batch_id):
         """A batch the last run closed and then stopped on: its ledger
         entry when it is missing, the push, then the status.  1 when the
-        push fails (the push exception), else None."""
+        push fails (the push exception) or the state commit does (the state
+        exception), else None."""
         self._runs = []
         self._ignored = {}
         batch = self.load_state(self.state_path)['batches'][batch_id]
@@ -5936,11 +6099,14 @@ class Driver:
             self.log('%s: closed by the last run without its ledger entry; '
                      'entry written' % batch_id)
         with self._landing_lock(batch_id), self._lock:
-            self._commit_state(batch_id)
+            state_err = self._commit_state(batch_id)
             err = self.push()
         self._finish(batch_id, 'closed')
         if err:
-            self._exception(batch_id, 'push', ['git push failed: %s' % err])
+            self._exception(batch_id, 'push', self._push_problems(err, state_err))
+            return 1
+        if state_err:
+            self._state_failed(batch_id, state_err)
             return 1
         return None
 
