@@ -1458,6 +1458,16 @@ def mechanical_checks(batch, worktree, verdicts, run=subprocess.run,
     return problems
 
 
+def kept_edited_rows(batch, worktree, key):
+    """{address key: address} of the rows the phase recorded `kept` (measured
+    on our body) whose body on the branch is no longer the measured one: they
+    get one message, from the section check (Task 30), nothing else."""
+    ce = _tool('check_evidence')
+    return {key(r['address']): r['address'] for r in batch.get('rows', [])
+            if r.get('outcome') == 'kept' and r.get('measured_body')
+            and ce.body_digest(worktree, r['address'], r.get('file')) != r['measured_body']}
+
+
 def _measured_body_problems(batch, worktree, parked, key, moved=None):
     """A row the Frida phase wrote trace evidence for (`measured_body` in the
     batch state: the digest of its body then) whose body on the branch is now
@@ -1468,9 +1478,10 @@ def _measured_body_problems(batch, worktree, parked, key, moved=None):
     the batch's."""
     ce = _tool('check_evidence')
     out = []
+    edited_kept = kept_edited_rows(batch, worktree, key)
     for r in batch.get('rows', []):
         want = r.get('measured_body')
-        if want and key(r['address']) not in parked and \
+        if want and key(r['address']) not in parked and key(r['address']) not in edited_kept and \
                 ce.body_digest(worktree, r['address'], r.get('file')) != want:
             out.append('%s: body changed after the Frida phase; park it or edit it back to the '
                        'measured body' % r['address'])
@@ -1534,7 +1545,7 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
             problems.append('%s: both kept and parked (%s); keep one (delete the parked '
                             'file, or take the row off ## Kept)' % (a, wave.parked_rel(k)))
         else:
-            if k in moved:
+            if k in moved and k not in kept_edited_rows(batch, worktree, key):
                 problems.append('%s: listed under ## Kept but its body changed against %s; keep '
                                 'the change and move the row to ## Imported (take it off '
                                 '## Kept), or edit it back and park it (`needs`: `%s`): %s'
@@ -3699,17 +3710,21 @@ class Driver:
         base_rows = {key(r['address']) for r in batch.get('rows', [])
                      if r.get('category') == 'theirs_changed_ours_base'} - set(parked)
         imported = {key(a) for a in parse_imported(report)} & base_rows
-        # only a row the phase recorded as kept: any other kept-but-changed row
-        # is left to the fuller check (it also offers to park the row)
-        recorded = {key(r['address']) for r in batch.get('rows', [])
-                    if r.get('outcome') == 'kept'}
-        kept = {key(a) for a in self._kept} & base_rows & recorded
+        # a row the phase recorded as kept and the worker then edited gets the one
+        # line below (edit it back to the measured body); any other kept row whose
+        # body changed gets the brief's two options
+        edited = {k: a for k, a in kept_edited_rows(batch, worktree, key).items()
+                  if k in base_rows}
+        kept = {key(a) for a in self._kept} & base_rows - set(edited)
         out = ['0x%s listed under ## Imported but its body is unchanged against the merge '
                'base; list it under ## Kept (it was measured on our body) or import it'
                % k.upper() for k in sorted(imported - touched)]
         out += ['0x%s listed under ## Kept but its body changed against the merge base; put '
                 'the body back to the merge base\'s or list it under ## Imported' % k.upper()
                 for k in sorted(kept & touched)]
+        out += ['%s: a kept row the Frida phase measured on our body; its body changed; edit it '
+                'back to the measured body (it is in the frozen block); do not park it and do '
+                'not move it to ## Imported' % a for _k, a in sorted(edited.items())]
         return out
 
     def _clear_kept_outcomes(self, batch_id, kept):

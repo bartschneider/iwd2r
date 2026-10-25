@@ -10801,6 +10801,24 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._section_problems_of(
             d, '## Imported\nimported 0x401000 trace\n'), [])
 
+    def test_a_recorded_kept_row_edited_afterwards_gets_one_edit_back_line(self):
+        d, batch = self._body_phase(kept=True)
+        with open(self.state_path) as f:
+            state = json.load(f)
+        row = state['batches']['b011']['rows'][0]
+        row['outcome'] = 'kept'                  # measured on our body ...
+        row['measured_body'] = 'not-the-digest-of-the-edited-body'   # ... then edited
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x401000 ours matches\n')
+        mine = [p for p in probs if p.startswith('0x401000') and
+                ('changed' in p or 'Frida phase' in p)]
+        self.assertEqual(mine, ['0x401000: a kept row the Frida phase measured on our body; its '
+                                'body changed; edit it back to the measured body (it is in the '
+                                'frozen block); do not park it and do not move it to ## Imported'],
+                         probs)
+        self.assertEqual(self._outcomes(), {'0x401000': 'kept'})
+
     def test_section_problems_come_with_the_other_check_problems(self):
         # a batch gets one fix round: the section problem must not hide the rest
         d, batch = self._kept_phase_driver(kept=())
