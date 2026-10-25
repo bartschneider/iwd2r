@@ -1,0 +1,7 @@
+{
+  "address": "0x621470",
+  "name": "CUIControlTextDisplayConnectionTCPIPSessions dtor",
+  "file": "src/CScreenConnection.cpp",
+  "batch": "i023",
+  "needs": "fork body contradicts the exe: 0x621470 decompiles as a complex control dtor (list teardown with CString destructs, CObList::RemoveAll, CRes::CancelRequest on this+0x42*4 and +0x182*4, DeleteCriticalSection, two CVidFont dtors), not the empty dtor the fork's body carries; kept our body"
+}
