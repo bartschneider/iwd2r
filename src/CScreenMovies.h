@@ -19,7 +19,6 @@ public:
     /* 0060 */ BOOL CheckMouseMove() override;
     /* 0064 */ void OnMouseMove(CPoint pt) override;
     /* 0068 */ BOOL CheckMouseLButton() override;
-    /* 006C */ void OnLButtonDblClk(CPoint pt) override;
     /* 0070 */ void OnLButtonDown(CPoint pt) override;
     /* 0074 */ void OnLButtonUp(CPoint pt) override;
     /* 0088 */ BOOL CheckMouseRButton() override;
