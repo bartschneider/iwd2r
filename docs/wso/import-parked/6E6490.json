@@ -1,0 +1,1 @@
+{"address": "0x6E6490", "name": "CGameAnimationTypeMonsterIcewind::ClearColorEffectsAll", "file": "src/CGameAnimationTypeMonsterIcewind.cpp", "batch": "i019", "needs": "frida frequency only, no exact compare: identical in first_fight"}
