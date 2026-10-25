@@ -16792,6 +16792,9 @@ class DriverTest(unittest.TestCase):
             'git commit -a --amend --no-edit', 'git filter-repo --path src',
             'git push', 'git push origin HEAD', 'git branch -D old',
             'git branch -d old', 'git branch --delete old', 'git update-ref -d refs/x',
+            'git update-index --skip-worktree docs/wso/import-state.json',
+            'git update-index --assume-unchanged src/A.cpp',
+            'git -C /w update-index --no-assume-unchanged docs/MAP.md',
             'git reflog expire --expire=now --all', 'git gc --prune=now',
             'git -C /w reset --hard', 'git -c core.x=1 revert abc1234',
             'git checkout src/A.cpp', 'git checkout ./src/A.cpp',
@@ -17104,6 +17107,35 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
         parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
         self.assertEqual(len(parents), 3)
+
+    def test_check_clears_a_hidden_index_flag_on_a_driver_owned_file(self):
+        """i021/i022/i023 (Task 33): a skip-worktree or assume-unchanged flag
+        hides the dirty file from `git status`, so the flag is cleared and the
+        file restored like any dirty driver-owned file, and the merge runs."""
+        for flag in ('--skip-worktree', '--assume-unchanged'):
+            d, wt = self._t26_driver(
+                base_files={'docs/wso/wave-state.json': '{}\n'})
+            with mock.patch.dict(os.environ, self.GIT_ENV):
+                self._first_moves()
+                _write(os.path.join(wt, 'docs', 'wso', 'wave-state.json'), 'dirty\n')
+                self.git('update-index', flag, '--',
+                         'docs/wso/wave-state.json', cwd=wt)
+                self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+                verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+            self.assertEqual(problems, ['docs/wso/wave-state.json was modified by the '
+                                        'worker; restored (driver-owned)'], flag)
+            self.assertIn('b011: docs/wso/wave-state.json was modified by the worker; '
+                          'restored (driver-owned)', self.logs)
+            self.assertEqual(self.seen, [])
+            self.assertEqual(_slurp(os.path.join(wt, 'docs', 'wso',
+                                                 'wave-state.json')), '{}\n')
+            self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+            self.assertEqual(self.git('ls-files', '-v', '--',
+                                      'docs/wso/wave-state.json',
+                                      cwd=wt).stdout, 'H docs/wso/wave-state.json\n')
+            parents = self.git('rev-list', '--parents', '-n1', 'HEAD',
+                               cwd=wt).stdout.split()
+            self.assertEqual(len(parents), 3)
 
     def test_check_unlinks_an_untracked_copy_of_a_driver_owned_file(self):
         d, wt = self._t26_driver()     # docs/wso/import-state.json is in no commit

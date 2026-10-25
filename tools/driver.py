@@ -646,7 +646,7 @@ def _tool_calls(path):
 
 
 _HISTORY_VERBS = ('reset', 'rebase', 'revert', 'restore', 'clean', 'stash',
-                  'filter-repo', 'push', 'update-ref')
+                  'filter-repo', 'push', 'update-ref', 'update-index')
 
 
 # No real branch is named for these (the batch's own path prefixes).
@@ -757,8 +757,9 @@ def _history_rewrite(args, covered=(), tracked=None):
     """True when the arguments of a `git` command (after the command word)
     rewrite or discard history or work: reset, rebase, revert, restore,
     clean, stash (except the read-only `stash list` / `stash show`),
-    filter-repo, push, update-ref, commit --amend, branch
-    -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
+    filter-repo, push, update-ref, update-index (it can hide local
+    changes behind a skip-worktree/assume-unchanged flag), commit --amend,
+    branch -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
     branch switch (`--`, -f, -B, `.`, a path after a start point, or one
     argument that names a covered file, looks like a path or starts with a
     batch directory), branch -f/-M/-C and switch -C/--force-create.
@@ -5084,9 +5085,11 @@ class Driver:
         tree the close will gate (Task 26); a merge conflict is the
         coordinator's, never the worker's (the worker may not merge).  A
         dirty driver-owned file is restored and reported (a selfcheck that
-        could not find the live state used to copy it in), and a
-        driver-owned file in the worker's own diff was committed by the
-        worker; neither stops the merge (Task 33)."""
+        could not find the live state used to copy it in), a driver-owned
+        file hidden behind a skip-worktree/assume-unchanged flag is un-hidden
+        first and restored with the rest, and a driver-owned file in the
+        worker's own diff was committed by the worker; none of them stops
+        the merge (Task 33)."""
         problems = []
         try:
             branch = self.load_state(self.state_path)['batches'][batch_id]['branch']
@@ -5098,10 +5101,35 @@ class Driver:
             problems += ["%s is the driver's; revert your commit's change to it "
                          '(git revert or a new commit putting the merge-base copy '
                          'back)' % p for p in r.stdout.split() if p in DRIVER_OWNED]
+        # A driver-owned file hidden behind an index flag (S = skip-worktree,
+        # h = assume-unchanged; the i021/i022/i023 workers set one after
+        # copying the live state in) keeps `status` clean while its content
+        # differs from HEAD, and the merge below would refuse on it.  Clear
+        # the flag, then treat the file as dirty like any other driver-owned
+        # modification (Task 33).
+        hidden = []
+        r = self._git_in(worktree, 'ls-files', '-v', '--', *DRIVER_OWNED)
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                flag, _, path = line.partition(' ')
+                if flag in ('S', 'h') and path in DRIVER_OWNED:
+                    hidden.append((path, flag))
+        if hidden:
+            with self._writing():
+                for p, flag in hidden:
+                    # One negation per call: a single `--no-skip-worktree
+                    # --no-assume-unchanged` invocation leaves skip-worktree
+                    # set (git 2.43.0), so the merge below would still refuse.
+                    self._git_in(worktree, 'update-index',
+                                 '--no-skip-worktree' if flag == 'S'
+                                 else '--no-assume-unchanged', '--', p)
         st = self._git_in(worktree, 'status', '--porcelain', '-uall')
         dirty = [(l[:2] == '??', l[3:].split(' -> ')[-1].strip('"'))
                  for l in st.stdout.splitlines() if l.strip()]
         dirty = [(u, p) for u, p in dirty if p != REPORT_DRAFT]
+        # A hidden file whose content matches HEAD shows in no status line;
+        # the flag alone still counts as the worker's doing.
+        dirty += [(False, p) for p, _ in hidden if p not in {q for _, q in dirty}]
         if st.returncode != 0 or any(p not in DRIVER_OWNED for _, p in dirty):
             return problems           # the uncommitted-paths problem covers it
         if dirty:
