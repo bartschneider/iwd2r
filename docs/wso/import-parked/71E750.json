@@ -1,0 +1,1 @@
+{"address": "0x71E750", "name": "CScreenMovies::OnLButtonDblClk", "file": "src/CScreenMovies.cpp", "batch": "i024", "needs": "not measured (Frida refuses the hook; coverage)"}

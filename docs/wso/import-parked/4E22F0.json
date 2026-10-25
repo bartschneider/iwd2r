@@ -1,0 +1,1 @@
+{"address": "0x4E22F0", "name": "CUIControlTextDisplay::AdjustScrollBar", "file": "src/CUIControlTextDisplay.cpp", "batch": "i018", "needs": "first_fight, equip_shots, world_map: not measured (frequency difference only: identical in first_fight); ours reading matches the decompile"}

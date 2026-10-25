@@ -1,0 +1,1 @@
+{"address": "0x7881B0", "name": "CDimm::RequestsPendingCount", "file": "src/CDimm.cpp", "batch": "i018", "needs": "first_fight, equip_shots, world_map: not measured (no Frida hook: ambiguous: 2 overloads of CDimm::RequestsPendingCount in our map); ours reading matches the decompile"}
