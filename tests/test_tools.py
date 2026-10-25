@@ -10979,6 +10979,20 @@ class DriverTest(unittest.TestCase):
             nums = [int(n) for n in re.findall(r'^(\d+)\. \*\*', text, re.M)]
             self.assertEqual(nums, list(range(1, len(nums) + 1)), name)
 
+    def test_briefs_say_the_driver_owns_the_state_files(self):
+        # Task 33: workers never touch the driver's files; selfcheck finds the
+        # live state by itself.
+        rule = ('**Never touch the driver\'s files.** The files under `docs/wso/` '
+                'named `*-state.json`, `*-list.json`, `coverage.json`, `triage.json`, '
+                '`xrec-report.md`, and `docs/MAP.md`, are the driver\'s. Never edit, '
+                'copy over, or commit them; `selfcheck --batch` finds the live state '
+                'by itself. Your files are `src/`, `docs/evidence/`, and '
+                '`docs/wso/import-parked/<ADDR>.json`.')
+        for name in ('brief-template.md', 'import-brief-template.md',
+                     'probe-brief-template.md'):
+            flat = ' '.join(_slurp(os.path.join(ROOT, 'docs', 'wso', name)).split())
+            self.assertIn(rule, flat, name)
+
     def test_credits_of_uses_both_formulas(self):
         lines = [json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
                  'usage': {'input_tokens': 10000, 'cache_read_input_tokens': 100000, 'output_tokens': 1000}}})]
