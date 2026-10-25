@@ -1,0 +1,1 @@
+{"address": "0x4E3D60", "name": "CUIControlTextDisplay::ScrollToBottom", "file": "src/CUIControlTextDisplay.cpp", "batch": "i018", "needs": "first_fight, equip_shots, world_map: not measured (called on one side only in first_fight); ours reading matches the decompile"}
