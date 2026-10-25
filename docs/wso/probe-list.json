@@ -22,8 +22,26 @@
     "batch": "b014",
     "file": "src/CBaldurChitin.cpp",
     "name": "CBaldurChitin::OnMultiplayerSessionOpen",
+    "probed": {
+      "batch": "p004",
+      "hand": true,
+      "hits": [
+        "action_bar",
+        "biography",
+        "equip_shots",
+        "first_fight",
+        "inventory",
+        "level_up",
+        "save_load_screens",
+        "walk_and_talk",
+        "world_entry",
+        "world_map"
+      ],
+      "pin": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
+      "scenarios": []
+    },
     "reading": "fork",
-    "reason": "the exe's third chat clear (+0x1C90 \u2192 FUN_0064d690) is missing from our body; deciding it needs a multiplayer-session trace and dump evidence cannot carry a fork (rule 1)",
+    "reason": "his deciding delta (the +0x1C90 third chat clear) needs m_pEngineMultiPlayer->ClearChatMessages(), a dependency ours lacks: our src/CBaldurChitin.h leaves 0x1C90 an unnamed gap (header not in this batch's owned files) and our src has no CScreenMultiPlayer class nor 0x64D690; not a compile fix (rule 2), and his other two deltas are name-only renames of our sub_4D2060/sub_7A73D0 that alone would leave the binary identical to ours",
     "source": "worker"
   },
   {

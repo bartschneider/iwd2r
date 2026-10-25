@@ -3648,13 +3648,14 @@
     "i021": {
       "assigned_at": "2026-10-25T02:25:45+00:00",
       "branch": "p3/wso-i021",
-      "closed_at": null,
+      "closed_at": "2026-10-25T05:50:34+00:00",
       "files": [
         "src/CScreenInventory.cpp",
         "src/CGameSprite.cpp",
         "src/CScreenWorldMap.cpp",
         "src/CGameAIBase.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -3669,30 +3670,37 @@
           "address": "0x6FF410",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameSprite.cpp",
+          "measured_body": "196996fa5134240472118271aeb8f37d89b41515b6d943f9097bd503f731ab00",
           "name": "CGameSprite::MoveToBack",
           "our_len": 1111,
+          "outcome": "kept",
           "their_len": 1121
         },
         {
           "address": "0x714130",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameSprite.cpp",
+          "measured_body": "3d20b87cf19acd06c7633d547adceb8ad4acaf85f190eaf18f9fbbdd95cb78df",
           "name": "CGameSprite::GetWeaponButton",
           "our_len": 1053,
+          "outcome": "kept",
           "their_len": 1085
         },
         {
           "address": "0x69FFC0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenWorldMap.cpp",
+          "measured_body": "ab93e83caa6b34cec939b0876f55fd8bd5a43e83959f39d45b993d8977293f25",
           "name": "CScreenWorldMap::GetMarkerPosition",
           "our_len": 1036,
+          "outcome": "kept",
           "their_len": 1084
         },
         {
           "address": "0x71B7A0",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameSprite.cpp",
+          "measured_body": "3d3520f12517130afcb0a54851db6bd856271b95e35ae911565b13b663605706",
           "name": "CGameSprite::Unequip",
           "our_len": 786,
           "their_len": 791
@@ -3701,32 +3709,40 @@
           "address": "0x71A0E0",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameSprite.cpp",
+          "measured_body": "49f7462098376ac3ae28e9574ad8391be181ab496ae2d128a81f906dd98cf736",
           "name": "CGameSprite::sub_71A0E0",
           "our_len": 748,
+          "outcome": "kept",
           "their_len": 751
         },
         {
           "address": "0x69A4D0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenWorldMap.cpp",
+          "measured_body": "1bbe1938eaaf985923fd9ed1f4d368d5ab3e4c84c85af72ef33aaf22d6670d61",
           "name": "CScreenWorldMap::SetMapView",
           "our_len": 581,
+          "outcome": "kept",
           "their_len": 592
         },
         {
           "address": "0x6A05A0",
           "category": "theirs_changed_ours_base",
           "file": "src/CScreenWorldMap.cpp",
+          "measured_body": "e682f2b5f9f6d742df61de67aa2a9523ce83be2ef39da7b108cbbd6ab0d1f6a9",
           "name": "CUIControlButtonWorldMapDone::OnLButtonClick",
           "our_len": 235,
+          "outcome": "kept",
           "their_len": 237
         },
         {
           "address": "0x73B740",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameSprite.cpp",
+          "measured_body": "0b0e58ce14431577d54cf13cf57b351a2abfec4a34a63dd14ed0d5b677cdf8de",
           "name": "CGameSprite::GetCriticalHitBonus",
           "our_len": 156,
+          "outcome": "kept",
           "their_len": 153
         },
         {
@@ -3735,68 +3751,82 @@
           "file": "src/CGameSprite.cpp",
           "name": "CGameSprite::CheckAranceFailure",
           "our_len": 129,
+          "outcome": "kept",
           "their_len": 140
         },
         {
           "address": "0x6F2C30",
           "category": "theirs_changed_ours_base",
           "file": "src/CGameAIBase.cpp",
+          "measured_body": "4eebe04be128a766a4a9d0f7d94b10e9aee96224315a415efc8ef5443db0fe43",
           "name": "CGameAIBase::GetHelpRange",
           "our_len": 41,
+          "outcome": "kept",
           "their_len": 49
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i022": {
       "assigned_at": "2026-10-25T02:27:59+00:00",
       "branch": "p3/wso-i022",
-      "closed_at": null,
+      "closed_at": "2026-10-25T05:23:51+00:00",
       "files": [
         "src/CUIControlTextDisplay.cpp",
         "src/CInfCursor.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
           "address": "0x4E2660",
           "category": "theirs_changed_ours_base",
           "file": "src/CUIControlTextDisplay.cpp",
+          "measured_body": "2cbe335566f764bfc443037d6d96764b644a20f5a15cd6588b429f561d9baee8",
           "name": "CUIControlTextDisplay::OnMouseMove",
           "our_len": 541,
+          "outcome": "kept",
           "their_len": 630
         },
         {
           "address": "0x5981D0",
           "category": "theirs_changed_ours_base",
           "file": "src/CInfCursor.cpp",
+          "measured_body": "93f665d6c6b9e5ceb85d4ff147340050fc8565f6d52e2b6ddc9d298a73ec0063",
           "name": "CInfToolTip::GetFrame",
           "our_len": 544,
+          "outcome": "kept",
           "their_len": 546
         },
         {
           "address": "0x598770",
           "category": "theirs_changed_ours_base",
           "file": "src/CInfCursor.cpp",
+          "measured_body": "0e2e40f03d74ec8d9d7b30003768b16f00837a0b24419099dcad228bf72745ff",
           "name": "CInfToolTip::RenderText",
           "our_len": 509,
+          "outcome": "kept",
           "their_len": 503
         },
         {
           "address": "0x4E2550",
           "category": "theirs_changed_ours_base",
           "file": "src/CUIControlTextDisplay.cpp",
+          "measured_body": "b27f68c9828c402ab893b3e1d1187f4f4a4e48445a6772d5dfa40eabb5b634c3",
           "name": "CUIControlTextDisplay::OnButtonLClick",
           "our_len": 269,
+          "outcome": "kept",
           "their_len": 393
         },
         {
           "address": "0x4E2600",
           "category": "theirs_changed_ours_base",
           "file": "src/CUIControlTextDisplay.cpp",
+          "measured_body": "ad73a2e0d7b2f37c42eb8cb966ed6ba2ba7c0f88f08039c15eeaebe6bb369e5c",
           "name": "CUIControlTextDisplay::OnLButtonUp",
           "our_len": 102,
+          "outcome": "kept",
           "their_len": 183
         },
         {
@@ -3808,7 +3838,7 @@
           "their_len": 991
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i023": {
@@ -3930,6 +3960,7 @@
           "address": "0x487530",
           "category": "only_theirs",
           "file": "src/CGameDoor.cpp",
+          "measured_body": "5aa55d306ded553335148bdb278c24ca35ac3ada9b8da69a3c39939321c57830",
           "name": "CGameDoor::CompressTime",
           "our_len": 0,
           "their_len": 847
@@ -3962,6 +3993,7 @@
           "address": "0x4CBB20",
           "category": "only_theirs",
           "file": "src/CGameText.cpp",
+          "measured_body": "438dfe13d05c2a4a8165949e8bf15f24bd89d74a5f1282229bee61cc40a04f84",
           "name": "CGameText::Render",
           "our_len": 0,
           "their_len": 2972
