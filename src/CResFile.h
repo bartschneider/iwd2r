@@ -9,7 +9,6 @@ public:
     ~CResFile();
 
     BOOL AddCacheCount();
-    BOOL Cache();
     BOOL CloseFile();
     BOOL GetCacheKey(CString& sCacheKey);
     DWORD GetFileSize(RESID resID);
