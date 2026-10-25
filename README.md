@@ -2,6 +2,8 @@
 
 iwd2r (Icewind Dale 2 Resurrected) is a cross-platform port of the decompiled Icewind Dale II engine from [alexbatalov/iwd2-re](https://github.com/alexbatalov/iwd2-re). It builds natively on Linux and Windows, runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and the IWD2EE mod built in. iwd2r is a modified version of iwd2-re.
 
+**Want to help?** The recovery runs as batches of functions measured against the original game; [Contributing: running the recovery pipeline](#contributing-running-the-recovery-pipeline) lists what you need (a Windows 11 PC with the game, WSL2, a GLM Coding Plan for the workers), how a batch is cut, checked and landed, and the house rules. Readings of single functions, oracle cases for the rows no scenario reaches, and new game scenarios are the easiest places to start.
+
 ## What this repository does not contain
 
 - No game content.
@@ -137,6 +139,8 @@ The rules are code, not prose. The close refuses a verdict for the fork or for n
 
 Changes to the tooling itself go through a written spec and plan under `docs/superpowers/`, then subagent-driven development: one implementer per task, a reviewer on a stronger model after each, fix rounds with scoped re-reviews, and a whole-branch review before the merge and gate.
 
+Everything a pipeline run needs on the machine — the sandbox, the game copies, Frida, the worker pools, the locks — is listed under [Contributing: running the recovery pipeline](#contributing-running-the-recovery-pipeline).
+
 ### Manual
 
 Point the engine at your install with `IWD2_DATA`:
@@ -200,6 +204,167 @@ The "done" rule: every function you change under `src/` that carries a `// 0xADD
 
 CI runs the parts that need no game data: the PE loader tests (`[pe]`), the VC6 `rand` tests (`[rand]`), the oracle generator tests (`[oracle]`), the state dump and replay tests (`[dump]`), `tests/test_tools.py` and the evidence check. The runner itself needs the vanilla exe, so it runs only on your machine.
 
+
+## Contributing: running the recovery pipeline
+
+The batch driver described under [Run](#run) runs on one Windows host driven from WSL. This section lists what a contributor needs to run that pipeline themselves; [docs/wso/README.md](docs/wso/README.md) stays the reference for the tools' behavior and every key of their state files, and [docs/evidence/README.md](docs/evidence/README.md) for the evidence files themselves.
+
+### What you need.
+
+- **A Windows 11 Pro host with Windows Sandbox enabled, and WSL2 (Ubuntu).** The repository and the tools live on the WSL side; the sandbox, the oracle runner and the game run on the Windows side. One-time sandbox setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`.
+- The original needs DirectPlay; the sandbox ships only stub files, so the host must have DirectPlay enabled, as it is for the original game.
+  The driver copies the host's 32-bit files over the sandbox's stubs at logon, inside the sandbox only.
+- **A legal copy of Icewind Dale II.** The tools expect the original `iwd2.exe` at `~/.local/share/iwd2r/vanilla/iwd2.exe` — `VANILLA_EXE` in `tools/oracle.py`, overridable on `run` with `--vanilla`. Its MD5 is checked against `oracle/loader/vanilla.json`, so a modified exe never becomes the oracle's truth.
+- **A second copy of the game for the oracle.** `python3 tools/oracle.py vanilla` builds that copy at `%USERPROFILE%\iwd2r-oracle\game` from your install:
+  - IWD2EE's uninstaller runs there, the vanilla `iwd2.exe` MD5 is verified, and the marker `game/vanilla.ok` records success — your install is never changed;
+  - `--rebuild` starts the copy over;
+  - `python3 tools/oracle.py run` then copies the vanilla `iwd2.exe` into the build it measures.
+- The sandbox never sees your install either: `tools/winsandbox.py` keeps its own game copy at `%USERPROFILE%\iwd2r-vm\game`, filled by default from the vanilla copy, with the source and the copy's hash recorded in `%USERPROFILE%\iwd2r-vm\game.source.json`.
+- **Python 3** — `python3 --version` on the WSL side. The tools import only the standard library, always run as `python3 -I`, and declare no version floor beyond your distribution's Python 3.
+- **The Linux build presets** — CMake, gcc and clang, ccache optional — exactly as the [Build](#build) section describes; the gate below uses them. Engine tests always run under a memory cap (`systemd-run --user --scope -q -p MemoryMax=8G -p MemorySwapMax=0 --`), so give WSL that much headroom plus the two builds.
+- **Frida inside the sandbox**, for the differential trace phase:
+  - `C:\Python314\python.exe -m venv %USERPROFILE%\iwd2r-frida\venv`
+  - `%USERPROFILE%\iwd2r-frida\venv\Scripts\python.exe -m pip install frida==17.24.1` (measured on Python 3.14.8; provisioning is in [docs/frida-tracing.md](docs/frida-tracing.md))
+  - `tools/frida/probe.py` maps that venv, read-only, into the sandbox.
+- **Ghidra, only for new decompiles.** `tools/ghidra/setup.sh` installs the pinned Ghidra 12.1.4 ([tools/ghidra/versions.json](tools/ghidra/versions.json)); evidence front matter records `ghidra_version: 12.1.4`.
+- **Rough sizes.** The sandbox VM alone is 4096 MB (`MEMORY_MB` in `tools/winsandbox.py`), on top of the two Linux builds a gate runs and the host's own work; the gate timings below were measured on a 24-core box, so plan for that class of machine.
+
+### What is not in the repo and why.
+
+- **The game and its exe.** Nothing from the game is committed (see [License](#license)); every path above lives on your machine.
+- **The WSO fork tree.** Recovery adopts bodies from `WillScarlettOhara/iwd2-re` at one pinned sha — `DEFAULT_FORK_BASE` in `tools/wave.py`, currently `e8dd16a750966af53f24daaf49dcb4fb13594c13` — reachable through the read-only `wso` remote.
+  The fork's tree is untrusted: it is read only through git plumbing that never checks it out — `git show <sha>:<path>` and `git ls-tree <sha>` — never executed, never named as a `wso/` ref.
+- Adopted code carries an `Imported-From: WillScarlettOhara/iwd2-re@<sha> (MIT per author, 2026-10-17)` trailer, so every absorbed line stays traceable to that one commit.
+- **Any credential.** No GLM or Anthropic token, key or account name is ever committed or written into a brief; the worker wrapper reads them from the environment, as the next subsection describes.
+
+### The worktree layout.
+
+- `first` is the integration branch and lives in its own worktree, the main one. Every batch and every stream lands in it by fast-forward; the driver does the pushing.
+- Batch branches `p3/wso-<id>` — `b<NNN>` for wave 1, `i<NNN>` for imports, `p<NNN>` for probes — each get a worktree of their own, cut at `<main worktree>-worktrees/p3-wso-<id>`, the shape `git worktree list` in `tools/wave.py` expects:
+
+```
+git worktree add -q -b p3/wso-<id> <main worktree>-worktrees/p3-wso-<id> <first commit>
+```
+
+- A branch that already exists but has no worktree takes `git worktree add -q <path> <branch>` instead.
+- Hand streams use `tools/worktree.sh new <stream>` — `~/iwd2-re-worktrees/p3-<stream>` on branch `p3/<stream>`, cut from `first` — as [Parallel work streams](#parallel-work-streams) describes.
+- Numbered integration branches `p3/integrate-N` hold a plan's task work between those merges.
+- Each worktree builds on Windows in its own folder, so parallel batches never share a build tree:
+  - `%USERPROFILE%\iwd2r-build` for the `first` worktree, `%USERPROFILE%\iwd2r-build-<folder>` for the others, `IWD2R_WIN_CHECKOUT` overriding.
+
+### Workers: the GLM Coding Plan and the `claude-glm` wrapper.
+
+The driver runs headless Claude Code sessions against Z.ai's Anthropic-compatible endpoint through a wrapper named `claude-glm` on `PATH`. The wrapper is not in the repo; to work with the driver it must:
+
+- keep its own config dir, `~/.claude-glm` (`CLAUDE_GLM_CONFIG_DIR` moves it), mirroring `~/.claude` — the driver reads worker transcripts from `<config dir>/projects`, and worker config must never land in your interactive one;
+- point `ANTHROPIC_BASE_URL` at `https://api.z.ai/api/anthropic` and put the GLM Coding Plan's token in `ANTHROPIC_AUTH_TOKEN`;
+- map the model the driver names in `CLAUDE_GLM_MODEL` — `glm-5.3-flash[1m]` — onto the plan's models;
+- run like `claude -p <brief> --output-format json`; the driver adds `--dangerously-skip-permissions` and `--max-turns 400`, and sets the batch worktree as the working directory.
+
+The driver scrubs the launching session out of every worker's environment and sets `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for all of them. A `claude-glm` pool keeps the wrapper's variables — `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `API_TIMEOUT_MS`, and the `ANTHROPIC_DEFAULT_*`, `CLAUDE_GLM_*` and `CLAUDE_CODE_SUBAGENT_MODEL` prefixes. Any other wrapper gets its model as `--model <model>` instead, plus `--setting-sources project,local`, `--strict-mcp-config` and `ENABLE_CLAUDEAI_MCP_SERVERS=0`.
+
+Two `claude-glm` launches race on the wrapper's re-link of `~/.claude` into `~/.claude-glm`: apply `patch ~/.local/bin/claude-glm < tools/claude-glm.lock.patch` (an `flock` on `~/.claude-glm/.relink.lock`; needs util-linux `flock`) before running two workers.
+
+A pool is written `NAME=WRAPPER:MODEL[:WORKERS]`, where `WORKERS` defaults to 1, or as the short form `NAME[:WORKERS]` of a known name: `glm` is `claude-glm:glm-5.3-flash[1m]` on every queue, and `claude` is `claude:sonnet` on `wave1` and `probes` but `claude:haiku` on `import`. Without `--pool` the driver runs one pool, `glm=claude-glm:glm-5.3-flash[1m]:2`; reviews default to `sonnet` on a `claude` pool and `glm-5.3-flash[1m]` on a `glm` one, and `--reviewer-model NAME=MODEL` overrides that. A contributor can point the pool at any wrapper that speaks the same protocol — the pool spec decides, not the repository. The grammar above is the driver's own `--pool` help, quoted; the per-queue defaults live in `tools/driver.py` beside it.
+
+### Running a batch with the driver.
+
+From the `first` worktree:
+
+```
+python3 -I tools/wave.py run --queue import --pool glm:2 --budget-glm 30000 --max-batches 4
+python3 -I tools/wave.py run --queue probes --pool glm:1 --budget-glm 10000 --seed 2026-10-22
+```
+
+- `--queue` is `wave1` (the default), `import` or `probes`; `--pool` repeats, once per pool.
+- `--budget C` caps credits over all pools, `--budget-NAME C` caps one pool; credits price GLM turns only.
+- `--max-batches N` stops starting batches once N have started, letting the in-flight ones finish.
+- `--seed S` is the review sample seed, `2026-10-22` by default; `--worker-timeout SECONDS` bounds a worker at 3 hours by default.
+- `run --dry-run --state COPY.json` runs one batch with a fake worker — the way to watch a cycle without spending credits.
+- The Frida phase runs after an import worker by default (`frida_default` in `docs/wso/truth-calibration.json`); `--frida` and `--no-frida` override it, and `remeasure` re-traces what closed without it.
+- Exit codes:
+
+  - 0 — done, or a budget stop;
+  - 1 — an exception or a halt: a launch failure, an auth or billing error, or the breaker (three batch exceptions in a row whose worker produced no transcript);
+  - 3 — parked (a 429);
+  - 4 — stalled.
+
+The queue's truth is the committed state file under `docs/wso/`: `wave-state.json`, `import-state.json` or `probe-state.json`. The driver's own bookkeeping is untracked scratch under `.superpowers/sdd/2026-10-17-wso-integration/driver/`, with each batch's briefs, reports and review diffs in `driver/<id>/`:
+
+- `status.json` tracks `wave1`, `status-import.json` tracks `import`, `status-probes.json` tracks `probes`;
+- the keys worth reading are `current`, `running`, `pools`, `stopped`, `stalled`, `halted` and `exceptions`;
+- never commit that folder, never edit it by hand.
+
+- An exception — a second failed check, a second blocking review, a worker without a report — waits in `exceptions`. Read it there, and clear it only with `python3 -I tools/wave.py run --clear <batch>`, never by editing the file: the next run retries that batch before any new cut, plain `--clear` re-checking its last report and `--clear <batch> --rerun` re-running the worker. A batch interrupted at the `close`, `record` or `push` stage goes straight back to that stage on its recorded work.
+- The reserved key `first` — the base tests went red — is lifted with `--clear first`.
+- A stopped driver leaves its in-flight batches recorded in `running`; the next run resumes them, the worker re-entering with a `Resume:` preamble.
+- Locks, so two drivers never collide:
+  - the sandbox lock `%USERPROFILE%\iwd2r-vm\sandbox.lock` — one sandbox at a time, across all worktrees;
+  - the landing lock `<git common dir>/iwd2r-landing.lock` — one per repository, held over a batch's merge into `first`, its gate and its landing.
+- The driver appends a templated `## driver <id>` entry to the plan's ledger, `.superpowers/sdd/2026-10-17-wso-integration/progress.md` — untracked scratch, never committed — and pushes `first:main first:first` to the `iwd2r` remote itself.
+
+### Doing a batch by hand.
+
+The coordinator's loop, one command each; everything below also has a section in [docs/wso/README.md](docs/wso/README.md).
+
+- `python3 -I tools/wave.py next [--queue import|probes] [--include-uncovered]` — pick, cut and triage the next batch, 20 rows by default: branch, worktree, triage and a rendered brief. Wave-1 rows come from `docs/wso/disagreements.json`; an import batch takes covered rows first, and `--include-uncovered` keeps the rest.
+- The brief templates are the worker's whole job description, and `python3 -I tools/wave.py brief <id>` re-renders one:
+  - wave 1: [docs/wso/brief-template.md](docs/wso/brief-template.md)
+  - imports: [docs/wso/import-brief-template.md](docs/wso/import-brief-template.md)
+  - probes: [docs/wso/probe-brief-template.md](docs/wso/probe-brief-template.md)
+- `python3 tools/oracle.py evidence 0x5845D0` — write the draft evidence file for a function, front matter and decompile included.
+- `python3 -I tools/wave.py selfcheck --batch <id>` — run in the batch worktree when the work is done; fix every line it prints until it says `selfcheck: OK`.
+- `python3 -I tools/wave.py verdict <batch> <address> fork|ours|neither <case>` — record one wave-1 verdict with its deciding case.
+- `python3 -I tools/wave.py close <batch> [--kind import|probes]` — check and land a batch: verdicts, evidence lines, a clean tree, an unmodified gate, then fast-forward `first`.
+- `python3 -I tools/wave.py resolve <address> fork|ours|neither <case>` — a probe-list row into its batch.
+- `python3 -I tools/wave.py undecide <batch> <address> fork|neither <reason>` — the reverse: a batch row onto the probe list.
+- `python3 -I tools/wave.py unpark <address> [<address> ...] [--reason TEXT]` — a parked import row back to the queue.
+- `python3 -I tools/wave.py coverage [--scenarios a,b] [--chunk N] [--addresses FILE]` (and `coverage --pending`) — measure which functions of the original exe each scenario exercises, into `docs/wso/coverage.json`.
+- `python3 -I tools/wave.py recompare [--tip SHA] [--no-fetch]` — queue what the fork's tip adds, for coverage to measure; `scorecard` tallies the waves into `xrec-report.md`.
+- `python3 -I tools/wave.py remeasure --read-only-measured` — a Frida-only pass over closed rows, re-tracing them on a `p3/remeasure-<stamp>` branch.
+
+Never edit by hand what the tools own: `docs/wso/*-state.json`, `docs/wso/*-list.json`, `docs/wso/coverage.json`, `docs/wso/triage.json`, the driver status files, and the generated `docs/MAP.md` (wave-1 brief rule 11). A contributor writes code under `src/`, evidence under `docs/evidence/`, and the park files `docs/wso/import-parked/<ADDRESS>.json`.
+
+### The gate.
+
+`tools/gates.sh --base first` runs locally the steps CI runs, in order:
+
+- the `linux-gcc` build with its tests;
+- the `linux-clang` build with its tests;
+- structural parity against the base;
+- the tool tests, `tests/test_tools.py`;
+- the subsystem map (`tools/gen_map.py --check`), recovery status (`tools/re_status.py --check`) and replay fields (`tools/gen_fields.py --check`);
+- the shader blobs when `tools/shaders.py` exists, and the decompiler evidence check (`tools/check_evidence.py --base`).
+
+When every path the branch changed against `--base` is on the script's allow-list (docs, tools, README — the list is in the script), the build, test and parity steps print `skipped (docs-only change against BASE)` and the summary says `gates: docs-only fast path`; `--full` forces the full gate, and `--windows` adds the Windows builds. One gate runs at a time: an exclusive `flock` on `.gates.lock` at the main repo root, shared by every worktree — a second gate waits, or with `--no-wait` names the holder and exits 3.
+
+On a 24-core box the full gate takes about 9 minutes, a docs-only one about 1.
+
+### What a verdict is.
+
+- Sides: `ours`, `fork` or `neither` — whether our recovered body, the WSO fork's adopted body, or neither is right for a function.
+  A wave-1 batch's report carries one line per row; the probe queue and the parked rows are the two ways a row leaves undecided.
+- Evidence kinds: `oracle`, `replay`, `read-only` or `trace`. A `fork` or `neither` verdict needs a case that ran something — an oracle case, a replay checkpoint or a trace; a reading of the decompile, and a dump reading, decides only `ours`.
+  `close` refuses anything else unless a recorded ruling allows it (`--allow-dump RULING --ledger PATH`).
+- The Frida phase: after an import worker, the driver measures the rows whose evidence is a reading plus an exemption by differential tracing — the same function hooked in the original and in ours over the same scenario ([docs/frida-tracing.md](docs/frida-tracing.md)) — and rewrites the evidence `kind:` to `trace`. Bodies it measured are then frozen.
+- The probe list: rows no worker could decide wait in `docs/wso/probe-list.json` until a probe batch (`p<NNN>`) or a `resolve` settles them; a probe batch's worker adopts the fork body and the Frida phase decides.
+- Parked rows: import rows a batch dropped land in `docs/wso/import-parked/<ADDRESS>.json` with what they need; `unpark` returns them to the queue.
+
+The full format of an evidence file, and every key of a state file, are in [docs/evidence/README.md](docs/evidence/README.md) and [docs/wso/README.md](docs/wso/README.md) — this section is the tour, not the reference.
+
+### House rules for anyone (human or model) touching a batch.
+
+- Never amend or rewrite history on a shared branch, and never push (import brief rules 8 and 9). The refused commands are listed and enforced — `reset`, `rebase`, `revert`, `restore`, `clean`, any `stash`, `commit --amend`, `filter-repo`, `push`, `branch -d/-D/-f/-M/-C`, `checkout -B`, `switch -C`, `checkout -- <path>`, `checkout <sha> <path>` and a bare `git checkout <path>`.
+  The allowed list is `add`, `commit`, `status`, `diff`, `log`, `show`, `ls-tree`, `merge-base`, `rev-parse`, `blame`, `checkout -b`, `checkout <branch>`, `switch -c`.
+- Never wait for the coordinator — report what you have and return (wave-1 brief rule 15; the import and probe briefs say the same, their rules 10 and 14).
+- Bodies the Frida phase measured are frozen: a parity red against one is waived in the evidence (`parity_waiver: "<reason>"`, wave-1 brief rule 6), never edited away.
+- Kept rows stay under `## Kept`: base-body rows kept as ours are listed there, one line `kept <0xADDR> <reason>`, never also under `## Imported`.
+- The fork is read at the pinned sha only, through `git show` and `git ls-tree`; never a `wso/` ref, never checked out, never executed (wave-1 brief rules 8 and 9).
+- No desktop windows from automation: the game runs in the sandbox (wave-1 brief rule 12).
+  A desktop launch needs the human's explicit `IWD2R_DESKTOP_OK=1`.
+- At most two sandbox launches per attempt, through `tools/play.py` and `tools/gltrace.py`, until `--new-attempt "<why>"` records a fresh attempt.
+- The sandbox save reset touches only the oracle game copy, `%USERPROFILE%\iwd2r-vm\game`, never a real install.
+
 ## Deviations from the original
 
 - Multiplayer is removed permanently: DirectPlay and the multiplayer screen are deleted, and the engine runs the original's single-player null-provider path.
@@ -237,3 +402,4 @@ CI runs the parts that need no game data: the PE loader tests (`[pe]`), the VC6 
 - [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re), the parallel recovery being integrated (project 7); its author's [IWD2EE OpenGL/HD branch](https://github.com/WillScarlettOhara/IWD2EE/tree/opengl-hd-beta7), the design reference for the remaster renderer; and his [iwd2ee-installer](https://github.com/WillScarlettOhara/iwd2ee-installer), the WeiDU front end used to install that branch for the GL captures.
 - [Deoroot/iwd2-re](https://github.com/Deoroot/iwd2-re), a fork of the parallel recovery, integrated as a delta after it.
 - [Bubb13/EEex](https://github.com/Bubb13/EEex), the open-source extender for the Enhanced Editions by the IEex author, a naming reference for the helper DLL.
+
