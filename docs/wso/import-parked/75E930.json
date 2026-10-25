@@ -1,0 +1,2 @@
+{"address": "0x75E930", "name": "CGameSprite::sub_75E930", "file": "src/CGameSprite.cpp", "batch": "i026",
+ "needs": "not measured: called on one side only in first_fight"}
