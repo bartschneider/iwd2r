@@ -1,0 +1,2 @@
+{"address": "0x799E60", "name": "CGameEffect::OnAdd", "file": "src/CGameEffect.cpp", "batch": "i023",
+ "needs": "no Frida hook: no entry for CGameEffect::OnAdd in our map"}
