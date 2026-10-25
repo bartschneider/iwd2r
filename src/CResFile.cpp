@@ -1,7 +1,6 @@
 #include "CResFile.h"
 
 #include "CChitin.h"
-#include "CUtil.h"
 
 // NOTE: Inlined in `CDimm::CreateKeyTable`.
 CResFile::CResFile()
@@ -85,32 +84,6 @@ BOOL CResFile::CloseFile()
     }
 
     return TRUE;
-}
-
-// #guess
-// 0x78a0f0
-BOOL CResFile::GetCacheKey(CString& sCacheKey)
-{
-    CString sDir;
-    CString sFileName;
-    CString sName;
-
-    if (g_pChitin->cDimm.m_cKeyTable.m_bInitialized &&
-        m_nIndex < g_pChitin->cDimm.m_cKeyTable.m_nResFiles) {
-        sFileName = reinterpret_cast<char*>(g_pChitin->cDimm.m_cKeyTable.m_pResFileNameEntries) +
-                    g_pChitin->cDimm.m_cKeyTable.m_pResFileNameEntries[m_nIndex].nFileNameOffset;
-        sName = sFileName;
-
-        int iSlash;
-        while ((iSlash = sName.Find('\\')) != -1) {
-            sName = sName.Right(sName.GetLength() - iSlash - 1);
-        }
-
-        sCacheKey = sName.Left(sName.GetLength() - 4);
-        return TRUE;
-    }
-
-    return FALSE;
 }
 
 // #guess

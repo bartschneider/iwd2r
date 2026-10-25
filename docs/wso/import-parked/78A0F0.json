@@ -1,0 +1,2 @@
+{"address": "0x78A0F0", "name": "CResFile::GetCacheKey", "file": "src/CResFile.cpp", "batch": "i023",
+ "needs": "not measured: called on one side only in walk_and_talk"}
