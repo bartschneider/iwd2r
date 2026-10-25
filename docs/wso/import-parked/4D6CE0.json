@@ -1,0 +1,2 @@
+{"address": "0x4D6CE0", "name": "CUIControlEditMultiLine::SetActive", "file": "src/CUIControlEditMultiLine.cpp", "batch": "i026",
+ "needs": "frida frequency only, no exact compare: identical in first_fight"}

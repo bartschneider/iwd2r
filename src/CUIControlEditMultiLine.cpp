@@ -9,19 +9,6 @@
 #include "CVidInf.h"
 #include "CWarp.h"
 
-// 0x4D6CE0
-void CUIControlEditMultiLine::SetActive(BOOLEAN bActive)
-{
-    // ICF//OPT:ICF folds this with CUIControlEdit::SetActive: one body in the
-    // exe, shared by both classes' vtables.
-    m_bActive = bActive;
-    if (bActive) {
-        m_cVidFont.RegisterFont();
-    } else {
-        m_cVidFont.Unload();
-    }
-}
-
 // 0x4D9410
 CUIControlEditMultiLine::CUIControlEditMultiLine(CUIPanel* panel, UI_CONTROL_EDIT* controlInfo, int a3)
     : CUIControlBase(panel, &(controlInfo->base), 0)
