@@ -1,0 +1,1 @@
+{"address": "0x65B320", "name": "CScreenSave::OnSaveButtonClick", "file": "src/CScreenSave.cpp", "batch": "i020", "needs": "not exercised; ours reading matches the decompile"}
