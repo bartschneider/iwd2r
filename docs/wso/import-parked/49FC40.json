@@ -1,0 +1,2 @@
+{"address": "0x49FC40", "name": "CGameAnimationTypeCharacterOld::GetPathSmooth", "file": "src/CGameAnimationTypeCharacterOld.cpp", "batch": "i023",
+ "needs": "not measured: called on one side only in walk_and_talk"}
