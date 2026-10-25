@@ -1,0 +1,2 @@
+{"address": "0x57CFB0", "name": "CProjectile850F9C::Render", "file": "src/CProjectile850F9C.cpp", "batch": "i026",
+ "needs": "not measured: called on one side only in first_fight"}
