@@ -908,6 +908,14 @@ ALLOWED_PATHS = ('src/', 'compat/', 'docs/evidence/', 'docs/MAP.md',
                  'oracle/cases/', 'oracle/CMakeLists.txt',
                  'docs/wso/import-parked/')
 
+# The driver's files in a batch worktree (Task 33): a dirty one is restored
+# before the checks (a selfcheck that could not find the live state used to
+# copy it in), and one in the worker's own diff is a problem to revert.
+DRIVER_OWNED = ('docs/wso/wave-state.json', 'docs/wso/import-state.json',
+                'docs/wso/probe-state.json', 'docs/wso/probe-list.json',
+                'docs/wso/coverage.json', 'docs/wso/triage.json',
+                'docs/wso/xrec-report.md', 'docs/MAP.md')
+
 
 # The worker's draft of its report (Task 24): written in the worktree, checked
 # by `wave.py selfcheck`, ignored by git, never an uncommitted path.
@@ -5030,32 +5038,61 @@ class Driver:
 
     def _merge_before_checks(self, batch_id, worktree):
         """A problem list: [] when `first` was merged into the batch branch
-        (or needed no merge, or the worktree is dirty), else the one
-        coordinator problem.  The checks must see the tree the close will
-        gate (Task 26); a merge conflict is the coordinator's, never the
-        worker's (the worker may not merge)."""
+        (or needed no merge, or the worktree is dirty with the worker's own
+        files), else the one coordinator problem.  The checks must see the
+        tree the close will gate (Task 26); a merge conflict is the
+        coordinator's, never the worker's (the worker may not merge).  A
+        dirty driver-owned file is restored and reported (a selfcheck that
+        could not find the live state used to copy it in), and a
+        driver-owned file in the worker's own diff was committed by the
+        worker; neither stops the merge (Task 33)."""
+        problems = []
         try:
             branch = self.load_state(self.state_path)['batches'][batch_id]['branch']
         except (OSError, KeyError, ValueError, TypeError):
-            return []
+            return problems
+        r = self._git_in(worktree, 'diff', '--name-only',
+                         _merge_base(worktree, self.base), 'HEAD')
+        if r.returncode == 0:
+            problems += ["%s is the driver's; revert your commit's change to it "
+                         '(git revert or a new commit putting the merge-base copy '
+                         'back)' % p for p in r.stdout.split() if p in DRIVER_OWNED]
+        st = self._git_in(worktree, 'status', '--porcelain', '-uall')
+        dirty = [(l[:2] == '??', l[3:].split(' -> ')[-1].strip('"'))
+                 for l in st.stdout.splitlines() if l.strip()]
+        dirty = [(u, p) for u, p in dirty if p != REPORT_DRAFT]
+        if st.returncode != 0 or any(p not in DRIVER_OWNED for _, p in dirty):
+            return problems           # the uncommitted-paths problem covers it
+        if dirty:
+            with self._writing():
+                for untracked, p in dirty:
+                    if untracked:
+                        try:
+                            os.unlink(os.path.join(worktree, p))
+                        except OSError:
+                            pass
+                    else:
+                        self._git_in(worktree, 'checkout', '--', p)
+                    self.log('%s: %s was modified by the worker; restored (driver-owned)'
+                             % (batch_id, p))
+            problems += ['%s was modified by the worker; restored (driver-owned)'
+                         % p for _, p in dirty]
         r = self._git_in(worktree, 'merge-base', '--is-ancestor', self.base, 'HEAD')
         if r.returncode != 1:          # 0: nothing moved; else not a repo we can read
-            return []
-        st = self._git_in(worktree, 'status', '--porcelain', '-uall')
-        if st.returncode != 0 or [l for l in st.stdout.splitlines()
-                                  if l[3:].split(' -> ')[-1].strip('"') != REPORT_DRAFT]:
-            return []                  # the uncommitted-paths problem covers it
+            return problems
         with self._writing():
             why, conflicts = self._merge_base_into(
                 branch, worktree, when='the checks', pull=False,
                 message='merge %s into %s before the checks' % (self.base, branch))
         if not why:
-            return []
+            return problems
         if conflicts:
-            return ['%s conflicts with this branch in %s; the coordinator resolves it'
-                    % (self.base, ', '.join(sorted(conflicts)))]
-        return ['%s could not be merged into this branch (%s); the coordinator '
-                'resolves it' % (self.base, why)]
+            problems.append('%s conflicts with this branch in %s; the coordinator '
+                            'resolves it' % (self.base, ', '.join(sorted(conflicts))))
+        else:
+            problems.append('%s could not be merged into this branch (%s); the '
+                            'coordinator resolves it' % (self.base, why))
+        return problems
 
     LANDING_POLL = 0.25    # seconds between tries at the landing lock
 

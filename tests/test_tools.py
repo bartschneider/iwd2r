@@ -16676,8 +16676,14 @@ class DriverTest(unittest.TestCase):
         for rel in ('import-brief-template.md', 'brief-template.md', 'README.md'):
             prose.append(_slurp(os.path.join(ROOT, 'docs', 'wso', rel)))
         verb = re.compile(r'\b(?:revert|restor)\w*', re.I)
+        # Task 33's driver-owned problems are the one place a revert is the
+        # remedy (the brief fixes their wording)
+        allowed = ("is the driver's; revert your commit's change to it "
+                   '(git revert or a new commit putting the merge-base copy back)',
+                   'was modified by the worker; restored (driver-owned)')
         for text in prose:
             bare = re.sub(r'`[^`]*`', '', text)
+            bare = re.sub('|'.join(re.escape(a) for a in allowed), '', bare)
             self.assertIsNone(verb.search(bare), text[:200])
             if re.search(r'git show[^`]*> *<path>', text):
                 self.assertIn('outside the paths a batch may touch', text)
@@ -16904,7 +16910,6 @@ class DriverTest(unittest.TestCase):
             _write(os.path.join(wt, 'compat', 'ok.h'), 'x\n')
             _write(os.path.join(wt, 'oracle', 'cases', 'c.json'), 'x\n')
             _write(os.path.join(wt, 'oracle', 'CMakeLists.txt'), 'x\n')
-            _write(os.path.join(wt, 'docs', 'MAP.md'), 'x\n')
             _write(os.path.join(wt, '.mcp.json'), '{}\n')
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
@@ -16917,7 +16922,7 @@ class DriverTest(unittest.TestCase):
         for bad in ('tools/extra.py', 'docs/wso/brief-template.md', '.mcp.json'):
             self.assertIn(bad, text)
         for ok in ('src/ok.cpp', 'compat/ok.h', 'oracle/cases/c.json',
-                   'oracle/CMakeLists.txt', 'docs/MAP.md'):
+                   'oracle/CMakeLists.txt'):
             self.assertNotIn(ok, text)
         self.assertFalse(driver._path_allowed('docs/evidence-other/x.md'))
         self.assertTrue(driver._path_allowed('docs/evidence/40B000.md'))
@@ -16987,7 +16992,9 @@ class DriverTest(unittest.TestCase):
             self._first_moves()
             _write(os.path.join(wt, 'wip.txt'), 'x\n')
             before = self._rev('HEAD', cwd=wt)
-            d._check('b011', wt, self._T26_REPORT)
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, [])            # not a restore problem: the
+        self.assertEqual(_slurp(os.path.join(wt, 'wip.txt')), 'x\n')  # worker's file
         self.assertEqual(self._rev('HEAD', cwd=wt), before)
         self.assertEqual(self.seen, [(False, True)])
 
@@ -17030,11 +17037,64 @@ class DriverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self._first_moves('first\n', 'docs/MAP.md')
             verdicts, problems = d._check('b011', wt, self._T26_REPORT)
-        self.assertEqual(problems, [])
+        # the committed MAP.md is the driver's: a problem to revert, and the
+        # checks (and this round) wait for the fix round
+        self.assertEqual(problems, ["docs/MAP.md is the driver's; revert your "
+                                    "commit's change to it (git revert or a new "
+                                    'commit putting the merge-base copy back)'])
+        self.assertEqual(self.seen, [])
         body = self.git('log', '-1', '--format=%B', cwd=wt).stdout
         self.assertNotIn('Conflicts', body)
         self.assertNotIn('#', body)
         self.assertIn(driver.STATE_COMMIT_TRAILER, body)
+
+    def test_check_restores_a_dirty_driver_owned_file_and_merges(self):
+        d, wt = self._t26_driver(base_files={'docs/wso/wave-state.json': '{}\n'})
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            _write(os.path.join(wt, 'docs', 'wso', 'wave-state.json'), 'dirty\n')
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ['docs/wso/wave-state.json was modified by the '
+                                    'worker; restored (driver-owned)'])
+        self.assertIn('b011: docs/wso/wave-state.json was modified by the worker; '
+                      'restored (driver-owned)', self.logs)
+        # the restore is a problem this round (a fix round follows), but the
+        # merge still happened and the tree is clean
+        self.assertEqual(self.seen, [])
+        self.assertEqual(_slurp(os.path.join(wt, 'docs', 'wso', 'wave-state.json')),
+                         '{}\n')
+        self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)
+
+    def test_check_unlinks_an_untracked_copy_of_a_driver_owned_file(self):
+        d, wt = self._t26_driver()     # docs/wso/import-state.json is in no commit
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            _write(os.path.join(wt, 'docs', 'wso', 'import-state.json'), '{}\n')
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ['docs/wso/import-state.json was modified by the '
+                                    'worker; restored (driver-owned)'])
+        self.assertFalse(os.path.exists(
+            os.path.join(wt, 'docs', 'wso', 'import-state.json')))
+        self.assertEqual(self.seen, [])
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)
+
+    def test_check_reports_a_driver_owned_file_the_worker_committed(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'docs', 'wso', 'coverage.json'), '{}\n')
+        d, wt = self._t26_driver(base_files={'docs/wso/coverage.json': 'base\n'},
+                                 on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ["docs/wso/coverage.json is the driver's; revert "
+                                    "your commit's change to it (git revert or a new "
+                                    'commit putting the merge-base copy back)'])
+        self.assertEqual(self.seen, [])
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)      # the merge is not stopped
 
     def test_ledger_commit_count_ignores_the_pre_check_merge(self):
         d, wt = self._t26_driver()
@@ -18278,9 +18338,9 @@ class DriverTest(unittest.TestCase):
                'tools/gen_map.py': _slurp(gen)}
         added = {'b011': 'src/CGameNew.cpp', 'b012': 'src/CScreenNew.cpp'}
 
-        def on_branch(wt, bid):    # a worker's source file and its own MAP edit
-            _write(os.path.join(wt, added[bid]), '// 0x401000\nint y; // TODO: Incomplete\n')
-            _write(os.path.join(wt, 'docs', 'MAP.md'), 'mine ' + bid + '\n')
+        def on_branch(wt, bid):    # a worker's source file (a MAP edit is now
+            _write(os.path.join(wt, added[bid]),    # the driver's, Task 33)
+                   '// 0x401000\nint y; // TODO: Incomplete\n')
         d = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
                               ids=('b011', 'b012'), base_files=src, on_branch=on_branch)
         calls = []
