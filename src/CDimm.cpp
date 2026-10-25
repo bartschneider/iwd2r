@@ -1320,7 +1320,7 @@ BOOL CDimm::FindFileInDirectoryList(const CString& sDirName, CString& sFileName)
     POSITION pos = m_lDirectories.GetHeadPosition();
     while (pos != NULL) {
         v1 = m_lDirectories.GetAt(pos);
-        if (fileFind.FindFile(v1 + sDirName)) {
+        if (fileFind.FindFile(sDirName + v1)) {
             sFileName = v1;
             return TRUE;
         }
