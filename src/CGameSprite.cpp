@@ -24580,6 +24580,14 @@ BOOLEAN CGameSprite::CanSaveGame(STRREF& strError)
     return FALSE;
 }
 
+// 0x75E930
+int CGameSprite::sub_75E930(int a1)
+{
+    // Stub in the shipped binary: xor eax, eax; ret 4 — the fighting-style
+    // feat query always answers zero.
+    return 0;
+}
+
 // 0x75E940
 SHORT CGameSprite::GetCasterLevel(CSpell* pSpell, BYTE nClass, DWORD nSpecialization)
 {

@@ -655,6 +655,7 @@ public:
     SHORT GiveItem(CGameAIBase* pTarget);
     const CAIObjectType& GetLiveAIType();
     SHORT GetCasterLevel(CSpell* pSpell, BYTE nClass, DWORD nSpecialization);
+    int sub_75E930(int a1);
     SHORT sub_75F240();
     SHORT sub_75F3D0(int a1);
     SHORT LeaveArea();
