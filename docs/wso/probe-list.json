@@ -156,34 +156,6 @@
     "source": "worker"
   },
   {
-    "address": "0x4F7620",
-    "at": "2026-10-24T07:27:21+00:00",
-    "batch": "b027",
-    "file": "src/CMessage.cpp",
-    "name": "CMessageHandler::Broadcast",
-    "probed": {
-      "batch": "p003",
-      "hand": true,
-      "hits": [
-        "action_bar",
-        "biography",
-        "equip_shots",
-        "first_fight",
-        "inventory",
-        "level_up",
-        "save_load_screens",
-        "walk_and_talk",
-        "world_entry",
-        "world_map"
-      ],
-      "pin": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
-      "scenarios": []
-    },
-    "reading": "fork",
-    "reason": "evidence is kind replay; needs a hand ruling",
-    "source": "worker"
-  },
-  {
     "address": "0x5E56F0",
     "at": "2026-10-24T10:55:27+00:00",
     "batch": "b030",
