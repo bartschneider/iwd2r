@@ -94,10 +94,16 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
     changes. If a commit message is wrong, make a new commit; never amend.
     Workers only add and commit. The driver stops a batch whose
     transcript shows a history rewrite.
-15. **Never wait.** Never wait for the coordinator, for `first` to move, or for
+15. **Never touch the driver's files.** The files under `docs/wso/` named
+    `*-state.json`, `*-list.json`, `coverage.json`, `triage.json`,
+    `xrec-report.md`, and `docs/MAP.md`, are the driver's. Never edit, copy
+    over, or commit them; `selfcheck --batch` finds the live state by itself.
+    Your files are `src/`, `docs/evidence/`, and
+    `docs/wso/import-parked/<ADDR>.json`.
+16. **Never wait.** Never wait for the coordinator, for `first` to move, or for
     another batch: if you cannot go on, write the report with what you have,
     say what blocked you, and return.
-16. **Selfcheck last.** Write your report to `.report.md` in the worktree (git
+17. **Selfcheck last.** Write your report to `.report.md` in the worktree (git
     ignores it), run `python3 -I tools/wave.py selfcheck --batch {{id}}`, fix every
     line it prints, and run it again until it prints `selfcheck: OK`; then return
     the same text as your report.

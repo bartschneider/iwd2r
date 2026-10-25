@@ -559,6 +559,16 @@ HOUSE_RUNNERS = ('tools/play.py', 'tools/gltrace.py')
 READ_LIMIT = 200      # lines of a covered source file one read may take
 _SEGMENT = re.compile(r'&&|\|\||;|\n')
 _WSO_REF = re.compile(r"(?:(?<=[\s'\"=:.^~@])|(?<=remotes/)|(?<=heads/))wso/")
+# The git subcommands that put the fork tree on disk: a wso/ ref named with
+# one of them is fatal (Task 33). The read-only subcommands, and `branch`
+# without a write flag, only read the ref.
+_WSO_WRITE_SUBS = frozenset((
+    'checkout', 'switch', 'merge', 'rebase', 'cherry-pick', 'reset',
+    'restore', 'read-tree', 'archive', 'worktree', 'pull', 'fetch',
+    'submodule', 'am', 'apply', 'revert'))
+_WSO_READ_SUBS = frozenset((
+    'rev-parse', 'log', 'show', 'diff', 'ls-tree', 'cat-file',
+    'merge-base', 'name-rev', 'describe', 'for-each-ref'))
 _SED_SPAN = re.compile(r"(\d+),(\d+)p")
 _LAUNCH = re.compile(r'\.wsb\b|WindowsSandbox|Start-Process', re.I)
 # A command that sets the desktop override: an assignment (leading word,
@@ -636,7 +646,7 @@ def _tool_calls(path):
 
 
 _HISTORY_VERBS = ('reset', 'rebase', 'revert', 'restore', 'clean', 'stash',
-                  'filter-repo', 'push', 'update-ref')
+                  'filter-repo', 'push', 'update-ref', 'update-index')
 
 
 # No real branch is named for these (the batch's own path prefixes).
@@ -747,8 +757,9 @@ def _history_rewrite(args, covered=(), tracked=None):
     """True when the arguments of a `git` command (after the command word)
     rewrite or discard history or work: reset, rebase, revert, restore,
     clean, stash (except the read-only `stash list` / `stash show`),
-    filter-repo, push, update-ref, commit --amend, branch
-    -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
+    filter-repo, push, update-ref, update-index (it can hide local
+    changes behind a skip-worktree/assume-unchanged flag), commit --amend,
+    branch -d/-D, reflog expire, gc --prune, and a checkout that is not a plain
     branch switch (`--`, -f, -B, `.`, a path after a start point, or one
     argument that names a covered file, looks like a path or starts with a
     batch directory), branch -f/-M/-C and switch -C/--force-create.
@@ -811,10 +822,36 @@ def _is_amend(args):
     return bool(rest) and rest[0] == 'commit' and '--amend' in rest[1:]
 
 
+def _wso_ref_finding(args, short):
+    """The finding for a `git` command naming a wso/ ref: ('wso', ...) when
+    the subcommand is one of _WSO_WRITE_SUBS, which put the fork tree on
+    disk; ('wso-read', ...) for the read-only subcommands and a `branch`
+    without -f/-M/-C/-d/-D (a ledger line, not a problem: i020 lost a review
+    over a fatal `git rev-parse wso/main`); None for anything else — a
+    `branch` with a write flag names the ref only as history rewrite
+    (_history_rewrite catches it)."""
+    rest = list(args)
+    while rest and rest[0].startswith('-'):      # git -C dir / -c k=v / --x
+        rest = rest[2:] if rest[0] in ('-C', '-c') else rest[1:]
+    if not rest:
+        return None
+    sub, rest = rest[0], rest[1:]
+    if sub in _WSO_WRITE_SUBS:
+        return ('wso', 'git command naming a wso/ ref (%s): read the fork '
+                'only at the pinned sha, `git show <sha>:<path>`' % short)
+    if sub in _WSO_READ_SUBS or (sub == 'branch' and not any(
+            a in ('--delete', '--force')
+            or re.fullmatch(r'-[a-zA-Z]*[dDfMC][a-zA-Z]*', a) for a in rest)):
+        return ('wso-read', 'transcript: read a wso/ ref (%s)' % short)
+    return None
+
+
 def transcript_findings(transcript_path, covered_files, tracked=None):
     """[(kind, problem, file)] for the forbidden tool calls in a worker's
-    transcript.  kind 'wso' (a git command naming a wso/ ref; the pinned
-    sha is allowed), 'launch' (a .wsb, WindowsSandbox or Start-Process
+    transcript.  kind 'wso' (a git subcommand that puts a wso/ ref on disk,
+    _WSO_WRITE_SUBS; the pinned sha is allowed), 'wso-read' (a git command
+    that only reads a wso/ ref, _WSO_READ_SUBS or a plain `branch`; a ledger
+    line, not a problem), 'launch' (a .wsb, WindowsSandbox or Start-Process
     launch outside HOUSE_RUNNERS), 'read' (a whole-file read of a covered
     source file: no Read limit or one over READ_LIMIT; cat, a sed -n span
     or head/tail -n over READ_LIMIT; file is the covered file),
@@ -859,10 +896,9 @@ def transcript_findings(transcript_path, covered_files, tracked=None):
                 for i, (cw, args) in enumerate(stages):
                     text = ' '.join(args)
                     if cw == 'git' and _WSO_REF.search(' ' + text):
-                        out.append(('wso', 'git command naming a wso/ ref '
-                                    '(%s): read the fork only at the pinned '
-                                    'sha, `git show <sha>:<path>`'
-                                    % _short(seg), None))
+                        hit = _wso_ref_finding(args, _short(seg))
+                        if hit:
+                            out.append(hit + (None,))
                     if cw == 'git' and _history_rewrite(args, covered, tracked):
                         out.append(('history', 'history rewrite in a worker '
                                     '(%s): workers only add and commit'
@@ -896,9 +932,11 @@ def transcript_findings(transcript_path, covered_files, tracked=None):
 
 
 def transcript_checks(transcript_path, covered_files, tracked=None):
-    """One problem per forbidden worker tool call (transcript_findings)."""
-    return [text for _kind, text, _f in
-            transcript_findings(transcript_path, covered_files, tracked)]
+    """One problem per forbidden worker tool call (transcript_findings); a
+    wso-read (a git read of a wso/ ref) is a ledger line, not a problem."""
+    return [text for kind, text, _f in
+            transcript_findings(transcript_path, covered_files, tracked)
+            if kind != 'wso-read']
 
 
 # The paths a batch may change (ruling R71): anything else on the branch is
@@ -907,6 +945,14 @@ def transcript_checks(transcript_path, covered_files, tracked=None):
 ALLOWED_PATHS = ('src/', 'compat/', 'docs/evidence/', 'docs/MAP.md',
                  'oracle/cases/', 'oracle/CMakeLists.txt',
                  'docs/wso/import-parked/')
+
+# The driver's files in a batch worktree (Task 33): a dirty one is restored
+# before the checks (a selfcheck that could not find the live state used to
+# copy it in), and one in the worker's own diff is a problem to revert.
+DRIVER_OWNED = ('docs/wso/wave-state.json', 'docs/wso/import-state.json',
+                'docs/wso/probe-state.json', 'docs/wso/probe-list.json',
+                'docs/wso/coverage.json', 'docs/wso/triage.json',
+                'docs/wso/xrec-report.md', 'docs/MAP.md')
 
 
 # The worker's draft of its report (Task 24): written in the worktree, checked
@@ -1981,22 +2027,61 @@ def _spelling_problems(worktree, base, batch, report_addrs):
     return problems, odd_keys
 
 
-def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
+def _first_worktree(worktree, run=subprocess.run):
+    """The worktree that has `first` checked out (the driver's, where the
+    running batch's live state sits), from `git worktree list --porcelain`;
+    None when there is none."""
+    r = run(['git', '-C', worktree, 'worktree', 'list', '--porcelain'],
+            capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    path = None
+    for line in (r.stdout or '').splitlines():
+        if line.startswith('worktree '):
+            path = line.split(' ', 1)[1]
+        elif path is not None and line == 'branch refs/heads/first':
+            return path
+    return None
+
+
+def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run,
+              state_path=None):
     """The driver's mechanical checks that need no driver state, for the
     worker to run on its own report and files before it returns (Task 24):
     [] when clean, else one problem per entry in the driver's own wording.
-    The batch id gives the kind (b: verdicts, i: import) and the state file;
-    nothing is edited."""
+    The batch id gives the kind (b: verdicts, i: import) and the state file.
+    The entry is looked for in this worktree's state file, then in the first
+    worktree's (the driver keeps the running batch's live state uncommitted
+    there), then in `state_path` (--state); nothing is edited."""
     wave = _tool('wave')
     kind = {'i': 'import', 'p': 'probes'}.get(batch_id[:1], 'verdicts')
     state_rel = 'docs/wso/%s-state.json' % {'import': 'import', 'probes': 'probe'}.get(
         kind, 'wave')
-    try:
-        batch = wave.load_state(os.path.join(worktree, state_rel))['batches'].get(batch_id)
-    except (OSError, ValueError) as e:
-        return ['cannot read %s (%r)' % (state_rel, e)]
+    # The driver holds the running batch's live state uncommitted in the
+    # worktree that has `first` checked out, so the batch worktree's copy
+    # (committed at the cut) has no entry for it: the first of the three
+    # places that has the entry wins, and nothing is copied in (Task 33).
+    first_wt = _first_worktree(worktree, run)
+    places = ['%s (this worktree)' % state_rel]
+    places.append(os.path.join(first_wt, state_rel) + ' (the first worktree)'
+                  if first_wt else 'the first worktree (no worktree has first checked out)')
+    places.append(os.path.abspath(state_path) + ' (--state)'
+                  if state_path else '--state (not given)')
+    batch = None
+    for place in (os.path.join(worktree, state_rel),
+                  os.path.join(first_wt, state_rel) if first_wt else None,
+                  state_path):
+        if not place:
+            continue
+        try:
+            batch = wave.load_state(place)['batches'].get(batch_id)
+        except (OSError, ValueError):
+            batch = None
+        if batch is not None:
+            break
     if batch is None:
-        return ['batch %s is not in %s; check the --batch id' % (batch_id, state_rel)]
+        return ['batch %s is not in %s; check the --batch id'
+                % (batch_id, ', '.join(places))]
     key = wave._addr_key
     problems = []
     try:
@@ -2110,22 +2195,26 @@ def _exclude_draft(worktree):
 
 
 def selfcheck_main(argv):
-    """`wave.py selfcheck --batch <id> [--report <file>]`, run in the batch
-    worktree: the report from --report (`-` is stdin), else `.report.md` there.
-    The one write it makes: `.report.md` into the repository's info/exclude when
-    missing (untracked; a worktree cut before the .gitignore entry needs it)."""
-    batch_id = report = None
+    """`wave.py selfcheck --batch <id> [--report <file>] [--state <file>]`,
+    run in the batch worktree: the report from --report (`-` is stdin), else
+    `.report.md` there; `--state` names a state file to read the batch from
+    when neither this worktree's nor the first one's has it. The one write it
+    makes: `.report.md` into the repository's info/exclude when missing
+    (untracked; a worktree cut before the .gitignore entry needs it)."""
+    batch_id = report = state_path = None
     it = iter(argv)
     for a in it:
-        if a in ('--batch', '--report'):
+        if a in ('--batch', '--report', '--state'):
             v = next(it, None)
             if v is None:
                 print('wave selfcheck: %s needs a value' % a, file=sys.stderr)
                 return 2
             if a == '--batch':
                 batch_id = v
-            else:
+            elif a == '--report':
                 report = v
+            else:
+                state_path = v
         else:
             print('wave selfcheck: unknown option %s' % a, file=sys.stderr)
             return 2
@@ -2149,7 +2238,7 @@ def selfcheck_main(argv):
     except OSError as e:
         print('wave selfcheck: cannot read the report (%s)' % e, file=sys.stderr)
         return 2
-    problems = selfcheck(batch_id, worktree, text)
+    problems = selfcheck(batch_id, worktree, text, state_path=state_path)
     if not problems:
         print('selfcheck: OK')
         return 0
@@ -2829,9 +2918,10 @@ class Driver:
 
     def _scan_transcript(self, batch_id, label, res, anchors=(), cwd=None):
         """Every run's transcript, worker, fix rounds and reviewer: a wso/
-        ref, a launch outside the house runners or a history rewrite is a
-        past call nobody can undo, so a `transcript` exception with no fix round; a whole-file
-        read is a ledger line only; a missing transcript is a ledger line."""
+        ref put on disk, a launch outside the house runners or a history
+        rewrite is a past call nobody can undo, so a `transcript` exception
+        with no fix round; a whole-file read or a git read of a wso/ ref is
+        a ledger line only; a missing transcript is a ledger line."""
         lines = self._ctx.transcript_lines
         if not res.transcript:
             lines.append('transcript: none (%s)' % label)
@@ -2846,6 +2936,9 @@ class Driver:
                 line = 'transcript: whole read of %s' % f
                 if line not in lines:
                     lines.append(line)
+            elif kind == 'wso-read':
+                if text not in lines:
+                    lines.append(text)
             elif kind == 'unreadable':
                 lines.append('transcript: unreadable (%s)' % label)
             elif kind == 'history' and (f or '').startswith('amend:') and cwd and \
@@ -4987,32 +5080,88 @@ class Driver:
 
     def _merge_before_checks(self, batch_id, worktree):
         """A problem list: [] when `first` was merged into the batch branch
-        (or needed no merge, or the worktree is dirty), else the one
-        coordinator problem.  The checks must see the tree the close will
-        gate (Task 26); a merge conflict is the coordinator's, never the
-        worker's (the worker may not merge)."""
+        (or needed no merge, or the worktree is dirty with the worker's own
+        files), else the one coordinator problem.  The checks must see the
+        tree the close will gate (Task 26); a merge conflict is the
+        coordinator's, never the worker's (the worker may not merge).  A
+        dirty driver-owned file is restored and reported (a selfcheck that
+        could not find the live state used to copy it in), a driver-owned
+        file hidden behind a skip-worktree/assume-unchanged flag is un-hidden
+        first and restored with the rest, and a driver-owned file in the
+        worker's own diff was committed by the worker; none of them stops
+        the merge (Task 33)."""
+        problems = []
         try:
             branch = self.load_state(self.state_path)['batches'][batch_id]['branch']
         except (OSError, KeyError, ValueError, TypeError):
-            return []
+            return problems
+        r = self._git_in(worktree, 'diff', '--name-only',
+                         _merge_base(worktree, self.base), 'HEAD')
+        if r.returncode == 0:
+            problems += ["%s is the driver's; revert your commit's change to it "
+                         '(git revert or a new commit putting the merge-base copy '
+                         'back)' % p for p in r.stdout.split() if p in DRIVER_OWNED]
+        # A driver-owned file hidden behind an index flag (S = skip-worktree,
+        # h = assume-unchanged; the i021/i022/i023 workers set one after
+        # copying the live state in) keeps `status` clean while its content
+        # differs from HEAD, and the merge below would refuse on it.  Clear
+        # the flag, then treat the file as dirty like any other driver-owned
+        # modification (Task 33).
+        hidden = []
+        r = self._git_in(worktree, 'ls-files', '-v', '--', *DRIVER_OWNED)
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                flag, _, path = line.partition(' ')
+                if flag in ('S', 'h') and path in DRIVER_OWNED:
+                    hidden.append((path, flag))
+        if hidden:
+            with self._writing():
+                for p, flag in hidden:
+                    # One negation per call: a single `--no-skip-worktree
+                    # --no-assume-unchanged` invocation leaves skip-worktree
+                    # set (git 2.43.0), so the merge below would still refuse.
+                    self._git_in(worktree, 'update-index',
+                                 '--no-skip-worktree' if flag == 'S'
+                                 else '--no-assume-unchanged', '--', p)
+        st = self._git_in(worktree, 'status', '--porcelain', '-uall')
+        dirty = [(l[:2] == '??', l[3:].split(' -> ')[-1].strip('"'))
+                 for l in st.stdout.splitlines() if l.strip()]
+        dirty = [(u, p) for u, p in dirty if p != REPORT_DRAFT]
+        # A hidden file whose content matches HEAD shows in no status line;
+        # the flag alone still counts as the worker's doing.
+        dirty += [(False, p) for p, _ in hidden if p not in {q for _, q in dirty}]
+        if st.returncode != 0 or any(p not in DRIVER_OWNED for _, p in dirty):
+            return problems           # the uncommitted-paths problem covers it
+        if dirty:
+            with self._writing():
+                for untracked, p in dirty:
+                    if untracked:
+                        try:
+                            os.unlink(os.path.join(worktree, p))
+                        except OSError:
+                            pass
+                    else:
+                        self._git_in(worktree, 'checkout', '--', p)
+                    self.log('%s: %s was modified by the worker; restored (driver-owned)'
+                             % (batch_id, p))
+            problems += ['%s was modified by the worker; restored (driver-owned)'
+                         % p for _, p in dirty]
         r = self._git_in(worktree, 'merge-base', '--is-ancestor', self.base, 'HEAD')
         if r.returncode != 1:          # 0: nothing moved; else not a repo we can read
-            return []
-        st = self._git_in(worktree, 'status', '--porcelain', '-uall')
-        if st.returncode != 0 or [l for l in st.stdout.splitlines()
-                                  if l[3:].split(' -> ')[-1].strip('"') != REPORT_DRAFT]:
-            return []                  # the uncommitted-paths problem covers it
+            return problems
         with self._writing():
             why, conflicts = self._merge_base_into(
                 branch, worktree, when='the checks', pull=False,
                 message='merge %s into %s before the checks' % (self.base, branch))
         if not why:
-            return []
+            return problems
         if conflicts:
-            return ['%s conflicts with this branch in %s; the coordinator resolves it'
-                    % (self.base, ', '.join(sorted(conflicts)))]
-        return ['%s could not be merged into this branch (%s); the coordinator '
-                'resolves it' % (self.base, why)]
+            problems.append('%s conflicts with this branch in %s; the coordinator '
+                            'resolves it' % (self.base, ', '.join(sorted(conflicts))))
+        else:
+            problems.append('%s could not be merged into this branch (%s); the '
+                            'coordinator resolves it' % (self.base, why))
+        return problems
 
     LANDING_POLL = 0.25    # seconds between tries at the landing lock
 
@@ -6309,13 +6458,17 @@ class Driver:
         # The breaker (rulings R45, R46): a batch exception whose worker
         # never really ran (no transcript, or one with no successful
         # non-synthetic turn) counts; any other batch resets.  Credits are
-        # no signal: a Claude pool's read 0.
+        # no signal: a Claude pool's read 0.  A batch that launched no
+        # worker this run (a recheck, a record or close retry) is excluded
+        # from the count either way (Task 33): its exception has no
+        # transcript by design, so it is no evidence and no counter-signal.
         tripped = False
         with self._lock:
-            if out == 'exception' and not any(self._worker_ran):
+            if out == 'exception' and self._worker_ran \
+                    and not any(self._worker_ran):
                 self._no_transcript += 1
                 tripped = self._no_transcript >= BREAKER_LIMIT
-            else:
+            elif self._worker_ran:
                 self._no_transcript = 0
         if tripped:
             self._halt_run('breaker: %d batches without a worker transcript'
