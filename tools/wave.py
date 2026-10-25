@@ -408,6 +408,20 @@ def _oracle_backed(repo, base, address, case_names):
     return None
 
 
+def _mismatch_finding(repo, base, address):
+    """The Finding note a mismatch-recorded evidence file at `base` carries
+    (an oracle case that ran and disagreed: no kind, a `Finding (runs/...)
+    ` paragraph under ## Notes), or None.  Task 39: the worker who takes
+    such a row must see what the case found — ours is wrong there."""
+    text = _evidence_at(repo, base, address) if address else None
+    if text is None or _check_evidence().front_matter(text).get('kind'):
+        return None
+    m = re.search(r'^## Notes\s*$(.*?)(?=^## |\Z)', text, re.M | re.S)
+    f = m and re.search(r'^(Finding \(runs/[^)]+\):.*?)(?:\n\n|\Z)',
+                        m.group(1), re.M | re.S)
+    return ' '.join(f.group(1).split()) if f else None
+
+
 def _import_bar(worktree, merge_base, address, name, rel, text, batch_id=None, want=None,
                 file=None):
     """The close's problem with an import function's evidence, or None:
@@ -1123,11 +1137,13 @@ def apply_triage(state_path, repo, batch_id, triage_path, fork_base,
 # -- brief --------------------------------------------------------------
 
 def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
-                 batch_id=None, bundle_dir=None, bundle_fn=_assemble_bundle):
+                 batch_id=None, bundle_dir=None, bundle_fn=_assemble_bundle,
+                 repo=None, base='first'):
     """Fill brief-template.md for one batch; the coordinator dispatches
     the result verbatim.  With bundle_dir, a context bundle is written
     per row the worker must decide (class ambiguous, or no class and no
-    verdict yet) and {{bundle}} lists the paths."""
+    verdict yet) and {{bundle}} lists the paths.  With repo, a row whose
+    evidence at `base` records an oracle mismatch carries its finding."""
     state = load_state(state_path)
     batch = state['batches'].get(batch_id or '')
     if batch is None:
@@ -1147,8 +1163,15 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
         # an import row says what ours is: a stub, or the base body
         label = CATEGORY_LABEL.get(r.get('category'))
         tail = f'; {label}' if label else ''
-        return (f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
+        line = (f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
                 f'theirs {r["their_len"]} / ours {r["our_len"]} chars{tail})')
+        if repo:
+            finding = _mismatch_finding(repo, base, r.get('address'))
+            if finding:
+                # the oracle case found ours wrong; a kept row cannot stand
+                line += (f'\n   - oracle mismatch at {base} (ours is wrong there; import '
+                         f'the fork body or park this row): {finding}')
+        return line
     fork_base = str(batch.get('fork_base') or state.get('fork_base')
                     or DEFAULT_FORK_BASE)
     rows = '\n'.join(row_line(i, r) for i, r in enumerate(batch['rows'], 1))
@@ -2861,7 +2884,7 @@ def main(argv=None):
         if len(rest) != 1:
             print('usage: wave.py brief <batch-id>', file=sys.stderr)
             return 2
-        rc, out = render_brief(batch_id=rest[0])
+        rc, out = render_brief(batch_id=rest[0], repo=ROOT)
     elif cmd == 'verdict':
         if len(rest) != 4:
             print('usage: wave.py verdict <batch-id> <address> '
