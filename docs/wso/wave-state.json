@@ -7233,12 +7233,27 @@
           "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
           "our_len": 845,
           "their_len": 1369
+        },
+        {
+          "address": "0x4F7620",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageHandler::Broadcast",
+          "our_len": 817,
+          "their_len": 1265
         }
       ],
       "status": "closed",
       "verdicts": {
         "0x42CDA0": {
           "case": "dump-42CDA0",
+          "losing_kind": "trace",
+          "measured": "none",
+          "side": "ours"
+        },
+        "0x4F7620": {
+          "case": "dump-4F7620",
           "losing_kind": "trace",
           "measured": "none",
           "side": "ours"
