@@ -15544,13 +15544,7 @@ void CMessageFamiliarRemoveResRef::Run()
 CMessageFireProjectile::CMessageFireProjectile(WORD projectileType, LONG projectileTargetId, const CPoint& projectileTarget, LONG height, LONG caller, LONG target, unsigned char a7)
     : CMessage(caller, target)
 {
-    // 0x500481: the binary increments the projectile type before storing it
-    // (inc ecx). Senders pass the projectile's m_projectileType, which DecodeProjectile
-    // stores as (factory type - 1); the +1 restores the factory type so Run's
-    // DecodeProjectile(m_projectileType) rebuilds the same projectile. Without it the
-    // handler decodes one type lower -- e.g. Ice Storm (0x62) replicated as Color
-    // Spray (0x61).
-    m_projectileType = static_cast<WORD>(projectileType + 1);
+    m_projectileType = projectileType;
     m_projectileTargetId = projectileTargetId;
     m_projectileTarget = projectileTarget;
     m_height = height;
