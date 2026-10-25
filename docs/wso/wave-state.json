@@ -4349,7 +4349,8 @@
         "src/CStore.cpp",
         "src/CVisibility.cpp",
         "src/CDerivedStats.cpp",
-        "src/CScreenCharacter.cpp"
+        "src/CScreenCharacter.cpp",
+        "src/CChitin3d.cpp"
       ],
       "pool": "glm",
       "rows": [
@@ -4523,6 +4524,15 @@
           "name": "CScreenCharacter::UpdateSavingThrows",
           "our_len": 600,
           "their_len": 575
+        },
+        {
+          "address": "0x7C8990",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CChitin3d.cpp",
+          "name": "CChitin::Init3d",
+          "our_len": 241,
+          "their_len": 800
         }
       ],
       "status": "closed",
@@ -4611,6 +4621,12 @@
         "0x7C2040": {
           "case": "vid/hline_shaded_mirrored16",
           "losing_kind": "trace",
+          "side": "ours"
+        },
+        "0x7C8990": {
+          "case": "dump-7C8990",
+          "losing_kind": "trace",
+          "measured": "none",
           "side": "ours"
         },
         "0x7CE290": {
@@ -7208,10 +7224,25 @@
           "name": "CGameSprite::ReturnToStartLoc",
           "our_len": 671,
           "their_len": 697
+        },
+        {
+          "address": "0x42CDA0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::OnSettingsArbitrationLockStatus",
+          "our_len": 845,
+          "their_len": 1369
         }
       ],
       "status": "closed",
       "verdicts": {
+        "0x42CDA0": {
+          "case": "dump-42CDA0",
+          "losing_kind": "trace",
+          "measured": "none",
+          "side": "ours"
+        },
         "0x502570": {
           "case": "readout-502570",
           "losing_kind": "trace",
