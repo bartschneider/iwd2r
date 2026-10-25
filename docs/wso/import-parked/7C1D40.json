@@ -1,0 +1,2 @@
+{"address": "0x7C1D40", "name": "CVidPolyEdgeCacheEntry::~CVidPolyEdgeCacheEntry", "file": "src/CVidPoly.cpp", "batch": "i023",
+ "needs": "no Frida hook: no entry for CVidPolyEdgeCacheEntry::~CVidPolyEdgeCacheEntry in our map"}
