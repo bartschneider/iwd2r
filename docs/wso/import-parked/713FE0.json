@@ -1,0 +1,2 @@
+{"address": "0x713FE0", "name": "CGameSprite::GetSelectedWeaponButton", "file": "src/CGameSprite.cpp", "batch": "i017",
+ "needs": "world_entry: not measured (frequency difference only: identical in world_entry); ours reading matches the decompile"}
