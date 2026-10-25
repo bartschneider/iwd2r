@@ -1,0 +1,7 @@
+{
+  "address": "0x7A4F00",
+  "name": "CNetwork::HasModems",
+  "file": "src/CNetwork.cpp",
+  "batch": "i023",
+  "needs": "fork body is pure winreg modem enumeration that exists solely to feed DirectPlay's modem and serial setup, which ADR 0002 deletes from our tree; it cannot compile here; kept our body"
+}
