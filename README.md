@@ -2,7 +2,7 @@
 
 iwd2r (Icewind Dale 2 Resurrected) is a cross-platform port of the decompiled Icewind Dale II engine from [alexbatalov/iwd2-re](https://github.com/alexbatalov/iwd2-re). It builds natively on Linux and Windows, runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and the IWD2EE mod built in. iwd2r is a modified version of iwd2-re.
 
-**Want to help?** The recovery runs as batches of functions measured against the original game; [Contributing: running the recovery pipeline](#contributing-running-the-recovery-pipeline) lists what you need (a Windows 11 PC with the game, WSL2, a GLM Coding Plan for the workers), how a batch is cut, checked and landed, and the house rules. Readings of single functions, oracle cases for the rows no scenario reaches, and new game scenarios are the easiest places to start.
+**Want to help?** The recovery runs as batches of functions measured against the original game; [Contributing: running the recovery pipeline](#contributing-running-the-recovery-pipeline) lists what you need (a Windows 11 PC with the game, WSL2, and Claude Code for the workers, on an Anthropic subscription or on Z.ai's cheaper GLM plan), how a batch is cut, checked and landed, and the house rules. Readings of single functions, oracle cases for the rows no scenario reaches, and new game scenarios are the easiest places to start.
 
 ## What this repository does not contain
 
@@ -211,7 +211,7 @@ The batch driver described under [Run](#run) runs on one Windows host driven fro
 
 ### What you need.
 
-- **Claude Code**, the `claude` CLI (2.1 or later), on the WSL side. Every worker, reviewer and fix round is a headless Claude Code session in print mode (`claude -p`), and the driver only orchestrates them. With an Anthropic subscription or API key you run the pool as `--pool claude:N` (Sonnet on wave 1 and probes, Haiku on imports, Sonnet as reviewer) and need no wrapper at all; the GLM Coding Plan route in the Workers subsection is the cheaper default this repository runs on.
+- **Claude Code**, the `claude` CLI (2.1 or later), on the WSL side. Claude Code is the harness: every worker, reviewer and fix round is a headless Claude Code session (`claude -p`) that the driver orchestrates. Which model answers inside it is your choice: Anthropic's models through a normal Claude subscription or API key (`--pool claude:N`, nothing else to install), or Z.ai's GLM models through the GLM Coding Plan (`--pool glm:N`, the default here because it is cheaper; it needs the small wrapper described under Workers).
 - **A Windows 11 Pro host with Windows Sandbox enabled, and WSL2 (Ubuntu).** The repository and the tools live on the WSL side; the sandbox, the oracle runner and the game run on the Windows side. One-time sandbox setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`.
 - The original needs DirectPlay; the sandbox ships only stub files, so the host must have DirectPlay enabled, as it is for the original game.
   The driver copies the host's 32-bit files over the sandbox's stubs at logon, inside the sandbox only.
@@ -253,9 +253,12 @@ git worktree add -q -b p3/wso-<id> <main worktree>-worktrees/p3-wso-<id> <first 
 - Each worktree builds on Windows in its own folder, so parallel batches never share a build tree:
   - `%USERPROFILE%\iwd2r-build` for the `first` worktree, `%USERPROFILE%\iwd2r-build-<folder>` for the others, `IWD2R_WIN_CHECKOUT` overriding.
 
-### Workers: Claude Code sessions, through the `claude` pool or the GLM Coding Plan wrapper.
+### Workers: Claude Code is the harness, the model is your choice.
 
-Workers are headless Claude Code sessions. The simplest pool is `--pool claude:N`: the `claude` CLI logged into an Anthropic account, nothing else to install. The default pool, `glm`, runs the same sessions against Z.ai's Anthropic-compatible endpoint through a wrapper named `claude-glm` on `PATH`. The wrapper is not in the repo; to work with the driver it must:
+Workers are headless Claude Code sessions whatever model runs inside them; the pool you pass to the driver picks the model.
+
+- **Anthropic models** (`--pool claude:N`): the `claude` CLI logged into an Anthropic account or given an API key. Nothing else to install.
+- **Z.ai GLM models** (`--pool glm:N`, the default): the same Claude Code sessions, pointed at Z.ai's Anthropic-compatible endpoint by a wrapper named `claude-glm` on `PATH`. The wrapper is not in the repo; to work with the driver it must:
 
 - keep its own config dir, `~/.claude-glm` (`CLAUDE_GLM_CONFIG_DIR` moves it), mirroring `~/.claude` — the driver reads worker transcripts from `<config dir>/projects`, and worker config must never land in your interactive one;
 - point `ANTHROPIC_BASE_URL` at `https://api.z.ai/api/anthropic` and put the GLM Coding Plan's token in `ANTHROPIC_AUTH_TOKEN`;
