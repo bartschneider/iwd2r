@@ -3845,7 +3845,7 @@
     "i023": {
       "assigned_at": "2026-10-25T03:20:52+00:00",
       "branch": "p3/wso-i023",
-      "closed_at": null,
+      "closed_at": "2026-10-25T06:54:16+00:00",
       "files": [
         "src/CNetwork.cpp",
         "src/CImmunities.cpp",
@@ -3859,6 +3859,7 @@
         "src/CGameAnimationTypeFlying.cpp",
         "src/CGameEffect.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -4024,7 +4025,7 @@
           "their_len": 2
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i024": {
