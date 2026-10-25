@@ -1,0 +1,2 @@
+{"address": "0x6A3C60", "name": "CGameAnimationTypeFlying::CanLieDown", "file": "src/CGameAnimationTypeFlying.cpp", "batch": "i023",
+ "needs": "not measured: Frida could not hook it on the original in walk_and_talk (Error: unable to intercept function at 006A3C60; please file a bug)"}

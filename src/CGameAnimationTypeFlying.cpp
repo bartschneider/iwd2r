@@ -125,13 +125,6 @@ void CGameAnimationTypeFlying::ChangeDirection(SHORT nDirection)
     }
 }
 
-// 0x6A3C60
-BOOLEAN CGameAnimationTypeFlying::CanLieDown()
-{
-    // Folded with CGameAnimationType::GetListType at 0x6A3C60.
-    return FALSE;
-}
-
 // 0x6A3C70
 BYTE CGameAnimationTypeFlying::GetListType()
 {
