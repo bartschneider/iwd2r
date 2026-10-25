@@ -8235,6 +8235,34 @@ class WaveTest(unittest.TestCase):
         self.assertEqual(
             self.wave.render_brief(template, self.state, 'b999')[0], 2)
 
+    def test_wave_brief_carries_an_oracle_mismatch_finding(self):
+        # Task 39: a row whose evidence at the base records an oracle case's
+        # mismatch carries the finding in the brief; a matched record does not
+        self.write_disagreements(_WAVE_ROWS[:2])
+        self.next(size=2)
+        repo = os.path.join(self.tmp, 'repo')
+        os.makedirs(os.path.join(repo, 'docs', 'evidence'), exist_ok=True)
+        _write(os.path.join(repo, 'docs', 'evidence', '643CC0.md'),
+               '---\naddress: 0x643CC0\nname: Render\noracle_case: rules/render\nkind:\n---\n\n'
+               '## Notes\n\nFinding (runs/20261025-134651): the guard differs.\n')
+        self.git('init', '-q', '-b', 'first', cwd=repo)
+        self.git('add', '-A', cwd=repo)
+        self.git('commit', '-qm', 'an oracle case found ours wrong', cwd=repo)
+        template = os.path.join(ROOT, 'docs', 'wso', 'brief-template.md')
+        rc, brief = self.wave.render_brief(template, self.state, 'b001', repo=repo)
+        self.assertEqual(rc, 0, brief)
+        self.assertIn('oracle mismatch at first (ours is wrong there; import the fork body '
+                      'or park this row): Finding (runs/20261025-134651): the guard '
+                      'differs.', brief)
+        _write(os.path.join(repo, 'docs', 'evidence', '643CC0.md'),
+               '---\naddress: 0x643CC0\nname: Render\nkind: oracle\n'
+               'oracle_case: rules/render\n---\n')
+        self.git('add', '-A', cwd=repo)
+        self.git('commit', '-qm', 'the case now matches', cwd=repo)
+        rc, brief = self.wave.render_brief(template, self.state, 'b001', repo=repo)
+        self.assertEqual(rc, 0, brief)
+        self.assertNotIn('oracle mismatch', brief)
+
     # -- recompare ---------------------------------------------------------
 
     @staticmethod
@@ -13579,7 +13607,7 @@ class DriverTest(unittest.TestCase):
         d.frida_run = lambda *a, **kw: self.fail('nothing to measure')
         self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
         logs = '\n'.join(self.logs)
-        for needle in ('0x401000 kept as written (oracle case rules/render)',
+        for needle in ('0x401000: oracle-backed; the case is its measurement',
                        '0x402000 kept as written (fork note docs/roll-recovery.md)',
                        '0x403000 kept as written (unchanged since the merge base)'):
             self.assertIn(needle, logs)
@@ -14136,8 +14164,9 @@ class DriverTest(unittest.TestCase):
         d.frida_build = lambda *a, **kw: self.fail('nothing to measure: no build')
         d.frida_run = lambda *a, **kw: self.fail('nothing to measure')
         self.assertEqual(d._frida_phase('b011', batch, self.wt, {}), [])
-        self.assertIn('b011: frida 0x404000 kept as written (oracle case rules/tick); not measured',
+        self.assertIn('b011: frida 0x404000: oracle-backed; the case is its measurement',
                       self.logs)
+        self.assertNotIn('0x404000 kept as written', '\n'.join(self.logs))
         self.assertEqual(self._outcomes()['0x404000'], 'kept')
         self.assertEqual(_slurp(os.path.join(self.wt, 'docs', 'evidence', '404000.md')), oracle)
         rc, out = self._close_import()
@@ -22087,6 +22116,38 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
 
+    def _kept_on_oracle(self, head_and_notes):
+        """Draw kept on evidence `head_and_notes` whose registered, wired case
+        `rules/draw` (Task 39) is the row's measurement; the body untouched."""
+        self._kept_ready(evidence_kind='replay')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               '---\naddress: 0x643CD0\nname: fn\noracle_case: rules/draw\n'
+               + head_and_notes)
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+               'ORACLE_CASE("rules/draw", Draw);\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        self.commit_worktree('oracle evidence')
+
+    def test_import_close_accepts_a_kept_row_on_oracle_evidence(self):
+        # Task 39: the case is the row's measurement, so the kept row
+        # closes on it — no trace, no measured_body
+        self._kept_on_oracle('kind: oracle\n---\n')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_refuses_a_kept_row_on_a_mismatch_record(self):
+        # the case ran and disagreed (no kind, a Finding note): ours is
+        # wrong there, a kept row cannot stand on it
+        self._kept_on_oracle(
+            'kind:\n---\n\n## Notes\n\nFinding (runs/20261025-134651): ours returns '
+            '0 where the\noriginal returns 1.\n')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: kept but not measured; park it or import it', out)
+        self.assertEqual(self.batches()['b001']['status'], 'assigned')
+
     def test_import_close_never_keeps_a_stub_row(self):
         self._kept_ready(category='theirs_real_ours_stub')
         rc, out = self.close(kind='import')
@@ -23589,6 +23650,74 @@ class CoverageTest(unittest.TestCase):
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x401000', '0x403000'])
         self.assertIn('coverage: map has no fresh phase scenario', out)
+
+    def _oracle_repo(self, evidence, case_ids):
+        """A repo whose `first` holds `evidence` — (stem, file text) pairs —
+        and an oracle registry wiring `case_ids`: the Task 39 cut reads both
+        at the base with git show."""
+        repo = os.path.join(self.tmp, 'repo')
+        os.makedirs(os.path.join(repo, 'oracle', 'cases'), exist_ok=True)
+        for stem, text in evidence:
+            _write(os.path.join(repo, 'docs', 'evidence', stem + '.md'), text)
+        _write(os.path.join(repo, 'oracle', 'cases', 'rules.cpp'),
+               ''.join('ORACLE_CASE("%s", Fn);\n' % c for c in case_ids))
+        _write(os.path.join(repo, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        for cmd in (['git', 'init', '-q', '-b', 'first', repo],
+                    ['git', '-C', repo, 'add', '-A'],
+                    ['git', '-C', repo, 'commit', '-qm', 'oracle evidence']):
+            subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
+        return repo
+
+    def next_from(self, repo, size=2, **kw):
+        imp = os.path.join(self.tmp, 'import-state.json')
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            return self.wave.next_batch(
+                self.dp, imp, size, queue='import', repo=repo,
+                import_path=os.path.join(self.tmp, 'import-list.json'), base='first',
+                coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'), **kw)
+
+    def test_next_import_cuts_an_oracle_backed_row_and_skips_an_uncovered_one(self):
+        # Task 39: a registered oracle case measures a row on its own, so
+        # the cut offers it without --include-uncovered; a row with neither
+        # a scenario nor a case still waits for one
+        repo = self._oracle_repo(
+            (('407000', '---\naddress: 0x407000\nname: G\nkind: oracle\n'
+                        'oracle_case: rules/g\n---\n'),), ['rules/g'])
+        self.cov({'world_entry': {'0x403000': 3}})
+        rc, out = self.next_from(repo)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
+        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
+        os.unlink(os.path.join(self.tmp, 'import-state.json'))
+        rc, out = self.next_from(self.tmp)     # without a repo nothing is oracle-backed
+        self.assertEqual(self.rows_of(out), ['0x403000'])
+        self.assertIn('coverage: 1 scenario-covered row(s), 0 oracle-backed', out)
+
+    def test_next_import_sorts_an_oracle_backed_row_with_the_covered_rows(self):
+        # ahead of the rows no scenario measured (0x401000 outranks it by
+        # size), and a mismatch record (no kind) backs nothing even with
+        # its case registered: it stays with the unknown rows
+        mismatch = ('---\naddress: 0x401000\nname: A\noracle_case: rules/a\nkind:\n---\n\n'
+                    '## Notes\n\nFinding (runs/20261025-134651): ours returns 0 where the\n'
+                    'original returns 1.\n')
+        repo = self._oracle_repo(
+            (('407000', '---\naddress: 0x407000\nname: G\nkind: oracle\n'
+                        'oracle_case: rules/g\n---\n'),
+             ('401000', mismatch)), ['rules/g', 'rules/a'])
+        self.cov({'world_entry': {'0x403000': 3}},
+                 hooked=[a for a in coverage.candidates(self.dp)
+                         if a not in ('0x401000', '0x407000')])
+        rc, out = self.next_from(repo, size=3)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x407000', '0x401000'])
+        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
 
     def test_scorecard_carries_the_coverage_line(self):
         state = os.path.join(self.tmp, 'docs', 'wso', 'wave-state.json')

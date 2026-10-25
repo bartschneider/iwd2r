@@ -383,6 +383,45 @@ def kept_evidence(worktree, merge_base, address, name, text):
     return None
 
 
+def _evidence_at(repo, ref, address):
+    """An evidence file's text as `ref` holds it (git show), or None when
+    git cannot read it (no repo there, no such branch, no such file)."""
+    at = subprocess.run(['git', '-C', repo, 'show', f'{ref}:{_evidence_rel(address)}'],
+                        capture_output=True, text=True)
+    return at.stdout if at.returncode == 0 else None
+
+
+def _oracle_backed(repo, base, address, case_names):
+    """Why the evidence `base` holds measures an import row on its own:
+    `kind: oracle` with an oracle_case base's oracle/cases registers (the
+    case IS the row's measurement, so no scenario need hit it).  A case
+    that recorded a mismatch left no kind behind, so it backs nothing
+    here.  `case_names` is _oracle_case_names of base's worktree; empty
+    (base is not checked out) backs nothing."""
+    text = _evidence_at(repo, base, address)
+    if text is None:
+        return None
+    fields = _check_evidence().front_matter(text)
+    case = fields.get('oracle_case')
+    if fields.get('kind') == 'oracle' and case and case in case_names:
+        return f'oracle case {case}'
+    return None
+
+
+def _mismatch_finding(repo, base, address):
+    """The Finding note a mismatch-recorded evidence file at `base` carries
+    (an oracle case that ran and disagreed: no kind, a `Finding (runs/...)
+    ` paragraph under ## Notes), or None.  Task 39: the worker who takes
+    such a row must see what the case found — ours is wrong there."""
+    text = _evidence_at(repo, base, address) if address else None
+    if text is None or _check_evidence().front_matter(text).get('kind'):
+        return None
+    m = re.search(r'^## Notes\s*$(.*?)(?=^## |\Z)', text, re.M | re.S)
+    f = m and re.search(r'^(Finding \(runs/[^)]+\):.*?)(?:\n\n|\Z)',
+                        m.group(1), re.M | re.S)
+    return ' '.join(f.group(1).split()) if f else None
+
+
 def _import_bar(worktree, merge_base, address, name, rel, text, batch_id=None, want=None,
                 file=None):
     """The close's problem with an import function's evidence, or None:
@@ -597,7 +636,7 @@ def _probe_reoffer(row, disagreements_path, coverage_path, coverage_root, repo):
 
 
 def _import_pool(rows, category, decided, owned, importing, disagreements_path,
-                 coverage_path, coverage_root, repo, include_uncovered):
+                 coverage_path, coverage_root, repo, include_uncovered, base='first'):
     """(eligible rows, rows without an address, coverage note, None) for one
     category, or ([], [], None, (rc, message)) when it offers nothing."""
     def in_category(r):
@@ -651,16 +690,29 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                 state_of = None
                 coverage_note = 'coverage: map unreadable (%r); candidate order unchanged' % (e,)
             if state_of is not None:
+                # Task 39: a registered oracle case measures a row on its own,
+                # so such a row is covered whatever the map says and sorts
+                # with the covered rows; a mismatch record (no kind) is not.
+                base_wt = worktree_for(repo, base) if repo else None
+                case_names = _oracle_case_names(base_wt) if base_wt else set()
+                oracle_rows = []
+                if case_names:
+                    oracle_rows = [r for r in eligible if state_of[id(r)] != 'hit'
+                                   and _oracle_backed(repo, base, r['address'], case_names)]
+                oracle = {id(r) for r in oracle_rows}
                 hit = [r for r in eligible if state_of[id(r)] == 'hit']
                 # stale hits rank above unknown but never decide: such a row is
                 # unknown for the leave-out decision
                 stale_hit = [r for r in eligible if state_of[id(r)] == 'unknown'
-                             and cov_mod.covered(cov, r['address'], include_stale=True)]
+                             and cov_mod.covered(cov, r['address'], include_stale=True)
+                             and id(r) not in oracle]
                 unknown = [r for r in eligible if state_of[id(r)] == 'unknown'
-                           and r not in stale_hit]
-                dead = [r for r in eligible if state_of[id(r)] == 'dead']
+                           and r not in stale_hit and id(r) not in oracle]
+                dead = [r for r in eligible if state_of[id(r)] == 'dead'
+                        and id(r) not in oracle]
                 hit.sort(key=lambda r: -count[id(r)])   # stable: size order within a count
-                eligible = hit + stale_hit + unknown + (dead if include_uncovered else [])
+                eligible = (hit + oracle_rows + stale_hit + unknown
+                            + (dead if include_uncovered else []))
                 notes = []
                 if not include_uncovered:
                     notes.append('coverage: %d candidate row(s) left out as exercised by no '
@@ -668,6 +720,8 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                 if unknown or stale_hit:
                     notes.append('coverage: %d row(s) kept that no scenario measured (unknown)'
                                  % (len(unknown) + len(stale_hit)))
+                notes.append('coverage: %d scenario-covered row(s), %d oracle-backed'
+                             % (len(hit), len(oracle_rows)))
                 coverage_note = '\n'.join(notes) or None
                 if not eligible:
                     return [], [], None, (2, 'nothing left: every remaining import row is '
@@ -827,7 +881,7 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     for category in cats:
         eligible, no_addr, coverage_note, failure = _import_pool(
             rows, category, decided, owned, importing, disagreements_path,
-            coverage_path, coverage_root, repo, include_uncovered)
+            coverage_path, coverage_root, repo, include_uncovered, base=base)
         if eligible:
             break
         last_failure = failure      # the last category's message carries the hint that matters
@@ -1083,11 +1137,13 @@ def apply_triage(state_path, repo, batch_id, triage_path, fork_base,
 # -- brief --------------------------------------------------------------
 
 def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
-                 batch_id=None, bundle_dir=None, bundle_fn=_assemble_bundle):
+                 batch_id=None, bundle_dir=None, bundle_fn=_assemble_bundle,
+                 repo=None, base='first'):
     """Fill brief-template.md for one batch; the coordinator dispatches
     the result verbatim.  With bundle_dir, a context bundle is written
     per row the worker must decide (class ambiguous, or no class and no
-    verdict yet) and {{bundle}} lists the paths."""
+    verdict yet) and {{bundle}} lists the paths.  With repo, a row whose
+    evidence at `base` records an oracle mismatch carries its finding."""
     state = load_state(state_path)
     batch = state['batches'].get(batch_id or '')
     if batch is None:
@@ -1107,8 +1163,15 @@ def render_brief(template_path=TEMPLATE_PATH, state_path=STATE_PATH,
         # an import row says what ours is: a stub, or the base body
         label = CATEGORY_LABEL.get(r.get('category'))
         tail = f'; {label}' if label else ''
-        return (f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
+        line = (f'{i}. `{r["address"]}` **{r["name"]}** ({r["file"]}, '
                 f'theirs {r["their_len"]} / ours {r["our_len"]} chars{tail})')
+        if repo:
+            finding = _mismatch_finding(repo, base, r.get('address'))
+            if finding:
+                # the oracle case found ours wrong; a kept row cannot stand
+                line += (f'\n   - oracle mismatch at {base} (ours is wrong there; import '
+                         f'the fork body or park this row): {finding}')
+        return line
     fork_base = str(batch.get('fork_base') or state.get('fork_base')
                     or DEFAULT_FORK_BASE)
     rows = '\n'.join(row_line(i, r) for i, r in enumerate(batch['rows'], 1))
@@ -2821,7 +2884,7 @@ def main(argv=None):
         if len(rest) != 1:
             print('usage: wave.py brief <batch-id>', file=sys.stderr)
             return 2
-        rc, out = render_brief(batch_id=rest[0])
+        rc, out = render_brief(batch_id=rest[0], repo=ROOT)
     elif cmd == 'verdict':
         if len(rest) != 4:
             print('usage: wave.py verdict <batch-id> <address> '

@@ -4049,6 +4049,207 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i025": {
+      "assigned_at": "2026-10-25T20:58:23+00:00",
+      "branch": "p3/wso-i025",
+      "closed_at": "2026-10-25T21:21:38+00:00",
+      "files": [
+        "src/CGameSpriteSpells.cpp"
+      ],
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x7261A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "measured_body": "c64299258a1cc8feb5cb5dce8ad0c8dad96c06bba0c7c8deb4348ed839b67688",
+          "name": "CGameSpriteGroupedSpellList::sub_7261A0",
+          "our_len": 89,
+          "outcome": "kept",
+          "their_len": 109
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i026": {
+      "assigned_at": "2026-10-25T20:58:24+00:00",
+      "branch": "p3/wso-i026",
+      "closed_at": null,
+      "files": [
+        "src/CGameSprite.cpp",
+        "src/CUIControlEditMultiLine.cpp",
+        "src/CMessage.cpp",
+        "src/CGameArea.cpp",
+        "src/CProjectile.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x722D50",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::AddClassAbilities",
+          "our_len": 0,
+          "their_len": 2322
+        },
+        {
+          "address": "0x4D6CE0",
+          "category": "only_theirs",
+          "file": "src/CUIControlEditMultiLine.cpp",
+          "name": "CUIControlEditMultiLine::SetActive",
+          "our_len": 0,
+          "their_len": 85
+        },
+        {
+          "address": "0x4536E0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage117::GetCommType",
+          "our_len": 0,
+          "their_len": 32
+        },
+        {
+          "address": "0x4088A0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileImmumityUpdate::GetCommType",
+          "our_len": 0,
+          "their_len": 25
+        },
+        {
+          "address": "0x72DE60",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_72DE60",
+          "our_len": 0,
+          "their_len": 22
+        },
+        {
+          "address": "0x75E930",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_75E930",
+          "our_len": 0,
+          "their_len": 10
+        },
+        {
+          "address": "0x4B2340",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSpellLevelImmumityUpdate::~CMessageSpellLevelImmumityUpdate",
+          "our_len": 0,
+          "their_len": 2
+        },
+        {
+          "address": "0x46CD20",
+          "category": "only_theirs",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::GetCloseObjects",
+          "our_len": 0,
+          "their_len": 2449
+        },
+        {
+          "address": "0x75F3D0",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::SetStealthState",
+          "our_len": 0,
+          "their_len": 1489
+        },
+        {
+          "address": "0x43E170",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetVariable::GetCommType",
+          "our_len": 0,
+          "their_len": 25
+        },
+        {
+          "address": "0x40A0D0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage105::GetCommType",
+          "our_len": 0,
+          "their_len": 13
+        },
+        {
+          "address": "0x4844D0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageContinueDialog::~CMessageContinueDialog",
+          "our_len": 0,
+          "their_len": 2
+        },
+        {
+          "address": "0x5BA2E0",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::CanEquipItemInSlot",
+          "our_len": 0,
+          "their_len": 6205
+        },
+        {
+          "address": "0x560310",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSummonVFX::DecodeSpellHitProjectile",
+          "our_len": 0,
+          "their_len": 19567
+        },
+        {
+          "address": "0x52C050",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileTravelling::Fire",
+          "our_len": 0,
+          "their_len": 4392
+        },
+        {
+          "address": "0x578480",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileTravellingVFX::Render",
+          "our_len": 0,
+          "their_len": 3019
+        },
+        {
+          "address": "0x52B900",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileTravelling::AIUpdate",
+          "our_len": 0,
+          "their_len": 2680
+        },
+        {
+          "address": "0x57CFB0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileBAM::Render",
+          "our_len": 0,
+          "their_len": 1545
+        },
+        {
+          "address": "0x52AD60",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileTravelling::CProjectileTravelling",
+          "our_len": 0,
+          "their_len": 1043
+        },
+        {
+          "address": "0x57E580",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSummonVFX::AIUpdate",
+          "our_len": 0,
+          "their_len": 904
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   }
 }

@@ -64,7 +64,10 @@ constexpr uint32_t kVanillaCrtRanges[][2] = {
         loader/pe.cpp loader/map_win32.cpp cases/selftest.cpp cases/selftest_ours.cpp cases/rand.cpp
         cases/tables.cpp cases/pending.cpp cases/rules.cpp cases/save_load.cpp cases/items.cpp cases/vid.cpp cases/vis.cpp cases/spawn.cpp cases/ai.cpp
         cases/area.cpp cases/move.cpp cases/blood.cpp cases/wind_paladin.cpp cases/combat.cpp cases/ui_misc.cpp
-        cases/store_spell.cpp cases/area_tint.cpp
+        cases/store_spell.cpp cases/area_tint.cpp cases/messages.cpp cases/projectile.cpp
+        cases/spell_list.cpp cases/effects.cpp cases/store_chat.cpp cases/rule_tables.cpp
+        cases/timer.cpp cases/anim_types.cpp cases/aliases.cpp
+        cases/store_spell.cpp cases/area_tint.cpp cases/messages_wire.cpp
         $<TARGET_OBJECTS:iwd2r_engine>)
     target_include_directories(iwd2r_oracle PRIVATE "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/generated")
