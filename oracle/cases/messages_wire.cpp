@@ -304,11 +304,11 @@ void TrailingVfxMarshal(CaseContext& ctx)
         uint32_t spriteId;
     };
     const Input inputs[] = {
-        {"SPFIR001", "TRAILING VFX", {0, 1, 0x7FFFFFFF, 0xFFFFFFFF}, 0x1234, 0x0001ABCD},
-        {"ABCD1234", "", {42, 0x80000000, 7, 0}, 0, 0},
-        {"", "A", {0, 0, 0, 0}, 0xFFFF, 0xFFFFFFFF},
-        {std::string("SPF\0IR\0", 6), "Trimmed", {1, 2, 3, 4}, 0x0102, 0},
-        {"01234567", "x", {0xDEADBEEF, 0, 0, 0xCAFEF00D}, 0x8000, 0x7FFF1234},
+        { "SPFIR001", "TRAILING VFX", { 0, 1, 0x7FFFFFFF, 0xFFFFFFFF }, 0x1234, 0x0001ABCD },
+        { "ABCD1234", "", { 42, 0x80000000, 7, 0 }, 0, 0 },
+        { "", "A", { 0, 0, 0, 0 }, 0xFFFF, 0xFFFFFFFF },
+        { std::string("SPF\0IR\0", 6), "Trimmed", { 1, 2, 3, 4 }, 0x0102, 0 },
+        { "01234567", "x", { 0xDEADBEEF, 0, 0, 0xCAFEF00D }, 0x8000, 0x7FFF1234 },
     };
 
     auto run = [&](const Input& in) {
@@ -331,8 +331,8 @@ void TrailingVfxMarshal(CaseContext& ctx)
         expected.U16(in.last);
 
         ctx.SetInputs("sprite=" + Hex(in.spriteId) + " resref=" + Hex(in.resref) + " name=\"" + in.name
-                      + "\" tail=[" + Hex(in.tail[0]) + "," + Hex(in.tail[1]) + "," + Hex(in.tail[2]) + ","
-                      + Hex(in.tail[3]) + "] last=" + Hex(in.last));
+            + "\" tail=[" + Hex(in.tail[0]) + "," + Hex(in.tail[1]) + "," + Hex(in.tail[2]) + ","
+            + Hex(in.tail[3]) + "] last=" + Hex(in.last));
 
         uint32_t actualSize = 0;
         std::string actualWire;
@@ -405,11 +405,11 @@ void TrailingVfxUnmarshal(CaseContext& ctx)
         uint16_t last;
     };
     const Input inputs[] = {
-        {0, kInvalidId, "SPFIR001", "TRAILVFX", {0, 1, 0x7FFFFFFF, 0xFFFFFFFF}, 0x1234},
-        {0x12345678, 0x9ABCDEF0, "ABCD1234", "", {42, 0x80000000, 7, 0}, 0},
-        {0, kInvalidId, "", "A", {0, 0, 0, 0}, 0xFFFF},
-        {0, kInvalidId, "spf!r001", "lowercs", {1, 2, 3, 4}, 0x0102}, // pins the a-z transform
-        {0, kInvalidId, "01234567", "8charsok", {9, 9, 9, 9}, 9},     // R = N = 8, full width
+        { 0, kInvalidId, "SPFIR001", "TRAILVFX", { 0, 1, 0x7FFFFFFF, 0xFFFFFFFF }, 0x1234 },
+        { 0x12345678, 0x9ABCDEF0, "ABCD1234", "", { 42, 0x80000000, 7, 0 }, 0 },
+        { 0, kInvalidId, "", "A", { 0, 0, 0, 0 }, 0xFFFF },
+        { 0, kInvalidId, "spf!r001", "lowercs", { 1, 2, 3, 4 }, 0x0102 }, // pins the a-z transform
+        { 0, kInvalidId, "01234567", "8charsok", { 9, 9, 9, 9 }, 9 }, // R = N = 8, full width
     };
 
     auto run = [&](const Input& in) {
@@ -426,7 +426,7 @@ void TrailingVfxUnmarshal(CaseContext& ctx)
         wire.U16(in.last);
 
         ctx.SetInputs("pair=(" + Hex(in.player) + "," + Hex(in.remote) + ") resref=" + Hex(in.resref)
-                      + " name=\"" + in.name + "\"");
+            + " name=\"" + in.name + "\"");
 
         int32_t returned = 0;
         uint8_t* message = nullptr;
@@ -481,9 +481,9 @@ void TrailingVfxUnmarshal(CaseContext& ctx)
         uint16_t last;
     };
     const Trip trips[] = {
-        {"SPFIR001", "TRAILVFX", {0, 1, 0x7FFFFFFF, 0xFFFFFFFF}, 0x1234},
-        {"", "RoundTri", {0xDEADBEEF, 0, 0, 0xCAFEF00D}, 0x8000},
-        {"01234567", "", {1, 2, 3, 4}, 0},
+        { "SPFIR001", "TRAILVFX", { 0, 1, 0x7FFFFFFF, 0xFFFFFFFF }, 0x1234 },
+        { "", "RoundTri", { 0xDEADBEEF, 0, 0, 0xCAFEF00D }, 0x8000 },
+        { "01234567", "", { 1, 2, 3, 4 }, 0 },
     };
     for (const Trip& trip : trips) {
         ctx.SetInputs("round trip resref=" + Hex(trip.resref) + " name=\"" + trip.name + "\"");
@@ -541,17 +541,17 @@ void SetVariableUnmarshal(CaseContext& ctx)
     struct Input {
         uint32_t player;
         uint32_t remote;
-        std::string name;    // wire string 1 -> this+0x10
-        std::string scope;   // wire string 2 -> this+0xC
-        uint32_t value;      // this+0x14
-        uint8_t increment;   // this+0x18
-        uint32_t flags;      // this+0x1A
+        std::string name; // wire string 1 -> this+0x10
+        std::string scope; // wire string 2 -> this+0xC
+        uint32_t value; // this+0x14
+        uint8_t increment; // this+0x18
+        uint32_t flags; // this+0x1A
     };
     const Input inputs[] = {
-        {0, kInvalidId, "KAPUT", "GLOBAL", 1, 0, 0},
-        {0x55667788, 0x99AABBCC, "", "", 0, 0, 0},
-        {0, kInvalidId, "ARETHYA_VARIABLE", "LOCALS", 0x7FFFFFFF, 1, 0x0000000F},
-        {0, kInvalidId, "forty chars of name padding 1234567", "scope too", 0xDEADBEEF, 0x80, 0xFFFFFFFF},
+        { 0, kInvalidId, "KAPUT", "GLOBAL", 1, 0, 0 },
+        { 0x55667788, 0x99AABBCC, "", "", 0, 0, 0 },
+        { 0, kInvalidId, "ARETHYA_VARIABLE", "LOCALS", 0x7FFFFFFF, 1, 0x0000000F },
+        { 0, kInvalidId, "forty chars of name padding 1234567", "scope too", 0xDEADBEEF, 0x80, 0xFFFFFFFF },
     };
 
     auto run = [&](const Input& in) {
@@ -567,8 +567,8 @@ void SetVariableUnmarshal(CaseContext& ctx)
         wire.U32(in.flags);
 
         ctx.SetInputs("pair=(" + Hex(in.player) + "," + Hex(in.remote) + ") name=\"" + in.name
-                      + "\" scope=\"" + in.scope + "\" value=" + Hex(in.value)
-                      + " increment=" + Hex(static_cast<uint32_t>(in.increment)) + " flags=" + Hex(in.flags));
+            + "\" scope=\"" + in.scope + "\" value=" + Hex(in.value)
+            + " increment=" + Hex(static_cast<uint32_t>(in.increment)) + " flags=" + Hex(in.flags));
 
         int32_t returned = 0;
         uint8_t* message = nullptr;
@@ -631,10 +631,10 @@ void LoadDialogUnmarshal(CaseContext& ctx)
         bool aborts;
     };
     const Input inputs[] = {
-        {0, kInvalidId, "AEMYRA", 0, kInvalidId, false},
-        {0x12345678, 0x9ABCDEF0, "", 0, kInvalidId, false},
-        {0, kInvalidId, "0CHICK3N", 5, 6, true},
-        {0, kInvalidId, "DLGNAME9", 0xCAFEBABE, 0, true},
+        { 0, kInvalidId, "AEMYRA", 0, kInvalidId, false },
+        { 0x12345678, 0x9ABCDEF0, "", 0, kInvalidId, false },
+        { 0, kInvalidId, "0CHICK3N", 5, 6, true },
+        { 0, kInvalidId, "DLGNAME9", 0xCAFEBABE, 0, true },
     };
 
     auto run = [&](const Input& in) {
@@ -646,7 +646,7 @@ void LoadDialogUnmarshal(CaseContext& ctx)
         wire.Pair(in.player2, in.remote2);
 
         ctx.SetInputs("pair1=(" + Hex(in.player1) + "," + Hex(in.remote1) + ") dialog=\"" + in.dialog
-                      + "\" pair2=(" + Hex(in.player2) + "," + Hex(in.remote2) + ")");
+            + "\" pair2=(" + Hex(in.player2) + "," + Hex(in.remote2) + ")");
 
         int32_t returned = 0;
         uint8_t* message = nullptr;
@@ -726,17 +726,17 @@ void ContinueDialogUnmarshal(CaseContext& ctx)
         int mode; // 0 = completes, 2 = second pair other-miss, 3 = third pair other-miss
     };
     const Input inputs[] = {
-        {0, kInvalidId, "JOURNAL1", {1, 2, 3}, 0, kInvalidId, "NEXTDLG", 0, kInvalidId, 0x11111111,
-         0x22222222, 0x33333333, 0x44, 0},
-        {0x12345678, 0x9ABCDEF0, "", {0, 0x80000000, 0xFFFFFFFF}, 0, kInvalidId, "", 0, kInvalidId, 0,
-         0, 0, 0, 0},
+        { 0, kInvalidId, "JOURNAL1", { 1, 2, 3 }, 0, kInvalidId, "NEXTDLG", 0, kInvalidId, 0x11111111,
+            0x22222222, 0x33333333, 0x44, 0 },
+        { 0x12345678, 0x9ABCDEF0, "", { 0, 0x80000000, 0xFFFFFFFF }, 0, kInvalidId, "", 0, kInvalidId, 0,
+            0, 0, 0, 0 },
         // Pair 2 other-miss: the +0x1C store is skipped but the run
         // continues through the tail, so everything else still lands.
-        {0, kInvalidId, "KEEPS OLD", {7, 8, 9}, 7, 8, "STILL SET", 0, kInvalidId, 0, 0, 0x5A, 0x5B, 2},
+        { 0, kInvalidId, "KEEPS OLD", { 7, 8, 9 }, 7, 8, "STILL SET", 0, kInvalidId, 0, 0, 0x5A, 0x5B, 2 },
         // Pair 3 other-miss: return 0, +0x24 onward untouched (+0x1C and
         // text2 were stored before the miss).
-        {0, kInvalidId, "SET TOO", {0xA, 0xB, 0xC}, 0, kInvalidId, "SET BEFORE PAIR3", 9, 10, 0x55, 0x66,
-         0x77, 0x88, 3},
+        { 0, kInvalidId, "SET TOO", { 0xA, 0xB, 0xC }, 0, kInvalidId, "SET BEFORE PAIR3", 9, 10, 0x55, 0x66,
+            0x77, 0x88, 3 },
     };
 
     auto run = [&](const Input& in) {
@@ -757,10 +757,11 @@ void ContinueDialogUnmarshal(CaseContext& ctx)
         wire.U8(in.flag);
 
         ctx.SetInputs("pair1=(" + Hex(in.player1) + "," + Hex(in.remote1) + ") text1=\"" + in.text1
-                      + "\" pair2=(" + Hex(in.player2) + "," + Hex(in.remote2) + ") text2=\"" + in.text2
-                      + "\" pair3=(" + Hex(in.player3) + "," + Hex(in.remote3) + ") pair4=("
-                      + Hex(in.player4) + "," + Hex(in.remote4) + ") mode="
-                      + (in.mode == 0 ? "full" : in.mode == 2 ? "pair2skip" : "pair3abort"));
+            + "\" pair2=(" + Hex(in.player2) + "," + Hex(in.remote2) + ") text2=\"" + in.text2
+            + "\" pair3=(" + Hex(in.player3) + "," + Hex(in.remote3) + ") pair4=("
+            + Hex(in.player4) + "," + Hex(in.remote4) + ") mode="
+            + (in.mode == 0 ? "full" : in.mode == 2 ? "pair2skip"
+                                                    : "pair3abort"));
 
         int32_t returned = 0;
         uint8_t* message = nullptr;
@@ -861,12 +862,12 @@ void ImmumityUpdateUnmarshal(CaseContext& ctx)
         std::vector<uint32_t> entries; // wire DWORDs, in order
     };
     const Input inputs[] = {
-        {0, kInvalidId, {}},
-        {0x0001ABCD, 0x12345678, {0}},
-        {0, kInvalidId, {1, 0, 0xFFFFFFFF, 1}},
-        {0x12345678, 0x9ABCDEF0, {0x80000000, 0x7FFFFFFF}},
+        { 0, kInvalidId, {} },
+        { 0x0001ABCD, 0x12345678, { 0 } },
+        { 0, kInvalidId, { 1, 0, 0xFFFFFFFF, 1 } },
+        { 0x12345678, 0x9ABCDEF0, { 0x80000000, 0x7FFFFFFF } },
         // 16 entries crosses the first node block (10 per plex).
-        {0xFFFFFFFF, 0, {0xDEADBEEF, 0, 0, 0xCAFEBABE, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}},
+        { 0xFFFFFFFF, 0, { 0xDEADBEEF, 0, 0, 0xCAFEBABE, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 } },
     };
 
     auto run = [&](const Input& in) {
@@ -884,7 +885,7 @@ void ImmumityUpdateUnmarshal(CaseContext& ctx)
         }
 
         ctx.SetInputs("pair=(" + Hex(in.player) + "," + Hex(in.remote) + ") count="
-                      + Hex(static_cast<uint32_t>(in.entries.size())) + " ids=[" + ids + "]");
+            + Hex(static_cast<uint32_t>(in.entries.size())) + " ids=[" + ids + "]");
 
         int32_t returned = 0;
         uint8_t* message = nullptr;
@@ -915,7 +916,7 @@ void ImmumityUpdateUnmarshal(CaseContext& ctx)
         const uint8_t* list = message + kImmumityListOffset;
         if (in.entries.empty()) {
             oracle::Compare(ctx, std::string(kImmumityListSize, kPoison),
-                            ReadBytes(list, kImmumityListSize));
+                ReadBytes(list, kImmumityListSize));
             return;
         }
 
@@ -925,8 +926,8 @@ void ImmumityUpdateUnmarshal(CaseContext& ctx)
         oracle::Compare(ctx, 1u, static_cast<uint32_t>(ReadU32(list + 4) != 0));
         oracle::Compare(ctx, 1u, static_cast<uint32_t>(ReadU32(list + 8) != 0));
 
-        std::string values;  // node->data in walk order
-        std::string linked;  // a 1 per node whose pPrev is the previous node
+        std::string values; // node->data in walk order
+        std::string linked; // a 1 per node whose pPrev is the previous node
         uintptr_t prev = 0;
         uintptr_t node = ReadU32(list + 4);
         for (size_t i = 0; i < in.entries.size() && node != 0; ++i) {
