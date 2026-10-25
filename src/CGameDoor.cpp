@@ -1093,13 +1093,6 @@ static BYTE ToggleDoorSoundPriority(const CPoint& ptListener, const CPoint& pos)
     return static_cast<BYTE>(nPriority);
 }
 
-// 0x47D7F0
-BOOLEAN CGameDoor::DoAIUpdate(BOOLEAN active, LONG counter)
-{
-    // Folded with CGameContainer::DoAIUpdate at 0x47D7F0.
-    return active && (counter & m_AISpeed) == (m_AISpeed & m_id);
-}
-
 // 0x489680
 void CGameDoor::ToggleDoor(const CAIObjectType& cause, BOOL bForce)
 {

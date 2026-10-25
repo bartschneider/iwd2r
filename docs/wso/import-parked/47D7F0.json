@@ -1,0 +1,2 @@
+{"address": "0x47D7F0", "name": "CGameDoor::DoAIUpdate", "file": "src/CGameDoor.cpp", "batch": "i023",
+ "needs": "frida different: differs in walk_and_talk: event 13: original {\"a0_u8\": 0, \"a1_s32\": 1492, \"tag\": \"fn_47D7F0\", \"this\": \"<ptr>\"}, ours {\"a0_u8\": 0, \"a1_s32\": 1493, \"tag\": \"fn_47D7F0\", \"this\": \"<ptr>\"}"}
