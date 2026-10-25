@@ -109,6 +109,22 @@ void CImmunitiesSpellLevel::ClearAll()
     }
 }
 
+// 0x4E7000
+int CImmunitiesSpellLevel::GetMask() const
+{
+    // Pack the per-level immunity flags for spell levels 1..9 into a bitmask
+    // (level 0 is unused).  Used as a cheap change key for the multiplayer
+    // immunity broadcast in CGameSprite::ProcessEffectList.
+    int mask = 0;
+    int bit = 1;
+    for (int index = 1; index < 10; index++) {
+        mask += m_levels[index] * bit;
+        bit *= 2;
+    }
+
+    return mask;
+}
+
 // 0x4E7030
 CImmunitiesSpellLevel& CImmunitiesSpellLevel::operator=(const CImmunitiesSpellLevel& other)
 {
@@ -117,6 +133,15 @@ CImmunitiesSpellLevel& CImmunitiesSpellLevel::operator=(const CImmunitiesSpellLe
     }
 
     return *this;
+}
+
+// 0x4E7050
+void CImmunitiesSpellLevelDecrementing::ClearAll()
+{
+    for (int index = 0; index < 10; index++) {
+        m_levels[index].m_bImmune = FALSE;
+        m_levels[index].m_nLevels = 0;
+    }
 }
 
 // -----------------------------------------------------------------------------
