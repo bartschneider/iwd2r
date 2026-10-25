@@ -10682,6 +10682,191 @@ class DriverTest(unittest.TestCase):
         self.assertIn('`## Kept`', imp)
         self.assertIn('kept <0xADDR> <one-line reason>', imp)
 
+    # -- Task 30: fix-round discipline
+
+    def test_the_state_commit_trailer_is_pinned(self):
+        self.assertEqual(driver.STATE_COMMIT_TRAILER,
+                         'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>')
+
+    def test_fix_prompt_frozen_block_follows_the_first_paragraph(self):
+        frozen = [('0x401000', 'Rules::Render'), ('0x402000', 'Rules::Tick')]
+        p = driver.fix_prompt('i011', 'checks', 'p3/wso-i011', 'BRIEF', ['x'], 'import',
+                              frozen=frozen)
+        self.assertIn('**Frozen bodies.** The driver\'s Frida phase has measured these '
+                      'functions; their bodies are evidence now.', p)
+        self.assertIn('A parity RED on one of them is waived with a `parity_waiver:` line', p)
+        self.assertIn('\n- 0x401000 Rules::Render\n- 0x402000 Rules::Tick\n', p)
+        first = p.index('write your report again.')
+        self.assertLess(first, p.index('**Frozen bodies.**'))
+        self.assertLess(p.index('**Frozen bodies.**'), p.index('A base-body row the phase'))
+        for kind in ('verdicts', 'probes', 'import'):
+            self.assertNotIn('Frozen bodies', driver.fix_prompt(
+                'b011', 'checks', 'br', 'BRIEF', ['x'], kind))
+
+    def test_fix_round_report_rules_open_with_kept_and_fork(self):
+        imp = driver.FIX_REPORT_RULES['import']
+        self.assertTrue(imp.startswith(
+            'A base-body row the phase measured equal on OUR body stays under `## Kept` as '
+            '`kept <0xADDR> <one-line reason>`; `## Imported` lists only the rows whose body '
+            'you changed, one `imported <0xADDR> <evidence kind>` line each; a row is never '
+            'in both.'))
+        self.assertIn('This is an import batch', imp)
+        pr = driver.FIX_REPORT_RULES['probes']
+        self.assertTrue(pr.startswith(
+            'A row the phase decided `fork` keeps its `candidate <0xADDR> fork <reason>` line; '
+            '`neither` is only for a row you did not build, or edited back to the merge base '
+            'because the phase could not measure it.'))
+        self.assertIn('This is a probe batch', pr)
+
+    def test_frozen_rows_of_an_import_batch_are_the_measured_ones(self):
+        d, batch = self._kept_phase_driver(kept=())
+        with open(self.state_path) as f:
+            state = json.load(f)
+        rows = state['batches']['b011']['rows']
+        rows[0]['measured_body'] = 'aa'
+        rows[2]['measured_body'] = 'bb'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+        self.assertEqual(d._frozen_rows('b011'),
+                         [('0x401000', 'Rules::Render'), ('0x403000', 'Rules::Tick')])
+        w = d._fix('b011', batch | {'branch': 'p3/wso-b011'}, self._BatchWorker(credits=0.0),
+                   self.wt, 'checks', ['p'], 'BRIEF b011', 'fix')
+        self.assertIsNotNone(w)
+
+    def test_frozen_rows_of_a_probes_batch_are_the_phase_written_ones(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        d.kind = 'probes'
+        with open(d.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['rows'] = [
+            {'address': '0x402000', 'name': 'Rules::Tick'},
+            {'address': '0x403000', 'name': 'Rules::Other'}]
+        with open(d.state_path, 'w') as f:
+            json.dump(state, f)
+        d._update_status(lambda s: s['batches'].setdefault('b011', {}).setdefault(
+            'frida_written', {}).update({'402000': 'frida x'}))
+        self.assertEqual(d._frozen_rows('b011'), [('0x402000', 'Rules::Tick')])
+
+    def test_frozen_rows_of_a_verdicts_batch_need_a_frida_measurement(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with open(d.state_path) as f:
+            state = json.load(f)
+        batch = state['batches']['b011']
+        batch['rows'] = [{'address': '0x402000', 'name': 'Rules::Tick'},
+                         {'address': '0x403000', 'name': 'Rules::Other'}]
+        batch['verdicts'] = {'0x402000': {'side': 'ours', 'case': 'dump-1'},
+                             '0x403000': {'side': 'ours', 'case': 'dump-2', 'measured': 'frida'}}
+        with open(d.state_path, 'w') as f:
+            json.dump(state, f)
+        self.assertEqual(d._frozen_rows('b011'), [('0x403000', 'Rules::Other')])
+        batch['verdicts']['0x403000'].pop('measured')
+        with open(d.state_path, 'w') as f:
+            json.dump(state, f)
+        self.assertEqual(d._frozen_rows('b011'), [])
+
+    def _section_problems_of(self, d, report):
+        _v, probs = d._check('b011', self.wt, report)
+        return [p for p in probs if 'listed under ## ' in p]
+
+    def _mark_kept_outcomes(self):
+        with open(self.state_path) as f:
+            state = json.load(f)
+        for r in state['batches']['b011']['rows']:
+            r['outcome'] = 'kept'
+        with open(self.state_path, 'w') as f:
+            json.dump(state, f)
+
+    def test_check_refuses_an_imported_row_whose_body_is_unchanged(self):
+        d, batch = self._kept_phase_driver(kept=())
+        self._mark_kept_outcomes()
+        got = self._section_problems_of(d, '## Imported\nimported 0x402000 trace\n')
+        self.assertEqual(got, ['0x402000 listed under ## Imported but its body is unchanged '
+                               'against the merge base; list it under ## Kept (it was measured '
+                               'on our body) or import it'])
+        # the kept outcomes the phase recorded survive the fix round
+        self.assertEqual(self._outcomes(),
+                         {'0x401000': 'kept', '0x402000': 'kept', '0x403000': 'kept'})
+
+    def test_check_refuses_a_kept_row_whose_body_changed(self):
+        d, batch = self._body_phase(kept=True)
+        self._mark_kept_outcomes()
+        got = self._section_problems_of(d, '## Kept\nkept 0x401000 ours matches\n')
+        self.assertEqual(got, ['0x401000 listed under ## Kept but its body changed against the '
+                               'merge base; put the body back to the merge base\'s or list it '
+                               'under ## Imported'])
+        self.assertEqual(self._outcomes(), {'0x401000': 'kept'})
+        d._kept = {}
+        self.assertEqual(self._section_problems_of(
+            d, '## Imported\nimported 0x401000 trace\n'), [])
+
+    def test_check_section_rules_exempt_parked_rows(self):
+        d, batch = self._kept_phase_driver(kept=())
+        _write(os.path.join(self.wt, 'docs', 'wso', 'import-parked', '402000.json'),
+               json.dumps({'address': '0x402000', 'name': 'n', 'file': 'f', 'batch': 'b011',
+                           'needs': 'x'}))
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'park', cwd=self.wt)
+        self.assertEqual(self._section_problems_of(
+            d, '## Imported\nimported 0x402000 trace\n'), [])
+
+    def _amending_worker(self, command, amend):
+        t = self._tcalls(('Bash', {'command': command}))
+        w = self._twork([t])
+        if amend:
+            w.before = lambda cwd: subprocess.run(
+                ['git', '-C', cwd, 'commit', '-q', '--amend', '--allow-empty', '-m', 'again'],
+                check=True)
+        return w
+
+    def test_an_amend_that_keeps_the_start_tip_is_a_ledger_line(self):
+        w = self._amending_worker('git commit --amend -m better', amend=False)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertIn('transcript: rewrote only its own commits (git commit --amend -m '
+                      'better)', self._ledger_text(d))
+
+    def test_an_amend_that_moves_the_start_tip_is_a_transcript_exception(self):
+        w = self._amending_worker('git commit --amend -m better', amend=True)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'transcript')
+
+    def test_reset_stays_fatal_even_when_the_start_tip_stands(self):
+        w = self._amending_worker('git reset --hard', amend=False)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'transcript')
+
+    def test_settle_closed_recovers_the_gate_line(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with open(d.state_path) as f:
+            state = json.load(f)
+        state['batches']['b011']['gate'] = 'docs-only'
+        with open(d.state_path, 'w') as f:
+            json.dump(state, f)
+        d._commit_state = lambda bid: None
+        d.push = lambda: None
+        self.assertIsNone(d._settle_closed('b011'))
+        self.assertIn('- gate: docs-only', self._ledger_text(d))
+
+    def test_briefs_forbid_amending_and_waiting(self):
+        for name in ('brief-template.md', 'import-brief-template.md', 'probe-brief-template.md'):
+            text = _slurp(os.path.join(ROOT, 'docs', 'wso', name))
+            flat = ' '.join(text.split())
+            self.assertIn('If a commit message is wrong, make a new commit; never amend.', flat, name)
+            self.assertIn('Never wait for the coordinator, for `first` to move, or for another '
+                          'batch: if you cannot go on, write the report with what you have, say '
+                          'what blocked you, and return.', flat, name)
+            nums = [int(n) for n in re.findall(r'^(\d+)\. \*\*', text, re.M)]
+            self.assertEqual(nums, list(range(1, len(nums) + 1)), name)
+
     def test_credits_of_uses_both_formulas(self):
         lines = [json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
                  'usage': {'input_tokens': 10000, 'cache_read_input_tokens': 100000, 'output_tokens': 1000}}})]
@@ -13205,7 +13390,9 @@ class DriverTest(unittest.TestCase):
         # measured like an import: trace evidence for the CHANGED body
         self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
             self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
-        # the check tells the worker what to do
+        # the check tells the worker what to do (the later, fuller check: the early
+        # section check, which says it shorter, has its own tests)
+        d._section_problems = lambda *a: []
         _v, probs = d._check('b011', self.wt, '## Kept\nkept 0x401000 ours matches\n')
         mine = [p for p in probs if p.startswith('0x401000: listed under ## Kept but its body changed '
                                                   'against first')]
@@ -13838,6 +14025,7 @@ class DriverTest(unittest.TestCase):
             r['outcome'] = 'kept'
         with open(self.state_path, 'w') as f:
             json.dump(state, f)
+        d._section_problems = lambda *a: []     # these rows are not moved: the section check has its own tests
         d._check('b011', self.wt, '## Imported\nimported 0x402000 trace\n\n'
                  '## Kept\nkept 0x401000 ours is right\n')
         self.assertEqual(self._outcomes(),
@@ -13850,6 +14038,7 @@ class DriverTest(unittest.TestCase):
                            'needs': 'x'}))
         self.git('add', '-A', cwd=self.wt)
         self.git('commit', '-qm', 'park with evidence left', cwd=self.wt)
+        d._section_problems = lambda *a: []     # section check has its own tests
         report = '## Imported\nimported 0x401000 trace\n'
         text = ('0x402000: parked (docs/wso/import-parked/402000.json) but '
                 'docs/evidence/402000.md still exists; delete it')
@@ -17156,7 +17345,7 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(d.run(), 0)
         self.assertEqual(at_push, ['wave-state: close b011 (ours 1, fork 0, neither 0)'])
         head = self.git('show', '--format=%B', '--name-only', 'first').stdout
-        self.assertIn('Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>', head)
+        self.assertIn('Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>', head)
         names = self.git('show', '--format=', '--name-only', 'first').stdout.split()
         self.assertEqual(sorted(names), ['docs/wso/wave-state.json', 'docs/wso/xrec-report.md'])
         self.assertEqual(self.git('status', '--porcelain').stdout.strip(), 'M README')
@@ -17753,8 +17942,41 @@ class DriverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self.assertEqual(d.run(), 0)
         self.assertEqual(len(self.pushes), 1)
-        self.assertEqual(self.sent, ['driver: b011 exception at state-commit; see %s' % d.status_path])
         self.assertEqual(self.git('diff', '--cached', '--name-only').stdout.strip(), '')
+        # the close landed: the failed state commit is a `state` exception, one line sent
+        exc = self._status(d)['exceptions']['b011']
+        self.assertEqual(exc['stage'], 'state')
+        self.assertEqual(exc['problems'][1], driver.Driver.STATE_LANDED)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('exception at state', self.sent[0])
+
+    def test_a_cleared_state_exception_commits_the_state_and_pushes_only(self):
+        w = self._BatchWorker(credits=0.0)
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        self._state_in_repo(d)
+        self.git('rm', '-q', '--cached', 'docs/wso/wave-state.json')   # untracked and excluded, as on the probe queue
+        self.git('commit', '-qm', 'untrack the state')
+        exclude = os.path.join(self.root, '.git', 'info', 'exclude')
+        os.makedirs(os.path.dirname(exclude), exist_ok=True)
+        _write(exclude, 'docs/wso/wave-state.json\n')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            d.run()
+        self.assertEqual(self._status(d)['exceptions']['b011']['stage'], 'state')
+        self.assertEqual(self._state_of(d, 'b011')['status'], 'closed')
+        landed, pushes = self._rev('first'), len(self.pushes)
+        closes = []
+        real = d.close_batch
+        d.close_batch = lambda *a, **kw: closes.append(1) or real(*a, **kw)
+        _write(exclude, '')                       # the cause is fixed
+        self._clear(d, 'b011')
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(closes, [])              # no gate, no fast-forward again
+        self.assertEqual(len(w.briefs), 1)
+        self.assertEqual(len(self.pushes), pushes + 1)
+        self.assertEqual(self.git('log', '-1', '--format=%s', 'first').stdout.strip(),
+                         'wave-state: close b011 (ours 1, fork 0, neither 0)')
+        self.assertNotEqual(self._rev('first'), landed)
         self.assertEqual(self._status(d)['exceptions'], {})
 
     def test_an_exception_in_the_state_commit_never_skips_the_push(self):
