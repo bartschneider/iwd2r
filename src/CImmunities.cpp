@@ -119,15 +119,6 @@ CImmunitiesSpellLevel& CImmunitiesSpellLevel::operator=(const CImmunitiesSpellLe
     return *this;
 }
 
-// 0x4E7050
-void CImmunitiesSpellLevelDecrementing::ClearAll()
-{
-    for (int index = 0; index < 10; index++) {
-        m_levels[index].m_bImmune = FALSE;
-        m_levels[index].m_nLevels = 0;
-    }
-}
-
 // -----------------------------------------------------------------------------
 
 // NOTE: Inlined.

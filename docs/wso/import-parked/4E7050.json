@@ -1,0 +1,2 @@
+{"address": "0x4E7050", "name": "CImmunitiesSpellLevelDecrementing::ClearAll", "file": "src/CImmunities.cpp", "batch": "i023",
+ "needs": "not measured: called on one side only in walk_and_talk"}
