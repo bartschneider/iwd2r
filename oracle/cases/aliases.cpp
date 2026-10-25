@@ -123,7 +123,7 @@ void CheckParse(CaseContext& ctx, const char* raw)
     oracle::Compare(ctx, *reinterpret_cast<const int32_t*>(original + 4), static_cast<int32_t>(ours->field_4));
     ctx.SetInputs(inputs + ", the name");
     oracle::Compare(ctx, std::string(*reinterpret_cast<const char* const*>(original + 8)),
-            std::string(static_cast<const char*>(ours->field_8)));
+        std::string(static_cast<const char*>(ours->field_8)));
     ctx.SetInputs(inputs + ", the values");
     oracle::Compare(ctx, JoinOriginal(original), JoinOurs(*ours));
     ctx.SetInputs(inputs);
@@ -181,19 +181,19 @@ void CheckAdd(CaseContext& ctx, int32_t flag, bool nullAlias)
 void AliasParseRawData(CaseContext& ctx)
 {
     for (const char* const raw : {
-                "a:=b",
-                "a:=b;c",
-                "a:=b;c;d",
-                "a:=b\\;c",
-                "a:=b;",
-                "a:b",
-                "a=b",
-                "a:=",
-                "abc",
-                ":=x",
-                "longname:=v1;v2;v3",
-                "a:=b\\",
-        }) {
+             "a:=b",
+             "a:=b;c",
+             "a:=b;c;d",
+             "a:=b\\;c",
+             "a:=b;",
+             "a:b",
+             "a=b",
+             "a:=",
+             "abc",
+             ":=x",
+             "longname:=v1;v2;v3",
+             "a:=b\\",
+         }) {
         CheckParse(ctx, raw);
     }
 }

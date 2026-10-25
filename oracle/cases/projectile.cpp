@@ -86,10 +86,18 @@ void CheckDirection(CaseContext& ctx, const Point& pos, const Point& target)
 void ProjectileDirection(CaseContext& ctx)
 {
     static const Point kPositions[] = {
-        { 0, 0 }, { 100, 75 }, { -100, -75 }, { 32000, 24000 }, { -32000, -24000 },
+        { 0, 0 },
+        { 100, 75 },
+        { -100, -75 },
+        { 32000, 24000 },
+        { -32000, -24000 },
     };
     static const Point kTargets[] = {
-        { 0, 0 }, { 1000, 750 }, { -1000, -750 }, { 30000, 30000 }, { -30000, -30000 },
+        { 0, 0 },
+        { 1000, 750 },
+        { -1000, -750 },
+        { 30000, 30000 },
+        { -30000, -30000 },
     };
     for (const Point& pos : kPositions) {
         for (const Point& target : kTargets) {
