@@ -4250,6 +4250,49 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "i027": {
+      "assigned_at": "2026-10-25T23:02:44+00:00",
+      "branch": "p3/wso-i027",
+      "closed_at": "2026-10-25T23:16:20+00:00",
+      "files": [
+        "src/CGameEffect.cpp",
+        "src/CTimerWorld.cpp",
+        "src/CAliasList.cpp"
+      ],
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x452E70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectDeath::Copy",
+          "our_len": 191,
+          "outcome": "kept",
+          "their_len": 195
+        },
+        {
+          "address": "0x45B500",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CTimerWorld.cpp",
+          "name": "CTimerWorld::GetCurrentHour",
+          "our_len": 110,
+          "outcome": "kept",
+          "their_len": 129
+        },
+        {
+          "address": "0x781A90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CAliasList.cpp",
+          "name": "CAliasList::AddAlias",
+          "our_len": 91,
+          "outcome": "kept",
+          "their_len": 95
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
