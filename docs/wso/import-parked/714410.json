@@ -1,0 +1,2 @@
+{"address": "0x714410", "name": "CGameSprite::InitQuickSpellData", "file": "src/CGameSprite.cpp", "batch": "i017",
+ "needs": "world_entry: not measured (address-like untyped argument a3 (90368236 vs 222045304); type it from the header); ours reading matches the decompile"}

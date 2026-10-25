@@ -1,0 +1,2 @@
+{"address": "0x550B60", "name": "CNamedCreatureVariableHash::ClearAll", "file": "src/CVariableHash.cpp", "batch": "i017",
+ "needs": "world_entry: not measured (frequency difference only: identical in world_entry); ours reading matches the decompile"}
