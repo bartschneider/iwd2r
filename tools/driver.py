@@ -1813,7 +1813,7 @@ WIP_MESSAGE = 'WIP: parked by driver'
 # The breaker (ruling R45): this many batch exceptions in a row whose
 # worker never produced a transcript halt the run.
 BREAKER_LIMIT = 3
-STATE_COMMIT_TRAILER = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
+STATE_COMMIT_TRAILER = 'Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>'
 PUSH_ARGS = ('push', 'iwd2r', 'first:main', 'first:first')
 # Exceptions at these stages are not the batch's own: the run stops.
 GLOBAL_STAGES = ('cut', 'push')
