@@ -3635,6 +3635,15 @@
           "name": "CInfButtonArray::sub_588820",
           "our_len": 1457,
           "their_len": 1391
+        },
+        {
+          "address": "0x478490",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::SetDawn",
+          "our_len": 1650,
+          "their_len": 1642
         }
       ],
       "status": "closed",
@@ -3648,6 +3657,12 @@
           "case": "dump-477550",
           "losing_kind": "trace",
           "side": "ours"
+        },
+        "0x478490": {
+          "case": "frida-p003-first_fight",
+          "losing_kind": "read-only",
+          "measured": "frida",
+          "side": "fork"
         },
         "0x4E8DF0": {
           "case": "dump-4E8DF0",
@@ -4499,6 +4514,15 @@
           "name": "CVisibilityMap::sub_553440",
           "our_len": 765,
           "their_len": 315
+        },
+        {
+          "address": "0x5D79B0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::UpdateSavingThrows",
+          "our_len": 600,
+          "their_len": 575
         }
       ],
       "status": "closed",
@@ -4551,6 +4575,12 @@
           "losing_kind": "trace",
           "measured": "frida",
           "side": "ours"
+        },
+        "0x5D79B0": {
+          "case": "frida-p002-equip_shots",
+          "losing_kind": "read-only",
+          "measured": "frida",
+          "side": "fork"
         },
         "0x63D460": {
           "case": "dump-63D460",
@@ -5469,7 +5499,8 @@
         "src/CScreenConnection.cpp",
         "src/CGameDialog.cpp",
         "src/CVidMode.cpp",
-        "src/CAIObjectType.cpp"
+        "src/CAIObjectType.cpp",
+        "src/CGameArea.cpp"
       ],
       "fork_base": "e8dd16a750966af53f24daaf49dcb4fb13594c13",
       "pool": "glm",
@@ -5635,6 +5666,15 @@
           "name": "CAIObjectType::sub_40D0F0",
           "our_len": 334,
           "their_len": 336
+        },
+        {
+          "address": "0x477EE0",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::SetDay",
+          "our_len": 627,
+          "their_len": 710
         }
       ],
       "status": "closed",
@@ -5650,6 +5690,12 @@
           "losing_kind": "trace",
           "measured": "frida",
           "side": "ours"
+        },
+        "0x477EE0": {
+          "case": "frida-p003-first_fight",
+          "losing_kind": "read-only",
+          "measured": "frida",
+          "side": "fork"
         },
         "0x483CF0": {
           "case": "dump-483CF0",
@@ -8304,6 +8350,15 @@
           "name": "CUIControlButtonCharacter5EBC60::SetSpell",
           "our_len": 483,
           "their_len": 400
+        },
+        {
+          "address": "0x5E4E80",
+          "category": "both_changed_differ",
+          "class": "ambiguous",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::CanLevelUp",
+          "our_len": 486,
+          "their_len": 422
         }
       ],
       "status": "closed",
@@ -8332,6 +8387,12 @@
           "case": "dump-5E1F50",
           "losing_kind": "trace",
           "side": "ours"
+        },
+        "0x5E4E80": {
+          "case": "frida-p002-equip_shots",
+          "losing_kind": "read-only",
+          "measured": "frida",
+          "side": "fork"
         },
         "0x5E71A0": {
           "case": "dump-5E71A0",
