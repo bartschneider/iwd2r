@@ -1981,22 +1981,61 @@ def _spelling_problems(worktree, base, batch, report_addrs):
     return problems, odd_keys
 
 
-def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run):
+def _first_worktree(worktree, run=subprocess.run):
+    """The worktree that has `first` checked out (the driver's, where the
+    running batch's live state sits), from `git worktree list --porcelain`;
+    None when there is none."""
+    r = run(['git', '-C', worktree, 'worktree', 'list', '--porcelain'],
+            capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    path = None
+    for line in (r.stdout or '').splitlines():
+        if line.startswith('worktree '):
+            path = line.split(' ', 1)[1]
+        elif path is not None and line == 'branch refs/heads/first':
+            return path
+    return None
+
+
+def selfcheck(batch_id, worktree, report, base='first', run=subprocess.run,
+              state_path=None):
     """The driver's mechanical checks that need no driver state, for the
     worker to run on its own report and files before it returns (Task 24):
     [] when clean, else one problem per entry in the driver's own wording.
-    The batch id gives the kind (b: verdicts, i: import) and the state file;
-    nothing is edited."""
+    The batch id gives the kind (b: verdicts, i: import) and the state file.
+    The entry is looked for in this worktree's state file, then in the first
+    worktree's (the driver keeps the running batch's live state uncommitted
+    there), then in `state_path` (--state); nothing is edited."""
     wave = _tool('wave')
     kind = {'i': 'import', 'p': 'probes'}.get(batch_id[:1], 'verdicts')
     state_rel = 'docs/wso/%s-state.json' % {'import': 'import', 'probes': 'probe'}.get(
         kind, 'wave')
-    try:
-        batch = wave.load_state(os.path.join(worktree, state_rel))['batches'].get(batch_id)
-    except (OSError, ValueError) as e:
-        return ['cannot read %s (%r)' % (state_rel, e)]
+    # The driver holds the running batch's live state uncommitted in the
+    # worktree that has `first` checked out, so the batch worktree's copy
+    # (committed at the cut) has no entry for it: the first of the three
+    # places that has the entry wins, and nothing is copied in (Task 33).
+    first_wt = _first_worktree(worktree, run)
+    places = ['%s (this worktree)' % state_rel]
+    places.append(os.path.join(first_wt, state_rel) + ' (the first worktree)'
+                  if first_wt else 'the first worktree (no worktree has first checked out)')
+    places.append(os.path.abspath(state_path) + ' (--state)'
+                  if state_path else '--state (not given)')
+    batch = None
+    for place in (os.path.join(worktree, state_rel),
+                  os.path.join(first_wt, state_rel) if first_wt else None,
+                  state_path):
+        if not place:
+            continue
+        try:
+            batch = wave.load_state(place)['batches'].get(batch_id)
+        except (OSError, ValueError):
+            batch = None
+        if batch is not None:
+            break
     if batch is None:
-        return ['batch %s is not in %s; check the --batch id' % (batch_id, state_rel)]
+        return ['batch %s is not in %s; check the --batch id'
+                % (batch_id, ', '.join(places))]
     key = wave._addr_key
     problems = []
     try:
@@ -2110,22 +2149,26 @@ def _exclude_draft(worktree):
 
 
 def selfcheck_main(argv):
-    """`wave.py selfcheck --batch <id> [--report <file>]`, run in the batch
-    worktree: the report from --report (`-` is stdin), else `.report.md` there.
-    The one write it makes: `.report.md` into the repository's info/exclude when
-    missing (untracked; a worktree cut before the .gitignore entry needs it)."""
-    batch_id = report = None
+    """`wave.py selfcheck --batch <id> [--report <file>] [--state <file>]`,
+    run in the batch worktree: the report from --report (`-` is stdin), else
+    `.report.md` there; `--state` names a state file to read the batch from
+    when neither this worktree's nor the first one's has it. The one write it
+    makes: `.report.md` into the repository's info/exclude when missing
+    (untracked; a worktree cut before the .gitignore entry needs it)."""
+    batch_id = report = state_path = None
     it = iter(argv)
     for a in it:
-        if a in ('--batch', '--report'):
+        if a in ('--batch', '--report', '--state'):
             v = next(it, None)
             if v is None:
                 print('wave selfcheck: %s needs a value' % a, file=sys.stderr)
                 return 2
             if a == '--batch':
                 batch_id = v
-            else:
+            elif a == '--report':
                 report = v
+            else:
+                state_path = v
         else:
             print('wave selfcheck: unknown option %s' % a, file=sys.stderr)
             return 2
@@ -2149,7 +2192,7 @@ def selfcheck_main(argv):
     except OSError as e:
         print('wave selfcheck: cannot read the report (%s)' % e, file=sys.stderr)
         return 2
-    problems = selfcheck(batch_id, worktree, text)
+    problems = selfcheck(batch_id, worktree, text, state_path=state_path)
     if not problems:
         print('selfcheck: OK')
         return 0

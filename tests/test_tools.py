@@ -10628,7 +10628,14 @@ class DriverTest(unittest.TestCase):
         r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b999',
                             '--report', other], cwd=d, capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
-        self.assertIn('batch b999 is not in docs/wso/wave-state.json', r.stdout)
+        self.assertIn('batch b999 is not in docs/wso/wave-state.json (this worktree), '
+                      'the first worktree (no worktree has first checked out), '
+                      '--state (not given)', r.stdout)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', other, '--state'], cwd=d,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('--state needs a value', r.stderr)
 
     def test_selfcheck_cli_excludes_the_draft_untracked(self):
         d = self._sc_repo()
@@ -10657,6 +10664,74 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
                                         capture_output=True, text=True).stdout, before)
         self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+
+    def _sc_running_batch(self):
+        """`_sc_repo` with the worktree on the b012 branch: the state file
+        committed at the cut has no entry for the running batch b012."""
+        d = self._sc_repo()
+        self.sc_git('branch', '-m', 'p3/wso-b012')
+        return d
+
+    def _sc_first_worktree(self, live=None):
+        """A second worktree with `first` checked out (the driver's); `live`
+        overwrites its state file with the driver's uncommitted state."""
+        d = self._sc_running_batch()
+        first_wt = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, first_wt, True)
+        self.sc_git('worktree', 'add', '-q', first_wt, 'first')
+        if live is not None:
+            _write(os.path.join(first_wt, 'docs/wso/wave-state.json'), live)
+        return d, first_wt
+
+    _SC_ROWS = [{'address': '0x401000', 'class': 'ambiguous'},
+                {'address': '0x402000', 'class': 'ambiguous'}]
+
+    def _sc_live(self, bid):
+        return json.dumps({'batches': {bid: {'branch': 'p3/wso-' + bid,
+                                             'rows': self._SC_ROWS}}})
+
+    def test_selfcheck_reads_the_local_state_first(self):
+        d = self._sc_repo()
+        first_wt = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, first_wt, True)
+        self.sc_git('worktree', 'add', '-q', first_wt, 'first')
+        # both other places are unusable: the first worktree's live state is
+        # not json and --state names no file; the local entry wins anyway
+        _write(os.path.join(first_wt, 'docs/wso/wave-state.json'), 'not json')
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report(),
+                                          state_path=os.path.join(first_wt, 'gone.json')),
+                         [])
+
+    def test_selfcheck_finds_the_live_state_in_the_first_worktree(self):
+        # b012 is the running batch: the state file committed at the cut has
+        # no entry for it; the driver's live state sits in the first worktree
+        d, first_wt = self._sc_first_worktree(self._sc_live('b012'))
+        self.assertEqual(driver.selfcheck('b012', d, self._sc_report()), [])
+        # nothing was copied: the live state stays dirty in the first worktree
+        # and the batch worktree stays clean
+        st = subprocess.run(['git', '-C', first_wt, 'status', '--porcelain'],
+                            capture_output=True, text=True)
+        self.assertIn(' M docs/wso/wave-state.json', st.stdout)
+        self.assertEqual(subprocess.run(['git', '-C', d, 'status', '--porcelain'],
+                                        capture_output=True, text=True).stdout, '')
+
+    def test_selfcheck_reads_the_state_option_when_no_worktree_has_the_entry(self):
+        d = self._sc_running_batch()
+        state = os.path.join(tempfile.mkdtemp(), 'live.json')
+        self.addCleanup(shutil.rmtree, os.path.dirname(state), True)
+        _write(state, self._sc_live('b012'))
+        self.assertEqual(driver.selfcheck('b012', d, self._sc_report(),
+                                          state_path=state), [])
+
+    def test_selfcheck_names_the_three_places_it_looked(self):
+        # no place has b012: the cut copy has only b011 (renamed branch), the
+        # first worktree's state was never written, and --state is not given
+        d, first_wt = self._sc_first_worktree()
+        self.assertEqual(driver.selfcheck('b012', d, self._sc_report()),
+                         ['batch b012 is not in docs/wso/wave-state.json '
+                          '(this worktree), %s/docs/wso/wave-state.json '
+                          '(the first worktree), --state (not given); '
+                          'check the --batch id' % first_wt])
 
     def test_selfcheck_rule_is_pinned_in_the_briefs_and_the_fix_prompt(self):
         for name, n in (('brief-template.md', 15), ('import-brief-template.md', 10)):
