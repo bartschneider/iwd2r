@@ -1,0 +1,2 @@
+{"address": "0x482A40", "name": "CGameDialogSprite::LoadEntries", "file": "src/CGameDialog.cpp", "batch": "i023",
+ "needs": "no Frida hook: no entry for CGameDialogSprite::LoadEntries in our map"}
