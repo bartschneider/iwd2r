@@ -100,9 +100,13 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
     to a function, edit that function back to the merge base's body (`git
     show <merge-base>:<path>` shows it; `git merge-base first HEAD` names the
     merge base) and commit; do not replace a file that holds other rows'
-    changes. Workers only add and commit. The driver stops a batch whose
+    changes. If a commit message is wrong, make a new commit; never amend.
+    Workers only add and commit. The driver stops a batch whose
     transcript shows a history rewrite.
-14. **Selfcheck last.** Write your report to `.report.md` in the worktree (git
+14. **Never wait.** Never wait for the coordinator, for `first` to move, or for
+    another batch: if you cannot go on, write the report with what you have,
+    say what blocked you, and return.
+15. **Selfcheck last.** Write your report to `.report.md` in the worktree (git
     ignores it), run `python3 -I tools/wave.py selfcheck --batch {{id}}`, fix every
     line it prints, and run it again until it prints `selfcheck: OK`; then return
     the same text as your report.
