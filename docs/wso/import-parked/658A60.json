@@ -1,0 +1,1 @@
+{"address": "0x658A60", "name": "CUIControlButtonOptionsGameCommand::OnLButtonClick", "file": "src/CScreenOptions.cpp", "batch": "i019", "needs": "not exercised; ours reading matches the decompile"}
