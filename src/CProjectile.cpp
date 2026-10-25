@@ -527,7 +527,8 @@ void CProjectile::OnArrival()
         } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
 
         if (rc == CGameObjectArray::SUCCESS) {
-            pProjectile->RemoveSelf();
+            // Direct base call in the binary at 0x52A118.
+            pProjectile->CProjectile::RemoveSelf();
 
             g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(field_182,
                 CGameObjectArray::THREAD_ASYNCH,

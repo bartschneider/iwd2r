@@ -1,0 +1,1 @@
+{"address": "0x725950", "name": "CGameSpriteSpellList::Add", "file": "src/CGameSpriteSpells.cpp", "batch": "i020", "needs": "first_fight, world_map, biography: not measured (frequency difference only: identical in first_fight); ours reading matches the decompile"}

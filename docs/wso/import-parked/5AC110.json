@@ -1,0 +1,1 @@
+{"address": "0x5AC110", "name": "CInfGame::CanSaveGame", "file": "src/CInfGame.cpp", "batch": "i020", "needs": "not exercised; ours reading matches the decompile"}

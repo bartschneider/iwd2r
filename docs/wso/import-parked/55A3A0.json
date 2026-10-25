@@ -1,0 +1,1 @@
+{"address": "0x55A3A0", "name": "CWorldMap::sub_55A3A0", "file": "src/CWorldMap.cpp", "batch": "i020", "needs": "first_fight, world_map, biography: not measured (frequency difference only: identical in world_map); ours reading matches the decompile"}

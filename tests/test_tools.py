@@ -9235,9 +9235,10 @@ struct_layout_audit = load_parity_tool('struct_layout_audit')
 
 
 class ParityPreexistTest(unittest.TestCase):
-    """tools/parity/run.py's pre-existing-red downgrade (mask + decision) and
-    struct_layout_audit's phantom-member filter. Pure-function tests: the
-    decision is exercised through a synthetic check function, no git."""
+    """tools/parity/run.py's pre-existing-red downgrade (mask + decision),
+    waiver columns and struct_layout_audit's phantom-member filter.
+    Pure-function tests: the decision is exercised through a synthetic check
+    function, no git."""
 
     HEAD_REPO = '/repo/head'
     BASE_REPO = '/repo/base'
@@ -9283,6 +9284,28 @@ class ParityPreexistTest(unittest.TestCase):
             ['re_lint: L9: y', 're_lint: L8: x']))
         self.assertFalse(parity_run.same_after_mask(
             ['re_lint: L1: x'], []))
+
+    def test_same_findings_after_mask(self):
+        # the class re-run: the header's anchor counts moved with the change
+        # and base reports the hole the import filled -- still a match, the
+        # i023 CGameDoor shape
+        head = ['=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+                '(anchors 10/11) ===',
+                '[WRONGADDR] slot 0x0030: DebugDump src 0x47e040 != bin 0x4876e0',
+                '[MISSING] slot 0x0050: binary overrides -> 0x47d7f0 '
+                '(CGameContainer::DoAIUpdate), no source decl',
+                '[MISSING] slot 0x0078: binary overrides -> 0x486860, no source decl']
+        base = ['=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+                '(anchors 9/10) ===',
+                '[MISSING] slot 0x002c: binary overrides -> 0x487530, no source decl',
+                *head[1:]]
+        self.assertTrue(parity_run.same_findings_after_mask(head, base))
+        # a finding HEAD reports that base lacks is new: no match
+        self.assertFalse(parity_run.same_findings_after_mask(
+            head, [base[0], base[1], base[3]]))
+        # a header alone is not findings
+        self.assertFalse(parity_run.same_findings_after_mask(
+            ['=== C : B  vtable 0x1 ==='], ['=== C : B  vtable 0x1 ===']))
 
     # (b) the downgrade decision, via a synthetic check
     def test_identical_red_downgrades_to_warning(self):
@@ -9358,6 +9381,66 @@ class ParityPreexistTest(unittest.TestCase):
         self.assertNotIn('asm', parity_run.DELEGATED_COLUMNS)
         self.assertEqual(parity_run.DELEGATED_COLUMNS,
                          {'vtable', 'layout', 'offsets', 'markers', 'lints'})
+        # the class-level columns the downgrade may re-run through the class
+        self.assertEqual(parity_run.CLASS_COLUMNS, {'vtable', 'layout'})
+
+    # the waiver columns
+    def test_waiver_columns_leading_tokens_name_columns(self):
+        f = parity_run.waiver_columns
+        self.assertEqual(f(''), ['asm'])            # never reached: '' is no waiver
+        self.assertEqual(f('known thin wrapper'), ['asm'])   # today's files
+        self.assertEqual(f('asm red: the 25 callees ...'), ['asm'])  # prose
+        self.assertEqual(f('vtable: reason'), ['vtable'])
+        self.assertEqual(f('vtable asm 2026-10-25 i023: reason'),
+                         ['vtable', 'asm'])
+        self.assertEqual(f('lints layout offsets markers: x y'),
+                         ['lints', 'layout', 'offsets', 'markers'])
+        self.assertEqual(f('vtable::DoAIUpdate confirmed'), ['asm'])
+
+    def test_waive_cell_scopes_the_waiver_to_its_columns(self):
+        cell = (parity_run.RED, ['[WRONGADDR] slot 0x0030: src != bin'])
+
+        def waiver_repo(value):
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            d = os.path.join(tmp.name, 'docs', 'evidence')
+            os.makedirs(d)
+            with open(os.path.join(d, '401000.md'), 'w', encoding='utf-8') as f:
+                f.write('---\naddress: 0x401000\nname: A::f\n'
+                        f'parity_waiver: "{value}"\n---\n')
+            return tmp.name
+
+        text = 'vtable asm 2026-10-25 i023: class red confirmed by hand'
+        repo = waiver_repo(text)
+        for column in ('vtable', 'asm'):
+            verdict, notes = parity_run.waive_cell(column, 0x401000, cell,
+                                                   repo)
+            self.assertEqual(verdict, parity_run.WARNING)
+            self.assertEqual(notes, [*cell[1], f'  waived: {text}'])
+        # a column the waiver does not name stays RED, so does a row with no
+        # evidence file
+        self.assertEqual(parity_run.waive_cell('layout', 0x401000, cell,
+                                               repo), cell)
+        self.assertEqual(parity_run.waive_cell('vtable', 0x402000, cell,
+                                               repo), cell)
+        # no column token: asm only, today's meaning
+        repo = waiver_repo('known thin wrapper')
+        self.assertEqual(parity_run.waive_cell('asm', 0x401000, cell,
+                                               repo)[0], parity_run.WARNING)
+        self.assertEqual(parity_run.waive_cell('vtable', 0x401000, cell,
+                                               repo), cell)
+        # only a RED can be waived
+        self.assertEqual(parity_run.waive_cell(
+            'asm', 0x401000, (parity_run.YELLOW, ['soft']), repo),
+            (parity_run.YELLOW, ['soft']))
+
+    def test_evidence_readme_documents_waiver_columns(self):
+        with open(os.path.join(ROOT, 'docs', 'evidence', 'README.md'),
+                  encoding='utf-8') as f:
+            text = f.read()
+        self.assertIn('parity_waiver', text)
+        self.assertIn('vtable asm', text)   # the column-list form
+        self.assertIn('asm only', text)     # what no column token means
 
     # (c) the phantom-member filter
     HEADER = """\
@@ -9394,6 +9477,144 @@ public:
         # pair is gone, and the two real members are in order
         self.assertEqual(verdict, struct_layout_audit.SKIP)
         self.assertNotIn('goes backwards', ' '.join(notes))
+
+
+class ParityClassRedTest(unittest.TestCase):
+    """tools/parity/run.py's class-level pre-existing downgrade: a class
+    red (vtable/layout) on a function the change ADDED re-runs at base
+    through another function of the class. Git fixtures (the base extract
+    is a real archive); the class check is a synthetic check, the way
+    ParityPreexistTest's is."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = os.path.join(tmp.name, 'repo')
+        os.makedirs(self.repo)
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Test')
+        self.git('config', 'user.email', 'test@example.com')
+        self.git('config', 'commit.gpgsign', 'false')
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, check=True,
+                              capture_output=True, text=True).stdout
+
+    def write(self, rel, text):
+        path = os.path.join(self.repo, rel)
+        os.makedirs(os.path.dirname(path) or self.repo, exist_ok=True)
+        with open(path, 'w') as f:
+            f.write(text)
+
+    def commit(self, message='change'):
+        self.git('add', '-A')
+        self.git('commit', '-q', '--allow-empty', '-m', message)
+
+    def downgrade(self, base, rows, work, check):
+        old_checks = parity_run.CHECKS
+        parity_run.CHECKS = (('vtable', check),)
+        self.addCleanup(setattr, parity_run, 'CHECKS', old_checks)
+        parity_run.downgrade_preexisting(rows, work, self.repo, base,
+                                         ({}, {}, {}), None, [])
+
+    def test_class_red_downgrades_through_the_class_at_base(self):
+        # base: the class exists (GetFlags), the imported function does not
+        self.write('src/CGameDoor.cpp',
+                   '// 0x453140\n'
+                   'int CGameDoor::GetFlags(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        # the batch adds CompressTime; the class's vtable red comes with it
+        self.write('src/CGameDoor.cpp',
+                   '// 0x453140\n'
+                   'int CGameDoor::GetFlags(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n'
+                   '\n'
+                   '// 0x487530\n'
+                   'void CGameDoor::CompressTime(DWORD t)\n'
+                   '{\n'
+                   '    m_dwTime = t;\n'
+                   '}\n')
+        self.commit('import')
+        work = parity_run.collect(self.repo, base)
+        self.assertEqual([(rel, a, n) for rel, a, n, *_ in work],
+                         [('src/CGameDoor.cpp', 0x487530,
+                           'CGameDoor::CompressTime')])
+
+        head_notes = [
+            '=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+            '(anchors 10/11) ===',
+            '[WRONGADDR] slot 0x0030: DebugDump src 0x47e040 != bin 0x4876e0',
+            '[MISSING] slot 0x0050: binary overrides -> 0x47d7f0 '
+            '(CGameContainer::DoAIUpdate), no source decl',
+            '[MISSING] slot 0x0078: binary overrides -> 0x486860, no source decl']
+        base_notes = [  # anchors moved, plus the hole the import filled
+            '=== CGameDoor : CGameAIBase  vtable 0x8490b0 len 0xf8 '
+            '(anchors 9/10) ===',
+            '[MISSING] slot 0x002c: binary overrides -> 0x487530, no source decl',
+            *head_notes[1:]]
+        calls = []
+
+        def check(address, name, ctx):
+            calls.append((address, name, ctx['repo'], ctx['first']))
+            return parity_run.RED, (base_notes if ctx['repo'] != self.repo
+                                    else head_notes)
+
+        rows = [(0x487530, 'CGameDoor::CompressTime',
+                 {'vtable': (parity_run.RED, head_notes)})]
+        self.downgrade(base, rows, work, check)
+
+        verdict, notes = rows[0][2]['vtable']
+        self.assertEqual(verdict, parity_run.WARNING)
+        self.assertEqual(notes[0],
+                         f'pre-existing at base {base}: red reproduces there')
+        self.assertEqual(notes[1:], head_notes)
+        # the re-run went through the class's function at base -- GetFlags,
+        # whose span starts at line 0 of the base tree, not at our span
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 0x487530)
+        self.assertNotEqual(calls[0][2], self.repo)
+        self.assertEqual(calls[0][3], 0)
+
+    def test_class_red_without_a_class_function_at_base_stays_red(self):
+        # the base has no CGameDoor:: function at all: no proxy to re-run
+        # through, so the class red is new with this change
+        self.write('src/CGameSprite.cpp',
+                   '// 0x5845D0\n'
+                   'int CGameSprite::Render(int x)\n'
+                   '{\n'
+                   '    return x;\n'
+                   '}\n')
+        self.commit('base')
+        base = self.git('rev-parse', 'HEAD').strip()
+        self.write('src/CGameDoor.cpp',
+                   '// 0x487530\n'
+                   'void CGameDoor::CompressTime(DWORD t)\n'
+                   '{\n'
+                   '    m_dwTime = t;\n'
+                   '}\n')
+        self.commit('import')
+        work = parity_run.collect(self.repo, base)
+        self.assertEqual([n for _, _, n, *_ in work], ['CGameDoor::CompressTime'])
+        head_notes = ['=== CGameDoor : CGameAIBase  vtable 0x8490b0 '
+                      'len 0xf8 (anchors 1/1) ===',
+                      '[MISSING] slot 0x0030: no source decl']
+        calls = []
+
+        def check(address, name, ctx):
+            calls.append(ctx['repo'])
+            return parity_run.RED, head_notes
+
+        rows = [(0x487530, 'CGameDoor::CompressTime',
+                 {'vtable': (parity_run.RED, head_notes)})]
+        self.downgrade(base, rows, work, check)
+        self.assertEqual(rows[0][2]['vtable'], (parity_run.RED, head_notes))
+        self.assertEqual(calls, [])   # nothing to re-run through
 
 
 class TriageTest(unittest.TestCase):
@@ -10628,7 +10849,14 @@ class DriverTest(unittest.TestCase):
         r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b999',
                             '--report', other], cwd=d, capture_output=True, text=True)
         self.assertEqual(r.returncode, 1)
-        self.assertIn('batch b999 is not in docs/wso/wave-state.json', r.stdout)
+        self.assertIn('batch b999 is not in docs/wso/wave-state.json (this worktree), '
+                      'the first worktree (no worktree has first checked out), '
+                      '--state (not given)', r.stdout)
+        r = subprocess.run(['python3', '-I', wave_py, 'selfcheck', '--batch', 'b011',
+                            '--report', other, '--state'], cwd=d,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('--state needs a value', r.stderr)
 
     def test_selfcheck_cli_excludes_the_draft_untracked(self):
         d = self._sc_repo()
@@ -10657,6 +10885,74 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(subprocess.run(['git', '-C', d, 'status', '--porcelain', '-uall'],
                                         capture_output=True, text=True).stdout, before)
         self.assertEqual(self.sc_git('rev-parse', 'HEAD').stdout, head)
+
+    def _sc_running_batch(self):
+        """`_sc_repo` with the worktree on the b012 branch: the state file
+        committed at the cut has no entry for the running batch b012."""
+        d = self._sc_repo()
+        self.sc_git('branch', '-m', 'p3/wso-b012')
+        return d
+
+    def _sc_first_worktree(self, live=None):
+        """A second worktree with `first` checked out (the driver's); `live`
+        overwrites its state file with the driver's uncommitted state."""
+        d = self._sc_running_batch()
+        first_wt = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, first_wt, True)
+        self.sc_git('worktree', 'add', '-q', first_wt, 'first')
+        if live is not None:
+            _write(os.path.join(first_wt, 'docs/wso/wave-state.json'), live)
+        return d, first_wt
+
+    _SC_ROWS = [{'address': '0x401000', 'class': 'ambiguous'},
+                {'address': '0x402000', 'class': 'ambiguous'}]
+
+    def _sc_live(self, bid):
+        return json.dumps({'batches': {bid: {'branch': 'p3/wso-' + bid,
+                                             'rows': self._SC_ROWS}}})
+
+    def test_selfcheck_reads_the_local_state_first(self):
+        d = self._sc_repo()
+        first_wt = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, first_wt, True)
+        self.sc_git('worktree', 'add', '-q', first_wt, 'first')
+        # both other places are unusable: the first worktree's live state is
+        # not json and --state names no file; the local entry wins anyway
+        _write(os.path.join(first_wt, 'docs/wso/wave-state.json'), 'not json')
+        self.assertEqual(driver.selfcheck('b011', d, self._sc_report(),
+                                          state_path=os.path.join(first_wt, 'gone.json')),
+                         [])
+
+    def test_selfcheck_finds_the_live_state_in_the_first_worktree(self):
+        # b012 is the running batch: the state file committed at the cut has
+        # no entry for it; the driver's live state sits in the first worktree
+        d, first_wt = self._sc_first_worktree(self._sc_live('b012'))
+        self.assertEqual(driver.selfcheck('b012', d, self._sc_report()), [])
+        # nothing was copied: the live state stays dirty in the first worktree
+        # and the batch worktree stays clean
+        st = subprocess.run(['git', '-C', first_wt, 'status', '--porcelain'],
+                            capture_output=True, text=True)
+        self.assertIn(' M docs/wso/wave-state.json', st.stdout)
+        self.assertEqual(subprocess.run(['git', '-C', d, 'status', '--porcelain'],
+                                        capture_output=True, text=True).stdout, '')
+
+    def test_selfcheck_reads_the_state_option_when_no_worktree_has_the_entry(self):
+        d = self._sc_running_batch()
+        state = os.path.join(tempfile.mkdtemp(), 'live.json')
+        self.addCleanup(shutil.rmtree, os.path.dirname(state), True)
+        _write(state, self._sc_live('b012'))
+        self.assertEqual(driver.selfcheck('b012', d, self._sc_report(),
+                                          state_path=state), [])
+
+    def test_selfcheck_names_the_three_places_it_looked(self):
+        # no place has b012: the cut copy has only b011 (renamed branch), the
+        # first worktree's state was never written, and --state is not given
+        d, first_wt = self._sc_first_worktree()
+        self.assertEqual(driver.selfcheck('b012', d, self._sc_report()),
+                         ['batch b012 is not in docs/wso/wave-state.json '
+                          '(this worktree), %s/docs/wso/wave-state.json '
+                          '(the first worktree), --state (not given); '
+                          'check the --batch id' % first_wt])
 
     def test_selfcheck_rule_is_pinned_in_the_briefs_and_the_fix_prompt(self):
         for name, n in (('brief-template.md', 15), ('import-brief-template.md', 10)):
@@ -10903,6 +11199,20 @@ class DriverTest(unittest.TestCase):
                           'what blocked you, and return.', flat, name)
             nums = [int(n) for n in re.findall(r'^(\d+)\. \*\*', text, re.M)]
             self.assertEqual(nums, list(range(1, len(nums) + 1)), name)
+
+    def test_briefs_say_the_driver_owns_the_state_files(self):
+        # Task 33: workers never touch the driver's files; selfcheck finds the
+        # live state by itself.
+        rule = ('**Never touch the driver\'s files.** The files under `docs/wso/` '
+                'named `*-state.json`, `*-list.json`, `coverage.json`, `triage.json`, '
+                '`xrec-report.md`, and `docs/MAP.md`, are the driver\'s. Never edit, '
+                'copy over, or commit them; `selfcheck --batch` finds the live state '
+                'by itself. Your files are `src/`, `docs/evidence/`, and '
+                '`docs/wso/import-parked/<ADDR>.json`.')
+        for name in ('brief-template.md', 'import-brief-template.md',
+                     'probe-brief-template.md'):
+            flat = ' '.join(_slurp(os.path.join(ROOT, 'docs', 'wso', name)).split())
+            self.assertIn(rule, flat, name)
 
     def test_credits_of_uses_both_formulas(self):
         lines = [json.dumps({'type': 'assistant', 'message': {'model': 'glm-5.3-flash',
@@ -16601,8 +16911,14 @@ class DriverTest(unittest.TestCase):
         for rel in ('import-brief-template.md', 'brief-template.md', 'README.md'):
             prose.append(_slurp(os.path.join(ROOT, 'docs', 'wso', rel)))
         verb = re.compile(r'\b(?:revert|restor)\w*', re.I)
+        # Task 33's driver-owned problems are the one place a revert is the
+        # remedy (the brief fixes their wording)
+        allowed = ("is the driver's; revert your commit's change to it "
+                   '(git revert or a new commit putting the merge-base copy back)',
+                   'was modified by the worker; restored (driver-owned)')
         for text in prose:
             bare = re.sub(r'`[^`]*`', '', text)
+            bare = re.sub('|'.join(re.escape(a) for a in allowed), '', bare)
             self.assertIsNone(verb.search(bare), text[:200])
             if re.search(r'git show[^`]*> *<path>', text):
                 self.assertIn('outside the paths a batch may touch', text)
@@ -16614,15 +16930,39 @@ class DriverTest(unittest.TestCase):
         self.assertIn(driver.EDIT_BACK % 'abc', driver.park_text('0x401000', 'abc', 'x'))
 
     def test_transcript_rejects_wso_ref(self):
-        for cmd in ('git show wso/main:src/A.cpp', 'git show wso/x', 'git diff wso/main -- src',
-                    'git log wso/main --oneline', 'cd x && git diff first..wso/main',
-                    'git show refs/remotes/wso/main:README'):
+        # only the subcommands that put the fork tree on disk (Task 33)
+        for cmd in ('git checkout wso/main', 'git merge wso/main',
+                    'git -C x switch wso/main', 'git cherry-pick wso/main',
+                    'git archive wso/main', 'cd x && git pull wso/main'):
             probs = self._bash(cmd)
             self.assertEqual(len(probs), 1, cmd)
             self.assertIn('wso/', probs[0])
+        # branch with a write flag names the ref, but the history rule
+        # catches it: one problem, not two
+        probs = self._bash('git branch -D wso/main')
+        self.assertEqual(len(probs), 1)
+        self.assertIn('history rewrite', probs[0])
         # a path under docs/wso/ is not a ref
         self.assertEqual(self._bash('git log -- docs/wso/README.md'), [])
         self.assertEqual(self._bash('ls wso/ && git status'), [])
+
+    def test_transcript_reads_a_wso_ref_without_fatality(self):
+        """A read of a wso/ ref is a ledger-line finding, never a problem
+        (i020 lost a review over a fatal `git rev-parse wso/main`)."""
+        for cmd in ('git rev-parse wso/main', 'git show wso/main:src/F11.cpp',
+                    'git log wso/main', 'git diff wso/main',
+                    'git -C x diff wso/main',
+                    'git show remotes/wso/main:src/x.cpp',
+                    'git branch --list wso/main',
+                    'git for-each-ref refs/remotes/wso/main',
+                    'git ls-tree wso/main src', 'git merge-base wso/main HEAD',
+                    'git name-rev wso/main', 'git describe wso/main',
+                    'git cat-file -p wso/main:src/A.cpp'):
+            self.assertEqual(self._bash(cmd), [], cmd)
+            self.assertEqual(driver.transcript_findings(
+                self._tcalls(('Bash', {'command': cmd})), []),
+                [('wso-read', 'transcript: read a wso/ ref (%s)' % cmd,
+                  None)], cmd)
 
     def test_transcript_allows_pinned_sha(self):
         self.assertEqual(self._bash('git show e8dd16a7:src/A.cpp | head -50'), [])
@@ -16673,6 +17013,9 @@ class DriverTest(unittest.TestCase):
             'git commit -a --amend --no-edit', 'git filter-repo --path src',
             'git push', 'git push origin HEAD', 'git branch -D old',
             'git branch -d old', 'git branch --delete old', 'git update-ref -d refs/x',
+            'git update-index --skip-worktree docs/wso/import-state.json',
+            'git update-index --assume-unchanged src/A.cpp',
+            'git -C /w update-index --no-assume-unchanged docs/MAP.md',
             'git reflog expire --expire=now --all', 'git gc --prune=now',
             'git -C /w reset --hard', 'git -c core.x=1 revert abc1234',
             'git checkout src/A.cpp', 'git checkout ./src/A.cpp',
@@ -16701,7 +17044,7 @@ class DriverTest(unittest.TestCase):
              'history rewrite'),
             ("# it's time\nWindowsSandbox.exe run.wsb", 'launch outside'),
             ("# what's here\ncat src/A.cpp", 'cat of src/A.cpp'),
-            ("# what's here\ngit show wso/main:src/A.cpp", 'wso/ ref'),
+            ("# what's here\ngit checkout wso/main", 'wso/ ref'),
             ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
              "git reset --hard", 'history rewrite'),
             ("cat > docs/evidence/x.md <<'EOF'\nThe binary's body differs\nEOF\n"
@@ -16782,7 +17125,7 @@ class DriverTest(unittest.TestCase):
         d = self._mc_repo({'76D370': 'corroborated by WSO at abc; case c decides'})
         batch = self._mc_batch()
         batch['rows'] = batch['rows'][:1]
-        path = self._tcalls(('Bash', {'command': 'git show wso/main:src/A.cpp'}))
+        path = self._tcalls(('Bash', {'command': 'git checkout wso/main'}))
         with mock.patch.object(driver, '_vanilla_exe', return_value='/nonexistent'):
             probs = driver.mechanical_checks(
                 batch, d, {'0x76D370': ('ours', 'c')}, transcript=path,
@@ -16829,7 +17172,6 @@ class DriverTest(unittest.TestCase):
             _write(os.path.join(wt, 'compat', 'ok.h'), 'x\n')
             _write(os.path.join(wt, 'oracle', 'cases', 'c.json'), 'x\n')
             _write(os.path.join(wt, 'oracle', 'CMakeLists.txt'), 'x\n')
-            _write(os.path.join(wt, 'docs', 'MAP.md'), 'x\n')
             _write(os.path.join(wt, '.mcp.json'), '{}\n')
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',),
@@ -16842,7 +17184,7 @@ class DriverTest(unittest.TestCase):
         for bad in ('tools/extra.py', 'docs/wso/brief-template.md', '.mcp.json'):
             self.assertIn(bad, text)
         for ok in ('src/ok.cpp', 'compat/ok.h', 'oracle/cases/c.json',
-                   'oracle/CMakeLists.txt', 'docs/MAP.md'):
+                   'oracle/CMakeLists.txt'):
             self.assertNotIn(ok, text)
         self.assertFalse(driver._path_allowed('docs/evidence-other/x.md'))
         self.assertTrue(driver._path_allowed('docs/evidence/40B000.md'))
@@ -16912,7 +17254,9 @@ class DriverTest(unittest.TestCase):
             self._first_moves()
             _write(os.path.join(wt, 'wip.txt'), 'x\n')
             before = self._rev('HEAD', cwd=wt)
-            d._check('b011', wt, self._T26_REPORT)
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, [])            # not a restore problem: the
+        self.assertEqual(_slurp(os.path.join(wt, 'wip.txt')), 'x\n')  # worker's file
         self.assertEqual(self._rev('HEAD', cwd=wt), before)
         self.assertEqual(self.seen, [(False, True)])
 
@@ -16955,11 +17299,93 @@ class DriverTest(unittest.TestCase):
         with mock.patch.dict(os.environ, self.GIT_ENV):
             self._first_moves('first\n', 'docs/MAP.md')
             verdicts, problems = d._check('b011', wt, self._T26_REPORT)
-        self.assertEqual(problems, [])
+        # the committed MAP.md is the driver's: a problem to revert, and the
+        # checks (and this round) wait for the fix round
+        self.assertEqual(problems, ["docs/MAP.md is the driver's; revert your "
+                                    "commit's change to it (git revert or a new "
+                                    'commit putting the merge-base copy back)'])
+        self.assertEqual(self.seen, [])
         body = self.git('log', '-1', '--format=%B', cwd=wt).stdout
         self.assertNotIn('Conflicts', body)
         self.assertNotIn('#', body)
         self.assertIn(driver.STATE_COMMIT_TRAILER, body)
+
+    def test_check_restores_a_dirty_driver_owned_file_and_merges(self):
+        d, wt = self._t26_driver(base_files={'docs/wso/wave-state.json': '{}\n'})
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            _write(os.path.join(wt, 'docs', 'wso', 'wave-state.json'), 'dirty\n')
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ['docs/wso/wave-state.json was modified by the '
+                                    'worker; restored (driver-owned)'])
+        self.assertIn('b011: docs/wso/wave-state.json was modified by the worker; '
+                      'restored (driver-owned)', self.logs)
+        # the restore is a problem this round (a fix round follows), but the
+        # merge still happened and the tree is clean
+        self.assertEqual(self.seen, [])
+        self.assertEqual(_slurp(os.path.join(wt, 'docs', 'wso', 'wave-state.json')),
+                         '{}\n')
+        self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)
+
+    def test_check_clears_a_hidden_index_flag_on_a_driver_owned_file(self):
+        """i021/i022/i023 (Task 33): a skip-worktree or assume-unchanged flag
+        hides the dirty file from `git status`, so the flag is cleared and the
+        file restored like any dirty driver-owned file, and the merge runs."""
+        for flag in ('--skip-worktree', '--assume-unchanged'):
+            d, wt = self._t26_driver(
+                base_files={'docs/wso/wave-state.json': '{}\n'})
+            with mock.patch.dict(os.environ, self.GIT_ENV):
+                self._first_moves()
+                _write(os.path.join(wt, 'docs', 'wso', 'wave-state.json'), 'dirty\n')
+                self.git('update-index', flag, '--',
+                         'docs/wso/wave-state.json', cwd=wt)
+                self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+                verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+            self.assertEqual(problems, ['docs/wso/wave-state.json was modified by the '
+                                        'worker; restored (driver-owned)'], flag)
+            self.assertIn('b011: docs/wso/wave-state.json was modified by the worker; '
+                          'restored (driver-owned)', self.logs)
+            self.assertEqual(self.seen, [])
+            self.assertEqual(_slurp(os.path.join(wt, 'docs', 'wso',
+                                                 'wave-state.json')), '{}\n')
+            self.assertEqual(self.git('status', '--porcelain', cwd=wt).stdout, '')
+            self.assertEqual(self.git('ls-files', '-v', '--',
+                                      'docs/wso/wave-state.json',
+                                      cwd=wt).stdout, 'H docs/wso/wave-state.json\n')
+            parents = self.git('rev-list', '--parents', '-n1', 'HEAD',
+                               cwd=wt).stdout.split()
+            self.assertEqual(len(parents), 3)
+
+    def test_check_unlinks_an_untracked_copy_of_a_driver_owned_file(self):
+        d, wt = self._t26_driver()     # docs/wso/import-state.json is in no commit
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            _write(os.path.join(wt, 'docs', 'wso', 'import-state.json'), '{}\n')
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ['docs/wso/import-state.json was modified by the '
+                                    'worker; restored (driver-owned)'])
+        self.assertFalse(os.path.exists(
+            os.path.join(wt, 'docs', 'wso', 'import-state.json')))
+        self.assertEqual(self.seen, [])
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)
+
+    def test_check_reports_a_driver_owned_file_the_worker_committed(self):
+        def on_branch(wt, bid):
+            _write(os.path.join(wt, 'docs', 'wso', 'coverage.json'), '{}\n')
+        d, wt = self._t26_driver(base_files={'docs/wso/coverage.json': 'base\n'},
+                                 on_branch=on_branch)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self._first_moves()
+            verdicts, problems = d._check('b011', wt, self._T26_REPORT)
+        self.assertEqual(problems, ["docs/wso/coverage.json is the driver's; revert "
+                                    "your commit's change to it (git revert or a new "
+                                    'commit putting the merge-base copy back)'])
+        self.assertEqual(self.seen, [])
+        parents = self.git('rev-list', '--parents', '-n1', 'HEAD', cwd=wt).stdout.split()
+        self.assertEqual(len(parents), 3)      # the merge is not stopped
 
     def test_ledger_commit_count_ignores_the_pre_check_merge(self):
         d, wt = self._t26_driver()
@@ -17172,6 +17598,16 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._status(d)['exceptions'], {})
         self.assertIn('transcript: whole read of src/F11.cpp', self._ledger_text(d))
 
+    def test_reading_a_wso_ref_is_a_ledger_line_only(self):
+        t = self._tcalls(('Bash', {'command': 'git rev-parse wso/main'}))
+        w = self._twork([t])
+        d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)
+        self.assertEqual(self._status(d)['exceptions'], {})
+        self.assertIn('transcript: read a wso/ ref (git rev-parse wso/main)',
+                      self._ledger_text(d))
+
     def test_missing_transcript_is_a_ledger_line(self):
         w = self._BatchWorker(credits=0.0)
         d = self._pool_driver(self._two_pools()[:1], {'a': w}, ids=('b011',))
@@ -17180,7 +17616,7 @@ class DriverTest(unittest.TestCase):
         self.assertIn('transcript: none', self._ledger_text(d))
 
     def test_wso_ref_or_launch_in_a_transcript_is_an_exception_without_a_fix_round(self):
-        for cmd in ('git show wso/main:src/F11.cpp', 'WindowsSandbox.exe run.wsb',
+        for cmd in ('git checkout wso/main', 'WindowsSandbox.exe run.wsb',
                     'git reset --hard'):
             t = self._tcalls(('Bash', {'command': cmd}))
             w = self._twork([t])
@@ -17197,7 +17633,7 @@ class DriverTest(unittest.TestCase):
             return json.load(f)['batches'][bid]
 
     def test_every_transcript_is_checked_not_only_the_fix_rounds(self):
-        bad = self._tcalls(('Bash', {'command': 'git log wso/main'}))
+        bad = self._tcalls(('Bash', {'command': 'git merge wso/main'}))
         clean = self._tcalls(('Bash', {'command': 'ls'}))
         # The first run is the offender; the fix round's transcript is clean.
         w = self._twork([bad, clean])
@@ -17653,7 +18089,7 @@ class DriverTest(unittest.TestCase):
             f.write(json.dumps({'type': 'assistant', 'message': {
                 'id': 'm2', 'usage': {'input_tokens': 100, 'output_tokens': 50},
                 'content': [{'type': 'tool_use', 'id': 't2', 'name': 'Bash',
-                             'input': {'command': 'git show wso/main:x'}},
+                             'input': {'command': 'git checkout wso/main'}},
                             {'type': 'tool_use', 'id': 't3', 'name': 'Bash',
                              'input': {'command': 'ls'}}]}}) + '\n')
         probs = driver.transcript_checks(main, [])
@@ -17829,6 +18265,53 @@ class DriverTest(unittest.TestCase):
             d.run()
         self.assertEqual(len(w.briefs), 2)
         self.assertEqual(self._status(d)['exceptions']['b011']['problems'][1:], first)
+
+    def test_the_breaker_does_not_count_exceptions_that_ran_no_worker(self):
+        """Run 17 (Task 33): a recheck runs no worker, so its exception has
+        no transcript by design.  Three recheck exceptions in a row do not
+        halt the run; three fresh batches whose workers left no transcript
+        still do."""
+        class Bad(_SeqWorker):
+            def run(w, brief, cwd):
+                w.briefs.append(brief)
+                bid = re.search(r'BRIEF (b\d+)', brief).group(1)
+                addr = 0x400000 + int(bid[1:]) * 0x1000
+                return driver.Result(0, '## Verdicts\n\nverdict 0x%X ours case '
+                                        'dump-zzz\n' % addr, real, 0.0, False)
+        w = Bad('')
+        d = self._pool_driver(self._two_pools()[:1], {'a': w},
+                              ids=('b011', 'b012', 'b013', 'b014', 'b015', 'b016'))
+        real = self._jsonl('ran.jsonl', [self._turn()])   # the worker really ran
+        phases = []
+        d._frida_phase = lambda *a, **kw: phases.append(1) or []
+        d.frida = True
+        self.pending = ['b011', 'b012', 'b013']   # b014-016 wait for the contrast
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)          # three checks exceptions
+        self.assertEqual(len(w.briefs), 6)        # each worker and its one fix round
+        st = self._status(d)
+        self.assertEqual([st['exceptions'][b]['stage'] for b in
+                          ('b011', 'b012', 'b013')], ['checks'] * 3)
+        self.assertIsNone(st['halted'])           # the workers really ran
+        for b in ('b011', 'b012', 'b013'):
+            self._clear(d, b)
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 0)          # three rechecks, no worker
+        self.assertEqual(len(w.briefs), 6)        # no worker ran again
+        st = self._status(d)
+        self.assertIsNone(st['halted'])           # the breaker did not trip
+        self.assertEqual([st['exceptions'][b]['stage'] for b in
+                          ('b011', 'b012', 'b013')], ['checks'] * 3)
+        self.assertTrue(all(st['exceptions'][b]['problems'][0] ==
+                            'unchanged after recheck; fix by hand or clear '
+                            'with --rerun' for b in ('b011', 'b012', 'b013')))
+        # the contrast: three fresh batches whose workers leave no transcript
+        d.worker = self._NoReport([None] * 4)
+        self.pending = ['b014', 'b015', 'b016']
+        with mock.patch.dict(os.environ, self.GIT_ENV):
+            self.assertEqual(d.run(), 1)
+        self.assertEqual(self._status(d)['halted']['reason'],
+                         'breaker: 3 batches without a worker transcript')
 
     def test_a_cleared_review_exception_rechecks_and_reviews_again(self):
         blocking = '## Findings\n\n- BLOCKING: nope\n'
@@ -18203,9 +18686,9 @@ class DriverTest(unittest.TestCase):
                'tools/gen_map.py': _slurp(gen)}
         added = {'b011': 'src/CGameNew.cpp', 'b012': 'src/CScreenNew.cpp'}
 
-        def on_branch(wt, bid):    # a worker's source file and its own MAP edit
-            _write(os.path.join(wt, added[bid]), '// 0x401000\nint y; // TODO: Incomplete\n')
-            _write(os.path.join(wt, 'docs', 'MAP.md'), 'mine ' + bid + '\n')
+        def on_branch(wt, bid):    # a worker's source file (a MAP edit is now
+            _write(os.path.join(wt, added[bid]),    # the driver's, Task 33)
+                   '// 0x401000\nint y; // TODO: Incomplete\n')
         d = self._pool_driver(self._two_pools()[:1], {'a': self._BatchWorker(credits=0.0)},
                               ids=('b011', 'b012'), base_files=src, on_branch=on_branch)
         calls = []
@@ -18349,7 +18832,7 @@ class DriverTest(unittest.TestCase):
     def test_a_transcript_violation_on_the_first_run_does_not_trip_the_breaker(self):
         """R68: the scan runs after the run's bookkeeping, so the run still
         counts as a worker run and its evidence is saved."""
-        bad = self._tcalls(('Bash', {'command': 'git show wso/main:src/F11.cpp'}))
+        bad = self._tcalls(('Bash', {'command': 'git checkout wso/main'}))
         with open(bad, 'a') as f:      # the worker really ran: a successful turn
             f.write(json.dumps(self._turn()) + '\n')
         w = self._twork([bad])

@@ -1,0 +1,1 @@
+{"address": "0x5594D0", "name": "CWorldMap::GetMapSize", "file": "src/CWorldMap.cpp", "batch": "i020", "needs": "first_fight, world_map, biography: not measured (frequency difference only: identical in world_map); ours reading matches the decompile"}
