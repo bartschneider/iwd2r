@@ -777,15 +777,18 @@ def run_case_file(runner, exe, name, args, out_dir):
     print('== %s' % name)
     try:
         # The runner kills its own child at FILE_TIMEOUT; this is a backstop.
+        # Failure-detail lines echo payload bytes verbatim, which need not be
+        # UTF-8; decode lossily so the echo cannot take the report with it.
         r = subprocess.run(command, cwd=ORACLE_DIR, capture_output=True,
-                           text=True, timeout=FILE_TIMEOUT + 60)
+                           text=True, errors='replace',
+                           timeout=FILE_TIMEOUT + 60)
         code, stdout, stderr = r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired as e:
         code = None
-        stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else \
-            (e.stdout or '')
-        stderr = e.stderr.decode() if isinstance(e.stderr, bytes) else \
-            (e.stderr or '')
+        stdout = e.stdout.decode('utf-8', 'replace') \
+            if isinstance(e.stdout, bytes) else (e.stdout or '')
+        stderr = e.stderr.decode('utf-8', 'replace') \
+            if isinstance(e.stderr, bytes) else (e.stderr or '')
     for line in stdout.splitlines():
         print('  %s' % line)
     for line in stderr.splitlines():
