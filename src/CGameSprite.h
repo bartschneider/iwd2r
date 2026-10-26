@@ -450,6 +450,7 @@ public:
     void RemoveReplacementFromArea();
     void AIUpdateWalk();
     void SetPath(LONG* pPath, SHORT nPath);
+    void ComputeWaypoint(CPoint& result, LONG** ppPath, SHORT* pnPath, SHORT delay, BYTE* pReachedEnd);
     BOOL ClearBumpPath(const CPoint& start, const CPoint& goal);
     BOOL IsVisibleToCaller(BOOL bSeeInvisible);
     BOOL sub_6FB440();

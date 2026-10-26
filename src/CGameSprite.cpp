@@ -16773,6 +16773,82 @@ void CGameSprite::SetCurrAction(const CAIAction& action)
     }
 }
 
+// 0x734720
+void CGameSprite::ComputeWaypoint(CPoint& result, LONG** ppPath, SHORT* pnPath, SHORT delay, BYTE* pReachedEnd)
+{
+    LONG* pPath = *ppPath;
+    SHORT nPath = *pnPath;
+
+    LONG lastPos = pPath[nPath - 1];
+    LONG targetSquares = delay * 3;
+
+    LONG lastX = lastPos % CPathSearch::GRID_ACTUALX;
+    LONG lastY = CPathSearch::GRID_ACTUALY - lastPos / CPathSearch::GRID_ACTUALX - 1;
+
+    LONG prevPos = pPath[nPath - 2];
+    LONG prevX = prevPos % CPathSearch::GRID_ACTUALX;
+    LONG prevY = CPathSearch::GRID_ACTUALY - prevPos / CPathSearch::GRID_ACTUALX - 1;
+
+    *pReachedEnd = 0;
+
+    CPoint ptLast(lastX, lastY);
+    CPoint ptPrev(prevX, prevY);
+    LONG segSquares = CAIUtil::CountSquares(ptLast, ptPrev);
+
+    BOOL exact = (segSquares == targetSquares);
+
+    while (segSquares < targetSquares) {
+        SHORT newN = nPath - 1;
+        *pnPath = newN;
+
+        if (newN < 3) {
+            *pnPath = nPath;
+            LONG dx = lastX - prevX;
+            LONG dy = lastY - prevY;
+            LONG segLen = CAIUtil::CountSquares(ptLast, ptPrev);
+            LONG steps = targetSquares / segLen + 1;
+            *pReachedEnd = 1;
+            result.x = CPathSearch::GRID_SQUARE_SIZEX * (lastX - steps * dx);
+            result.y = CPathSearch::GRID_SQUARE_SIZEY * (lastY - steps * dy);
+            return;
+        }
+
+        nPath = newN;
+        targetSquares -= segSquares;
+
+        lastPos = pPath[nPath - 1];
+        lastX = lastPos % CPathSearch::GRID_ACTUALX;
+        lastY = CPathSearch::GRID_ACTUALY - lastPos / CPathSearch::GRID_ACTUALX - 1;
+
+        prevPos = pPath[nPath - 2];
+        prevX = prevPos % CPathSearch::GRID_ACTUALX;
+        prevY = CPathSearch::GRID_ACTUALY - prevPos / CPathSearch::GRID_ACTUALX - 1;
+
+        ptLast = CPoint(lastX, lastY);
+        ptPrev = CPoint(prevX, prevY);
+        segSquares = CAIUtil::CountSquares(ptLast, ptPrev);
+    }
+
+    exact = (segSquares == targetSquares);
+
+    if (exact) {
+        if (*pnPath > 3) {
+            *pnPath = *pnPath - 1;
+        }
+    } else {
+        LONG dx = lastX - prevX;
+        LONG dy = lastY - prevY;
+        double dist = sqrt((double)(dx * dx + dy * dy));
+        LONG iDist = (LONG)dist;
+        lastX = lastX + (((prevX - lastX) * 0x400 * targetSquares) / iDist >> 10);
+        lastY = lastY + (((prevY - lastY) * 0x400 * targetSquares) / iDist >> 10);
+        pPath[nPath - 1] = (CPathSearch::GRID_ACTUALY - lastY - 1) * CPathSearch::GRID_ACTUALX + lastX;
+    }
+
+    result.x = CPathSearch::GRID_SQUARE_SIZEX * lastX;
+    result.y = CPathSearch::GRID_SQUARE_SIZEY * lastY;
+}
+
 // 0x734550
 BOOL CGameSprite::HandleEffects()
 {
