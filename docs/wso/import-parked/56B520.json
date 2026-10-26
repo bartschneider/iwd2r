@@ -1,0 +1,1 @@
+{"address": "0x56B520", "name": "IcewindCGameEffectGlobeOfInvulnerability::ApplyEffect", "file": "src/IcewindCGameEffects.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
