@@ -15598,6 +15598,39 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(d.run(), 0)
         self.assertEqual([b for b, _r in ran], ['b011'])
 
+    def test_a_resume_finishing_after_exhaustion_earns_one_more_cut(self):
+        # run 24 (2026-10-25): the cut's 'nothing left' verdict formed while
+        # the retried batch still ran and owned its files, the run exited on
+        # it, and run 25 cut two batches at once; a resumed or retried batch
+        # that finishes after the verdict earns one more cut before the exit
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), workers=2)
+        self._write_status(d, {'current': {'batch': 'b011', 'stage': 'worker',
+                                           'at': '2026-10-24T01:00:00+00:00'}})
+        verdict, ran, cuts = threading.Event(), [], []
+        run24 = (2, 'nothing left: every remaining import row is exercised by no '
+                   'scenario (--include-uncovered offers them anyway)\n')
+
+        def run_batch(bid, resume=None):
+            ran.append((bid, resume is not None))
+            if bid == 'b011':
+                self.assertTrue(verdict.wait(10))  # the verdict forms while it runs
+            return 'closed'
+
+        def next_batch(*a, **kw):
+            cuts.append(1)
+            if len(cuts) == 1:
+                verdict.set()
+                return run24
+            return (0, self.CUT.replace('b011', 'b012')) if len(cuts) == 2 \
+                else self.NOTHING
+
+        d.run_batch, d.next_batch = run_batch, next_batch
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(ran, [('b011', True), ('b012', False)])
+        self.assertEqual(len(cuts), 3)
+        self.assertIn('b011 finished after the pool was judged exhausted; '
+                      'trying one more cut', '\n'.join(self.logs))
+
     def test_run_retries_a_cleared_exception_first(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
         os.makedirs(os.path.dirname(d.status_path))
