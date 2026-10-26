@@ -1,0 +1,7 @@
+{
+  "address": "0x63B6D0",
+  "name": "CScreenLoad::OnKeyDown",
+  "file": "src/CScreenLoad.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}
