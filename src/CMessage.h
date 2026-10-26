@@ -25,6 +25,7 @@ class CGameArea;
 class CGameContainer;
 class CGameDoor;
 class CGameEffect;
+class CGameSprite;
 
 class CBaldurMessage {
 public:
@@ -1973,6 +1974,23 @@ public:
     /* 0020 */ LONG m_targetX;          // original Fire target point x
     /* 0024 */ LONG m_targetY;          // original Fire target point y
     /* 0028 */ SHORT m_launchHeight;    // launch height (from DetermineHeight, SHORT copy)
+};
+
+// A message replacing a sprite's projectile immunities before a projectile
+// fires (the exe folds its GetMsgSubType with the spell-level immunities
+// update: both report subtype 104).
+class CMessageProjectileImmumityUpdate : public CMessage {
+public:
+    CMessageProjectileImmumityUpdate(CGameSprite* pSprite, LONG caller, LONG target);
+    ~CMessageProjectileImmumityUpdate() override;
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
+    void Run() override;
+
+    /* 000C */ CImmunitiesProjectile m_projectileImmunities;
 };
 
 // A message that runs a list of messages in order, sent as one (vtable
