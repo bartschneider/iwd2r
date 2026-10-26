@@ -1295,6 +1295,174 @@ def replay_ini(text):
     return mute_ini(text)
 
 
+def _cheats_key(text, value):
+    """icewind2.ini's text with the [Game Options] Cheats key set to value
+    ('0'/'1') or removed (None). Raises ValueError when there is no
+    [Game Options] section, rather than guessing where the key belongs."""
+    m = re.search(r'^\[Game Options\][^\r\n]*(?:\r?\n)', text,
+                  re.MULTILINE)
+    if not m:
+        raise ValueError('icewind2.ini has no [Game Options] section')
+    end = text.find('\n[', m.end())
+    body = text[m.end():end] if end >= 0 else text[m.end():]
+    tail = text[end:] if end >= 0 else ''
+    if value is None:
+        body = re.sub(r'^Cheats=[^\r\n]*\r?\n?', '', body,
+                      flags=re.MULTILINE)
+    elif re.search(r'^Cheats=', body, re.MULTILINE):
+        body = re.sub(r'^(Cheats=)[^\r\n]*', r'\g<1>' + value, body,
+                      flags=re.MULTILINE)
+    else:
+        eol = '\r\n' if '\r\n' in text else '\n'
+        body = 'Cheats=%s%s%s' % (value, eol, body)
+    return text[:m.end()] + body + tail
+
+
+def cheats_ini(text, on):
+    """icewind2.ini's text with the original's cheats on
+    ([Game Options] Cheats=1) for a run that opted in; the text unchanged
+    otherwise, so a run that does not opt in leaves the ini
+    byte-identical."""
+    if not on:
+        return text
+    return _cheats_key(text, '1')
+
+
+def cheats_ini_value(text):
+    """The [Game Options] Cheats value ('0'/'1'/...), or None when the key
+    is absent (the original then defaults to 0)."""
+    m = re.search(r'^\[Game Options\][^\r\n]*(?:\r?\n)', text,
+                  re.MULTILINE)
+    if not m:
+        return None
+    end = text.find('\n[', m.end())
+    body = text[m.end():end] if end >= 0 else text[m.end():]
+    key = re.search(r'^Cheats=([^\r\n]*)', body, re.MULTILINE)
+    return key.group(1) if key else None
+
+
+def set_cheats_ini(path, on):
+    """cheats_ini applied to the icewind2.ini at path (the sandbox cache's
+    or a private view's copy of it). Writes only when the run opted in and
+    the text changes."""
+    if not on:
+        return
+    with open(path, 'rb') as f:
+        old = f.read()
+    text = old.decode('latin-1')
+    try:
+        new = cheats_ini(text, True)
+    except ValueError as e:
+        sys.exit('oracle: %s: %s' % (path, e))
+    if new != text:
+        with open(path, 'wb') as f:
+            f.write(new.encode('latin-1'))
+        print('set Cheats=1 in %s' % path)
+
+
+def prepare_cheats_ini(game, on, install=INSTALL):
+    """Turn the copy's [Game Options] Cheats on for one opted-in run; only
+    the copy is written, after the same guard as every write to it.
+    Returns the prior Cheats value for restore_cheats_ini ('0'/'1'/...,
+    None when the key was absent), or None with nothing written when there
+    is no opt-in — the caller restores only for an opt-in run."""
+    if not on:
+        return None
+    path = _ini_path(game, install)
+    with open(path, 'rb') as f:
+        text = f.read().decode('latin-1')
+    try:
+        prior = cheats_ini_value(text)
+    except ValueError:
+        prior = None  # set_cheats_ini reports the missing section
+    set_cheats_ini(path, True)
+    return prior
+
+
+def restore_cheats_ini(game, prior, install=INSTALL):
+    """Put the copy's Cheats key back to prior (prepare_cheats_ini's
+    return) after an opted-in run: prior None removes the key (it was
+    absent before the run). Only that key changes, so the run's own ini
+    write-back (its console history) survives."""
+    path = _ini_path(game, install)
+    with open(path, 'rb') as f:
+        old = f.read()
+    text = old.decode('latin-1')
+    new = _cheats_key(text, prior)
+    if new != text:
+        with open(path, 'wb') as f:
+            f.write(new.encode('latin-1'))
+        print('restored Cheats in %s' % path)
+
+
+def console_ini_block(text):
+    """The [Lua Edit] section's whole block -- its header line through the
+    newline that ends the section's last line -- or None when the ini has
+    no such section. The original preloads the console edit box with the
+    section's String0 and writes every submitted line back as the new
+    String0 at exit, so the section is cross-run state: left in the copy,
+    the next run's typed command appends to the last run's line and the
+    dispatcher's prefix check rejects the concatenation."""
+    m = re.search(r'^\[Lua Edit\][^\r\n]*(?:\r?\n)', text, re.MULTILINE)
+    if not m:
+        return None
+    end = text.find('\n[', m.end())
+    if end < 0:
+        return text[m.start():]
+    return text[m.start():end + 1]
+
+
+def _ini_path(game, install):
+    """(the copy's icewind2.ini path), the shared lookup of the ini pair."""
+    assert_safe_target(game, install)
+    names = {n.lower(): n for n in os.listdir(game)}
+    if 'icewind2.ini' not in names:
+        sys.exit('oracle: the copy has no icewind2.ini')
+    return os.path.join(game, names['icewind2.ini'])
+
+
+def prepare_console_ini(game, install=INSTALL):
+    """Strip the copy's [Lua Edit] console history so the console edit box
+    opens empty for the run; returns the section's prior block for
+    restore_console_ini (None when the ini had none, and nothing is
+    written). The section is never scenario input -- it is what the last
+    run's submitted lines left behind."""
+    path = _ini_path(game, install)
+    with open(path, 'rb') as f:
+        text = f.read().decode('latin-1')
+    block = console_ini_block(text)
+    if block is None:
+        return None
+    with open(path, 'wb') as f:
+        f.write(text.replace(block, '', 1).encode('latin-1'))
+    print('stripped [Lua Edit] from %s' % path)
+    return block
+
+
+def restore_console_ini(game, prior, install=INSTALL):
+    """Put the copy's [Lua Edit] block back to prior (prepare_console_ini's
+    return) after the run: the block swaps in place where the run's own
+    write-back sits, prior None removes that write-back, and a run that
+    somehow left no section gets the prior block appended at the end."""
+    path = _ini_path(game, install)
+    with open(path, 'rb') as f:
+        old = f.read()
+    text = old.decode('latin-1')
+    block = console_ini_block(text)
+    if prior is None:
+        new = text.replace(block, '', 1) if block is not None else text
+    elif block is not None:
+        new = text.replace(block, prior, 1)
+    else:
+        eol = '\r\n' if '\r\n' in text else '\n'
+        new = text + ('' if not text or text.endswith(('\r\n', '\n'))
+                      else eol) + prior
+    if new.encode('latin-1') != old:
+        with open(path, 'wb') as f:
+            f.write(new.encode('latin-1'))
+        print('restored [Lua Edit] in %s' % path)
+
+
 def prepare_replay_ini(game, install=INSTALL):
     """Set the copy's icewind2.ini up for a recording (replay_ini); only the
     copy is written, after the same guard as every write to it."""

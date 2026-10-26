@@ -1,1 +1,0 @@
-{"address": "0x480480", "name": "CGameContainer::sub_480480", "file": "src/CGameContainer.cpp", "batch": "i001", "needs": "world_entry, first_fight, walk_and_talk: not exercised"}

@@ -520,11 +520,18 @@ function Press-Key($action, [switch]$Modal) {
     $vk = [uint16]$action.vk
     $extended = [bool]$action.extended
     $phase = if ($Modal) { { param($n) Sleep-Frames $n } } else { { param($n) Hold-Frames $n } }
+    # The modifier VK codes the scenario named (windows_actions' mods), in
+    # the order it wrote them; held down before the key and released after
+    # it in reverse. Quit-Game's synthetic action has no mods property.
+    $mods = @()
+    if ($action.PSObject.Properties['mods']) { $mods = @($action.mods) }
+    foreach ($m in $mods) { [IwdInput]::Key($m, $true, $false); & $phase 1 }
     if ($action.shift) { [IwdInput]::Key(0x10, $true, $false); & $phase 1 }
     [IwdInput]::Key($vk, $true, $extended)
     & $phase 2
     [IwdInput]::Key($vk, $false, $extended)
     if ($action.shift) { & $phase 1; [IwdInput]::Key(0x10, $false, $false) }
+    for ($i = $mods.Count - 1; $i -ge 0; $i--) { & $phase 1; [IwdInput]::Key($mods[$i], $false, $false) }
     & $phase 2
 }
 
@@ -584,7 +591,20 @@ function Quit-Game {
 function Describe($a) {
     switch ($a.op) {
         'wait' { "wait $($a.frames)" }
-        'key' { if ($a.shift) { "key SHIFT+$($a.key)" } else { "key $($a.key)" } }
+        'key' {
+            $mods = ''
+            if ($a.PSObject.Properties['mods'] -and $a.mods) {
+                $mods = ($a.mods | ForEach-Object {
+                        # The VK code back as its scenario name.
+                        switch ([int]$_) {
+                            0x11 { 'CTRL+' } 0x10 { 'SHIFT+' } 0x12 { 'ALT+' }
+                            default { '' }
+                        }
+                    }) -join ''
+            }
+            $shift = if ($a.shift) { 'SHIFT+' } else { '' }
+            "key $mods$shift$($a.key)"
+        }
         'shot' { "shot $($a.name)" }
         'checkpoint' { "checkpoint $($a.name)" }
         'quit' { 'quit' }
@@ -600,7 +620,12 @@ function Do-Action($a) {
                 $what = if ($a.op -eq 'move') { '' } elseif ($a.op -eq 'click') { ', left button down/up' } else { ', right button down/up' }
                 Log "  would SetCursorPos(ClientToScreen(game, $($a.x), $($a.y)))$what"
             }
-            'key' { Log ('  would SendInput VK 0x{0:X2} (extended {1}, shift {2})' -f [int]$a.vk, $a.extended, $a.shift) }
+            'key' {
+                $mods = @()
+                if ($a.PSObject.Properties['mods']) { $mods = @($a.mods) }
+                $modsText = if ($mods.Count) { ' mods ' + (($mods | ForEach-Object { '0x{0:X2}' -f [int]$_ }) -join ',') } else { '' }
+                Log ('  would SendInput VK 0x{0:X2} (extended {1}, shift {2}{3})' -f [int]$a.vk, $a.extended, $a.shift, $modsText)
+            }
             'shot' { Log "  would capture the screen to $($a.name)-screen.png and request $($a.name).png" }
             'checkpoint' { Log "  would request checkpoint-$($a.name).json" }
             'quit' { Log '  would post WM_CLOSE and confirm the dialog with Return' }

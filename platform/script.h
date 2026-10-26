@@ -9,8 +9,14 @@
 //   move X Y      move the cursor to X,Y
 //   key NAME      press and release a key over 2 frames; NAME is a VK name
 //                 without VK_ (ESCAPE, RETURN, SPACE, F1...) or one letter or
-//                 digit
-//   type TEXT     each letter, digit or space of TEXT as a key press
+//                 digit; CTRL, SHIFT and ALT may be written before it, joined
+//                 with '+' (key CTRL+SHIFT+X), pressed in written order and
+//                 released in reverse around the key, with the same frame
+//                 phases SHIFT uses for a capital; ALT+F4 is refused (it
+//                 would close the window)
+//   type TEXT     each character of TEXT (any printable ASCII) as one key
+//                 press on a US layout; capitals and shifted symbols have
+//                 SHIFT held around the press
 //   shot NAME     write the current primary surface as NAME.png into
 //                 IWD2R_SHOT_DIR (default: the working directory, which is
 //                 the install directory once the engine has started)

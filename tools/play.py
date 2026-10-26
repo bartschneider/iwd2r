@@ -757,6 +757,9 @@ def run_linux_vm(args, argv, scenarios, data, overrides, base_dir, nested,
         # and INI files: each gets a private view of it.
         view = dataview.make_view(data, os.path.join(run_dir, 'data'))
         env = dict(base_env, IWD2_DATA=view)
+        if realinput.load_header_cheats(path):
+            oracle.set_cheats_ini(
+                os.path.join(view, 'icewind2.ini'), True)
         try:
             result = realinput.run_scenario(
                 exe, env, actions, run_dir, geometry,
@@ -832,6 +835,10 @@ def run_windows_vm(args, argv, scenarios, data, overrides, base_dir, nested,
                 lock=lambda: filelock.hold(oracle.VANILLA_LOCK, 'vanilla'))
             with filelock.hold(oracle.VANILLA_LOCK, 'vanilla'):
                 winsandbox.reset_cache_inis(data, winsandbox.GAME_CACHE)
+            if realinput.load_header_cheats(path):
+                oracle.set_cheats_ini(
+                    os.path.join(winsandbox.GAME_CACHE, 'icewind2.ini'),
+                    True)
             log('windows: %s in Windows Sandbox (real input)' % name)
             result = winsandbox.run_scenario(
                 exe, winsandbox.GAME_CACHE,

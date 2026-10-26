@@ -1,1 +1,0 @@
-{"address": "0x45F6D0", "name": "CGameAIBase::MoveCursor", "file": "src/CGameAIBase.cpp", "batch": "i003", "needs": "world_entry, first_fight, walk_and_talk: not exercised"}

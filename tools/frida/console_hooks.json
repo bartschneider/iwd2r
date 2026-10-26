@@ -1,0 +1,13 @@
+{
+  "process": "IWD2.exe",
+  "log": "trace.jsonl",
+  "hooks": [
+    {
+      "addr": "0x5838A0",
+      "name": "CONSOLE",
+      "conv": "thiscall",
+      "args": ["str"],
+      "max": 20
+    }
+  ]
+}
