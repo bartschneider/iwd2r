@@ -1,0 +1,7 @@
+{
+  "address": "0x5F94C0",
+  "name": "CUIControlScrollbarCharacter5F9410::OnScrollDown",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}

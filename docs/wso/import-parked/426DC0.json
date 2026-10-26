@@ -1,0 +1,7 @@
+{
+  "address": "0x426DC0",
+  "name": "CBaldurChitin::GetFirstCDRomDrive",
+  "file": "src/CBaldurChitin.cpp",
+  "batch": "i041",
+  "needs": "not exercised; pre-existing divergences: exe iterates drives 0..30 vs ours 0..31, and exe returns '' on exhaustion vs ours leaving the last drive in sDrive"
+}

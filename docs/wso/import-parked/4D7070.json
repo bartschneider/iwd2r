@@ -1,0 +1,7 @@
+{
+  "address": "0x4D7070",
+  "name": "CUIControlEdit::OnRButtonDown",
+  "file": "src/CUIControlEdit.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}

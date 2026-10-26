@@ -1,0 +1,7 @@
+{
+  "address": "0x724FD0",
+  "name": "CGameSprite::sub_724FD0",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}

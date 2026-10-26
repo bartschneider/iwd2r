@@ -1,0 +1,7 @@
+{
+  "address": "0x74FC50",
+  "name": "CGameSprite::GroupAttack",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i041",
+  "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised. Pre-existing divergence, fork fix verified against the exe (evidence at b7e2dea7): the exe reads the actee type from pTarget->GetAIType() and pushes CAIAction::ATTACKNOSOUND (0x62); ours reads this->GetAIType() and pushes ATTACK. The fork body at e8dd16a750966af53f24daaf49dcb4fb13594c13 was reverted only because no scenario exercises the function - import on first coverage."
+}

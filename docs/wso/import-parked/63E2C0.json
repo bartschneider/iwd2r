@@ -1,0 +1,7 @@
+{
+  "address": "0x63E2C0",
+  "name": "CScreenLoad::OnErrorButtonClick",
+  "file": "src/CScreenLoad.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}

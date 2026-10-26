@@ -1,0 +1,7 @@
+{
+  "address": "0x63C3E0",
+  "name": "CScreenLoad::OnDeleteButtonClick",
+  "file": "src/CScreenLoad.cpp",
+  "batch": "i041",
+  "needs": "not exercised; pre-existing divergence: exe's bounds assert fires at 0x449 = 1097 AND again at 0x42e = 1070, while ours keeps only the 1097 assert"
+}

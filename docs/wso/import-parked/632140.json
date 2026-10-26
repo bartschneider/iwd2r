@@ -1,0 +1,7 @@
+{
+  "address": "0x632140",
+  "name": "CUIControlButtonInventoryColor::OnLButtonClick",
+  "file": "src/CScreenInventory.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
