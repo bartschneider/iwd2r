@@ -1,0 +1,7 @@
+{
+  "address": "0x60B610",
+  "name": "CScreenCreateChar::ResetMemorizeDomainSpellsPanel",
+  "file": "src/CScreenCreateChar.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
