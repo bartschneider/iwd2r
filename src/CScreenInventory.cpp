@@ -7397,7 +7397,6 @@ BOOL CUIControlButtonInventoryHistoryIcon::Render(BOOL bForce)
         // __LINE__: 10894
         UTIL_ASSERT(pVidMode != NULL);
 
-        // NOTE: Original code is slightly different.
         INT x = m_pPanel->m_ptOrigin.x + m_ptOrigin.x;
         INT y = m_pPanel->m_ptOrigin.y + m_ptOrigin.y;
 
@@ -7424,8 +7423,8 @@ BOOL CUIControlButtonInventoryHistoryIcon::Render(BOOL bForce)
         rClip.IntersectRect(rFrame, m_rDirty);
 
         vcIcon.Render(0,
-            ptCenter.x + (m_size.cx - frameSize.cx) / 2,
-            ptCenter.y + (m_size.cy - frameSize.cy) / 2,
+            x + (m_size.cx - frameSize.cx) / 2 + ptCenter.x,
+            y + (m_size.cy - frameSize.cy) / 2 + ptCenter.y,
             rClip,
             NULL,
             0,
