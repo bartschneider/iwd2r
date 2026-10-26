@@ -1748,7 +1748,7 @@ char* CGameAnimationTypeCharacterOld::GetSndArmor()
         break;
     default:
         // FIXME: Leaking `szTemp`.
-        return "";
+        return NULL;
     }
 
     ch = rand() % cnt + '1';
