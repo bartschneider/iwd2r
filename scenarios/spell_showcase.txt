@@ -689,65 +689,44 @@ shot engaged
 wait 120
 checkpoint attacked
 shot attacked
-# Centre on Aria (view 119,686: her at 400,216, the goblin at 385,196)
-# and give the ten casts one caster at a time. The phase no longer runs
-# wholly inside the Attacked auto-pause: on the original only every
-# second cast even armed there (Task 43's shot diffs - the even casts
-# changed zero pixels; once a cast was pending the next F5 stopped
-# opening the cast list). So each cast ends with Space and a wait long
-# enough for the cast to resolve and the projectile to land, and starts
-# by re-selecting its caster, which also resets the action bar. While
-# the goblin lives its attacks re-pause the world inside those waits
-# and the next cast's Space resumes it; after it dies a Space given to
-# a running world pauses it and the cast after that is lost to the same
-# pending-cast gate - accepted, every other cast still fires. Ground
-# targets sit on explored terrain next to the goblin (386,165): the old
-# clicks at 386,120/386,90 landed in fog and became move orders that
-# scattered the party north when the pause lifted.
+# Centre on Aria (view 119,686) and give the ten casts. Launch-1 of
+# Task 43 proved, on the original, that the digit-key target is the
+# one delivery path that always lands: Aria's Larloch's Minor Drain
+# (key 2 = Bram while armed) resolved and killed him, and Cade's Ray
+# (key 1 = Aria) and Grease (ground click, action 95 = cast-at-point)
+# both fired. The creature-target clicks did not: the goblin (hp 4 the
+# whole phase, id 1179666) never sat under (390,188) - Bram's b3 click
+# sent him WALKING to the click point, i.e. it landed on empty ground,
+# and Aria's Burning-Hands click did the same to her. So every
+# creature-target cast now targets a party member with its digit key
+# (on-screen, always valid), and only the point spells (cone/area)
+# keep the ground click at 386,165, which Grease proved in range.
+# Damage spells go last, globally, and spend their own caster or a
+# spent one, so no live caster or later target is ever lost first:
+# the six no-damage casts fire in any world state, floor 8 of 10.
+# Each cycle: reselect the caster (resets the action bar; if a cast
+# died un-armed its spell stays armed and the reselect fires it at
+# the caster - a bonus cast, never a loss), F5, F-pick, target,
+# Space, a wait long enough for the cast to resolve and land.
 origin ui
 click 528 460
 click 528 460
 wait 10
 origin screen
-# Bram: Ray of Enfeeblement at the goblin (390,188); no damage, the
-# goblin's 4 hit points stay for the next casts.
+# Bram: Ray of Enfeeblement at Aria (key 1 while armed) - strength
+# drain only, her hit points are intact for the casts to come.
 key 2
 wait 10
 key F5
 wait 10
 key F1
 wait 10
-click 390 188
+key 1
 wait 10
 key SPACE
 wait 220
 shot b1_ray
-# Ice Dagger at the goblin (1d4).
-key 2
-wait 10
-key F5
-wait 10
-key F2
-wait 10
-click 390 188
-wait 10
-key SPACE
-wait 220
-shot b2_icedagger
-# Magic Missile at the goblin (1d4+1; with the Ice Dagger at least
-# 2 + 2 damage by now, so the goblin drops here).
-key 2
-wait 10
-key F5
-wait 10
-key F3
-wait 10
-click 390 188
-wait 10
-key SPACE
-wait 220
-shot b3_magicmissile
-# Color Spray: ground north of the party, explored side of the fog.
+# Color Spray: cone at the ground north of the party.
 key 2
 wait 10
 key F5
@@ -758,34 +737,8 @@ click 386 165
 wait 10
 key SPACE
 wait 220
-shot b4_colorspray
-# Aria: key 1 selects her. Her creature casts target Bram (key 2 while
-# armed): he is done casting, so his hit points are free to spend.
-# Larloch's Minor Drain (1d4) - finishes the goblin if it still stands.
-key 1
-wait 10
-key F5
-wait 10
-key F1
-wait 10
-key 2
-wait 10
-key SPACE
-wait 220
-shot a1_larlochs
-# Chromatic Orb at Bram (1d8).
-key 1
-wait 10
-key F5
-wait 10
-key F2
-wait 10
-key 2
-wait 10
-key SPACE
-wait 220
-shot a2_chromaticorb
-# Burning Hands: ground north, explored side of the fog.
+shot b2_colorspray
+# Aria: key 1 selects her. Burning Hands: cone at the same ground.
 key 1
 wait 10
 key F5
@@ -796,8 +749,8 @@ click 386 165
 wait 10
 key SPACE
 wait 220
-shot a3_burninghands
-# Sleep: ground north, same point.
+shot a1_burninghands
+# Sleep: area at the same ground.
 key 1
 wait 10
 key F5
@@ -808,22 +761,22 @@ click 386 165
 wait 10
 key SPACE
 wait 220
-shot a4_sleep
-# Cade: key 3 selects him. His Ray of Enfeeblement targets Aria (key 1
-# while armed): no damage, and she is done casting.
+shot a2_sleep
+# Cade: key 3 selects him. His Ray of Enfeeblement targets Bram
+# (key 2 while armed): no damage, and Bram has finished casting.
 key 3
 wait 10
 key F5
 wait 10
 key F1
 wait 10
-key 1
+key 2
 wait 10
 key SPACE
 wait 220
 shot c1_ray
-# Grease: ground north. His spares (Chromatic Orb, Ice Dagger) stay
-# uncast.
+# Grease: ground north - the exact cast that landed as a
+# cast-at-point (action 95) in launch 1.
 key 3
 wait 10
 key F5
@@ -835,6 +788,61 @@ wait 10
 key SPACE
 wait 220
 shot c2_grease
+# Damage tail; every caster is done. Ice Dagger at Bram himself
+# (key 2 twice: select, then target while armed): 1d4+1 on his 4 hp.
+key 2
+wait 10
+key F5
+wait 10
+key F2
+wait 10
+key 2
+wait 10
+key SPACE
+wait 220
+shot b3_icedagger
+# Chromatic Orb at Aria herself (key 1 twice), after her own casting.
+key 1
+wait 10
+key F5
+wait 10
+key F2
+wait 10
+key 1
+wait 10
+key SPACE
+wait 220
+shot a4_chromaticorb
+# Larloch's Minor Drain at Aria herself: fires if the orb left her
+# alive, and heals her for what it drains.
+key 1
+wait 10
+key F5
+wait 10
+key F1
+wait 10
+key 1
+wait 10
+key SPACE
+wait 220
+shot a3_larlochs
+# Magic Missile at Bram himself: fires if the Ice Dagger left him
+# alive.
+key 2
+wait 10
+key F5
+wait 10
+key F3
+wait 10
+key 2
+wait 10
+key SPACE
+wait 220
+shot b4_magicmissile
+# One more Space: the last queued cast resolves on the next toggle,
+# and nothing follows to unpause a world this one might pause.
+key SPACE
+wait 120
 # The last Space may have paused a running world; the casts have fired
 # either way - the hooks count at cast time, not here. Thirty seconds
 # of aftermath.
