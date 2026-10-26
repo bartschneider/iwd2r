@@ -24216,6 +24216,27 @@ class ImportSecondSourceTest(unittest.TestCase):
         self.assertIn('(the delete instruction above is for stub rows only). 2. **Every commit',
                       flat(texts['i002']))
 
+    def test_brief_renders_the_present_row_sentence_with_the_kept_paragraph(self):
+        # Task 40: the Kept paragraph says a present only-theirs row (ours
+        # already carries the body) is reported there too — never imported,
+        # never parked — and, like the rest of that paragraph, only for the
+        # batches that have one
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
+        self.next_import()
+        self.next_import()
+        texts = {}
+        for bid in ('i001', 'i002'):
+            rc, texts[bid] = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, texts[bid])
+            self.assertNotIn('{{', texts[bid])
+        flat = lambda t: t.replace('\n   ', ' ').replace('\n', ' ')
+        for needle in ('An only-theirs row whose address our src already labels',
+                       'ours already has the body', 'never imported, never parked'):
+            self.assertIn(needle, flat(texts['i002']), needle)
+            self.assertNotIn(needle, flat(texts['i001']), needle)
+
     ONLY = 'only_theirs'
     ONLY_ROWS = [
         {'address': '0x409000', 'category': ONLY, 'file': 'src/P.cpp',

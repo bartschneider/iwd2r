@@ -2592,7 +2592,10 @@ KEPT_REPORT_PARAGRAPH = (
     "per row, never also under `## Imported`:\n"
     "\n"
     "    kept <0xADDR> <one-line reason>\n"
-    "\n")
+    "\n"
+    "An only-theirs row whose address our src already labels (ours carries the\n"
+    "body) is reported there too, as `kept <0xADDR> ours already has the body:\n"
+    "<reason>`; it is never imported, never parked.\n")
 
 
 def _import_tally(state, import_state=None, parked=None):
