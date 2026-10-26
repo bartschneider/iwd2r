@@ -1,0 +1,1 @@
+{"address": "0x6811D0", "name": "CUIControlScrollBarStoreSpell::InvalidateItems", "file": "src/CScreenStore.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}
