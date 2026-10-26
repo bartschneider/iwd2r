@@ -15854,8 +15854,8 @@ class DriverTest(unittest.TestCase):
         self._write_status(d, {'current': {'batch': 'b011', 'stage': 'worker',
                                            'at': '2026-10-24T01:00:00+00:00'}})
         verdict, ran, cuts = threading.Event(), [], []
-        run24 = (2, 'nothing left: every remaining import row is exercised by no '
-                   'scenario (--include-uncovered offers them anyway)\n')
+        run24 = (2, 'nothing left: every remaining theirs_changed_ours_base row '
+                   'is kept by default (1 recorded: no scenario exercises them)\n')
 
         def run_batch(bid, resume=None):
             ran.append((bid, resume is not None))
@@ -24061,7 +24061,9 @@ class CoverageTest(unittest.TestCase):
         _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
         rc, out = self.next_import()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.rows_of(out), ['0x407000'])
+        # the screen row the UI scenario hits leads the pool; the dead
+        # stub rows follow it (rule 1 imports them unmeasured)
+        self.assertEqual(self.rows_of(out), ['0x407000', '0x401000'])
 
     def test_cli_dry_prints_the_launches_and_writes_nothing(self):
         import io
@@ -24092,29 +24094,33 @@ class CoverageTest(unittest.TestCase):
     def rows_of(self, out):
         return re.findall(r'^\s*\d+\. (0x\w+)', out, re.M)
 
-    def test_next_import_offers_covered_rows_first_and_leaves_the_rest_out(self):
+    def test_next_import_offers_covered_rows_first_and_rule1_rows_unmeasured(self):
+        # rule 1 (2026-10-26 ruling): a row we lack the body for is offered
+        # with the covered rows even when no scenario exercises it -- the
+        # note says so instead of leaving it out -- so no flag is needed
         self.cov({'world_entry': {'0x403000': 3, '0x401000': 1},
                   'first_fight': {'0x403000': 2}, 'walk_and_talk': {}})
         rc, out = self.next_import()
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
-        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
-        os.unlink(os.path.join(self.tmp, 'import-state.json'))
-        rc, out = self.next_import(include_uncovered=True)
-        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertIn('coverage: 2 scenario-covered row(s), 0 oracle-backed', out)
         self.assertNotIn('left out', out)
         os.unlink(os.path.join(self.tmp, 'import-state.json'))
         self.cov({'world_entry': {'0x403000': 3}})
-        rc, out = self.next_import(include_uncovered=True)
+        rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertIn('coverage: 2 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
 
-    def test_next_import_keeps_rows_nobody_measured(self):
+    def test_next_import_offers_rows_nobody_measured(self):
+        # a dead row (hooked, never hit) and an unknown one (never hooked)
+        # are both offered behind the covered rows, unknown first
         cands = [a for a in coverage.candidates(self.dp) if a != '0x407000']
         self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
-        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
-        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 2 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
         os.unlink(os.path.join(self.tmp, 'import-state.json'))
         self.cov({'world_entry': {'0x403000': 3}}, hooked=['0x403000'])
         with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
@@ -24124,10 +24130,12 @@ class CoverageTest(unittest.TestCase):
                 base='first', coverage_root=self.tmp,
                 claims_path=os.path.join(self.tmp, 'claims.json'))
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000', '0x407000'])
-        self.assertIn('coverage: 0 candidate row(s) left out as exercised by no scenario', out)
-        self.assertIn('coverage: 2 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 2 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
 
-    def test_next_import_keeps_a_row_refused_in_some_scenarios_and_dead_in_the_rest(self):
+    def test_next_import_offers_a_row_refused_in_some_scenarios_and_dead_in_the_rest(self):
+        # the refused+dead row reads unknown, so it is offered like one;
+        # the next cut reaches it after the dead rows ahead of it
         cands = coverage.candidates(self.dp)
         data = self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
         data['scenarios']['world_entry']['refused'] = ['fn_407000']
@@ -24135,13 +24143,60 @@ class CoverageTest(unittest.TestCase):
         _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
-        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x401000'])
 
     def test_next_include_uncovered_needs_the_import_queue(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             self.assertEqual(self.wave.main(['next', '--include-uncovered']), 2)
         self.assertIn('--include-uncovered only applies to --queue import', err.getvalue())
+
+    def test_next_import_records_an_unexercised_base_body_row_kept_by_default(self):
+        # rule 2 (2026-10-26 ruling): a base-body row no scenario exercises
+        # is ours by default -- recorded in the import state, never cut --
+        # while a covered base-body row is cut as before
+        dp = os.path.join(self.tmp, 'docs', 'wso', 'disag-base.json')
+        _write(dp, json.dumps([
+            {'address': '0x405000', 'category': 'theirs_changed_ours_base',
+             'file': 'src/E.cpp', 'name': 'E', 'their_len': 5, 'our_len': 5},
+            {'address': '0x405001', 'category': 'theirs_changed_ours_base',
+             'file': 'src/E2.cpp', 'name': 'E2', 'their_len': 5, 'our_len': 5}]))
+        imp = os.path.join(self.tmp, 'import-base-state.json')
+        self.cov({'world_entry': {'0x405000': 3}})
+        kw = dict(queue='import', repo=self.tmp, base='first', coverage_root=self.tmp,
+                  import_path=os.path.join(self.tmp, 'import-list.json'),
+                  claims_path=os.path.join(self.tmp, 'claims.json'))
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(dp, imp, 2, **kw)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x405000'])
+        self.assertIn('category: theirs_changed_ours_base', out)
+        self.assertIn('coverage: 1 base-body row(s) kept by default: '
+                      'no scenario exercises them', out)
+        self.assertIn('kept by default: 1 base-body row(s) no scenario exercises '
+                      '(rule 2); recorded in the import state', out)
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual(list(st['batches']), ['i001'])       # one row cut, not two
+        self.assertEqual(list(st['kept_default']), ['405001'])
+        self.assertEqual(st['kept_default']['405001']['name'], 'E2')
+        # not cut again: the recording repeats, no batch is cut
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(dp, imp, 2, **kw)
+        self.assertEqual(rc, 2, out)
+        self.assertTrue(out.startswith('nothing left'), out)
+        self.assertIn('kept by default: 1 base-body row(s) no scenario exercises', out)
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual(list(st['batches']), ['i001'])
+        self.assertEqual(list(st['kept_default']), ['405001'])
+        # status and the tally both see the outcome
+        rc, out = self.wave.status(imp)
+        self.assertIn('kept by default: 1 row(s) no scenario exercises', out)
+        st['batches']['i001']['status'] = 'closed'
+        self.assertIn('; 1 kept by default',
+                      self.wave._import_tally({'batches': {}}, st))
 
     def test_next_import_without_a_fresh_map_is_unchanged(self):
         rc, out = self.next_import()
@@ -24187,10 +24242,10 @@ class CoverageTest(unittest.TestCase):
                 coverage_root=self.tmp,
                 claims_path=os.path.join(self.tmp, 'claims.json'), **kw)
 
-    def test_next_import_cuts_an_oracle_backed_row_and_skips_an_uncovered_one(self):
+    def test_next_import_cuts_an_oracle_backed_row_and_offers_the_uncovered_one(self):
         # Task 39: a registered oracle case measures a row on its own, so
-        # the cut offers it without --include-uncovered; a row with neither
-        # a scenario nor a case still waits for one
+        # it sorts with the covered rows; a row with neither a scenario nor
+        # a case is offered too now (rule 1), behind them
         repo = self._oracle_repo(
             (('407000', '---\naddress: 0x407000\nname: G\nkind: oracle\n'
                         'oracle_case: rules/g\n---\n'),), ['rules/g'])
@@ -24198,11 +24253,12 @@ class CoverageTest(unittest.TestCase):
         rc, out = self.next_from(repo)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
-        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 1 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
         self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
         os.unlink(os.path.join(self.tmp, 'import-state.json'))
         rc, out = self.next_from(self.tmp)     # without a repo nothing is oracle-backed
-        self.assertEqual(self.rows_of(out), ['0x403000'])
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
         self.assertIn('coverage: 1 scenario-covered row(s), 0 oracle-backed', out)
 
     def test_next_import_sorts_an_oracle_backed_row_with_the_covered_rows(self):
@@ -24222,7 +24278,8 @@ class CoverageTest(unittest.TestCase):
         rc, out = self.next_from(repo, size=3)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000', '0x401000'])
-        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 1 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
         self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
 
     def test_scorecard_carries_the_coverage_line(self):
@@ -24476,16 +24533,22 @@ class ImportSecondSourceTest(unittest.TestCase):
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x405000'])
 
-    def test_uncovered_base_rows_are_left_out_without_the_flag(self):
+    def test_uncovered_base_rows_are_kept_by_default_without_a_batch(self):
+        # rule 2: a base-body row no scenario exercises is ours by default --
+        # recorded in the import state, never cut again, and no flag rescues it
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
         self.next_import()
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x406000'])
+        self.assertIn('kept by default: 2 base-body row(s) no scenario exercises', out)
         rc, out = self.next_import()
         self.assertEqual(rc, 2, out)
+        self.assertIn('kept by default: 2 base-body row(s) no scenario exercises', out)
+        self.assertEqual(list(self.state()['kept_default']), ['405000', '407000'])
+        self.assertEqual(list(self.state()['batches']), ['i001', 'i002'])
         rc, out = self.next_import(include_uncovered=True)
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(sorted(self.rows_of(out)), ['0x405000', '0x407000'])
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(list(self.state()['batches']), ['i001', 'i002'])
 
     def test_brief_names_the_category_and_the_park_sentence(self):
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
@@ -24676,9 +24739,10 @@ class ImportSecondSourceTest(unittest.TestCase):
         self.with_only()
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x409000': 1}})
         self.next_import()
-        # base rows are uncovered here, so the next batch is the only-theirs one
+        # base rows are kept by default here (rule 2), so the next batch is
+        # the only-theirs one, the unmeasured 0x40A000 included (rule 1)
         rc, out = self.next_import()
-        self.assertEqual(self.rows_of(out), ['0x409000'], out)
+        self.assertEqual(self.rows_of(out), ['0x409000', '0x40A000'], out)
         texts = {}
         for bid in ('i001', 'i002'):
             rc, texts[bid] = self.wave.render_brief(

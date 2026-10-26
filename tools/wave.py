@@ -20,8 +20,10 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py unmeasured-imports   # every import no scenario exercised (rule 1)
     python3 tools/wave.py recompare [--tip SHA] [--no-fetch]   # queue what Will's tip adds
     python3 tools/wave.py run [--queue wave1|import|probes] [--pool SPEC]... [--budget C] [--seed S]   # the driver
-    python3 tools/wave.py next --queue import   # cut an import batch i<NNN> (covered rows first;
-                                                # --include-uncovered keeps the rest)
+    python3 tools/wave.py next --queue import   # cut an import batch i<NNN>: rule-1 rows all
+                                                # offered (unmeasured import when uncovered);
+                                                # base-body rows only when covered, the rest
+                                                # kept by default (rule 2)
     python3 tools/wave.py next --queue probes   # cut a probe batch p<NNN> from the probe list: the worker
                                                 # adopts the fork body, the Frida phase decides
     python3 tools/wave.py close p001 --kind probes
@@ -665,8 +667,19 @@ def _probe_reoffer(row, disagreements_path, coverage_path, coverage_root, repo):
 
 def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                  coverage_path, coverage_root, repo, include_uncovered, base='first'):
-    """(eligible rows, rows without an address, coverage note, None) for one
-    category, or ([], [], None, (rc, message)) when it offers nothing."""
+    """(eligible rows, rows without an address, coverage note, kept by
+    default, None) for one category, or ([], [], None, None, (rc, message))
+    when it offers nothing.
+
+    The coverage requirement is per category (2026-10-26 ruling): where we
+    lack the body (theirs_real_ours_stub, only_theirs -- rule 1) every
+    candidate is offered, the ones no scenario exercises too, ordered
+    covered-first; where we both have the body (theirs_changed_ours_base --
+    rule 2) only the rows the map exercises are cut, and the rest are
+    returned as kept by default for the state to record (ours stays, no
+    worker).  With no usable map the candidate order is unchanged, and
+    include_uncovered (kept for the CLI it still parses) no longer changes
+    either cut."""
     def in_category(r):
         return r.get('category') == category
 
@@ -693,20 +706,22 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
             skip_note = ('%d only_theirs row(s) skipped: ours already carries '
                          'the body (recompare will reclassify)' % len(present))
             if not eligible:
-                return [], [], None, (2, skip_note + '\n')
+                return [], [], None, None, (2, skip_note + '\n')
     if not eligible:
         if candidates:
-            return [], [], None, (2, 'nothing left to assign: %d row%s wait%s on files '
+            return [], [], None, None, (2, 'nothing left to assign: %d row%s wait%s on files '
                                  'owned by assigned batches or claimed by streams\n'
                                  % (len(candidates), 's' if len(candidates) != 1 else '',
                                     '' if len(candidates) != 1 else 's'))
-        return [], [], None, (2, f'nothing left: every {category} row is assigned or decided\n')
+        return [], [], None, None, (2, f'nothing left: every {category} row is assigned or decided\n')
     eligible.sort(key=lambda r: (-(r['their_len'] + r['our_len']),
                                  r['file'], r['name']))
     coverage_note = None
+    kept_default = None            # rule 2 fills this for base-body pools
     if importing:
         # The coverage map (tools/coverage.py): covered rows first, most
-        # scenarios first; rows no scenario exercises are left out.
+        # scenarios first.  Rule 1 offers the unexercised rows too (they
+        # import unmeasured); rule 2 keeps base-body ones by default.
         cov_mod = _coverage()
         cpath = coverage_path or os.path.join(
             os.path.dirname(os.path.abspath(disagreements_path)), 'coverage.json')
@@ -744,7 +759,7 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                 oracle = {id(r) for r in oracle_rows}
                 hit = [r for r in eligible if state_of[id(r)] == 'hit']
                 # stale hits rank above unknown but never decide: such a row is
-                # unknown for the leave-out decision
+                # unknown for the exercises-it decision
                 stale_hit = [r for r in eligible if state_of[id(r)] == 'unknown'
                              and cov_mod.covered(cov, r['address'], include_stale=True)
                              and id(r) not in oracle]
@@ -753,26 +768,58 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                 dead = [r for r in eligible if state_of[id(r)] == 'dead'
                         and id(r) not in oracle]
                 hit.sort(key=lambda r: -count[id(r)])   # stable: size order within a count
-                eligible = (hit + oracle_rows + stale_hit + unknown
-                            + (dead if include_uncovered else []))
                 notes = []
-                if not include_uncovered:
-                    notes.append('coverage: %d candidate row(s) left out as exercised by no '
-                                 'scenario' % len(dead))
-                if unknown or stale_hit:
-                    notes.append('coverage: %d row(s) kept that no scenario measured (unknown)'
-                                 % (len(unknown) + len(stale_hit)))
+                if category == 'theirs_changed_ours_base':
+                    # Rule 2: where we both have the body, ours stays by
+                    # default, so only the rows a scenario exercises are cut;
+                    # the rest go back to the caller as kept by default.
+                    kept_default = stale_hit + unknown + dead
+                    eligible = hit + oracle_rows
+                    if kept_default:
+                        notes.append('coverage: %d base-body row(s) kept by default: no '
+                                     'scenario exercises them' % len(kept_default))
+                else:
+                    # Rule 1: where we lack the body there is no coverage
+                    # requirement, so every candidate is offered, the ones no
+                    # scenario exercises too (imported unmeasured, marked by
+                    # the Frida phase) and the unknowns in between.
+                    eligible = (hit + oracle_rows + stale_hit + unknown + dead)
+                    unmeasured = len(stale_hit) + len(unknown) + len(dead)
+                    if unmeasured:
+                        notes.append('coverage: %d row(s) exercised by no scenario: rule 1 '
+                                     'imports them unmeasured' % unmeasured)
                 notes.append('coverage: %d scenario-covered row(s), %d oracle-backed'
                              % (len(hit), len(oracle_rows)))
                 coverage_note = '\n'.join(notes) or None
-                if not eligible:
-                    return [], [], None, (2, 'nothing left: every remaining import row is '
-                                         'exercised by no scenario (--include-uncovered '
-                                         'offers them anyway)\n')
+                if not eligible and kept_default:
+                    return [], [], None, kept_default, (
+                        2, 'nothing left: every remaining %s row is kept by default '
+                           '(%d recorded: no scenario exercises them)\n'
+                           % (category, len(kept_default)))
     if skip_note:
         coverage_note = skip_note if coverage_note is None else (
             coverage_note + '\n' + skip_note)
-    return eligible, no_addr, coverage_note, None
+    return eligible, no_addr, coverage_note, kept_default, None
+
+
+def _record_kept_default(state, rows):
+    """Record rule-2 kept-by-default rows in `state` (the import state the
+    batches live in -- no second state file): merge `rows` in, keeping an
+    earlier `at` for a row already recorded, and drop entries whose row has
+    since entered a batch (a coverage pass exercised it and it was cut)."""
+    kept = state.setdefault('kept_default', {})
+    in_batch = {_addr_key(r['address'])
+                for b in state['batches'].values()
+                for r in b['rows'] if r.get('address')}
+    for r in rows:
+        k = _addr_key(r['address'])
+        if k in in_batch:
+            continue
+        if k not in kept:
+            kept[k] = {'address': r['address'], 'name': r.get('name', ''),
+                       'file': r.get('file', ''), 'at': _now()}
+    for k in [k for k in kept if k in in_batch]:
+        del kept[k]
 
 
 def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
@@ -923,14 +970,44 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
     cats = tuple(q.get('categories', ())) if importing else (
         (q['category'],) if probing else (category,))
     last_failure = None
+    kept_note = None
+    pool_cache = {}
+
+    def pool_for(cat):
+        # one pool per category however often this call reaches it: the
+        # pre-loop rule-2 recording below shares the loop's work
+        if cat not in pool_cache:
+            pool_cache[cat] = _import_pool(
+                rows, cat, decided, owned, importing, disagreements_path,
+                coverage_path, coverage_root, repo, include_uncovered, base=base)
+        return pool_cache[cat]
+
+    if importing:
+        # Rule 2 (2026-10-26 ruling): where we both have the body ours is
+        # the default, so a base-body row no scenario exercises never
+        # reaches a worker.  Pool that category here, before the loop, so
+        # those rows are recorded kept by default even when this call cuts
+        # no batch or a stub category wins the cut; the loop then reuses
+        # the pool, and the stub-first category order is unchanged.
+        _, _, _, base_kept, _ = pool_for('theirs_changed_ours_base')
+        if base_kept:
+            _record_kept_default(state, base_kept)
+            kept_note = (f'kept by default: {len(base_kept)} base-body row(s) no '
+                         f'scenario exercises (rule 2); recorded in the import '
+                         f'state, out of later cuts until a coverage pass '
+                         f'exercises them')
     for category in cats:
-        eligible, no_addr, coverage_note, failure = _import_pool(
-            rows, category, decided, owned, importing, disagreements_path,
-            coverage_path, coverage_root, repo, include_uncovered, base=base)
+        eligible, no_addr, coverage_note, kept_default, failure = pool_for(category)
         if eligible:
             break
         last_failure = failure      # the last category's message carries the hint that matters
     if not eligible:
+        if kept_note:
+            # the recording survives a call that cuts nothing: the state
+            # file is the record, the note says it happened
+            save_state(state_path, state)
+            rc, msg = last_failure
+            last_failure = (rc, msg.rstrip('\n') + '\n' + kept_note + '\n')
         return last_failure
     chosen = eligible[:size]
     pre = q['prefix']
@@ -966,6 +1043,8 @@ def _next_batch(disagreements_path=DISAGREEMENTS_PATH, state_path=STATE_PATH,
              f'files: {", ".join(files)}']
     if importing:
         lines.append(f'category: {category}')
+        if kept_note:
+            lines.append(kept_note)
     for i, r in enumerate(chosen, 1):
         if probing:
             lines.append(f'{i:2}. {r["address"]}  {r["name"]}  {r["file"]}  '
@@ -2652,7 +2731,9 @@ def _import_tally(state, import_state=None, parked=None):
     for a base-body row untouched against the merge base, and for an
     only-theirs row ours already carries a body for, and close lets it close
     only on standing evidence or this batch's trace) is kept, any other
-    closed row imported.  None without any."""
+    closed row imported.  The import state's kept_default rows (rule 2:
+    base-body rows never cut because no scenario exercises them) close
+    the tally when there are any.  None without any."""
     parked = parked or {}
     seen = {}
     for st in (state, import_state):
@@ -2676,6 +2757,12 @@ def _import_tally(state, import_state=None, parked=None):
         kept = '; %d kept' % n['only-theirs'][1] if n['only-theirs'][1] else ''
         text += '; only-theirs %d imported%s / %d parked' % (
             n['only-theirs'][0], kept, n['only-theirs'][2])
+    default_kept = (import_state or {}).get('kept_default') or {}
+    if default_kept:
+        closed = {k for (_, k) in seen}
+        nkept = sum(1 for k in default_kept if k not in closed)
+        if nkept:
+            text += '; %d kept by default' % nkept
     return text
 
 
@@ -2966,6 +3053,11 @@ def status(state_path=STATE_PATH):
         n = len(b['rows'])
         extra = f', {v}/{n} verdicts' if b['status'] == 'assigned' else ''
         lines.append(f'{bid} {b["status"]} {b["branch"]} {n} rows{extra}')
+    kept = state.get('kept_default') or {}
+    if kept:
+        # rule 2: base-body rows recorded ours by default because no
+        # scenario exercises them; they leave this map only when cut
+        lines.append(f'kept by default: {len(kept)} row(s) no scenario exercises')
     return 0, '\n'.join(lines) + '\n'
 
 
