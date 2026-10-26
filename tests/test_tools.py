@@ -13715,6 +13715,31 @@ class DriverTest(unittest.TestCase):
             self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
                 os.path.join(ev, addr[2:] + '.md'))), addr)
 
+    def test_kept_evidence_accepts_a_pending_case_registration(self):
+        """Task 41: an `oracle_case: pending/...` names a registration the
+        family's other spellings write too (a pending case stands as
+        written, docs/evidence/README.md), so kept_evidence keeps it."""
+        d, batch = self._import_phase_driver()
+        ev = os.path.join(self.wt, 'docs', 'evidence')
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+               'ORACLE_CASE("rules/render", Render);\n'
+               'ORACLE_CASE_EXPECT("rules/expect", Expect, OracleExpect::Fail);\n'
+               'ORACLE_CASE_PENDING("pending/hit", nullptr,\n'
+               '                     "needs engine state");\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        _write(os.path.join(ev, '401000.md'), '---\naddress: 0x401000\nname: Rules::Render\n'
+               'kind: oracle\noracle_case: pending/hit\n---\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'pending case', cwd=self.wt)
+        wave = driver._tool('wave')
+        self.assertEqual(wave._oracle_case_names(self.wt),
+                         {'rules/render', 'rules/expect', 'pending/hit'})
+        mb = wave.merge_base_sha(self.wt, 'first')
+        self.assertEqual(wave.kept_evidence(self.wt, mb, '0x401000', 'Rules::Render',
+                                            _slurp(os.path.join(ev, '401000.md'))),
+                         'oracle case pending/hit')
+
     BASE_CAT = 'theirs_changed_ours_base'
 
     def _kept_phase_driver(self, kept=('0x401000', '0x402000', '0x403000'), category=None):
