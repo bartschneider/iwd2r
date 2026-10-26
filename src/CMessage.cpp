@@ -18134,6 +18134,52 @@ void CMessagePickedDialogResponse::Run()
 
 // -----------------------------------------------------------------------------
 
+// 0x50A6C0
+BOOL CMessageSetVariable::UnmarshalMessage(BYTE* pData, DWORD dwSize)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 21254
+    UTIL_ASSERT(pData != NULL);
+
+    DWORD cnt = CNetwork::SPEC_MSG_HEADER_LENGTH;
+
+    PLAYER_ID player = *reinterpret_cast<PLAYER_ID*>(pData + cnt);
+    cnt += sizeof(PLAYER_ID);
+
+    LONG remote = *reinterpret_cast<LONG*>(pData + cnt);
+    cnt += sizeof(LONG);
+
+    LONG local;
+    if (g_pBaldurChitin->GetObjectGame()->GetRemoteObjectArray()->Find(player, remote, local) == TRUE) {
+        m_targetId = local;
+    } else {
+        m_targetId = CGameObjectArray::INVALID_INDEX;
+    }
+
+    SHORT length = *reinterpret_cast<SHORT*>(pData + cnt);
+    cnt += sizeof(SHORT);
+    m_sScope = CString(reinterpret_cast<const char*>(pData + cnt), length);
+    cnt += length;
+
+    length = *reinterpret_cast<SHORT*>(pData + cnt);
+    cnt += sizeof(SHORT);
+    m_sName = CString(reinterpret_cast<const char*>(pData + cnt), length);
+    cnt += length;
+
+    m_nValue = *reinterpret_cast<LONG*>(pData + cnt);
+    cnt += sizeof(LONG);
+
+    m_bIncrement = pData[cnt++];
+    m_dwFlags = *reinterpret_cast<DWORD*>(pData + cnt);
+    cnt += sizeof(DWORD);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 21302
+    UTIL_ASSERT(cnt == dwSize);
+
+    return TRUE;
+}
+
 // 0x50A820
 void CMessageSetVariable::Run()
 {

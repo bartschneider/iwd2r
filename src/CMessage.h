@@ -1087,9 +1087,8 @@ public:
 
 // NOTE: The original's message that sets (or increments) a script variable
 // on every machine (vtable 0x84882C, 0x1E bytes). Its comm type is
-// BROADCAST_FORCED, so the local player runs it too. Marshal and Unmarshal
-// (0x50A4D0, 0x50A6C0) are the network path and are omitted (single player
-// only, docs/adr/0002-single-player-only.md).
+// BROADCAST_FORCED, so the local player runs it too. Marshal (0x50A4D0) is
+// omitted (single player only, docs/adr/0002-single-player-only.md).
 class CMessageSetVariable : public CMessage {
 public:
     CMessageSetVariable(const CString& sScope, const CString& sName, LONG nValue, LONG caller, LONG target)
@@ -1106,6 +1105,7 @@ public:
     BYTE GetMsgType() override { return CBaldurMessage::MSG_TYPE_CMESSAGE; }
     // NOTE: The BYTE at 0x84CF0C (53).
     BYTE GetMsgSubType() override { return 53; }
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
     /* 000C */ CString m_sScope;
