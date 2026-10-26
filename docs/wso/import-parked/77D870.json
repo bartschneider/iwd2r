@@ -1,0 +1,1 @@
+{"address": "0x77D870", "name": "CUIControlButtonGeneralOptionsFromMainMenu::OnLButtonClick", "file": "src/CUIControlFactory.cpp", "batch": "i042", "needs": "not exercised; ours reading matches the decompile"}
