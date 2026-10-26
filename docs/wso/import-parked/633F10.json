@@ -1,0 +1,7 @@
+{
+  "address": "0x633F10",
+  "name": "CUIControlButtonInventoryHistoryIcon::Render",
+  "file": "src/CScreenInventory.cpp",
+  "batch": "i032",
+  "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"
+}
