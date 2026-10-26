@@ -7553,7 +7553,7 @@ BYTE CMessageDisplayText::GetMsgType()
 // 0x43E060
 BYTE CMessageDisplayText::GetMsgSubType()
 {
-    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_CUT_SCENE_MODE_STATUS;
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_DISPLAY_TEXT;
 }
 
 // 0x4FC4F0
