@@ -7011,7 +7011,7 @@
     "i046": {
       "assigned_at": "2026-10-26T15:28:25+00:00",
       "branch": "p3/wso-i046",
-      "closed_at": null,
+      "closed_at": "2026-10-26T16:26:08+00:00",
       "files": [
         "src/CScreenStart.cpp",
         "src/CGameSprite.cpp",
@@ -7020,6 +7020,7 @@
         "src/CScreenLoad.cpp",
         "src/CBaldurChitin.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -7117,6 +7118,184 @@
           "name": "CBaldurChitin::UnloadFonts",
           "our_len": 49,
           "their_len": 54
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i047": {
+      "assigned_at": "2026-10-26T15:50:20+00:00",
+      "branch": "p3/wso-i047",
+      "closed_at": null,
+      "files": [
+        "src/CMessage.cpp",
+        "src/CGameDoor.cpp",
+        "src/CProjectile.cpp",
+        "src/CAIGroup.cpp",
+        "src/CGameAIBase.cpp",
+        "src/IcewindCGameEffects.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x511D00",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileTrailingVFX::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1523
+        },
+        {
+          "address": "0x511F40",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileTrailingVFX::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 1112
+        },
+        {
+          "address": "0x50A6C0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetVariable::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 867
+        },
+        {
+          "address": "0x515180",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileImmumityUpdate::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 564
+        },
+        {
+          "address": "0x4FDD30",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageContinueDialog::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 39
+        },
+        {
+          "address": "0x502D60",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageLoadDialog::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 39
+        },
+        {
+          "address": "0x486860",
+          "category": "only_theirs",
+          "file": "src/CGameDoor.cpp",
+          "name": "CGameDoor::AddEffect",
+          "our_len": 0,
+          "their_len": 3832
+        },
+        {
+          "address": "0x532F00",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSPBRNHND::Fire",
+          "our_len": 0,
+          "their_len": 3475
+        },
+        {
+          "address": "0x57D9F0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileReboundingBolt::AIUpdate",
+          "our_len": 0,
+          "their_len": 3262
+        },
+        {
+          "address": "0x405A10",
+          "category": "only_theirs",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GetFormationFaces",
+          "our_len": 0,
+          "their_len": 3225
+        },
+        {
+          "address": "0x57B210",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::AIUpdate",
+          "our_len": 0,
+          "their_len": 3064
+        },
+        {
+          "address": "0x4F8470",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddEffect::MarshalMessage",
+          "our_len": 0,
+          "their_len": 2832
+        },
+        {
+          "address": "0x534140",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileFollowUp::AIUpdate",
+          "our_len": 0,
+          "their_len": 2724
+        },
+        {
+          "address": "0x52EC80",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExplodingFlame::AIUpdate",
+          "our_len": 0,
+          "their_len": 2709
+        },
+        {
+          "address": "0x52CF80",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExploding::Render",
+          "our_len": 0,
+          "their_len": 2633
+        },
+        {
+          "address": "0x463B30",
+          "category": "only_theirs",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::TakePartyItem",
+          "our_len": 0,
+          "their_len": 2591
+        },
+        {
+          "address": "0x4F8880",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddEffect::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 2357
+        },
+        {
+          "address": "0x57B780",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::Render",
+          "our_len": 0,
+          "their_len": 2351
+        },
+        {
+          "address": "0x55FAD0",
+          "category": "only_theirs",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectSummon::SpawnFromResRef",
+          "our_len": 0,
+          "their_len": 2234
+        },
+        {
+          "address": "0x52E4D0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExplodingWeapon::AIUpdate",
+          "our_len": 0,
+          "their_len": 2171
         }
       ],
       "status": "assigned",
