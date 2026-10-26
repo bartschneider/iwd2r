@@ -1,2 +1,1 @@
-{"address": "0x6653D0", "name": "CScreenSinglePlayer", "file": ":OnLogoutButtonClick:src/CScreenSinglePlayer.cpp", "batch": "i045",
- "needs": "not exercised; ours reading matches the decompile"}
+{"address": "0x6653D0", "name": "CScreenSinglePlayer::OnLogoutButtonClick", "file": "src/CScreenSinglePlayer.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}

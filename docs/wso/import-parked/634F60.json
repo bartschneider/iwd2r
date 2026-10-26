@@ -1,2 +1,1 @@
-{"address": "0x634F60", "name": "CUIControlButtonInventoryHistoryUse", "file": ":OnLButtonClick:src/CScreenInventory.cpp", "batch": "i045",
- "needs": "not exercised; ours reading matches the decompile"}
+{"address": "0x634F60", "name": "CUIControlButtonInventoryHistoryUse::OnLButtonClick", "file": "src/CScreenInventory.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}

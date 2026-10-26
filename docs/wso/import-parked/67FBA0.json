@@ -1,2 +1,1 @@
-{"address": "0x67FBA0", "name": "CUIControlScrollBarStoreBuyDrinksDrink", "file": ":InvalidateItems:src/CScreenStore.cpp", "batch": "i045",
- "needs": "not exercised; ours reading matches the decompile"}
+{"address": "0x67FBA0", "name": "CUIControlScrollBarStoreBuyDrinksDrink::InvalidateItems", "file": "src/CScreenStore.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}

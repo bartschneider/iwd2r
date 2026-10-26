@@ -1,2 +1,1 @@
-{"address": "0x66EDA0", "name": "CUIControlButtonSpellbookLevelSelection", "file": ":OnLButtonClick:src/CScreenSpellbook.cpp", "batch": "i045",
- "needs": "not exercised; ours reading matches the decompile"}
+{"address": "0x66EDA0", "name": "CUIControlButtonSpellbookLevelSelection::OnLButtonClick", "file": "src/CScreenSpellbook.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}

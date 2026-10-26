@@ -1,2 +1,1 @@
-{"address": "0x6978D0", "name": "CUIControlButtonWorldContainerClose", "file": ":OnLButtonClick:src/CScreenWorld.cpp", "batch": "i045",
- "needs": "not exercised; ours reading matches the decompile"}
+{"address": "0x6978D0", "name": "CUIControlButtonWorldContainerClose::OnLButtonClick", "file": "src/CScreenWorld.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}

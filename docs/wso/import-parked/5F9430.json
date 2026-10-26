@@ -1,2 +1,1 @@
-{"address": "0x5F9430", "name": "CUIControlScrollbarCharacter5F9410", "file": ":OnScrollUp:src/CScreenCharacter.cpp", "batch": "i045",
- "needs": "not exercised; ours reading matches the decompile"}
+{"address": "0x5F9430", "name": "CUIControlScrollbarCharacter5F9410::OnScrollUp", "file": "src/CScreenCharacter.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}

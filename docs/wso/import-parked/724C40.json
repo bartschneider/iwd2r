@@ -1,2 +1,1 @@
-{"address": "0x724C40", "name": "CGameSprite", "file": ":sub_724C40:src/CGameSprite.cpp", "batch": "i045",
- "needs": "not exercised; ours reading matches the decompile"}
+{"address": "0x724C40", "name": "CGameSprite::sub_724C40", "file": "src/CGameSprite.cpp", "batch": "i045", "needs": "not exercised; ours reading matches the decompile"}
