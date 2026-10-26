@@ -1,0 +1,1 @@
+{"address": "0x4FDD30", "name": "CMessageContinueDialog::UnmarshalMessage", "file": "src/CMessage.cpp", "batch": "i047", "needs": "fork body contradicts the exe: his body is a TODO stub returning FALSE; the exe resolves IDs via CGameRemoteObjectArray::Find and reads length-prefixed strings/fields"}
