@@ -5147,7 +5147,7 @@
     "i035": {
       "assigned_at": "2026-10-26T05:19:26+00:00",
       "branch": "p3/wso-i035",
-      "closed_at": null,
+      "closed_at": "2026-10-26T07:01:04+00:00",
       "files": [
         "src/CScreenConnection.cpp",
         "src/CGameEffect.cpp",
@@ -5158,6 +5158,7 @@
         "src/CScreenJournal.cpp",
         "src/CScreenWorldMap.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -5321,7 +5322,7 @@
           "their_len": 773
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     }
   }
