@@ -50,11 +50,15 @@
 # 386,165 where Grease landed as a cast-at-point (action 95). Bram
 # opens with his Ray of Enfeeblement at Aria (strength drain only);
 # Aria answers with her Ray at Bram, then Greases the ground north.
-# Bram's Burning Hands and Cade's Color Spray cone that same ground -
-# the cone points north, away from the party, into the goblin's melee.
-# Damage goes last: Cade's Magic Missile at Bram, 1d4+1 that cannot
-# miss, after every other cast has fired (Bram's hit points untouched
-# until then - the Rays drain strength, and the cones face away).
+# Bram's second cast is his Ice Dagger at Aria by key - launch 2 of
+# attempt 1 fired it as the one travelling-dagger cast, and the rows
+# its projectile family owns (TravellingVFX Fire/AIUpdate,
+# GetDirection) fell to zero when no dagger flew. Cade's Color Spray
+# cones that same ground - north, away from the party, into the
+# goblin's melee. Damage goes last: the Ice Dagger 1d4+1 lands on
+# Aria, who has finished both her casts, and Cade's Magic Missile
+# (1d4+1, cannot miss) closes on Bram after every other cast has
+# fired - the Ray drains strength only, and the cone faces away.
 #
 # Space ends the pause and the casts play out: the Rays and Larloch's
 # fly as travelling projectiles, Magic Missile and Ice Dagger fly at
@@ -309,14 +313,15 @@ wait 15
 click 536 562
 wait 30
 checkpoint b_feats_done
-# Bram's spells: Ray of Enfeeblement (508,222) and Burning Hands
-# (293,179) are his casts; Ice Dagger (293,222) and Magic Missile
+# Bram's spells: Ray of Enfeeblement (508,222) and Ice Dagger
+# (293,222) are his casts - the dagger rides the TravellingVFX
+# projectile family; Burning Hands (293,179) and Magic Missile
 # (465,222) ride along as spares.
 click 508 222
 wait 15
-click 293 179
-wait 15
 click 293 222
+wait 15
+click 293 179
 wait 15
 click 465 222
 wait 15
@@ -752,19 +757,20 @@ wait 10
 key SPACE
 wait 220
 shot a2_grease
-# Bram's Burning Hands: cone at the same ground, pointing north, away
-# from the party, into the goblin's melee.
+# Bram's Ice Dagger at Aria: the digit-key delivery every creature
+# cast uses; Aria is done casting, so its 1d4+1 landing here hurts
+# nothing that acts later.
 key 2
 wait 10
 key F5
 wait 10
 key F2
 wait 10
-click 386 165
+key 1
 wait 10
 key SPACE
 wait 220
-shot b2_burninghands
+shot b2_icedagger
 # Cade: key 3 selects him. Color Spray cones the same ground.
 key 3
 wait 10
