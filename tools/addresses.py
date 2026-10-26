@@ -44,6 +44,7 @@ SOURCES = ('sub-name', 'ghidra', 'ours', 'fork-header', 'fork-decl')
 SUB_NAME = re.compile(r'(?:\w+::)*sub_([0-9A-Fa-f]+)$')
 
 DECL_TRAILING = re.compile(r'^(.+?)\s*//(.*)$')     # code // trailing comment
+DECL_BLOCK = re.compile(r'/\*.*?\*/')               # inline /* */ comment
 DECL_HEX = re.compile(r'0x([0-9A-Fa-f]{6,8})')      # addresses a comment names
 DECL_CLASS = re.compile(r'\b(?:class|struct|union)\s+(\w+)')
 DECL_NAMESPACE = re.compile(r'\bnamespace(?:\s+\w+)?\s*\{')
@@ -241,16 +242,22 @@ def decl_addresses(repo, ref):
 
 
 def _code_and_comment(line):
-    """(code, comment) when the line ends in a // comment that labels code
-    before it, else (line, None): a comment-only line labels nothing, so a
-    declaration's trailing comment never gets mistaken for the
-    comment-above-definition form, and braces inside comments do not open
-    scopes."""
-    m = DECL_TRAILING.match(line)
-    if (m and m.group(1).strip()
-            and not m.group(1).strip().startswith(('*', '/*', '//'))):
+    """(code, comment) of one line with every comment out of the code:
+    inline /* */ pairs are cut first -- one left open runs to the end of
+    its line -- then a trailing // comment is split off, and a comment-only
+    line is ('', its text).  Prose like `one class for both` thus never
+    reaches the class/brace scan, so it cannot set a pending class, and
+    braces inside comments never open scopes."""
+    code = DECL_BLOCK.sub(' ', line)
+    cut = code.find('/*')           # a block comment left open runs to the
+    if cut >= 0:                    # end of its line
+        code = code[:cut]
+    if code.lstrip().startswith('//'):      # comment-only: prose, not code
+        return '', code.strip()[2:].strip()
+    m = DECL_TRAILING.match(code)
+    if m and m.group(1).strip() and not m.group(1).strip().startswith('*'):
         return m.group(1), m.group(2)
-    return line, None
+    return code, None
 
 
 def _first_text_address(comment):

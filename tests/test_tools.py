@@ -9139,6 +9139,38 @@ class WaveTest(unittest.TestCase):
                                                    'BYTE facingOffset'}})
         self.assertEqual(addr.decl_addresses(repo, 'no-such-ref'), {})
 
+    def test_decl_addresses_ignores_comment_prose_mentioning_class(self):
+        addr = load_tool('addresses')
+        repo = os.path.join(self.tmp, 'proserepo')
+        os.makedirs(os.path.join(repo, 'src'))
+        self.git('init', '-q', cwd=repo)
+        with open(os.path.join(repo, 'src', 'P.h'), 'w') as f:
+            f.write('// Leaf 0x5756C0 -- Portal Animation Flipping Hack, Open (projectile\n'
+                    '// type 294) and Close (type 297), one class for both. Not a spell\n'
+                    '// (no SPL owner): a minimal portal-door overlay.\n'
+                    'class CProjectilePortalAnimFlip /*#guess*/ : public IcewindCProjectileSpellHit {\n'
+                    'public:\n'
+                    '    CProjectilePortalAnimFlip();    // 0x5756C0\n'
+                    '    ~CProjectilePortalAnimFlip() override;   // slot 0; ICF-folded onto 0x5768A0\n'
+                    '};\n\n'
+                    '// The only spell-hit leaf with its own data and virtual overrides (nothing\n'
+                    '// outside this class reads them).\n'
+                    'class CProjectileDBFireball /*#guess*/ : public IcewindCProjectileSpellHit {\n'
+                    'public:\n'
+                    '    CProjectileDBFireball();    // 0x576990\n'
+                    '    void AIUpdate() override;   // vtable slot 3;  0x576BA0\n'
+                    '};\n')
+        self.git('add', '-A', cwd=repo)
+        self.git('commit', '-qm', 'headers', cwd=repo)
+        # the prose names no class: every decl is indexed under the class
+        # head that encloses it (its /*#guess*/ stripped), never under the
+        # `for`/`reads` a comment-only line used to leave pending
+        self.assertEqual(addr.decl_addresses(repo, 'HEAD'), {
+            'CProjectilePortalAnimFlip::CProjectilePortalAnimFlip': {'0x5756C0': ''},
+            'CProjectilePortalAnimFlip::~CProjectilePortalAnimFlip': {'0x5768A0': ''},
+            'CProjectileDBFireball::CProjectileDBFireball': {'0x576990': ''},
+            'CProjectileDBFireball::AIUpdate': {'0x576BA0': ''}})
+
     def test_wave_addresses_command_reaches_the_tool(self):
         from unittest import mock
         addr = load_tool('addresses')
