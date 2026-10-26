@@ -10734,6 +10734,79 @@ INT CGameSprite::GetNumQuickWeaponSlots()
     return g_pBaldurChitin->GetObjectGame()->GetRuleTables().GetNumQuickWeaponSlots(m_typeAI.m_nClass);
 }
 
+// 0x71CC90
+//
+// Refresh the weapon-proficiency contribution after the equipped weapons may
+// have changed: re-apply the proficiency bonus for the main hand and off hand,
+// then (only when the main weapon just changed) add the fighting-style feat
+// bonuses.  The style-feat query (sub_75E930) is stubbed to zero in the shipped
+// binary, so those bonus branches never actually fire.
+void CGameSprite::sub_71CC90()
+{
+    INT nOffhandSlot = CGameSpriteEquipment::SLOT_WEAPON + 2 * m_nWeaponSet + 1;
+    CItem* pMainWeapon = m_equipment.m_items[m_equipment.m_selectedWeapon];
+    CItem* pOffhand = m_equipment.m_items[nOffhandSlot];
+
+    // A shield or armour in the off hand is not a second weapon.
+    if (m_equipment.m_selectedWeapon == 0x2A
+        || (pOffhand != NULL
+            && (pOffhand->GetItemType() == 0x2F || pOffhand->GetItemType() == 0x35
+                || pOffhand->GetItemType() == 0x31 || pOffhand->GetItemType() == 0x29))) {
+        pOffhand = NULL;
+    }
+
+    if (pMainWeapon == NULL) {
+        SelectWeaponAbility(CGameSpriteEquipment::SLOT_FIST, 0, 0, 1);
+        pMainWeapon = m_equipment.m_items[m_equipment.m_selectedWeapon];
+    }
+
+    sub_71CEA0(pMainWeapon, 0);
+    sub_71CEA0(pOffhand, 1);
+
+    BOOL bWeaponChanged = pMainWeapon != m_equipment.m_items[CGameSpriteEquipment::SLOT_FIST];
+
+    pMainWeapon->Demand();
+    ITEM_ABILITY* pAbility = pMainWeapon->GetAbility(m_equipment.m_selectedWeaponAbility);
+    if (pAbility != NULL && static_cast<BYTE>(pAbility->type) != 2) {
+        if ((pMainWeapon->GetFlagsFile() & 2) == 0) {
+            if (pOffhand == NULL) {
+                if (m_equipment.m_items[nOffhandSlot] == NULL) {
+                    if (bWeaponChanged) {
+                        INT nRank = sub_75E930(CGAMESPRITE_FEAT_DODGE);
+                        if (nRank == 1) {
+                            m_derivedStats.field_6 += 1;
+                            m_derivedStats.m_nCriticalHitBonus += 1;
+                        } else if (nRank == 2) {
+                            m_derivedStats.field_6 += 2;
+                            m_derivedStats.m_nCriticalHitBonus += 1;
+                        }
+                    }
+                } else if (bWeaponChanged) {
+                    INT nRank = sub_75E930(CGAMESPRITE_FEAT_DISCIPLINE);
+                    if (nRank == 1) {
+                        m_derivedStats.m_nACMissileMod -= 2;
+                    } else if (nRank == 2) {
+                        m_derivedStats.m_nACMissileMod -= 4;
+                    }
+                }
+            }
+        } else if (bWeaponChanged) {
+            INT nRank = sub_75E930(CGAMESPRITE_FEAT_DIRTY_FIGHTING);
+            if (nRank == 1) {
+                m_derivedStats.m_nPhysicalSpeed += 2;
+                m_derivedStats.m_nCriticalHitBonus += 1;
+                m_derivedStats.m_DamageBonusRight += 1;
+            } else if (nRank == 2) {
+                m_derivedStats.m_nPhysicalSpeed += 4;
+                m_derivedStats.m_nCriticalHitBonus += 1;
+                m_derivedStats.m_DamageBonusRight += 1;
+            }
+        }
+    }
+    pMainWeapon->Release();
+}
+
+
 // 0x71CEA0
 //
 // Apply the weapon-specialization damage bonus for one hand.  The proficiency

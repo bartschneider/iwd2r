@@ -559,6 +559,7 @@ public:
     void sub_737990();
     int sub_75E930(int a1);
     void sub_71CEA0(CItem* pItem, int a2);
+    void sub_71CC90();
     void sub_71D0B0();
     void sub_72FBF0();
     void CheckSequence(BYTE& sequence);
