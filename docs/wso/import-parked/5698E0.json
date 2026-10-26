@@ -1,0 +1,1 @@
+{"address": "0x5698E0", "name": "IcewindCGameEffectFreeAction::ApplyEffect", "file": "src/IcewindCGameEffects.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
