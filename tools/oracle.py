@@ -1295,6 +1295,114 @@ def replay_ini(text):
     return mute_ini(text)
 
 
+def _cheats_key(text, value):
+    """icewind2.ini's text with the [Game Options] Cheats key set to value
+    ('0'/'1') or removed (None). Raises ValueError when there is no
+    [Game Options] section, rather than guessing where the key belongs."""
+    m = re.search(r'^\[Game Options\][^\r\n]*(?:\r?\n)', text,
+                  re.MULTILINE)
+    if not m:
+        raise ValueError('icewind2.ini has no [Game Options] section')
+    end = text.find('\n[', m.end())
+    body = text[m.end():end] if end >= 0 else text[m.end():]
+    tail = text[end:] if end >= 0 else ''
+    if value is None:
+        body = re.sub(r'^Cheats=[^\r\n]*\r?\n?', '', body,
+                      flags=re.MULTILINE)
+    elif re.search(r'^Cheats=', body, re.MULTILINE):
+        body = re.sub(r'^(Cheats=)[^\r\n]*', r'\g<1>' + value, body,
+                      flags=re.MULTILINE)
+    else:
+        eol = '\r\n' if '\r\n' in text else '\n'
+        body = 'Cheats=%s%s%s' % (value, eol, body)
+    return text[:m.end()] + body + tail
+
+
+def cheats_ini(text, on):
+    """icewind2.ini's text with the original's cheats on
+    ([Game Options] Cheats=1) for a run that opted in; the text unchanged
+    otherwise, so a run that does not opt in leaves the ini
+    byte-identical."""
+    if not on:
+        return text
+    return _cheats_key(text, '1')
+
+
+def cheats_ini_value(text):
+    """The [Game Options] Cheats value ('0'/'1'/...), or None when the key
+    is absent (the original then defaults to 0)."""
+    m = re.search(r'^\[Game Options\][^\r\n]*(?:\r?\n)', text,
+                  re.MULTILINE)
+    if not m:
+        return None
+    end = text.find('\n[', m.end())
+    body = text[m.end():end] if end >= 0 else text[m.end():]
+    key = re.search(r'^Cheats=([^\r\n]*)', body, re.MULTILINE)
+    return key.group(1) if key else None
+
+
+def set_cheats_ini(path, on):
+    """cheats_ini applied to the icewind2.ini at path (the sandbox cache's
+    or a private view's copy of it). Writes only when the run opted in and
+    the text changes."""
+    if not on:
+        return
+    with open(path, 'rb') as f:
+        old = f.read()
+    text = old.decode('latin-1')
+    try:
+        new = cheats_ini(text, True)
+    except ValueError as e:
+        sys.exit('oracle: %s: %s' % (path, e))
+    if new != text:
+        with open(path, 'wb') as f:
+            f.write(new.encode('latin-1'))
+        print('set Cheats=1 in %s' % path)
+
+
+def prepare_cheats_ini(game, on, install=INSTALL):
+    """Turn the copy's [Game Options] Cheats on for one opted-in run; only
+    the copy is written, after the same guard as every write to it.
+    Returns the prior Cheats value for restore_cheats_ini ('0'/'1'/...,
+    None when the key was absent), or None with nothing written when there
+    is no opt-in — the caller restores only for an opt-in run."""
+    if not on:
+        return None
+    assert_safe_target(game, install)
+    names = {n.lower(): n for n in os.listdir(game)}
+    if 'icewind2.ini' not in names:
+        sys.exit('oracle: the copy has no icewind2.ini')
+    path = os.path.join(game, names['icewind2.ini'])
+    with open(path, 'rb') as f:
+        text = f.read().decode('latin-1')
+    try:
+        prior = cheats_ini_value(text)
+    except ValueError:
+        prior = None  # set_cheats_ini reports the missing section
+    set_cheats_ini(path, True)
+    return prior
+
+
+def restore_cheats_ini(game, prior, install=INSTALL):
+    """Put the copy's Cheats key back to prior (prepare_cheats_ini's
+    return) after an opted-in run: prior None removes the key (it was
+    absent before the run). Only that key changes, so the run's own ini
+    write-back (its console history) survives."""
+    assert_safe_target(game, install)
+    names = {n.lower(): n for n in os.listdir(game)}
+    if 'icewind2.ini' not in names:
+        sys.exit('oracle: the copy has no icewind2.ini')
+    path = os.path.join(game, names['icewind2.ini'])
+    with open(path, 'rb') as f:
+        old = f.read()
+    text = old.decode('latin-1')
+    new = _cheats_key(text, prior)
+    if new != text:
+        with open(path, 'wb') as f:
+            f.write(new.encode('latin-1'))
+        print('restored Cheats in %s' % path)
+
+
 def prepare_replay_ini(game, install=INSTALL):
     """Set the copy's icewind2.ini up for a recording (replay_ini); only the
     copy is written, after the same guard as every write to it."""

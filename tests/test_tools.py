@@ -5059,6 +5059,86 @@ class OracleReplayTest(unittest.TestCase):
                 self.assertEqual(f.read(),
                                  b'Full Screen=1\r\nResolution=800\r\n')
 
+    def test_cheats_ini(self):
+        text = ('[Program Options]\r\nResolution=800\r\n'
+                '[Game Options]\r\nCheats=0\r\nDifficulty=0\r\n'
+                '[Characters]\r\n')
+        # A run that does not opt in leaves the ini byte-identical.
+        self.assertEqual(oracle.cheats_ini(text, False), text)
+        self.assertEqual(oracle.cheats_ini(text, True),
+                         '[Program Options]\r\nResolution=800\r\n'
+                         '[Game Options]\r\nCheats=1\r\nDifficulty=0\r\n'
+                         '[Characters]\r\n')
+        # A copy without the key gains it at the top of the section.
+        bare = text.replace('Cheats=0\r\n', '')
+        self.assertEqual(oracle.cheats_ini(bare, True),
+                         '[Program Options]\r\nResolution=800\r\n'
+                         '[Game Options]\r\nCheats=1\r\nDifficulty=0\r\n'
+                         '[Characters]\r\n')
+        self.assertEqual(oracle.cheats_ini_value(text), '0')
+        self.assertEqual(oracle.cheats_ini_value(
+            text.replace('Cheats=0', 'Cheats=1')), '1')
+        self.assertIsNone(oracle.cheats_ini_value(bare))
+        for broken in ('Cheats=1\r\n', '[Program Options]\r\nCheats=1\r\n'):
+            with self.assertRaises(ValueError):
+                oracle.cheats_ini(broken, True)
+
+    def test_prepare_and_restore_cheats_ini(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            game = os.path.join(tmp, 'game')
+            os.makedirs(game)
+            ini = os.path.join(game, 'Icewind2.ini')
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            calls = []
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: calls.append((g, i))), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(
+                    oracle.prepare_cheats_ini(game, True, '/install'), '0')
+                # The original writes its console history back at exit.
+                with open(ini, 'ab') as f:
+                    f.write(b'[Lua Edit]\r\nHistory=SETCURRENTXP(4000)\r\n')
+                oracle.restore_cheats_ini(game, '0', '/install')
+            self.assertEqual(calls, [(game, '/install')] * 2)
+            self.assertIn('set Cheats=1', out.getvalue())
+            # Only the Cheats key went back; the write-back survived.
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n'
+                                 b'[Lua Edit]\r\n'
+                                 b'History=SETCURRENTXP(4000)\r\n')
+            # An opt-in on a copy without the key removes it again on
+            # restore (the original then defaults the cheats to 0).
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nSound=1\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(
+                    oracle.prepare_cheats_ini(game, True, '/install'))
+                oracle.restore_cheats_ini(game, None, '/install')
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nSound=1\r\n')
+            # No opt-in writes nothing at all.
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertIsNone(
+                    oracle.prepare_cheats_ini(game, False, '/install'))
+            self.assertNotIn('set Cheats', out.getvalue())
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n')
+            # An ini without the section is refused, not guessed at.
+            with open(ini, 'wb') as f:
+                f.write(b'[Program Options]\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None):
+                with self.assertRaises(SystemExit):
+                    oracle.prepare_cheats_ini(game, True, '/install')
+
     def test_parse_status(self):
         self.assertEqual(oracle.parse_status(
             'frame=21046\nscript_line=5\nstate=running\n'),
@@ -7126,6 +7206,8 @@ class ProbePlanTest(unittest.TestCase):
             post_load=None, target='original', build_checkout=None, out='t.jsonl',
             seed=1, dump_every=0, clicks=0)
         script = os.path.join(tmp, 's.txt')
+        with open(script, 'w') as f:
+            f.write('# cheats: 1\n')
 
         def run_side(*a, **kw):
             events.append(('run_side',))
@@ -7139,6 +7221,12 @@ class ProbePlanTest(unittest.TestCase):
             mock.patch.object(probe.winsandbox, 'available', return_value=True),
             mock.patch.object(probe.oracle, 'ensure_vanilla', return_value=game),
             mock.patch.object(probe.oracle, 'prepare_replay_ini'),
+            mock.patch.object(probe.oracle, 'prepare_cheats_ini',
+                              side_effect=lambda g, on:
+                              events.append(('cheats-on', g)) or '0'),
+            mock.patch.object(probe.oracle, 'restore_cheats_ini',
+                              side_effect=lambda g, prior:
+                              events.append(('cheats-off', g))),
             mock.patch.object(probe, 'ours_build', return_value=builddir),
             mock.patch.object(probe.winsandbox, 'deploy_runtime'),
             mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
@@ -7161,9 +7249,11 @@ class ProbePlanTest(unittest.TestCase):
             rc = probe.run(ns)
         self.assertEqual(rc, 0)
         self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
+            ('cheats-on', game),
             ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
             ('run_side',),
-            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay')])
+            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay'),
+            ('cheats-off', game)])
         saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
         self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
                                     {'mode': 'empty', 'load': None},

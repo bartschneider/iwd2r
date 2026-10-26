@@ -55,6 +55,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 import filelock  # noqa: E402
 import oracle  # noqa: E402
 import play  # noqa: E402
+import realinput  # noqa: E402
 import winsandbox  # noqa: E402
 import winhome  # noqa: E402
 
@@ -428,6 +429,7 @@ def run(ns):
     load_probe(ns.probe)
     host_python, venv_win, box_python = venv_python()
     script = oracle.scenario_path(ns.scenario)
+    cheats = realinput.load_header_cheats(script)
     timeout = oracle.replay_timeout(ns.timeout, script)
     ns.post_load = resolve_post_load(ns.post_load, script)
     if timeout <= TRACE_GRACE:
@@ -493,7 +495,10 @@ def run(ns):
         for src, dst, ro in folders:
             print('  %s -> %s%s' % (src, dst, ' (ro)' if ro else ''))
     rc = 2
+    prior_cheats = None
     try:
+        if not dry and cheats:
+            prior_cheats = oracle.prepare_cheats_ini(game, cheats)
         with filelock.hold(oracle.REPLAY_LOCK, 'replay'), \
                 filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'), \
                 saves_of_its_own(game, out_dir, dry):
@@ -504,6 +509,8 @@ def run(ns):
         print('probe: %s' % e, file=sys.stderr)
         result = {'error': str(e), 'seconds': 0.0}
     finally:
+        if not dry and cheats:
+            oracle.restore_cheats_ini(game, prior_cheats)
         if not dry:
             shutil.rmtree(host_run, ignore_errors=True)
     if result['error']:
