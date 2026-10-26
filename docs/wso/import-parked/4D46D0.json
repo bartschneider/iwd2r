@@ -1,0 +1,1 @@
+{"address": "0x4D46D0", "name": "CUIManager::ForceToolTip", "file": "src/CUIManager.cpp", "batch": "i043", "needs": "not exercised; ours reading matches the decompile"}
