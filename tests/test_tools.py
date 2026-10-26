@@ -492,6 +492,24 @@ class ScenarioParseTest(unittest.TestCase):
             {'op': 'quit', 'line': 12},
         ])
 
+    def test_key_modifiers(self):
+        # CTRL/SHIFT/ALT (any combination) before the key, joined with '+';
+        # a bare key keeps its exact old shape (no 'mods').
+        actions = realinput.parse_scenario(
+            'key CTRL+SPACE\n'
+            'key SHIFT+OEM_1\n'
+            'key ctrl+shift+X\n'
+            'key alt+shift+ctrl+TAB\n'
+            'key b\n')
+        self.assertEqual(actions, [
+            {'op': 'key', 'key': 'SPACE', 'mods': ['CTRL'], 'line': 1},
+            {'op': 'key', 'key': 'OEM_1', 'mods': ['SHIFT'], 'line': 2},
+            {'op': 'key', 'key': 'X', 'mods': ['CTRL', 'SHIFT'], 'line': 3},
+            {'op': 'key', 'key': 'TAB',
+             'mods': ['ALT', 'SHIFT', 'CTRL'], 'line': 4},
+            {'op': 'key', 'key': 'B', 'line': 5},
+        ])
+
     def test_errors_name_the_line(self):
         cases = [
             ('wait\n', 'line 1: wait needs one frame count'),
@@ -503,8 +521,16 @@ class ScenarioParseTest(unittest.TestCase):
             ('key\n', 'line 1: key needs one key name'),
             ('key NOPE\n', "line 1: unknown key 'NOPE'"),
             ('key !\n', "line 1: unknown key '!'"),
+            ('key ctrl+nope+X\n',
+             "line 1: unknown modifier 'nope' (CTRL, SHIFT, ALT)"),
+            ('key ALT+F4\n',
+             'line 1: alt+f4 closes the game window; the scenarios cannot'),
+            ('key CTRL+\n',
+             'line 1: key needs a key name after its modifiers'),
             ('type\n', 'line 1: type needs text'),
-            ('type a-b\n', "line 1: type supports letters, digits and spaces, not '-'"),
+            ('type aé\n',
+             "line 1: type supports printable ASCII characters, not "
+             "'é'"),
             ('shot\n', 'line 1: shot needs one name'),
             ('shot a/b\n', 'line 1: shot name must not contain a path'),
             ('shot c:x\n', 'line 1: shot name must not contain a path'),
@@ -529,6 +555,28 @@ class ScenarioParseTest(unittest.TestCase):
             with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
                 realinput.parse_scenario(text)
             self.assertEqual(str(cm.exception), message)
+
+    def test_header_cheats(self):
+        c = realinput.header_cheats
+        self.assertTrue(c('# cheats: 1\nwait 1\n'))
+        self.assertTrue(c('# About it.\n\n#  Cheats:  1 \r\nwait 1\n'))
+        self.assertFalse(c('# cheats: 0\nwait 1\n'))
+        self.assertFalse(c('# About it.\nwait 1\n'))
+        # Only the header (the comment lines before the first command).
+        self.assertFalse(c('wait 1\n# cheats: 1\n'))
+        for text, message in (
+                ('# x\n# cheats: 2\n',
+                 'line 2: cheats needs 0 or 1'),
+                ('# cheats: on\n',
+                 'line 1: cheats needs 0 or 1'),
+                ('# cheats: 1\n# cheats: 0\n',
+                 'line 2: duplicate cheats (first on line 1)')):
+            with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
+                c(text)
+            self.assertEqual(str(cm.exception), message)
+        # The scenario parsers take the header for a comment.
+        self.assertEqual(realinput.parse_scenario('# cheats: 1\nquit\n'),
+                         [{'op': 'quit', 'line': 2}])
 
     def test_header_timeout(self):
         t = realinput.header_timeout
@@ -560,6 +608,8 @@ class ScenarioParseTest(unittest.TestCase):
             self.assertTrue(realinput.load_scenario(path), path)
             # A header line that reads like "# timeout: S" must be one.
             realinput.load_header_timeout(path)
+            # And one that reads like "# cheats: 0|1" must be one.
+            realinput.load_header_cheats(path)
 
     def test_world_entry_checkpoints(self):
         actions = realinput.load_scenario(os.path.join(
@@ -588,6 +638,22 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual([a['name'] for a in actions if a['op'] == 'shot'],
                          ['dialog', 'door_open'])
         self.assertEqual(actions[-1]['op'], 'quit')
+
+    def test_type_keys_cover_printable_ascii(self):
+        # Exactly the printable ASCII characters, each on a key both input
+        # paths know, with shift exactly where the original's own US-layout
+        # tables put it (CInfGame.cpp's byte_8ABA24/8ABA3C).
+        self.assertEqual(set(realinput.TYPE_KEYS),
+                         set(map(chr, range(0x20, 0x7f))))
+        for ch, (name, shift) in realinput.TYPE_KEYS.items():
+            self.assertTrue(realinput.vk_for_name(name), name)
+            self.assertTrue(realinput.keysym_for_name(name), name)
+        self.assertEqual(realinput.TYPE_KEYS[':'], ('OEM_1', True))
+        self.assertEqual(realinput.TYPE_KEYS['('], ('9', True))
+        self.assertEqual(realinput.TYPE_KEYS['"'], ('OEM_7', True))
+        self.assertEqual(realinput.TYPE_KEYS['_'], ('OEM_MINUS', True))
+        self.assertEqual(realinput.TYPE_KEYS['.'], ('OEM_PERIOD', False))
+        self.assertEqual(realinput.TYPE_KEYS[';'], ('OEM_1', False))
 
     def test_keysym_table_covers_every_key_name(self):
         self.assertEqual(set(realinput.X_KEYSYM), set(realinput.KEY_VK))
@@ -623,11 +689,31 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(out[0], {'op': 'key', 'line': 1, 'key': 'LEFT',
                                   'vk': 0x25, 'extended': True,
                                   'shift': False})
+        self.assertNotIn('mods', out[0])  # a bare key keeps its old shape
         self.assertEqual([(a['vk'], a['shift']) for a in out[1:5]],
                          [(0x41, False), (0x42, True), (0x20, False),
                           (0x31, False)])
         self.assertEqual(out[5], {'op': 'click', 'x': 5, 'y': 6, 'line': 3})
         json.dumps(out)  # serialisable
+        # Modifiers travel as VK codes; the shift field stays for the old
+        # action files.
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'key CTRL+SPACE\nkey CTRL+SHIFT+OEM_1\n'))
+        self.assertEqual(out, [
+            {'op': 'key', 'line': 1, 'key': 'SPACE', 'vk': 0x20,
+             'extended': False, 'shift': False, 'mods': [0x11]},
+            {'op': 'key', 'line': 2, 'key': 'OEM_1', 'vk': 0xBA,
+             'extended': False, 'shift': False, 'mods': [0x11, 0x10]}])
+        # type: every punctuation class expands through TYPE_KEYS.
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'type :("_.\n'))
+        self.assertEqual([(a['key'], a['vk'], a['shift']) for a in out],
+                         [('OEM_1', 0xBA, True), ('9', 0x39, True),
+                          ('OEM_7', 0xDE, True), ('OEM_MINUS', 0xBD, True),
+                          ('OEM_PERIOD', 0xBE, False)])
+        self.assertEqual(realinput.describe(
+            {'op': 'key', 'key': 'X', 'mods': ['CTRL', 'SHIFT']}),
+            'key CTRL+SHIFT+X')
         # Window pixels: the centred UI, times the scale; origin dropped.
         g = realinput.resolve_screen(2560, 1440, 2, (2560, 1440))
         out = realinput.windows_actions(realinput.parse_scenario(
@@ -911,6 +997,24 @@ class XDriverTest(unittest.TestCase):
             ['keydown', 'r'], ['keyup', 'r'],
             ['keydown', 'space'], ['keyup', 'space'],
             ['keydown', '1'], ['keyup', '1']])
+
+    def test_type_presses_punctuation_through_the_us_layout(self):
+        self.driver.do({'op': 'type', 'text': ':_', 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Shift_L'], ['keydown', 'semicolon'],
+            ['keyup', 'semicolon'], ['keyup', 'Shift_L'],
+            ['keydown', 'Shift_L'], ['keydown', 'minus'], ['keyup', 'minus'],
+            ['keyup', 'Shift_L']])
+
+    def test_key_with_modifiers(self):
+        # As driver.ps1 does: modifiers down in order, the key, then
+        # release in reverse, each phase waiting for the engine's reads.
+        self.driver.do({'op': 'key', 'key': 'X',
+                        'mods': ['CTRL', 'SHIFT'], 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Control_L'], ['keydown', 'Shift_L'],
+            ['keydown', 'x'], ['keyup', 'x'],
+            ['keyup', 'Shift_L'], ['keyup', 'Control_L']])
 
     def test_game_exit_ends_the_run(self):
         self.game.code = 0
