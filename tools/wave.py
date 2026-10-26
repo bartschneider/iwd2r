@@ -27,6 +27,9 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py coverage [--scenarios a,b] [--chunk N] [--addresses FILE] [--dry]
     python3 tools/wave.py coverage --pending [--chunk N] [--dry]   # measure what recompare queued
                                                 # original-exe hit map per scenario
+    python3 tools/wave.py addresses [--dry]    # an address for every address-less row (sub-name,
+                                                # Ghidra symbol, our label, the fork's header
+                                                # comment), written back into the file
     python3 tools/wave.py run --dry-run --state COPY.json   # one batch, fake worker
     python3 tools/wave.py run --clear b011      # the coordinator's retry of an exception
     python3 tools/wave.py run --clear b011 --rerun   # a checks/review exception re-runs the worker (plain --clear re-checks the last report)
@@ -2016,6 +2019,23 @@ def _xrec():
     return _xrec_module
 
 
+_addresses_module = None
+
+
+def _addresses():
+    """tools/addresses.py (the address-less rows of disagreements.json),
+    loaded by path (tools/ is not on sys.path under -I)."""
+    global _addresses_module
+    if _addresses_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'wave_addresses', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                           'addresses.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _addresses_module = module
+    return _addresses_module
+
+
 def address_from_header(source_text, name):
     """'0x<ADDR>' of the function `name` (qualified) defined in
     source_text under a `// 0x<ADDR>` header comment, or None when it is
@@ -3088,6 +3108,8 @@ def main(argv=None):
                 print(f'wave recompare: unknown option {a}', file=sys.stderr)
                 return 2
         rc, out = recompare(**kw)
+    elif cmd == 'addresses':
+        return _addresses().main(rest)
     elif cmd == 'coverage':
         return _coverage().main(rest)
     elif cmd == 'scorecard':
