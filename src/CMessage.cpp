@@ -18454,3 +18454,125 @@ void CMessage96::Run()
         CGameObjectArray::THREAD_ASYNCH,
         INFINITE);
 }
+
+// ---------------------------------------------------------------------------
+
+// 0x511D00
+void CMessageProjectileTrailingVFX::MarshalMessage(BYTE** pData, DWORD* dwSize)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 28029
+    UTIL_ASSERT(pData != NULL && dwSize != NULL);
+
+    PLAYER_ID remotePlayerID = 0;
+    LONG remoteObjectID = CGameObjectArray::INVALID_INDEX;
+
+    CGameObject* object;
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &object,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc == CGameObjectArray::SUCCESS) {
+        remotePlayerID = object->m_remotePlayerID;
+        remoteObjectID = object->m_remoteObjectID;
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    CString resName;
+    m_resRef.CopyToString(resName);
+    DWORD resLength = resName.GetLength();
+    DWORD areaLength = m_resRef2.GetLength();
+
+    *dwSize = 28 + resLength + areaLength;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 28063
+    UTIL_ASSERT(*dwSize <= STATICBUFFERSIZE);
+
+    DWORD cnt = 0;
+    *reinterpret_cast<PLAYER_ID*>(*pData + cnt) = remotePlayerID;
+    cnt += sizeof(PLAYER_ID);
+    *reinterpret_cast<LONG*>(*pData + cnt) = remoteObjectID;
+    cnt += sizeof(LONG);
+    (*pData)[cnt++] = static_cast<BYTE>(resLength);
+    memcpy(*pData + cnt, resName.GetBuffer(resLength), resLength);
+    cnt += resLength;
+    (*pData)[cnt++] = static_cast<BYTE>(areaLength);
+    memcpy(*pData + cnt, m_resRef2.GetBuffer(areaLength), areaLength);
+    cnt += areaLength;
+    *reinterpret_cast<LONG*>(*pData + cnt) = m_launchX;
+    cnt += sizeof(LONG);
+    *reinterpret_cast<LONG*>(*pData + cnt) = m_launchY;
+    cnt += sizeof(LONG);
+    *reinterpret_cast<LONG*>(*pData + cnt) = m_targetX;
+    cnt += sizeof(LONG);
+    *reinterpret_cast<LONG*>(*pData + cnt) = m_targetY;
+    cnt += sizeof(LONG);
+    *reinterpret_cast<SHORT*>(*pData + cnt) = m_launchHeight;
+    cnt += sizeof(SHORT);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 28110
+    UTIL_ASSERT(cnt == *dwSize);
+}
+
+// 0x511F40
+BOOL CMessageProjectileTrailingVFX::UnmarshalMessage(BYTE* pData, DWORD dwSize)
+{
+    // The exe builds (and tears down) an unused CString and CAIObjectType on
+    // its stack; keep locals to mirror it.
+    CString unusedString;
+    CAIObjectType unusedType;
+    (void)unusedString;
+    (void)unusedType;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 28147
+    UTIL_ASSERT(pData != NULL);
+
+    DWORD cnt = CNetwork::SPEC_MSG_HEADER_LENGTH;
+    PLAYER_ID remotePlayerID = *reinterpret_cast<PLAYER_ID*>(pData + cnt);
+    cnt += sizeof(PLAYER_ID);
+    LONG remoteObjectID = *reinterpret_cast<LONG*>(pData + cnt);
+    cnt += sizeof(LONG);
+
+    LONG localObjectID;
+    if (g_pBaldurChitin->GetObjectGame()->GetRemoteObjectArray()->Find(remotePlayerID,
+            remoteObjectID, localObjectID) == TRUE) {
+        m_targetId = localObjectID;
+    } else {
+        m_targetId = CGameObjectArray::INVALID_INDEX;
+    }
+
+    BYTE resLength = pData[cnt++];
+    CHAR resName[9] = {};
+    memcpy(resName, pData + cnt, resLength);
+    cnt += resLength;
+    CString resString(resName, resLength);
+    m_resRef = resString;
+
+    BYTE areaLength = pData[cnt++];
+    CHAR areaName[9] = {};
+    memcpy(areaName, pData + cnt, areaLength);
+    cnt += areaLength;
+    CString areaString(areaName, areaLength);
+    m_resRef2 = areaString;
+
+    m_launchX = *reinterpret_cast<LONG*>(pData + cnt);
+    cnt += sizeof(LONG);
+    m_launchY = *reinterpret_cast<LONG*>(pData + cnt);
+    cnt += sizeof(LONG);
+    m_targetX = *reinterpret_cast<LONG*>(pData + cnt);
+    cnt += sizeof(LONG);
+    m_targetY = *reinterpret_cast<LONG*>(pData + cnt);
+    cnt += sizeof(LONG);
+    m_launchHeight = *reinterpret_cast<SHORT*>(pData + cnt);
+    return TRUE;
+}
