@@ -213,6 +213,8 @@ public:
     CGameEffect* Copy() override;
 
     void sub_49DB60(int a1);
+    CGameSprite* SpawnFromResRef(const CString& resRef, const CPoint* pTarget);
+    void sub_55FF40(CGameSprite* pSpawned);
 
     /* 018C */ int field_18C;
     /* 0190 */ int field_190;

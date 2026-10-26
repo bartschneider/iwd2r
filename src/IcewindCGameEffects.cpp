@@ -1,16 +1,19 @@
 #include "IcewindCGameEffects.h"
 
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CMessage.h"
+#include "CPathSearch.h"
 #include "CProjectile.h"
 #include "CProjectile850F9C.h"
 #include "CProjectileArea.h"
 #include "CProjectileSingleTarget.h"
 #include "CScreenWorld.h"
 #include "CUtil.h"
+#include "Icewind586B70.h"
 #include "IcewindCVisualEffect.h"
 #include "IcewindMisc.h"
 
@@ -883,6 +886,130 @@ CGameEffect* IcewindCGameEffectSummon::Copy()
 void IcewindCGameEffectSummon::sub_49DB60(int a1)
 {
     field_190 = a1;
+}
+
+// 0x55FF40
+void IcewindCGameEffectSummon::sub_55FF40(CGameSprite* pSpawned)
+{
+    if (pSpawned == NULL || field_190 == 0) {
+        return;
+    }
+
+    CGameSprite* pSprite = reinterpret_cast<CGameSprite*>(field_18C);
+
+    BOOLEAN ally = FALSE;
+    if (field_190 == 1) {
+        ally = IcewindMisc::sub_585310(pSprite);
+    } else if (field_190 == 2) {
+        ally = IcewindMisc::sub_585310(pSprite) != TRUE;
+    }
+
+    CAIObjectType type;
+    type.Set(pSpawned->GetAIType());
+    CAIObjectType live;
+    live.Set(pSpawned->m_liveTypeAI);
+    CAIObjectType start;
+    start.Set(pSpawned->m_liveTypeAI);
+
+    if (ally) {
+        g_pBaldurChitin->GetObjectGame()->AddCharacterToAllies(pSpawned->GetId());
+    }
+
+    start.SetEnemyAlly(ally ? CAIObjectType::EA_ALLY : CAIObjectType::EA_ENEMY);
+    pSpawned->m_startTypeAI.Set(start);
+
+    type.SetEnemyAlly(ally ? CAIObjectType::EA_ALLY : CAIObjectType::EA_ENEMY);
+    pSpawned->SetAIType(type, FALSE, FALSE);
+
+    live.SetEnemyAlly(ally ? CAIObjectType::EA_ALLY : CAIObjectType::EA_ENEMY);
+    pSpawned->m_liveTypeAI.Set(live);
+}
+
+// 0x55FAD0
+CGameSprite* IcewindCGameEffectSummon::SpawnFromResRef(const CString& resRef, const CPoint* pTarget)
+{
+    if (resRef.IsEmpty()) {
+        return NULL;
+    }
+
+    CGameSprite* pSprite = reinterpret_cast<CGameSprite*>(field_18C);
+    CGameArea* pArea = pSprite->m_pArea;
+    if (pArea == NULL) {
+        return NULL;
+    }
+
+    if (pSprite->m_animation.m_animation == NULL) {
+        // .\Include\ObjAnimation.h: 2093
+        CUtil::UtilAssert(0x82d, ".\\Include\\ObjAnimation.h", "m_animation != NULL", NULL);
+    }
+
+    BYTE personalSpace = pSprite->GetAnimation()->GetPersonalSpace();
+    CPoint grid = pArea->m_search.GetNearestOpenSquare(
+        CPoint(pTarget->x / CPathSearch::GRID_SQUARE_SIZEX,
+            pTarget->y / CPathSearch::GRID_SQUARE_SIZEY),
+        pSprite->GetTerrainTable(),
+        personalSpace,
+        -1);
+
+    CCreatureFile creatureFile;
+    creatureFile.SetResRef(CResRef(resRef), TRUE, TRUE);
+    DWORD creatureSize = creatureFile.GetDataSize();
+    BYTE* pCreatureData = creatureFile.GetData();
+
+    WORD creatureType = IcewindMisc::sub_585310(pSprite) == TRUE ? 2 : 0;
+    CGameSprite* pSpawned = new CGameSprite(pCreatureData,
+        creatureSize,
+        0,
+        creatureType,
+        static_cast<DWORD>(-1),
+        0,
+        0,
+        0x7FFFFFFF,
+        CPoint(-1, -1),
+        0);
+
+    pSpawned->SetResRef(CResRef(creatureFile.GetResRef().GetResRefStr()));
+    creatureFile.ReleaseData();
+
+    if (pSpawned == NULL) {
+        return NULL;
+    }
+
+    pSpawned->SetResRef(CResRef(resRef));
+    pSpawned->m_baseStats.m_generalState |= 0x10000000;
+
+    if (field_190 != 0) {
+        sub_55FF40(pSpawned);
+    }
+
+    LONG id = pSpawned->GetId();
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(id,
+        CGameObjectArray::THREAD_ASYNCH,
+        reinterpret_cast<CGameObject**>(&pSpawned),
+        INFINITE);
+
+    if (pSpawned->m_animation.m_animation == NULL) {
+        // .\Include\ObjAnimation.h: 2086
+        CUtil::UtilAssert(0x826, ".\\Include\\ObjAnimation.h", "m_animation != NULL", NULL);
+    }
+
+    pSpawned->AddToArea(pArea,
+        CPoint(grid.x * CPathSearch::GRID_SQUARE_SIZEX, grid.y * CPathSearch::GRID_SQUARE_SIZEY),
+        0,
+        pSpawned->GetAnimation()->GetListType());
+    pSpawned->SetFacing(pSprite->GetDirection(pSprite->GetPos()));
+    pSpawned->m_posStart = pSpawned->m_pos;
+
+    Icewind586B70::Instance()->sub_586D60(pSprite, pSpawned);
+
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(
+        new CMessage88(pSpawned->GetId(), pSprite->GetId(), pSpawned->GetId(), pSpawned->GetId()), FALSE);
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(id,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    return pSpawned;
 }
 
 // -----------------------------------------------------------------------------

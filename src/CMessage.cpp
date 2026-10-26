@@ -327,6 +327,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_TIME_STOP = 85;
 // 0x84CF2E
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_STORE_RELEASE = 87;
 
+// 0x84CF2F
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_88 = 88;
+
 // 0x84CF30
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_89 = 89;
 
@@ -18516,6 +18519,103 @@ void CMessageGroup::Run()
     for (std::list<CMessage*>::iterator it = m_messages.begin(); it != m_messages.end(); ++it) {
         (*it)->Run();
     }
+}
+
+// NOTE: Inlined in IcewindCGameEffectSummon::SpawnFromResRef (0x55FAD0):
+// the vtable 0x84D360 and the four ids.
+CMessage88::CMessage88(LONG summonedId, LONG masterId, LONG caller, LONG target)
+    : CMessage(caller, target)
+{
+    m_summonedId = summonedId;
+    m_masterId = masterId;
+}
+
+// 0x453510
+SHORT CMessage88::GetCommType()
+{
+    return BROADCAST;
+}
+
+// 0x40A0E0
+BYTE CMessage88::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4F6B50
+BYTE CMessage88::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_88;
+}
+
+// 0x5125A0
+void CMessage88::Run()
+{
+    CGameObject* pSummoned;
+
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_summonedId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pSummoned,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    // NOTE: Only in a multiplayer game, for a summoned creature another
+    // player owns (docs/adr/0002-single-player-only.md): register the pair.
+    if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+        && g_pChitin->cNetwork.m_idLocalPlayer != pSummoned->m_remotePlayerID) {
+        if (pSummoned->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_summonedId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return;
+        }
+
+        CGameObject* pMaster;
+        do {
+            rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_masterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pMaster,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_summonedId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return;
+        }
+
+        if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
+            && g_pChitin->cNetwork.m_idLocalPlayer != pMaster->m_remotePlayerID) {
+            if (pMaster->GetObjectType() != CGameObject::TYPE_SPRITE) {
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_summonedId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_masterId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                return;
+            }
+
+            // 0x586D60
+            Icewind586B70::Instance()->sub_586D60(static_cast<CGameSprite*>(pMaster),
+                static_cast<CGameSprite*>(pSummoned));
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_masterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_summonedId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
 }
 
 // NOTE: Inlined in CGameEffectDeath::ApplyEffect (0x4AB510) and the skill
