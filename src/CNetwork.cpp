@@ -2122,6 +2122,90 @@ INT CNetwork::ThreadLoop()
     return nDelta;
 }
 
+// 0x7A7980
+BOOLEAN CNetwork::HandleSystemMessage(BYTE* pData, DWORD dwSize)
+{
+    switch (*reinterpret_cast<DWORD*>(pData)) {
+    case 3: /* DPSYS_CREATEPLAYERORGROUP */
+        if (1) {
+            CString sText;
+            CString sPlayerName;
+
+            PLAYER_ID dpId = *reinterpret_cast<PLAYER_ID*>(pData + 8);
+
+            // NOTE: the exe reads the DPNAME long-name pointer (at +0x20 in the
+            // create message), not the short-name slot the stock SDK structs
+            // would suggest.
+            sPlayerName = *reinterpret_cast<char**>(pData + 0x20);
+            if (AddPlayerToList(dpId, sPlayerName, FALSE, FALSE) == TRUE) {
+                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sJoinedGame);
+                sText.SetAt(0, sText.GetLength() - 1);
+
+                BYTE* pMessage = CreateCopyMessage(sText,
+                    sText.GetLength(),
+                    0,
+                    0,
+                    1);
+                if (pMessage != NULL) {
+                    m_SystemWindow.AddToIncomingQueue(0,
+                        m_idLocalPlayer,
+                        pMessage,
+                        sText.GetLength() + 12);
+                }
+            }
+        }
+        return TRUE;
+    case 5: /* DPSYS_DESTROYPLAYERORGROUP */
+        if (1) {
+            CString sText;
+            CString sPlayerName;
+
+            PLAYER_ID dpId = *reinterpret_cast<PLAYER_ID*>(pData + 8);
+
+            // NOTE: the exe reads the DPNAME long-name pointer (at +0x24 in the
+            // destroy message), not the short-name slot the stock SDK structs
+            // would suggest.
+            sPlayerName = *reinterpret_cast<char**>(pData + 0x24);
+            if (RemovePlayerFromList(dpId, FALSE) == TRUE) {
+                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sDroppedGame);
+                sText.SetAt(0, sText.GetLength() - 1);
+
+                BYTE* pMessage = CreateCopyMessage(sText,
+                    sText.GetLength(),
+                    0,
+                    0,
+                    1);
+                if (pMessage != NULL) {
+                    m_SystemWindow.AddToIncomingQueue(0,
+                        m_idLocalPlayer,
+                        pMessage,
+                        sText.GetLength() + 12);
+                }
+            } else {
+                for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+                    if (field_772[nPlayer] == dpId) {
+                        field_772[nPlayer] = 0;
+                    }
+                }
+            }
+        }
+        return TRUE;
+    case 0x31: /* DPSYS_SESSIONLOST */
+        g_pChitin->OnMultiplayerSessionToClose();
+        SleepEx(1000, FALSE);
+        if (m_bConnectionEstablished == TRUE) {
+            OnCloseSession();
+        }
+        return TRUE;
+    case 0x101: /* DPSYS_HOST */
+    case 0x103: /* DPSYS_SETPLAYERORGROUPNAME */
+    case 0x104: /* DPSYS_SETSESSIONDESC */
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 // 0x7A7DF0
 BYTE* CNetwork::CreateCopyMessage(const void* lpData, DWORD dwDataSize, BOOLEAN bCompressed, unsigned char a4, INT nFrame)
 {
