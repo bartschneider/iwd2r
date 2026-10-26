@@ -1,0 +1,7 @@
+{
+  "address": "0x602960",
+  "name": "CUIControlButtonConnectionQuitGame::OnLButtonClick",
+  "file": "src/CScreenConnection.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
