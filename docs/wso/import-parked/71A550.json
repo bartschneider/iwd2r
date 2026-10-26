@@ -1,0 +1,7 @@
+{
+  "address": "0x71A550",
+  "name": "CGameSprite::sub_71A550",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}
