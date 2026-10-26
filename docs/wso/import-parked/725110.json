@@ -1,0 +1,2 @@
+{"address": "0x725110", "name": "CGameSprite", "file": ":sub_725110:src/CGameSprite.cpp", "batch": "i045",
+ "needs": "not exercised; ours reading matches the decompile"}
