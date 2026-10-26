@@ -75,7 +75,9 @@ TIMEOUT_LINE = re.compile(r'#\s*timeout\s*:(.*)$', re.IGNORECASE)
 # run: "# cheats: 1" sets Game Options/Cheats=1 in the game copy's
 # icewind2.ini (its cheat console gate, CInfGame's m_bCheatsEnabled);
 # "# cheats: 0" and no line at all leave the ini as the run prepared it.
-CHEATS_LINE = re.compile(r'#\s*cheats\s*:\s*(\S*)\s*$', re.IGNORECASE)
+# The whole tail is captured, like TIMEOUT_LINE, so header_cheats refuses
+# junk ("# cheats: 1 (note)") instead of silently reading cheats off.
+CHEATS_LINE = re.compile(r'#\s*cheats\s*:(.*)$', re.IGNORECASE)
 
 # The virtual-key names platform/script_core.cpp accepts (kNamedKeys), with
 # their Win32 VK codes. Letters and digits are handled in vk_for_name.
@@ -449,7 +451,7 @@ def header_cheats(text):
         if found is not None:
             raise ScenarioError('line %d: duplicate cheats (first on line '
                                 '%d)' % (number, found[1]))
-        value = m.group(1)
+        value = m.group(1).strip()
         if value not in ('0', '1'):
             raise ScenarioError('line %d: cheats needs 0 or 1' % number)
         found = (value == '1', number)

@@ -569,6 +569,10 @@ class ScenarioParseTest(unittest.TestCase):
                  'line 2: cheats needs 0 or 1'),
                 ('# cheats: on\n',
                  'line 1: cheats needs 0 or 1'),
+                ('# cheats: 1 (note)\n',
+                 'line 1: cheats needs 0 or 1'),
+                ('# cheats:\n',
+                 'line 1: cheats needs 0 or 1'),
                 ('# cheats: 1\n# cheats: 0\n',
                  'line 2: duplicate cheats (first on line 1)')):
             with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
@@ -676,7 +680,9 @@ class ScenarioParseTest(unittest.TestCase):
     def test_vk_names_match_script_core_cpp(self):
         # Every name in platform/script_core.cpp's kNamedKeys, and no other
         # (kModifiers holds the CTRL/SHIFT/ALT `key` prefixes and mirrors
-        # realinput's MODIFIER_VK, a table of its own).
+        # realinput's MODIFIER_VK, a table of its own), and kTypeKeys mirrors
+        # TYPE_KEYS's punctuation rows (letters, digits and space are inline
+        # in Expand).
         with open(os.path.join(ROOT, 'platform', 'script_core.cpp')) as f:
             text = f.read()
         names = set(re.findall(
@@ -687,6 +693,17 @@ class ScenarioParseTest(unittest.TestCase):
             r'\{ "([A-Z0-9_]+)", VK_',
             text.split('kModifiers[] = {', 1)[1].split('};', 1)[0]))
         self.assertEqual(mods, set(realinput.MODIFIER_VK))
+        types = {}
+        for ch, vk, digit, shift in re.findall(
+                r"\{ '(.+?)', (VK_[A-Z0-9_]+|'(.+?)'), (true|false) \}",
+                text.split('kTypeKeys[] = {', 1)[1].split('};', 1)[0]):
+            ch = {'\\\\': '\\', "\\'": "'"}.get(ch, ch)
+            name = digit if digit else vk[len('VK_'):]
+            self.assertTrue(realinput.vk_for_name(name), name)
+            types[ch] = (name, shift == 'true')
+        punct = {ch: row for ch, row in realinput.TYPE_KEYS.items()
+                 if ch != ' ' and not ch.isalnum()}
+        self.assertEqual(types, punct)
         self.assertEqual(realinput.vk_for_name('escape'), 0x1B)
         self.assertEqual(realinput.vk_for_name('z'), ord('Z'))
         self.assertEqual(realinput.vk_for_name('NOPE'), 0)
@@ -5147,6 +5164,83 @@ class OracleReplayTest(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     oracle.prepare_cheats_ini(game, True, '/install')
 
+    def test_console_ini_block(self):
+        # A middle section's block ends at the newline before the next
+        # header; the section's own last newline is part of the block.
+        text = ('[Game Options]\r\nCheats=0\r\n[Lua Edit]\r\n'
+                'String0=ADDGOLD(500)\r\nString1=\r\n[Characters]\r\n')
+        self.assertEqual(oracle.console_ini_block(text),
+                         '[Lua Edit]\r\nString0=ADDGOLD(500)\r\n'
+                         'String1=\r\n')
+        # A last section runs to the end of the file, newline or not.
+        self.assertEqual(oracle.console_ini_block('[Lua Edit]\r\nString0=X'),
+                         '[Lua Edit]\r\nString0=X')
+        self.assertEqual(
+            oracle.console_ini_block('[Lua Edit]\r\nString0=X\r\n'),
+            '[Lua Edit]\r\nString0=X\r\n')
+        # No section, or a mention inside another section's value, is None.
+        self.assertIsNone(oracle.console_ini_block('[Game Options]\r\n'))
+        self.assertIsNone(oracle.console_ini_block(
+            '[Game Options]\r\nLast=[Lua Edit]\r\n'))
+
+    def test_prepare_and_restore_console_ini(self):
+        from unittest import mock
+        block = ('[Lua Edit]\r\nString0=SETCURRENTXP(4000)\r\n'
+                 'String1=ADDGOLD(500)\r\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            game = os.path.join(tmp, 'game')
+            os.makedirs(game)
+            ini = os.path.join(game, 'Icewind2.ini')
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n' + block.encode()
+                        + b'[Characters]\r\n')
+            calls = []
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: calls.append((g, i))), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                # The strip removes exactly the section; the box then opens
+                # empty instead of preloading String0.
+                self.assertEqual(
+                    oracle.prepare_console_ini(game, '/install'), block)
+                self.assertIn('stripped [Lua Edit]', out.getvalue())
+                with open(ini, 'rb') as f:
+                    self.assertEqual(f.read(),
+                                     b'[Game Options]\r\nCheats=0\r\n'
+                                     b'[Characters]\r\n')
+                # The run submits lines and the game writes them back.
+                with open(ini, 'wb') as f:
+                    f.write(b'[Game Options]\r\nCheats=0\r\n[Lua Edit]\r\n'
+                            b'String0=CTRLALTDELETE:ADDGOLD(500)\r\n'
+                            b'String5=NEW\r\n[Characters]\r\n')
+                oracle.restore_console_ini(game, block, '/install')
+            self.assertEqual(calls, [(game, '/install')] * 2)
+            # The prior block is back in place; the write-back is gone.
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(),
+                                 b'[Game Options]\r\nCheats=0\r\n'
+                                 + block.encode() + b'[Characters]\r\n')
+            # A copy without the section: prepare writes nothing, and a
+            # restore of None removes whatever the run left behind.
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertIsNone(
+                    oracle.prepare_console_ini(game, '/install'))
+            self.assertNotIn('stripped', out.getvalue())
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n')
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n'
+                        b'[Lua Edit]\r\nString0=X\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                oracle.restore_console_ini(game, None, '/install')
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n')
+
     def test_parse_status(self):
         self.assertEqual(oracle.parse_status(
             'frame=21046\nscript_line=5\nstate=running\n'),
@@ -7235,6 +7329,12 @@ class ProbePlanTest(unittest.TestCase):
             mock.patch.object(probe.oracle, 'restore_cheats_ini',
                               side_effect=lambda g, prior:
                               events.append(('cheats-off', g))),
+            mock.patch.object(probe.oracle, 'prepare_console_ini',
+                              side_effect=lambda g:
+                              events.append(('console-on', g)) or None),
+            mock.patch.object(probe.oracle, 'restore_console_ini',
+                              side_effect=lambda g, prior:
+                              events.append(('console-off', g))),
             mock.patch.object(probe, 'ours_build', return_value=builddir),
             mock.patch.object(probe.winsandbox, 'deploy_runtime'),
             mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
@@ -7257,11 +7357,11 @@ class ProbePlanTest(unittest.TestCase):
             rc = probe.run(ns)
         self.assertEqual(rc, 0)
         self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
-            ('cheats-on', game),
+            ('cheats-on', game), ('console-on', game),
             ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
             ('run_side',),
             ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay'),
-            ('cheats-off', game)])
+            ('cheats-off', game), ('console-off', game)])
         saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
         self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
                                     {'mode': 'empty', 'load': None},

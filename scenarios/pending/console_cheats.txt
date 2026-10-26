@@ -185,24 +185,75 @@ origin screen
 click 400 216
 wait 30
 checkpoint selected
-# The proof: one command with an unconditional, dumped effect, in the
+# The proof: commands with an unconditional, checkpointed effect, in the
 # grammar the dispatcher accepts. 0x5838A0 splits the submitted line at
 # the first ':' and requires position >= 1; the text before the colon is
 # obfuscated ((c+8)*2 per char, 0x5844E0) and strcmp'd against
 # 0x8AF630 = obf("CTRLALTDELETE") — anything else, or no colon, prints
-# "Nice try cheater!" (0x8AF700) and does nothing, which is what every
-# earlier bare ADDGOLD(500) run hit. Past the colon the command name
-# before '(' is matched by the strcmp chain 0x583E60 (ADDGOLD at
-# 0x8AF660, index 0x10) and the args after '(' go to 0x5840E0. So the
-# line is CTRLALTDELETE:ADDGOLD(500): every char typable in the box
+# "Nice try cheater!" (0x8AF700) and does nothing. Past the colon the
+# command name before '(' is matched by the strcmp chain 0x583E60
+# (ADDGOLD at 0x8AF660, index 0x10) and the args after '(' go to
+# 0x5840E0; 0x584420 takes ADDGOLD and SETCURRENTXP as one numeric arg.
+# Every char of CTRLALTDELETE:ADDGOLD(500) is typable in the box
 # (letters, digits, shift+9 '(' and shift+0 ')', and shift+VK 0xBA ':'
-# via the box's OEM key table at 0x8ABA3C). The edit box opens empty
-# (the copy's ini carries no [Lua Edit] preload), and RETURN submits the
-# line — and closes the console, so no closing toggle after it.
+# via the box's OEM key table at 0x8ABA3C) — the dump at 0x5838A0 proved
+# the typed text arrives. What failed before was the box's preload: the
+# ini's [Lua Edit] String0 (the last submitted line, any session's) is
+# preloaded at open, the typed command appended to it and the dispatcher
+# rejected the concatenation. probe.py strips that section around the
+# run, so the box opens empty. RETURN submits the line and closes the
+# console; the second command reopens it (the box then preloads this
+# run's first line) and clears it with BACKSPACEs before typing.
 checkpoint before
 key CTRL+TAB
 wait 10
 type CTRLALTDELETE:ADDGOLD(500)
+key RETURN
+wait 60
+checkpoint gold
+key CTRL+TAB
+wait 10
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+type CTRLALTDELETE:SETCURRENTXP(4000)
 key RETURN
 wait 60
 checkpoint after
