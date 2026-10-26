@@ -1,0 +1,1 @@
+{"address": "0x585E00", "name": "IcewindMisc::CreateButtonData", "file": "src/IcewindMisc.cpp", "batch": "i040", "needs": "not exercised; ours reading matches the decompile"}
