@@ -6824,6 +6824,188 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "i045": {
+      "assigned_at": "2026-10-26T14:08:51+00:00",
+      "branch": "p3/wso-i045",
+      "closed_at": "2026-10-26T15:27:23+00:00",
+      "files": [
+        "src/CGameAIBase.cpp",
+        "src/CGameSprite.cpp",
+        "src/CScreenStore.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CScreenStart.cpp"
+      ],
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x45F660",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::MoveViewObject",
+          "our_len": 265,
+          "their_len": 257
+        },
+        {
+          "address": "0x725110",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_725110",
+          "our_len": 247,
+          "their_len": 261
+        },
+        {
+          "address": "0x67E420",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::GetChatEditBoxStatus",
+          "our_len": 252,
+          "their_len": 253
+        },
+        {
+          "address": "0x634DD0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventoryHistoryAbilities::OnLButtonClick",
+          "our_len": 246,
+          "their_len": 248
+        },
+        {
+          "address": "0x724C40",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_724C40",
+          "our_len": 239,
+          "their_len": 246
+        },
+        {
+          "address": "0x634F60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventoryHistoryUse::OnLButtonClick",
+          "our_len": 240,
+          "their_len": 242
+        },
+        {
+          "address": "0x66E300",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CUIControlScrollBarSpellbookKnownSpells::InvalidateItems",
+          "our_len": 239,
+          "their_len": 241
+        },
+        {
+          "address": "0x45FC80",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::DoubleClickRButtonObject",
+          "our_len": 239,
+          "their_len": 239
+        },
+        {
+          "address": "0x67E4F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::SetChatEditBoxStatus",
+          "our_len": 232,
+          "their_len": 232
+        },
+        {
+          "address": "0x691090",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::CancelPopup",
+          "our_len": 218,
+          "their_len": 234
+        },
+        {
+          "address": "0x6653D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::OnLogoutButtonClick",
+          "our_len": 216,
+          "their_len": 218
+        },
+        {
+          "address": "0x67FBA0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlScrollBarStoreBuyDrinksDrink::InvalidateItems",
+          "our_len": 215,
+          "their_len": 217
+        },
+        {
+          "address": "0x680C10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlScrollBarStoreGroup::InvalidateItems",
+          "our_len": 215,
+          "their_len": 217
+        },
+        {
+          "address": "0x680720",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlScrollBarStoreIdentify::InvalidateItems",
+          "our_len": 215,
+          "their_len": 217
+        },
+        {
+          "address": "0x6811D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlScrollBarStoreSpell::InvalidateItems",
+          "our_len": 215,
+          "their_len": 217
+        },
+        {
+          "address": "0x680160",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlScrollBarStoreStore::InvalidateItems",
+          "our_len": 215,
+          "their_len": 217
+        },
+        {
+          "address": "0x6978D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerClose::OnLButtonClick",
+          "our_len": 213,
+          "their_len": 215
+        },
+        {
+          "address": "0x5F9430",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlScrollbarCharacter5F9410::OnScrollUp",
+          "our_len": 201,
+          "their_len": 213
+        },
+        {
+          "address": "0x66EDA0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CUIControlButtonSpellbookLevelSelection::OnLButtonClick",
+          "our_len": 191,
+          "their_len": 196
+        },
+        {
+          "address": "0x6702C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStart.cpp",
+          "name": "CScreenStart::sub_6702C0",
+          "our_len": 183,
+          "their_len": 185
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
