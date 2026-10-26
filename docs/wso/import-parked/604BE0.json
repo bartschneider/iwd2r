@@ -1,0 +1,1 @@
+{"address": "0x604BE0", "name": "CUIControlButtonConnectionCreateGameNewGame::OnLButtonClick", "file": "src/CScreenConnection.cpp", "batch": "i042", "needs": "not exercised; ours reading matches the decompile"}
