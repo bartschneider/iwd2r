@@ -1,0 +1,7 @@
+{
+  "address": "0x672A00",
+  "name": "CScreenStore::TimerAsynchronousUpdate",
+  "file": "src/CScreenStore.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
