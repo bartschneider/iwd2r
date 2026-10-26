@@ -1,0 +1,7 @@
+{
+  "address": "0x46ABB0",
+  "name": "CGameArea::CheckWalkable",
+  "file": "src/CGameArea.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}
