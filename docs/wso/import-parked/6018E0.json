@@ -1,0 +1,1 @@
+{"address": "0x6018E0", "name": "CScreenConnection::AutoStartConnect", "file": "src/CScreenConnection.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
