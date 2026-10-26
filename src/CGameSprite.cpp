@@ -23981,7 +23981,7 @@ SHORT CGameSprite::EquipItem()
 SHORT CGameSprite::FindTraps()
 {
     if (!m_typeAI.IsClassValid(CAIObjectType::C_ROGUE)
-        || !m_typeAI.IsClassValid(CAIObjectType::C_MONK)) {
+        && !m_typeAI.IsClassValid(CAIObjectType::C_MONK)) {
         return ACTION_ERROR;
     }
 
@@ -24022,7 +24022,7 @@ SHORT CGameSprite::Panic()
 SHORT CGameSprite::Turn()
 {
     if (!m_typeAI.IsClassValid(CAIObjectType::C_CLERIC)
-        || !m_typeAI.IsClassValid(CAIObjectType::C_PALADIN)) {
+        && !m_typeAI.IsClassValid(CAIObjectType::C_PALADIN)) {
         return ACTION_ERROR;
     }
 
