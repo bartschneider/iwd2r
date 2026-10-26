@@ -1,0 +1,1 @@
+{"address": "0x6379C0", "name": "CScreenJournal::OnErrorButtonClick", "file": "src/CScreenJournal.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}
