@@ -13413,6 +13413,101 @@ class DriverTest(unittest.TestCase):
         self.assertIn('b011: frida: skipped, coverage says no scenario exercises any row',
                       self.logs)
 
+    def test_import_outcome_imports_an_unexercised_rule_1_row_unmeasured(self):
+        d, batch = self._import_phase_driver()
+        d._frida_ran = (['world_entry'], ['first_fight'])
+        with open(os.path.join(self.wt, 'docs', 'evidence', '405000.md'), 'w') as f:
+            f.write('---\naddress: 0x405000\nname: Rules::Zed\nkind: read-only\n'
+                    'exemption: "his body, read against the disassembly"\n---\nprose\n')
+        with open(os.path.join(self.wt, 'docs', 'evidence', '406000.md'), 'w') as f:
+            f.write('---\naddress: 0x406000\nname: Rules::Yed\nkind: read-only\n---\nprose\n')
+        rows = [{'address': '0x405000', 'name': 'Rules::Zed', 'category': 'only_theirs'},
+                {'address': '0x406000', 'name': 'Rules::Yed', 'category': 'theirs_real_ours_stub'}]
+        for row in rows:
+            self.assertIsNone(d._import_outcome('b011', self.wt, row, 'not-exercised',
+                                                'no scenario hit it: world_entry', {}, 'abc', None))
+        self.assertEqual(d._unmeasured_marked,
+                         {'0x405000': 'docs/evidence/405000.md',
+                          '0x406000': 'docs/evidence/406000.md'})
+        wave = driver._tool('wave')
+        want = ('exemption: %s: world_entry: not exercised; not hit per coverage: first_fight'
+                % wave.UNMEASURED_WSO)
+        for stem in ('405000', '406000'):
+            with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md')) as f:
+                text = f.read()
+            self.assertIn(want, text)
+            self.assertIn('kind: read-only', text)
+            self.assertTrue(wave.unmeasured_wso(text))
+        with open(os.path.join(self.wt, 'docs', 'evidence', '405000.md')) as f:
+            self.assertNotIn('his body, read against', f.read())  # replaced, not duplicated
+        self.assertIn('b011: frida 0x405000 not-exercised: rule 1, imports unmeasured '
+                      '(evidence marked unmeasured WSO import)', self.logs)
+
+    def test_import_outcome_still_parks_an_unexercised_kept_or_base_row(self):
+        d, batch = self._import_phase_driver()
+        d._frida_ran = (['world_entry'], [])
+        base = {'address': '0x403000', 'name': 'Rules::Tick',
+                'category': 'theirs_changed_ours_base'}
+        kept = {'address': '0x403000', 'name': 'Rules::Tick',
+                'category': 'only_theirs', 'kept': True}
+        for row in (base, kept):
+            text = d._import_outcome('b011', self.wt, row, 'not-exercised',
+                                     'no scenario hit it: world_entry', {}, 'abc', None)
+            self.assertIn('exercised by no scenario', text)
+            self.assertIn('park it', text)
+        self.assertEqual(d._unmeasured_marked, {})
+
+    def test_import_outcome_parks_a_rule_1_row_whose_evidence_cannot_be_marked(self):
+        d, batch = self._import_phase_driver()
+        d._frida_ran = (['world_entry'], [])
+        row = {'address': '0x407000', 'name': 'Rules::NoFile', 'category': 'only_theirs'}
+        text = d._import_outcome('b011', self.wt, row, 'not-exercised',
+                                 'no scenario hit it: world_entry', {}, 'abc', None)
+        self.assertIn('park it', text)
+        self.assertEqual(d._unmeasured_marked, {})
+        self.assertTrue(any(l.startswith(
+            'b011: frida 0x407000 not-exercised: marking its evidence failed')
+            for l in self.logs), self.logs)
+
+    def test_write_unmeasured_evidence_rewrites_only_the_exemption(self):
+        self._import_phase_driver()
+        p = os.path.join(self.wt, 'docs', 'evidence', '408000.md')
+        with open(p, 'w', newline='') as f:
+            f.write('---\r\naddress: 0x408000\r\nname: Rules::Cr\r\nkind: read-only\r\n'
+                    'exemption: "thin"\r\n---\r\nprose stays\r\n')
+        driver._write_unmeasured_evidence(p, 'world_entry: not exercised')
+        with open(p, newline='') as f:
+            self.assertEqual(f.read(),
+                             '---\r\naddress: 0x408000\r\nname: Rules::Cr\r\nkind: read-only\r\n'
+                             'exemption: %s: world_entry: not exercised\r\n---\r\nprose stays\r\n'
+                             % driver._tool('wave').UNMEASURED_WSO)
+        with open(p, 'w') as f:
+            f.write('no front matter\n')
+        with self.assertRaises(ValueError):
+            driver._write_unmeasured_evidence(p, 'needs')
+
+    def test_driver_frida_phase_imports_unexercised_rule_1_rows_unmeasured(self):
+        d, batch = self._import_phase_driver()
+        batch['rows'] = [
+            {'address': '0x401000', 'name': 'Rules::Render', 'category': 'only_theirs'},
+            {'address': '0x403000', 'name': 'Rules::Tick', 'category': 'theirs_real_ours_stub'}]
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
+        d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(findings, [])
+        self.assertEqual(d._unmeasured_marked, {'0x401000': 'docs/evidence/401000.md',
+                                                '0x403000': 'docs/evidence/403000.md'})
+        for stem in ('401000', '403000'):
+            r = self.git('show', 'HEAD:docs/evidence/%s.md' % stem, cwd=self.wt)
+            self.assertIn('%s: not-exercised (coverage: no scenario hits it'
+                          % driver._tool('wave').UNMEASURED_WSO, r.stdout)
+        r = self.git('log', '-1', '--format=%s', cwd=self.wt)
+        self.assertEqual(r.stdout,
+                         'frida: unmeasured WSO import marking for 2 row(s) of b011\n')
+        self.assertIn('b011: frida 0x401000 not-exercised: rule 1, imports unmeasured '
+                      '(evidence marked unmeasured WSO import)', self.logs)
+
     def test_driver_frida_phase_runs_only_the_covering_scenario_and_keeps_uncovered_rows_in_the_table(self):
         d, batch = self._import_phase_driver()
         self._coverage_map({'first_fight': {'0x402000': 4}})
@@ -14188,14 +14283,13 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
             self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
         self.assertEqual(set(self._outcomes().values()), {None})
-        # unexercised: parked by REMOVING the function, never edit back
+        # unexercised: rule 1 of the 2026-10-26 ruling -- an only-theirs row
+        # imports unmeasured, no parking; only a marking that fails would park
         idle = [f for f in findings if f.startswith('0x403000:')]
-        self.assertEqual(len(idle), 1, findings)
-        self.assertIn('remove the function you added (and its declaration) so the file is back '
-                      "to the merge base's text for it", idle[0])
-        self.assertNotIn('edit that function back', idle[0])
-        self.assertIn('docs/wso/import-parked/403000.json', idle[0])
-        self.assertIn('needs "', idle[0])
+        self.assertEqual(idle, [], findings)
+        self.assertIn('exemption: unmeasured WSO import', _slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '403000.md')))
+        self.assertEqual(d._unmeasured_marked, {'0x403000': 'docs/evidence/403000.md'})
         diff = [f for f in findings if f.startswith('0x402000:')]
         self.assertIn('remove the function you added', diff[0])
         # a stub row's text is unchanged

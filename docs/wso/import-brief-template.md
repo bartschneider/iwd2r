@@ -83,10 +83,14 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    stand as written (the two forms above, or a file unchanged since the
    merge base): a function that behaves like the original in a run whose
    state dumps match gets its evidence rewritten to `kind: trace` by the
-   driver, committed on your branch. Every other outcome (different,
-   exercised by no scenario, no hook, a failed or unmeasured scenario)
-   cannot close: the phase runs once per batch, so park the row in your fix
-   round, with the `needs` the finding names.{{kept_measured}}
+   driver, committed on your branch. A stub or only-theirs row (ours never
+   had the body) exercised by no scenario still closes: the driver marks its
+   evidence `exemption: unmeasured WSO import` and commits it — `python3 -I
+   tools/wave.py unmeasured-imports` lists every such row; keep the body,
+   park nothing. Every other outcome (different, exercised by no scenario,
+   no hook, a failed or unmeasured scenario) cannot close: the phase runs
+   once per batch, so park the row in your fix round, with the `needs` the
+   finding names.{{kept_measured}}
    **Parking a row.** Edit that function back to the merge base's body
    (`git show <merge-base>:<path>` shows it; `git merge-base first HEAD`
    names the merge base; do not replace a file that holds other rows'
@@ -98,9 +102,14 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
        {"address": "0x...", "name": "...", "file": "src/...", "batch": "{{id}}",
         "needs": "<the scenarios that ran>: not exercised"}
 
-   `needs` names what was tried. Commit all three changes together. Every
-   row you do not park must be imported (its body changed against the merge
-   base){{kept_rule4}}.{{refusal_rule}}
+   `needs` names what was tried. Commit all three changes together. A stub
+   or only-theirs row never parks for lack of coverage alone (rule 1: ours
+   never had the body, so the driver imports it unmeasured); a base-body row
+   still parks as before, and a row that reaches you unparked though its
+   earlier `needs` ended in `not exercised` came back through `python3 -I
+   tools/wave.py requeue` (rule 3): import it, do not park it again for that.
+   Every row you do not park must be imported (its body changed against the
+   merge base){{kept_rule4}}.{{refusal_rule}}
    A row that was parked and unparked before carries an earlier attempt in that
    batch's branch history (`git log --all -- docs/evidence/<ADDRESS>.md` finds
    it); read it, do not trust it.
