@@ -1090,7 +1090,10 @@ SHARED_FILE = "do not replace a file that holds other rows' changes"
 
 
 # The needs of a kept row the Frida phase could not measure (Task 19): parked
-# so a later scenario can confirm it.
+# so a later scenario can confirm it.  Only a kept or base-body row parks for
+# lack of coverage: a stub or only-theirs row (ours never had the body)
+# imports unmeasured instead (rule 1 of the 2026-10-26 ruling,
+# _write_unmeasured_evidence).
 KEPT_UNMEASURED = 'not exercised; ours reading matches the decompile'
 KEPT_EDITED_NEEDS = 'kept row edited then put back; not measured'
 OFF_KEPT = ', and take the row off `## Kept`'
@@ -1257,6 +1260,35 @@ def _write_trace_evidence(path, probe, orig_path, ours_path, keep_exemption=Fals
             source_at += 1
     if source_at is None:
         head.insert(kind_at + 1, 'trace_source: %s%s' % (source, eol))
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        f.write(''.join([lines[0]] + head + lines[end:]))
+
+
+def _write_unmeasured_evidence(path, needs):
+    """Rewrite one evidence file's `exemption:` to the unmeasured WSO import
+    marking (rule 1 of the 2026-10-26 ruling: where ours never had the body
+    the import no longer needs coverage), leaving `kind:` and every other
+    line, and the line endings, as they are."""
+    wave = _tool('wave')
+    with open(path, encoding='utf-8', newline='') as f:
+        lines = f.read().splitlines(keepends=True)
+    if not lines or lines[0].strip() != '---':
+        raise ValueError('%s has no front matter' % path)
+    end = next((i for i in range(1, len(lines)) if lines[i].strip() == '---'), None)
+    if end is None:
+        raise ValueError('%s has an unclosed front matter' % path)
+    eol = '\r\n' if lines[0].endswith('\r\n') else '\n'
+    marked = 'exemption: %s: %s' % (wave.UNMEASURED_WSO, needs)
+    head, hit = [], False
+    for line in lines[1:end]:
+        if not hit and line.partition(':')[0].strip() == 'exemption':
+            hit = True
+            line = marked + (line[len(line.rstrip('\r\n')):] or eol)
+        head.append(line)
+    if not hit:
+        kind_at = next((i for i, l in enumerate(head)
+                        if l.partition(':')[0].strip() == 'kind'), None)
+        head.insert(0 if kind_at is None else kind_at + 1, marked + eol)
     with open(path, 'w', encoding='utf-8', newline='') as f:
         f.write(''.join([lines[0]] + head + lines[end:]))
 
@@ -2585,6 +2617,7 @@ class _BatchContext(threading.local):
         self.frida_got = {}     # address key -> (status, detail) of its one Frida run
         self.frida_notes = {}   # address key -> [frequency-only notes] (ledger lines)
         self.wave_notes = {}    # address key -> why an equal wave-1 row got no trace evidence
+        self.unmeasured_marked = {}  # address -> evidence rel marked unmeasured WSO import
         self.pool = None        # the pool this batch runs on
         self.t0 = None          # clock() at the cut or resume (ruling R61)
         self.usage = {'input': 0, 'cached': 0, 'output': 0, 'tool_calls': 0}
@@ -2625,7 +2658,8 @@ class Driver:
                  oracle_run=None, frida_run=None, frida_build=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
                  queue='wave1', runner=None, clock=None, max_batches=None,
-                 frida_cache=True, base_tests=True, base_tests_run=None):
+                 frida_cache=True, base_tests=True, base_tests_run=None,
+                 size=None):
         wave = _tool('wave')
         if queue not in wave.QUEUES:
             raise ValueError('unknown queue %r (one of %s)' % (
@@ -2676,7 +2710,9 @@ class Driver:
         self.max_batches = max_batches
         self.gate = gate
         self.base = base
-        self.size = wave.DEFAULT_SIZE
+        self.size = wave.DEFAULT_SIZE if size is None else size
+        if self.size < 1:
+            raise ValueError('--size must be at least 1')
         self.category = wave.QUEUES[queue]['category']
         docs = os.path.join(repo, 'docs', 'wso')
         self.disagreements_path = os.path.join(docs, 'disagreements.json')
@@ -2753,6 +2789,7 @@ class Driver:
     _frida_got = _per_thread('frida_got')
     _frida_notes = _per_thread('frida_notes')
     _wave_notes = _per_thread('wave_notes')
+    _unmeasured_marked = _per_thread('unmeasured_marked')
 
     @property
     def worker(self):
@@ -3411,7 +3448,12 @@ class Driver:
         that names the function, or evidence unchanged since the merge base);
         an equal row's evidence is rewritten to kind: trace and committed on
         the batch branch, and any other outcome (different, not exercised, no
-        hook, scenario failed, not measured) is a finding that parks it.  A
+        hook, scenario failed, not measured) is a finding that parks it --
+        except a stub or only-theirs row exercised by no scenario (rule 1 of
+        the 2026-10-26 ruling): ours never had the body, so the import needs
+        no coverage; its evidence is marked unmeasured WSO import and
+        committed, and the row closes (wave.py unmeasured-imports lists every
+        such row).  A
         phase-wide failure (no build, the run raised, every scenario failed
         with no status on either side, state dumps the replay schema refuses)
         raises _StageError('frida'): the
@@ -3421,6 +3463,7 @@ class Driver:
         self._frida_got = {}
         self._frida_notes = {}
         self._wave_notes = {}
+        self._unmeasured_marked = {}
         self._frida_ran = None
         if not self.frida or self.dry_run:
             return []
@@ -3697,7 +3740,8 @@ class Driver:
     def _frida_findings(self, batch_id, worktree, rows, got, traces, info, exact, verdicts,
                         importing, mb, commit=None):
         """The per-row outcomes of a Frida phase (or of a coverage skip): the
-        log lines, the import findings, the trace evidence written."""
+        log lines, the import findings, the trace evidence written, and the
+        unmeasured WSO markings (rule 1) committed."""
         key = _tool('wave')._addr_key
         truth = _tool('truth')
         sides = {key(a): s for a, (s, _c) in verdicts.items()}
@@ -3771,6 +3815,8 @@ class Driver:
             self._commit_trace_evidence(batch_id, worktree, written, None if importing else (
                 'frida: trace evidence for %d row(s) measured equal (%s)' % (
                     len(written), ', '.join(sorted(set(cites))))))
+        if self._unmeasured_marked:
+            self._commit_unmeasured_evidence(batch_id, worktree, self._unmeasured_marked)
         if (kept_ok or digests) and commit is None:
             self._record_kept(batch_id, kept_ok, digests)
         return findings
@@ -4016,7 +4062,10 @@ class Driver:
 
     def _import_outcome(self, batch_id, worktree, row, status, detail, traces, mb, cite):
         """None when an import row measured equal and its evidence is now
-        kind: trace (citing `cite`, a scenario whose compare returned 0);
+        kind: trace (citing `cite`, a scenario whose compare returned 0), or
+        when a stub or only-theirs row was exercised by no scenario (rule 1
+        of the 2026-10-26 ruling: ours never had the body, so the import
+        needs no coverage; its evidence is marked unmeasured WSO import);
         else the finding that parks it (the phase runs once per batch, so
         nothing else can measure it)."""
         a = row['address']
@@ -4063,6 +4112,23 @@ class Driver:
                      else unmeasured_needs(run, left))
             if kept:
                 needs = kept_needs(run)
+            if not kept and row.get('category') in _tool('wave').RULE1_CATEGORIES:
+                # Rule 1 (2026-10-26 ruling): ours never had this body, so the
+                # import no longer needs coverage.  Mark the evidence and let
+                # the row close unmeasured (wave.py unmeasured-imports lists
+                # it); only a marking that fails falls back to parking it.
+                rel = _tool('wave')._evidence_rel(a)
+                try:
+                    _write_unmeasured_evidence(os.path.join(worktree, rel), needs)
+                except (OSError, ValueError) as e:
+                    self.log('%s: frida %s not-exercised: marking its evidence '
+                             'failed (%s); parking it' % (batch_id, a, _one_line(str(e), 200)))
+                else:
+                    self._unmeasured_marked[a] = rel
+                    self.log('%s: frida %s not-exercised: rule 1, imports '
+                             'unmeasured (evidence marked %s)'
+                             % (batch_id, a, _tool('wave').UNMEASURED_WSO))
+                    return None
             text = unmeasured(a, run, park(needs))
         elif status == 'skipped':
             text = '%s: no Frida hook (%s); park it: %s' % (
@@ -4379,6 +4445,27 @@ class Driver:
             len(rels), batch_id), '--', *rels)
         if r.returncode != 0:
             self.log('%s: trace evidence not committed: %s' % (
+                batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
+
+    def _commit_unmeasured_evidence(self, batch_id, worktree, marked):
+        """Commit the evidence files the phase marked as unmeasured WSO
+        imports (rule 1 of the 2026-10-26 ruling): a plain git add+commit.
+        Unlike the trace evidence this never touches the status file's
+        frida_written -- there is no trace_source to remember, and the
+        marking stands on its own (wave.unmeasured-imports reads it)."""
+        rels = sorted(set(marked.values()))
+
+        def git(*args):
+            return subprocess.run(['git', '-C', worktree, *args],
+                                  capture_output=True, text=True)
+        if not git('status', '--porcelain', '--', *rels).stdout.strip():
+            return
+        git('add', '--', *rels)
+        r = git('commit', '-q', '-m',
+                'frida: unmeasured WSO import marking for %d row(s) of %s'
+                % (len(marked), batch_id), '--', *rels)
+        if r.returncode != 0:
+            self.log('%s: unmeasured WSO marking not committed: %s' % (
                 batch_id, _one_line((r.stderr or '') + (r.stdout or ''))))
 
     # -- the probe queue (Task 28) -----------------------------------------------
@@ -6862,6 +6949,9 @@ def _parse(argv):
                    help='stop starting batches once N have started in this '
                         'run (adopted, cut or resumed); the ones in flight '
                         'finish, and the run exits 0')
+    p.add_argument('--size', type=int, default=None, metavar='N',
+                   help='rows per batch (default: %d): a smaller batch keeps '
+                        'an import worker inside its timeout' % wave.DEFAULT_SIZE)
     p.add_argument('--worker-timeout', type=float, default=DEFAULT_TIMEOUT,
                    metavar='SECONDS',
                    help='kill a worker or reviewer run (its whole process '
@@ -6964,6 +7054,8 @@ def _build(args, repo):
                          'it at a copy, never at docs/wso/wave-state.json.')
     if args.max_batches is not None and args.max_batches < 1:
         return None, (2, 'wave.py run: --max-batches must be at least 1')
+    if args.size is not None and args.size < 1:
+        return None, (2, 'wave.py run: --size must be at least 1')
     if args.worker_timeout <= 0:
         return None, (2, 'wave.py run: --worker-timeout must be positive')
     live_path = wave.QUEUES[queue]['state']
@@ -7007,7 +7099,7 @@ def _build(args, repo):
                    reviewers_by_pool=reviewers_by_pool,
                    budgets=args.budgets, queue=queue,
                    max_batches=args.max_batches,
-                   base_tests=args.base_tests)
+                   base_tests=args.base_tests, size=args.size)
     except StatusError as e:
         return None, (1, 'wave.py run: the status file cannot be read: %s' % e)
     except ValueError as e:
