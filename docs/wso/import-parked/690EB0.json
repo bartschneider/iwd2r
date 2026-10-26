@@ -1,0 +1,1 @@
+{"address": "0x690EB0", "name": "CScreenWorld::StopContainer", "file": "src/CScreenWorld.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
