@@ -1,0 +1,7 @@
+{
+  "address": "0x67D050",
+  "name": "CScreenStore::StartStore",
+  "file": "src/CScreenStore.cpp",
+  "batch": "i031",
+  "needs": "not exercised; ours reading matches the decompile"
+}
