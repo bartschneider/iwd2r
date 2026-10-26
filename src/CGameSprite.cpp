@@ -9184,8 +9184,11 @@ void CGameSprite::RenderMirrorImage(INT placement, CRect& rFX, CRect& rGCBounds,
     SHORT searchSquareCode;
     CPoint pos;
 
+    // The offset is applied to the local copy only -- the binary reads m_pos.y
+    // and never writes it back, so a `+=` here would walk the sprite across the
+    // map one placement offset per rendered frame.
     pos.x = m_pos.x + mirrorImagePlacementX[placement];
-    pos.y = m_pos.y += mirrorImagePlacementY[placement];
+    pos.y = m_pos.y + mirrorImagePlacementY[placement];
     pos.y += m_pArea->GetHeightOffset(pos, m_listType);
 
     m_animation.CalculateGCBoundsRect(rGCBounds,
@@ -9196,16 +9199,25 @@ void CGameSprite::RenderMirrorImage(INT placement, CRect& rFX, CRect& rGCBounds,
         rFX.Height());
 
     if (!IsRectEmpty(rViewRect & rGCBounds)) {
-        mirrorPos.x = max(pos.x, m_pArea->GetInfinity()->nAreaX - 1) / CPathSearch::GRID_SQUARE_SIZEX;
-        mirrorPos.y = max(pos.y, m_pArea->GetInfinity()->nAreaY - 1) / CPathSearch::GRID_SQUARE_SIZEY;
+        // Three coordinate spaces, which the binary keeps in three separate
+        // stack slots: the world position, that position clamped into the area,
+        // and the clamped one divided down into search squares.  Only the
+        // search-map lookup wants squares; the visibility map divides by its
+        // own tile size, and the renderer wants the world position.
+        CPoint clampedPos(min(max(pos.x, 0), m_pArea->GetInfinity()->nAreaX - 1),
+            min(max(pos.y, 0), m_pArea->GetInfinity()->nAreaY - 1));
+
+        mirrorPos.x = clampedPos.x / CPathSearch::GRID_SQUARE_SIZEX;
+        mirrorPos.y = clampedPos.y / CPathSearch::GRID_SQUARE_SIZEY;
+
         if ((pSearch->GetLOSCost(mirrorPos, m_terrainTable, searchSquareCode, FALSE) != CPathSearch::COST_IMPASSABLE
                 || searchSquareCode == 14)
-            && pVisibility->IsTileExplored(pVisibility->PointToTile(mirrorPos))) {
+            && pVisibility->IsTileExplored(pVisibility->PointToTile(clampedPos))) {
             m_animation.Render(m_pArea->GetInfinity(),
                 pVidMode,
                 nSurface,
                 rFX,
-                mirrorPos,
+                pos,
                 ptReference,
                 dwRenderFlags | 0x2,
                 rgbTint,
