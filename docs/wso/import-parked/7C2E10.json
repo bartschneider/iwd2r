@@ -1,0 +1,1 @@
+{"address": "0x7C2E10", "name": "CImm::sub_7C2E10", "file": "src/CImm.cpp", "batch": "i038", "needs": "add the exe's field_128 = 0 store (mov [esi+0x128],0 at 0x7C2E92) inside the hImc!=NULL branch between the three CString resets; the fork body and ours both omit it, so his body contradicts the exe and ours is wrong the same way"}

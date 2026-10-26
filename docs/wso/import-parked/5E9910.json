@@ -1,0 +1,7 @@
+{
+  "address": "0x5E9910",
+  "name": "CScreenCharacter::OnSoundsButtonClick",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}

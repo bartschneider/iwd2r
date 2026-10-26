@@ -1,0 +1,7 @@
+{
+  "address": "0x4C3F30",
+  "name": "CGameEffect::sub_4C3F30",
+  "file": "src/CGameEffect.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}

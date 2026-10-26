@@ -1,0 +1,7 @@
+{
+  "address": "0x5E4900",
+  "name": "CScreenCharacter::OnCustomizeBiographyButtonClick",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}

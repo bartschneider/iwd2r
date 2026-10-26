@@ -1,0 +1,7 @@
+{
+  "address": "0x615680",
+  "name": "CUIControlButtonCharGenImport::OnLButtonClick",
+  "file": "src/CScreenCreateChar.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}

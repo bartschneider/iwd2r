@@ -1,0 +1,7 @@
+{
+  "address": "0x5E46C0",
+  "name": "CScreenCharacter::OnInformationButtonClick",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
