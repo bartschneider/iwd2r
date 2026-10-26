@@ -14380,6 +14380,8 @@ BOOL CGameEffectCastSpell::ApplyEffect(CGameSprite* pSprite)
         m_sourceID);
     g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
 
+    m_done = TRUE;
+
     return TRUE;
 }
 
@@ -14574,6 +14576,8 @@ BOOL CGameEffectCastSpellPoint::ApplyEffect(CGameSprite* pSprite)
         pSprite->GetId(),
         m_sourceID);
     g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+
+    m_done = TRUE;
 
     return TRUE;
 }
