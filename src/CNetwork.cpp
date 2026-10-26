@@ -2206,6 +2206,80 @@ BOOLEAN CNetwork::HandleSystemMessage(BYTE* pData, DWORD dwSize)
     return FALSE;
 }
 
+// 0x7A7BF0
+void CNetwork::AddMessageToWindow(PLAYER_ID idTo, DWORD dwFlags, BYTE* pData, DWORD dwSize)
+{
+    // NOTE: Uninline.
+    INT nPlayer = FindPlayerLocationByID(idTo, TRUE);
+
+    if (nPlayer == -1) {
+        // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
+        // __LINE__: 8339
+        UTIL_ASSERT_MSG(FALSE, "CNetwork::AddMessageToWindow: Invalid SendTo ID.");
+        return;
+    }
+
+    BOOLEAN bRaw = (dwFlags & SEND_RAW) != 0;
+
+    INT nPackets;
+    if (dwSize + 16 >= MAXIMAL_PACKET_SIZE) {
+        nPackets = dwSize / MAXIMAL_PACKET_SIZE + 1;
+        while (nPackets >= 2 && dwSize - (nPackets - 1) * MAXIMAL_PACKET_SIZE < MINIMAL_PACKET_SIZE) {
+            nPackets--;
+        }
+    } else {
+        nPackets = 1;
+    }
+
+    DWORD dwOffset = 0;
+    DWORD dwRemainingSize = dwSize;
+    for (INT nPacket = 0; nPacket < nPackets; nPacket++) {
+        DWORD dwChunkSize = MAXIMAL_PACKET_SIZE;
+        if (nPacket == nPackets - 1) {
+            dwChunkSize = dwRemainingSize;
+        }
+
+        if (nPacket != 0) {
+            BYTE* pMessage = CreateCopyMessage(pData + dwOffset,
+                dwChunkSize,
+                bRaw,
+                TRUE,
+                0);
+
+            EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
+
+            CNETWORKWINDOW_QUEUEENTRY* pEntry = new CNETWORKWINDOW_QUEUEENTRY();
+            pEntry->idFrom = m_idLocalPlayer;
+            pEntry->idTo = idTo;
+            pEntry->pData = pMessage;
+            pEntry->dwSize = dwChunkSize + 12;
+            m_pSlidingWindow[nPlayer].m_lQueueOutgoingMessages.AddTail(pEntry);
+
+            LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
+        } else {
+            BYTE* pMessage = CreateCopyMessage(pData + dwOffset,
+                dwChunkSize,
+                bRaw,
+                TRUE,
+                nPackets);
+
+            EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
+
+            CNETWORKWINDOW_QUEUEENTRY* pEntry = new CNETWORKWINDOW_QUEUEENTRY();
+            pEntry->idFrom = m_idLocalPlayer;
+            pEntry->idTo = idTo;
+            pEntry->pData = pMessage;
+            pEntry->dwSize = dwChunkSize + 16;
+            m_pSlidingWindow[nPlayer].m_lQueueOutgoingMessages.AddTail(pEntry);
+
+            LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
+        }
+
+        dwOffset += dwChunkSize;
+        dwRemainingSize -= dwChunkSize;
+    }
+}
+
 // 0x7A7DF0
 BYTE* CNetwork::CreateCopyMessage(const void* lpData, DWORD dwDataSize, BOOLEAN bCompressed, unsigned char a4, INT nFrame)
 {
