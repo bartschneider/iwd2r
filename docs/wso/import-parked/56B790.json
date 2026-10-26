@@ -1,0 +1,7 @@
+{
+  "address": "0x56B790",
+  "name": "IcewindCGameEffectFeatPowerAttack::ApplyEffect",
+  "file": "src/IcewindCGameEffects.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}

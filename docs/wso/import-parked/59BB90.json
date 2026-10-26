@@ -1,0 +1,7 @@
+{
+  "address": "0x59BB90",
+  "name": "CGameRemoteObjectArray::RemovePlayer",
+  "file": "src/CGameRemoteObjectArray.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}

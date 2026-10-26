@@ -1,0 +1,7 @@
+{
+  "address": "0x5FEB70",
+  "name": "CScreenConnection::sub_5FEB70",
+  "file": "src/CScreenConnection.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}

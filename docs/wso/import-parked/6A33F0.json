@@ -1,0 +1,7 @@
+{
+  "address": "0x6A33F0",
+  "name": "CGameAnimationTypeEffect::CalculateGCBoundsRect",
+  "file": "src/CGameAnimationTypeEffect.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}

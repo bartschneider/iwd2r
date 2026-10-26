@@ -1,0 +1,7 @@
+{
+  "address": "0x78CD90",
+  "name": "CResCache::FlushCache",
+  "file": "src/CResCache.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}

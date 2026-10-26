@@ -1,0 +1,7 @@
+{
+  "address": "0x4B5790",
+  "name": "CGameEffectDisease::ApplyEffect",
+  "file": "src/CGameEffect.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}

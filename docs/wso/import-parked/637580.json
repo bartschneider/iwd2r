@@ -1,0 +1,7 @@
+{
+  "address": "0x637580",
+  "name": "CScreenJournal::ResetAnnotatePanel",
+  "file": "src/CScreenJournal.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
