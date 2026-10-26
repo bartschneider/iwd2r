@@ -652,6 +652,20 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
             seen.add(_addr_key(r['address']))
             candidates.append(r)
     eligible = [r for r in candidates if r['file'] not in owned]
+    skip_note = None
+    if importing and category == 'only_theirs' and repo:
+        # An only-theirs row whose address our src labels at the base is
+        # present, not an import: ours already carries the body, and
+        # recompare reclassifies it.  The pool offers the rest.
+        present = {_addr_key(r['address']) for r in eligible
+                   if _labelled_at(repo, base, r['address'])}
+        if present:
+            eligible = [r for r in eligible
+                        if _addr_key(r['address']) not in present]
+            skip_note = ('%d only_theirs row(s) skipped: ours already carries '
+                         'the body (recompare will reclassify)' % len(present))
+            if not eligible:
+                return [], [], None, (2, skip_note + '\n')
     if not eligible:
         if candidates:
             return [], [], None, (2, 'nothing left to assign: %d row%s wait%s on files '
@@ -727,6 +741,9 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                     return [], [], None, (2, 'nothing left: every remaining import row is '
                                          'exercised by no scenario (--include-uncovered '
                                          'offers them anyway)\n')
+    if skip_note:
+        coverage_note = skip_note if coverage_note is None else (
+            coverage_note + '\n' + skip_note)
     return eligible, no_addr, coverage_note, None
 
 

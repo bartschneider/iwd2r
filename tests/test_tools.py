@@ -24183,6 +24183,48 @@ class ImportSecondSourceTest(unittest.TestCase):
         self.assertEqual([r['category'] for r in self.state()['batches']['i004']['rows']],
                          [self.ONLY] * 2)
 
+    def test_next_import_skips_a_present_only_theirs_row(self):
+        # Task 40: an only-theirs row whose address our src labels at the
+        # base is present — ours already carries the body — so the queue
+        # never cuts it, and says so once per cut
+        _write(self.dp, json.dumps(self.ONLY_ROWS))
+        self.cov({'world_entry': {'0x409000': 1, '0x40A000': 1}})
+        repo = os.path.join(self.tmp, 'repo')
+        os.makedirs(repo)
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        subprocess.run(['git', 'init', '-q', '-b', 'first'], cwd=repo, env=env,
+                       check=True, capture_output=True)
+        _write(os.path.join(repo, 'src', 'P.cpp'),
+               '// 0x409000\nint P()\n{\n  return 1;\n}\n')
+        subprocess.run(['git', 'add', '-A'], cwd=repo, env=env, check=True,
+                       capture_output=True)
+        subprocess.run(['git', 'commit', '-qm', 'p'], cwd=repo, env=env,
+                       check=True, capture_output=True)
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, os.path.join(self.tmp, 'import-state.json'), 2, queue='import',
+                repo=repo, import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first', coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x40A000'], out)
+        self.assertIn('1 only_theirs row(s) skipped: ours already carries the body '
+                      '(recompare will reclassify)', out)
+        self.assertEqual([r['address'] for r in self.state()['batches']['i001']['rows']],
+                         ['0x40A000'])
+        # with the rest batched, the one present row left explains the empty pool
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, os.path.join(self.tmp, 'import-state.json'), 2, queue='import',
+                repo=repo, import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first', coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(out, '1 only_theirs row(s) skipped: ours already carries the body '
+                              '(recompare will reclassify)\n')
+
     def test_brief_renders_the_only_theirs_paragraph_only_for_such_batches(self):
         self.with_only()
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x409000': 1}})
