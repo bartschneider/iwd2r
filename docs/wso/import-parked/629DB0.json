@@ -1,0 +1,7 @@
+{
+  "address": "0x629DB0",
+  "name": "CScreenInventory::OnAbilitiesButtonClick",
+  "file": "src/CScreenInventory.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}
