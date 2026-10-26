@@ -1,0 +1,7 @@
+{
+  "address": "0x6FF6D0",
+  "name": "CGameSprite::MoveToFront",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}
