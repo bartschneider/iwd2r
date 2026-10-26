@@ -1,0 +1,7 @@
+{
+  "address": "0x519270",
+  "name": "CMultiplayerSettings::OnDropPlayer",
+  "file": "src/CMultiplayerSettings.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}

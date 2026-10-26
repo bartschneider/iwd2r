@@ -1,0 +1,7 @@
+{
+  "address": "0x47E040",
+  "name": "CGameContainer::DebugDump",
+  "file": "src/CGameContainer.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}
