@@ -301,6 +301,9 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   run, counting adopted, cut and resumed ones. The batches in flight
   finish; the run then exits 0 (3 if a pool ended parked) with
   `stopped: {reason: "max-batches", n: N}` in the status file.
+- `--size N`: rows per batch (default 20; refused below 1). A smaller
+  batch keeps an import worker inside its timeout (i047's twenty
+  whole-function `only_theirs` rows timed the worker out).
 - Adoption (`--queue wave1`): before any new cut, the driver adopts every
   batch in state `assigned` with no recorded verdict that nothing in the
   status file claims (running, parked or exception), oldest `assigned_at`
@@ -401,13 +404,22 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   is `docs/wso/wave-state.json`: the `both_changed_differ` rows, triaged,
   batch ids `b<NNN>`, brief `brief-template.md`, closed with verdicts.
   `import` is `docs/wso/import-state.json`: the `theirs_real_ours_stub`
-  rows plus the entries of `docs/wso/import-list.json`, no triage, batch
-  ids `i<NNN>` (branches and worktrees `p3/wso-i<NNN>`, so they never
+  rows, the `theirs_changed_ours_base` rows and the `only_theirs` rows,
+  in that order, plus the entries of `docs/wso/import-list.json`, no
+  triage, batch ids `i<NNN>` (branches and worktrees `p3/wso-i<NNN>`,
+  so they never
   collide with wave 1's), brief `import-brief-template.md`, closed with
   `close --kind import`: no verdict lines or evidence phrases are
   checked, the evidence must be `kind: trace` or better, and the tool
   tests, `check_evidence` and parity still run. The import queue skips
-  the oracle phase and never rewrites wave 1's scorecard. It runs the
+  the oracle phase and never rewrites wave 1's scorecard. Its coverage
+  requirement is per category (2026-10-26 ruling): where ours lacks the
+  body — the stub and `only_theirs` categories, rule 1 — every
+  candidate is offered, covered first, and a row no scenario exercises
+  imports unmeasured (below); where both trees have the body —
+  `theirs_changed_ours_base`, rule 2 — only the rows the coverage map
+  exercises are cut, and the rest are kept by default (ours stays, no
+  worker runs). It runs the
   Frida phase (with `--frida`): the scenarios the coverage map picks
   for the batch (the nine world scenarios, plus `biography` for screen
   rows; the driver log names them), each through `probe.py run` once per
@@ -420,8 +432,10 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   failure (the build fails, the run raises, or every scenario failed with no
   status on either side) is the batch's exception at stage `frida` (status
   file, ledger, one aoe line): no row is measured, parked or rewritten, and
-  clearing it reruns the worker and the phase; a row-level failure (one row
-  not exercised, one scenario failed for one row) still parks that row. On
+  clearing it reruns the worker and the phase; a row-level failure (one
+  scenario failed for one row, or one row not exercised) still parks that
+  row — except the rule-1 row no scenario exercised, which the phase
+  marks unmeasured instead (below). On
   a wave-1 batch the build is the branch's too, so an equal row confirms
   whichever side the verdict records (`measured: frida`, ours, neither or
   an adopted fork body) and a different one is a finding for that side.
@@ -465,8 +479,9 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   without its case or a worker's `frida` line is measured like a read-only
   row, and a frida line the driver did not write (it keeps the lines it
   wrote in the status file, `frida_written`) is a mechanical-check problem.
-  A measured row that is not equal (different, exercised by no scenario,
-  no hook, `scenario failed`, `not measured`) cannot close: the phase runs
+  A measured row that is not equal (different, no hook, `scenario
+  failed`, `not measured`, or — outside rule 1 — exercised by no
+  scenario) cannot close: the phase runs
   once per batch, so the finding tells the worker to park it in its fix
   round: edit that function back to the merge base's body (one function,
   never a whole file that holds other rows' changes), delete its evidence
@@ -474,11 +489,34 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   `docs/wso/import-parked/<ADDR>.json` (one file per row, so two batches
   parking different rows merge cleanly; `needs` is what the finding names:
   the scenarios tried, `frida different: <detail>`, or the status text;
-  a batch may add files there). `close --kind import` accepts a batch when
+  a batch may add files there). Rule 1 (2026-10-26 ruling) takes one case
+  out of parking: a row where ours never had the body
+  (`theirs_real_ours_stub`, `only_theirs`) that no scenario exercised.
+  The import needs no coverage there, so the phase rewrites that row's
+  evidence `exemption:` to start `unmeasured WSO import` (the driver
+  only, never the worker, like the frida `trace_source` line; `kind:`
+  stays as it is), commits it (`frida: unmeasured WSO import marking
+  for <N> row(s) of <batch>`), and the row closes unmeasured: the close
+  takes the marking as its evidence, like the three forms above. Only a
+  marking that fails falls back to parking the row.
+  `python3 -I tools/wave.py unmeasured-imports` lists every evidence
+  file that carries the marking, so a later verification pass knows
+  exactly what never measured.
+
+  Rule 3: rows parked before that ruling only for lack of coverage come
+  back through `python3 -I tools/wave.py requeue [--dry-run] [--reason
+  TEXT]`: every parked rule-1 row whose `needs` ends in
+  `not exercised` re-enters the queue (unpark's move). A row parked for
+  any other reason — a dependency, an exe contradiction, a failed check —
+  a base-body row (rule 2 keeps those ours) and a row of a batch that is
+  not closed stay parked. `--dry-run` lists the rows and moves nothing.
+
+  `close --kind import` accepts a batch when
   every row that is not parked is imported (its body changed against the
   merge base: "row <addr> not imported: body unchanged against <base>;
   import it or park it") and at `trace` or better as the driver's frida
-  trace or as evidence that stands as written, every parked row has its
+  trace or as evidence that stands as written (or carrying the
+  unmeasured WSO import marking, rule 1), every parked row has its
   body back at the merge base's and its evidence gone, and every
   dependency the batch touched meets the same bar.
   The two queues' assigned batches all hold files, so they stay
