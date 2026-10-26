@@ -565,6 +565,7 @@ public:
     SHORT Formation(CGameSprite* pTarget);
     SHORT Follow();
     SHORT UseContainer();
+    SHORT RemoveTraps(CGameAIBase* pTarget);
     void sub_71D0B0();
     void sub_72FBF0();
     void CheckSequence(BYTE& sequence);
