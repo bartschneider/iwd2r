@@ -3,10 +3,10 @@
 # generation, Party Formation, the chapter screen, the opening dialog),
 # then the console: cheats on for this run only, CTRL+TAB opens it (the
 # binding is CTRL+TAB, not the brief's CTRL+SPACE: CScreenWorld checks
-# m_bCheatsEnabled && m_bCtrlKeyDown on VK_TAB), one ADDGOLD(500) (every
-# character of it typable in the console's edit box: letters, digits and
-# shifted-digit parens), RETURN applies it, and the checkpoint dumps
-# carry game.party_gold before and after (a new party starts with 8).
+# m_bCheatsEnabled && m_bCtrlKeyDown on VK_TAB), one command in the
+# grammar the dispatcher 0x5838A0 actually accepts, RETURN applies it,
+# and the checkpoint dumps carry game.party_gold before and after (a
+# new party starts with 8).
 # Coordinates as in first_fight.txt (Resolution=800).
 # timeout: 300
 # cheats: 1
@@ -185,15 +185,24 @@ origin screen
 click 400 216
 wait 30
 checkpoint selected
-# The proof: one command with an unconditional, dumped effect. The edit
-# box opens empty (the copy's ini carries no [Lua Edit] preload; an
-# earlier run showed a preload merges into the submitted line and makes
-# the command fail to parse), and RETURN submits the line — and closes
-# the console, so no closing toggle after it.
+# The proof: one command with an unconditional, dumped effect, in the
+# grammar the dispatcher accepts. 0x5838A0 splits the submitted line at
+# the first ':' and requires position >= 1; the text before the colon is
+# obfuscated ((c+8)*2 per char, 0x5844E0) and strcmp'd against
+# 0x8AF630 = obf("CTRLALTDELETE") — anything else, or no colon, prints
+# "Nice try cheater!" (0x8AF700) and does nothing, which is what every
+# earlier bare ADDGOLD(500) run hit. Past the colon the command name
+# before '(' is matched by the strcmp chain 0x583E60 (ADDGOLD at
+# 0x8AF660, index 0x10) and the args after '(' go to 0x5840E0. So the
+# line is CTRLALTDELETE:ADDGOLD(500): every char typable in the box
+# (letters, digits, shift+9 '(' and shift+0 ')', and shift+VK 0xBA ':'
+# via the box's OEM key table at 0x8ABA3C). The edit box opens empty
+# (the copy's ini carries no [Lua Edit] preload), and RETURN submits the
+# line — and closes the console, so no closing toggle after it.
 checkpoint before
 key CTRL+TAB
 wait 10
-type ADDGOLD(500)
+type CTRLALTDELETE:ADDGOLD(500)
 key RETURN
 wait 60
 checkpoint after
