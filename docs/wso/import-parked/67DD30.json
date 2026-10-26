@@ -1,0 +1,1 @@
+{"address": "0x67DD30", "name": "CScreenStore::OnErrorButtonClick", "file": "src/CScreenStore.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}
