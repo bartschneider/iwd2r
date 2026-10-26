@@ -1,0 +1,7 @@
+{
+  "address": "0x6432F0",
+  "name": "CUIControlButtonMapAreaMap::OnRButtonClick",
+  "file": "src/CScreenMap.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}
