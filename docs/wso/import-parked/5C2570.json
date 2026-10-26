@@ -1,0 +1,1 @@
+{"address": "0x5C2570", "name": "CInfGame::ReadyCharacterTerminationSequence", "file": "src/CInfGame.cpp", "batch": "i040", "needs": "not exercised; ours reading matches the decompile"}
