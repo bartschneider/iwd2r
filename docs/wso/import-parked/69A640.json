@@ -1,0 +1,1 @@
+{"address": "0x69A640", "name": "CScreenWorldMap::OnMapMouseDown", "file": "src/CScreenWorldMap.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
