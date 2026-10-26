@@ -1,0 +1,1 @@
+{"address": "0x55ED20", "name": "IcewindCGameEffectSavingThrowChange::ApplyEffect", "file": "src/IcewindCGameEffects.cpp", "batch": "i044", "needs": "not exercised; ours reading matches the decompile"}
