@@ -1850,7 +1850,7 @@ void CGameAIBase::ApplyEffectToParty(CGameEffect* pEffect)
                     pGame->GetObjectArray()->ReleaseShare(nCharacterId,
                         CGameObjectArray::THREAD_ASYNCH,
                         INFINITE);
-                    message = new CMessageAddEffect(pEffect->Copy(), m_id, nCharacterId);
+                    message = new CMessageAddEffect(pEffect, m_id, nCharacterId);
                     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
                 } else {
                     pGame->GetObjectArray()->ReleaseShare(nCharacterId,
@@ -1859,7 +1859,7 @@ void CGameAIBase::ApplyEffectToParty(CGameEffect* pEffect)
                 }
             }
         } else {
-            message = new CMessageAddEffect(pEffect->Copy(), m_id, nCharacterId);
+            message = new CMessageAddEffect(pEffect, m_id, nCharacterId);
             g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
         }
     }
