@@ -10,6 +10,8 @@ The coordinator's wave loop, one command each::
     python3 tools/wave.py resolve 0x716E80 ours dump-716E80   # a probe-list row into its batch
     python3 tools/wave.py undecide b016 0x5D79B0 fork <reason>  # a batch row onto the probe list
     python3 tools/wave.py unpark 0x5152C0 [--reason TEXT]     # a parked import row back to the queue
+    python3 tools/wave.py requeue [--dry-run] [--reason TEXT] # every rule-1 row parked only for
+                                                # lack of coverage back to the queue (rule 3)
     python3 tools/wave.py close b002 --kind import   # waves 2-5
     python3 tools/wave.py scorecard            # the tally into xrec-report.md
     python3 tools/wave.py remeasure (--rows 0xA 0xB .. | --read-only-measured |
@@ -101,6 +103,12 @@ DEFAULT_CATEGORY = 'both_changed_differ'
 # IMPORT_CATEGORY (the first) stays as an alias for what imports it.
 IMPORT_CATEGORIES = ('theirs_real_ours_stub', 'theirs_changed_ours_base', 'only_theirs')
 IMPORT_CATEGORY = IMPORT_CATEGORIES[0]
+# Rule 1 (2026-10-26 ruling): where we lack the body the import needs no
+# coverage.  These are the categories whose parked-only-for-coverage rows
+# `requeue` returns to the queue.
+RULE1_CATEGORIES = (IMPORT_CATEGORIES[0], IMPORT_CATEGORIES[2])
+REQUEUE_NEEDS_END = 'not exercised'
+REQUEUE_REASON = 'rule 1: no coverage requirement (2026-10-26 ruling)'
 CATEGORY_LABEL = {'theirs_real_ours_stub': 'ours is a stub',
                   'theirs_changed_ours_base': 'ours is the base body',
                   'only_theirs': 'ours has no body'}
@@ -2609,6 +2617,45 @@ def unpark(addresses, reason=None, state_path=IMPORT_STATE_PATH, repo=ROOT):
     return 0, '\n'.join(lines) + '\n'
 
 
+def requeue(state_path=IMPORT_STATE_PATH, repo=ROOT, dry_run=False, reason=None):
+    """Re-queue the parked rule-1 rows whose `needs` ends in `not
+    exercised` (2026-10-26 ruling): where we lack the body the import no
+    longer needs coverage, so a row parked only for that re-enters the
+    queue.  A row parked for any other reason -- a dependency, an exe
+    contradiction, a failed check, ours matching the decompile -- and a
+    base-body row (rule 2 keeps those ours) stay parked, as does a row in
+    a batch that is not closed or one no batch carries.  The move is
+    unpark's, with the ruling as the reason; dry_run lists and moves
+    nothing."""
+    parked, problem = _parked_rows(repo)
+    if problem:
+        return 2, f'{problem}\n'
+    state = load_state(state_path)
+    picks = []
+    for key, entry in sorted(parked.items()):
+        if not (entry.get('needs') or '').rstrip().endswith(REQUEUE_NEEDS_END):
+            continue
+        hit = next(((bid, b, r) for bid, b in sorted(state['batches'].items())
+                    for r in b.get('rows', [])
+                    if _addr_key(r.get('address')) == key), None)
+        if (hit is None or hit[2].get('category') not in RULE1_CATEGORIES
+                or hit[1].get('status') != 'closed'):
+            continue
+        picks.append((key, entry, hit[0]))
+    tail = 'would re-enter the queue' if dry_run else 're-enter the queue'
+    lines = [f'requeue: {len(picks)} parked rule-1 row(s) whose needs ends '
+             f'in "{REQUEUE_NEEDS_END}" {tail}']
+    lines += [f'  0x{key.upper()} {e.get("name", "")} from {bid}'
+              for key, e, bid in picks]
+    if dry_run:
+        return 0, '\n'.join(lines) + '\n'
+    if not picks:
+        return 0, f'requeue: no parked rule-1 row ends its needs in "{REQUEUE_NEEDS_END}"\n'
+    rc, out = unpark([f'0x{key}' for key, _, _ in picks],
+                     reason=reason or REQUEUE_REASON, state_path=state_path, repo=repo)
+    return (rc, out) if rc else (0, '\n'.join(lines) + '\n' + out)
+
+
 # -- scorecard -----------------------------------------------------------
 
 SCORECARD_HEAD = '## Scorecard'
@@ -3233,6 +3280,23 @@ def main(argv=None):
                   '[--reason TEXT] [--queue import]', file=sys.stderr)
             return 2
         rc, out = unpark(addrs, reason)
+    elif cmd == 'requeue':
+        dry, reason, stray = False, None, []
+        it = iter(rest)
+        for a in it:
+            if a == '--dry-run':
+                dry = True
+            elif a == '--reason':
+                reason = next(it, None)
+                if reason is None:
+                    print('wave requeue: --reason needs a value', file=sys.stderr)
+                    return 2
+            else:
+                stray.append(a)
+        if stray:
+            print('usage: wave.py requeue [--dry-run] [--reason TEXT]', file=sys.stderr)
+            return 2
+        rc, out = requeue(dry_run=dry, reason=reason)
     elif cmd == 'recompare':
         kw, it = {}, iter(rest)
         for a in it:

@@ -19536,6 +19536,84 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('i001 closed p3/wso-i001 1 rows', out)
 
+    # -- re-queueing parked rule-1 rows (rule 3 of the 2026-10-26 ruling) ------
+
+    def _requeue_fixture(self):
+        """_unpark_fixture plus the categories rule 3 reads: the rule-1 rows
+        0x403000 (stub category) and the appended only_theirs 0x406000 re-enter
+        the queue; the base 0x401000 (rule 2 keeps it), the assigned-batch
+        0x404000, the in-no-batch 0x405000 and the dependency-parked 0x407000
+        stay parked whatever their needs says."""
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        with open(imp) as f:
+            state = json.load(f)
+        cats = {'0x401000': 'theirs_changed_ours_base',
+                '0x403000': 'theirs_real_ours_stub',
+                '0x404000': 'only_theirs'}
+        for b in state['batches'].values():
+            for r in b['rows']:
+                r['category'] = cats[r['address']]
+        state['batches']['i001']['rows'].append(
+            {'address': '0x406000', 'name': 'N', 'file': 'src/F.cpp',
+             'their_len': 70, 'our_len': 2, 'category': 'only_theirs'})
+        with open(imp, 'w') as f:
+            json.dump(state, f)
+        parked = (('401000', 'F', 'world_entry: not exercised'),
+                  ('406000', 'N', 'world_entry: not exercised'),
+                  ('407000', 'P', 'dependency outside the batch files: 0x900000 not imported'))
+        for a, n, needs in parked:
+            with open(os.path.join(folder, a + '.json'), 'w') as f:
+                json.dump({'address': '0x' + a, 'name': n, 'file': 'src/x.cpp',
+                           'batch': 'i001', 'needs': needs}, f)
+        return tmp, dp, ip, imp, folder, wave
+
+    def test_requeue_dry_run_lists_the_rule_1_rows_and_moves_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._requeue_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        rc, out = wave.requeue(state_path=imp, repo=self.root, dry_run=True)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out,
+                         'requeue: 2 parked rule-1 row(s) whose needs ends in "not exercised" '
+                         'would re-enter the queue\n'
+                         '  0x403000 H from i001\n'
+                         '  0x406000 N from i001\n')
+        self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_requeue_unparks_exactly_those_rows_and_keeps_the_rest_parked(self):
+        tmp, dp, ip, imp, folder, wave = self._requeue_fixture()
+        rc, out = wave.requeue(state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.splitlines()[0],
+                         'requeue: 2 parked rule-1 row(s) whose needs ends in "not exercised" '
+                         're-enter the queue')
+        self.assertIn('unparked 0x403000 H', out)
+        with open(imp) as f:
+            b = json.load(f)['batches']['i001']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x401000'])
+        moved = {u['address']: u for u in b['unparked']}
+        self.assertEqual(sorted(moved), ['0x403000', '0x406000'])
+        self.assertEqual(moved['0x403000']['reason'],
+                         'rule 1: no coverage requirement (2026-10-26 ruling)')
+        self.assertEqual(sorted(os.listdir(folder)),
+                         ['401000.json', '404000.json', '405000.json', '407000.json'])
+
+    def test_requeue_without_a_matching_row_moves_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        # the fixture's rows carry no rule-1 category
+        rc, out = wave.requeue(state_path=imp, repo=self.root)
+        self.assertEqual((rc, out.rstrip()),
+                         (0, 'requeue: no parked rule-1 row ends its needs in "not exercised"'))
+        self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_requeue_rejects_addresses(self):
+        wave = driver._tool('wave')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = wave.main(['requeue', '0x403000'])
+        self.assertEqual(rc, 2)
+        self.assertEqual(err.getvalue(), 'usage: wave.py requeue [--dry-run] [--reason TEXT]\n')
+
     # -- unmeasured WSO imports (rule 1 of the 2026-10-26 ruling) ----------------
 
     def _marked_evidence(self):
