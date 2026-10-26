@@ -4295,6 +4295,50 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i028": {
+      "assigned_at": "2026-10-26T00:19:06+00:00",
+      "branch": "p3/wso-i028",
+      "closed_at": "2026-10-26T00:32:14+00:00",
+      "files": [
+        "src/CProjectile.cpp"
+      ],
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x52A480",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectile::GetDirection",
+          "our_len": 165,
+          "outcome": "kept",
+          "their_len": 243
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i029": {
+      "assigned_at": "2026-10-26T00:19:07+00:00",
+      "branch": "p3/wso-i029",
+      "closed_at": null,
+      "files": [
+        "src/CMessage.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x453560",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetVariable::GetMsgSubType",
+          "our_len": 0,
+          "their_len": 58
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   }
 }
