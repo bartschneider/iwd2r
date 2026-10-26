@@ -1,0 +1,1 @@
+{"address": "0x4A6E90", "name": "CGameEffectColorGlowPulse::ApplyEffect", "file": "src/CGameEffect.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
