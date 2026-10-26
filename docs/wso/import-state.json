@@ -6721,7 +6721,7 @@
     "i044": {
       "assigned_at": "2026-10-26T14:05:56+00:00",
       "branch": "p3/wso-i044",
-      "closed_at": null,
+      "closed_at": "2026-10-26T15:49:19+00:00",
       "files": [
         "src/CMessage.cpp",
         "src/CGameSpriteSpells.cpp",
@@ -6731,6 +6731,7 @@
         "src/CGameEffect.cpp",
         "src/CImm.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -6822,7 +6823,7 @@
           "their_len": 56
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i045": {
@@ -7005,6 +7006,120 @@
         }
       ],
       "status": "closed",
+      "verdicts": {}
+    },
+    "i046": {
+      "assigned_at": "2026-10-26T15:28:25+00:00",
+      "branch": "p3/wso-i046",
+      "closed_at": null,
+      "files": [
+        "src/CScreenStart.cpp",
+        "src/CGameSprite.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CScreenLoad.cpp",
+        "src/CBaldurChitin.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x66F8F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStart.cpp",
+          "name": "CScreenStart::OnQuitButtonClick",
+          "our_len": 174,
+          "their_len": 176
+        },
+        {
+          "address": "0x725270",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_725270",
+          "our_len": 146,
+          "their_len": 160
+        },
+        {
+          "address": "0x725210",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_725210",
+          "our_len": 146,
+          "their_len": 153
+        },
+        {
+          "address": "0x665340",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::OnPortraitButtonClick",
+          "our_len": 136,
+          "their_len": 138
+        },
+        {
+          "address": "0x5EA8C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacter5EA7D0::OnLButtonClick",
+          "our_len": 121,
+          "their_len": 125
+        },
+        {
+          "address": "0x5EA9F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlButtonCharacter5EA900::OnLButtonClick",
+          "our_len": 121,
+          "their_len": 125
+        },
+        {
+          "address": "0x63E630",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::OnCancelButtonClick",
+          "our_len": 117,
+          "their_len": 119
+        },
+        {
+          "address": "0x63E440",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::sub_63E440",
+          "our_len": 117,
+          "their_len": 119
+        },
+        {
+          "address": "0x424FF0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CBaldurChitin.cpp",
+          "name": "CBaldurChitin::PreLoadFonts",
+          "our_len": 106,
+          "their_len": 121
+        },
+        {
+          "address": "0x670860",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStart.cpp",
+          "name": "CUIControlButtonStart670770::OnLButtonClick",
+          "our_len": 101,
+          "their_len": 104
+        },
+        {
+          "address": "0x6662D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CUIControlEditSinglePlayerChat::OnEditReturn",
+          "our_len": 96,
+          "their_len": 102
+        },
+        {
+          "address": "0x422E70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CBaldurChitin.cpp",
+          "name": "CBaldurChitin::UnloadFonts",
+          "our_len": 49,
+          "their_len": 54
+        }
+      ],
+      "status": "assigned",
       "verdicts": {}
     }
   }

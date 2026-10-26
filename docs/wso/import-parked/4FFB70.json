@@ -1,0 +1,1 @@
+{"address": "0x4FFB70", "name": "CMessageExitDialogMode::Run", "file": "src/CMessage.cpp", "batch": "i044", "needs": "not exercised; ours reading matches the decompile"}

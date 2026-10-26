@@ -1,0 +1,1 @@
+{"address": "0x725E70", "name": "CGameSpriteSpellList::Find", "file": "src/CGameSpriteSpells.cpp", "batch": "i044", "needs": "not measured: called on one side only in first_fight"}
