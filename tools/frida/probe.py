@@ -496,9 +496,15 @@ def run(ns):
             print('  %s -> %s%s' % (src, dst, ' (ro)' if ro else ''))
     rc = 2
     prior_cheats = None
+    prior_console = None
     try:
         if not dry and cheats:
             prior_cheats = oracle.prepare_cheats_ini(game, cheats)
+        if not dry and ns.target == 'original':
+            # The original preloads the console edit box with the ini's
+            # [Lua Edit] String0 (the last submitted line, any session's),
+            # so a console run's typed command would append to it.
+            prior_console = oracle.prepare_console_ini(game)
         with filelock.hold(oracle.REPLAY_LOCK, 'replay'), \
                 filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'), \
                 saves_of_its_own(game, out_dir, dry):
@@ -511,6 +517,8 @@ def run(ns):
     finally:
         if not dry and cheats:
             oracle.restore_cheats_ini(game, prior_cheats)
+        if not dry and ns.target == 'original':
+            oracle.restore_console_ini(game, prior_console)
         if not dry:
             shutil.rmtree(host_run, ignore_errors=True)
     if result['error']:
