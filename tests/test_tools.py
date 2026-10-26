@@ -7329,6 +7329,12 @@ class ProbePlanTest(unittest.TestCase):
             mock.patch.object(probe.oracle, 'restore_cheats_ini',
                               side_effect=lambda g, prior:
                               events.append(('cheats-off', g))),
+            mock.patch.object(probe.oracle, 'prepare_console_ini',
+                              side_effect=lambda g:
+                              events.append(('console-on', g)) or None),
+            mock.patch.object(probe.oracle, 'restore_console_ini',
+                              side_effect=lambda g, prior:
+                              events.append(('console-off', g))),
             mock.patch.object(probe, 'ours_build', return_value=builddir),
             mock.patch.object(probe.winsandbox, 'deploy_runtime'),
             mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
@@ -7351,11 +7357,11 @@ class ProbePlanTest(unittest.TestCase):
             rc = probe.run(ns)
         self.assertEqual(rc, 0)
         self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
-            ('cheats-on', game),
+            ('cheats-on', game), ('console-on', game),
             ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
             ('run_side',),
             ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay'),
-            ('cheats-off', game)])
+            ('cheats-off', game), ('console-off', game)])
         saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
         self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
                                     {'mode': 'empty', 'load': None},
