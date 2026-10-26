@@ -52627,10 +52627,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileDBFireball::CProjectileDBFireball",
-  "address": null,
+  "address": "0x576990",
   "category": "only_theirs",
   "their_len": 797,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-decl"
  },
  {
   "file": "src/CMessage.cpp",
@@ -52885,10 +52886,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileDBFireball::AIUpdate",
-  "address": null,
+  "address": "0x576BA0",
   "category": "only_theirs",
   "their_len": 547,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-decl"
  },
  {
   "file": "src/CNetwork.cpp",
@@ -53992,10 +53994,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectilePortalAnimFlip::CProjectilePortalAnimFlip",
-  "address": null,
+  "address": "0x5756C0",
   "category": "only_theirs",
   "their_len": 46,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-decl"
  },
  {
   "file": "src/CGameSprite.cpp",
@@ -54227,10 +54230,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileDBFireball::OnArrival",
-  "address": null,
+  "address": "0x576CE0",
   "category": "only_theirs",
   "their_len": 17,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-decl"
  },
  {
   "file": "src/CGameEffect.cpp",
@@ -54507,10 +54511,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileDBFireball::~CProjectileDBFireball",
-  "address": null,
+  "address": "0x5768A0",
   "category": "only_theirs",
   "their_len": 2,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-decl"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -54657,10 +54662,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectilePortalAnimFlip::~CProjectilePortalAnimFlip",
-  "address": null,
+  "address": "0x5768A0",
   "category": "only_theirs",
   "their_len": 2,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-decl"
  },
  {
   "file": "src/CProjectile.cpp",
