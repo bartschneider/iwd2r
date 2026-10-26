@@ -1,0 +1,7 @@
+{
+  "address": "0x67ED50",
+  "name": "CUIControlButtonStoreBarPanel::OnLButtonClick",
+  "file": "src/CScreenStore.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
