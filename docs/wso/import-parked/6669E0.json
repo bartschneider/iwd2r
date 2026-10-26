@@ -1,0 +1,7 @@
+{
+  "address": "0x6669E0",
+  "name": "CUIControlButtonSinglePlayerModifyCharacterDelete::OnLButtonClick",
+  "file": "src/CScreenSinglePlayer.cpp",
+  "batch": "i031",
+  "needs": "not exercised; ours reading matches the decompile"
+}
