@@ -23,7 +23,7 @@ BOOL CAlias::ParseRawData(CString& a2)
 
     field_4 = FALSE;
 
-    int pos = a2.FindOneOf(":=");
+    int pos = a2.Find(":=");
     if (pos > 0) {
         field_8 = a2.Left(pos + 1);
 
