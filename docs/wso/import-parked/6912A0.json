@@ -1,0 +1,7 @@
+{
+  "address": "0x6912A0",
+  "name": "CScreenWorld::StopCommand",
+  "file": "src/CScreenWorld.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}

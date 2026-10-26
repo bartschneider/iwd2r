@@ -1,0 +1,7 @@
+{
+  "address": "0x69CE20",
+  "name": "CScreenWorldMap::FindAreaHit",
+  "file": "src/CScreenWorldMap.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}

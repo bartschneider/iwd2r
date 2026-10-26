@@ -1,0 +1,1 @@
+{"address": "0x63ACA0", "name": "CUIControlButtonKeymap::OnLButtonClick", "file": "src/CScreenKeymaps.cpp", "batch": "i039", "needs": "exe bound is m_nID <= 2 -> OnErrorButtonClick(m_nID-1); ours/fork test < CSCREENKEYMAPS_ERROR_BUTTONS+1 = < 4"}

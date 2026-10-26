@@ -1,0 +1,7 @@
+{
+  "address": "0x725B50",
+  "name": "CGameSpriteSpellList::Remove",
+  "file": "src/CGameSpriteSpells.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}

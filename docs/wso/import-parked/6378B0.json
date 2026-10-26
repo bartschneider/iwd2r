@@ -1,0 +1,7 @@
+{
+  "address": "0x6378B0",
+  "name": "CScreenJournal::OnRestButtonClick",
+  "file": "src/CScreenJournal.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}

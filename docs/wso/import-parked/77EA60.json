@@ -1,0 +1,7 @@
+{
+  "address": "0x77EA60",
+  "name": "CResWave::CopyWaveData",
+  "file": "src/CResWave.cpp",
+  "batch": "i039",
+  "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not measured (called on one side only in world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map); ours reading matches the decompile"
+}

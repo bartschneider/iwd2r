@@ -1,0 +1,7 @@
+{
+  "address": "0x6636D0",
+  "name": "CScreenSinglePlayer::OnModifyButtonClick",
+  "file": "src/CScreenSinglePlayer.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}
