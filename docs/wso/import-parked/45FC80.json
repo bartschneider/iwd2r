@@ -1,0 +1,2 @@
+{"address": "0x45FC80", "name": "CGameAIBase::DoubleClickRButtonObject", "file": "src/CGameAIBase.cpp", "batch": "i045",
+ "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"}

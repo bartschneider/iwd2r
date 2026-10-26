@@ -2174,7 +2174,7 @@ SHORT CGameAIBase::DoubleClickRButtonObject(CGameObject* target)
     }
 
     // NOTE: Uninline.
-    return DoubleClickRButton(dest);
+    return DoubleClickLButton(dest);
 }
 
 // 0x45FD20
