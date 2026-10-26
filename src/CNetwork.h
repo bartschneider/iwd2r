@@ -39,6 +39,7 @@ public:
     void RemoveFromAllQueues();
     BYTE* RemoveFromIncomingQueue(PLAYER_ID& idDPFrom, PLAYER_ID& idDPTo, DWORD& dwDataSize, BOOLEAN& bCompressed);
     BYTE* RemoveFromIncomingQueueSpecific(BYTE nSpecMsgType, BYTE nSpecMsgSubType, PLAYER_ID& idDPFrom, PLAYER_ID& idDPTo, DWORD& dwDataSize, BOOLEAN& bCompressed);
+    void SendCall();
 
     void SetPlayerTimeout();
     void SetNoMessageTimeout();
