@@ -1,6 +1,7 @@
 # Task 37's scenario: a three-sorcerer party whose way through the start
-# area (AR1000) ends with twelve spells cast at one goblin, to exercise
-# the projectile and effect rows (CProjectile, IcewindCVisualEffect).
+# area (AR1000) ends with ten spells cast - projectiles at the goblin,
+# cones and areas on the ground north of the party - to exercise the
+# projectile and effect rows (CProjectile, IcewindCVisualEffect).
 #
 # The party is produced by the scenario itself, but not through the cheat
 # console: the console's edit control never processes Enter in our engine
@@ -21,27 +22,44 @@
 # (Attacked, 0x2). Centred on Aria (view 119,686) she is at screen
 # 400,216 and the goblin at 385,196.
 #
-# While paused, twelve casts are given: the Cast Spell bar (179,463; the
-# bar's buttons at x 27 + 38 * n), each sorcerer's spells in the order
-# they were picked in (the quickslots keep pick order), then a target.
-# The target comes from the spell's ability actionType (SPELL_ABILITY
-# +0x0C, IcewindMisc::CreateButtonData): 1 targets a creature (click the
-# goblin at 390,188, or key 1 to 3 for a party member), 4 targets ground
-# (click north of the party at 386,120: world 505,806, away from the
-# party for Grease's and Sleep's areas and their radius, Sleep further
-# out at 386,90: world 505,776), and 5 needs no target (the slot itself
-# fires). A caster's portrait key re-selects just that member when the
-# whole party is selected, and for an already-solely-selected member it
-# double-clicks the portrait, which only centres the view
-# (CInfGame::OnPortraitLDblClick) - no record screen opens either way.
+# While paused, ten casts are given with keys alone: a character key
+# (1 to 3) selects that sorcerer alone (CScreenWorld::OnKeyDown also
+# swaps the action bar to her slots), F5 is the action bar's fifth
+# button (OnLButtonPressed(4): customizable[1] = 3 = Cast Spell on the
+# default sorcerer bar, CInfButtonArray.cpp:95), and F1 to F4 pick from
+# the cast list that opens (CInfButtonArray state 103; the list keeps
+# chargen pick order - the picks are appended as they are clicked - and
+# the F-key index is the list index, CInfButtonArray.cpp:3075). Each
+# cast that takes a valid target fires and the bar returns to state 0,
+# so the next character key is a clean select. The target comes from
+# the spell's ability actionType (SPELL_ABILITY +0x0C, IcewindMisc::
+# CreateButtonData): 1 targets a creature (click it, or a character key
+# while armed to target that party member - CScreenWorld.cpp:880 picks
+# the target instead of selecting when a spell is armed), 4 targets
+# ground (click north of the party at 386,120, away from the party for
+# the cones' and areas' radius, Sleep further out at 386,90), and 5
+# needs no target. None of the ten is actionType 5.
 #
-# Space ends the pause and the queue plays out: Magic Missile and Ice
-# Dagger fly at the goblin (1d4+1 and 1d4 damage on 4 hit points), the
-# cones and areas land north of the party, the self and friend spells
-# (Shield, Minor Mirror Image, Mage Armor, Eagle's Splendor, Larloch's
-# Minor Drain, Charm Person) land on the casters and the goblin. The
-# rolls (damage, Grease slips, Charm) are past the pass gate: only
-# experience points and enemy hit points are compared.
+# Bram casts first, all four of his: Ray of Enfeeblement at the goblin
+# (strength drain, no hit-point damage, so the goblin's 4 hit points
+# stay for the damage casts), Ice Dagger (1d4) and Magic Missile
+# (1d4+1) at it - 2 + 2 damage at the least, so it drops here - and
+# Color Spray north. Aria's and Cade's creature casts target party
+# members by character key instead: Bram is done casting, so his hit
+# points are free to spend, and a party member is always a valid
+# creature target. That also avoids the one trap the route has: a cast
+# canceled for an invalid target stays armed, and the next character
+# key would then target that member with the armed spell. Larloch's
+# Minor Drain (1d4) and Chromatic Orb (1d8) land on Bram, Cade's
+# second Ray (no damage) on Aria, who is done casting by then. The
+# ground casts are Color Spray, Burning Hands and Grease at 386,120
+# and Sleep at 386,90.
+#
+# Space ends the pause and the casts play out: the Rays and Larloch's
+# fly as travelling projectiles, Magic Missile and Ice Dagger fly at
+# the goblin, the cones land north of the party. The rolls (damage,
+# the strength drains) are past the pass gate: only experience points
+# and enemy hit points are compared.
 #
 # About 10,900 frames with three character generations: real input
 # (play.py --vm) plays them in real time, 30 a second, about 360 s;
@@ -154,16 +172,29 @@ wait 15
 click 536 562
 wait 30
 checkpoint a_feats_done
-# Aria's spells (the 6 by 4 grid from 293,179 by 43 by 43-44): Magic
-# Missile (465,222), Shield (379,265), Burning Hands (293,179), Grease
-# (293,222); then Next back to the main menu.
-click 465 222
+# The spell grid is the 6 by 4 grid from 293,179 by 43 by 43-44, in
+# the order the TLK dump gives the names (alphabetical, Identify
+# included): row 1 Burning Hands 293,179, Charm Person 336,179, Chill
+# Touch 379,179, Chromatic Orb 422,179, Color Spray 465,179, Grease
+# 508,179; row 2 Ice Dagger 293,222, Identify 336,222, Larloch's
+# Minor Drain 379,222, Mage Armor 422,222, Magic Missile 465,222, Ray
+# of Enfeeblement 508,222; row 3 Minor Mirror Image 293,265, Shield
+# 336,265, Shocking Grasp 379,265, Protection from Petrification
+# 422,265, Protection From Evil 465,265, Sleep 508,265; row 4 Summon
+# Monster I 293,308. Attempt 1's picks assumed a different order;
+# launch 2's run showed the clicks bought other spells, and this
+# mapping is the correction.
+#
+# Aria's spells (pick order, the cast list's F1 to F4): Larloch's
+# Minor Drain (379,222), Chromatic Orb (422,179), Burning Hands
+# (293,179), Sleep (508,265); then Next back to the main menu.
+click 379 222
 wait 15
-click 379 265
+click 422 179
 wait 15
 click 293 179
 wait 15
-click 293 222
+click 508 265
 wait 15
 checkpoint a_spells_chosen
 click 536 562
@@ -276,15 +307,15 @@ wait 15
 click 536 562
 wait 30
 checkpoint b_feats_done
-# Bram's spells: Ice Dagger (336,222), Color Spray (465,179), Minor
-# Mirror Image (508,222), Sleep (465,265).
-click 336 222
-wait 15
-click 465 179
-wait 15
+# Bram's spells: Ray of Enfeeblement (508,222), Ice Dagger (293,222),
+# Magic Missile (465,222), Color Spray (465,179).
 click 508 222
 wait 15
-click 465 265
+click 293 222
+wait 15
+click 465 222
+wait 15
+click 465 179
 wait 15
 checkpoint b_spells_chosen
 click 536 562
@@ -394,15 +425,16 @@ wait 15
 click 536 562
 wait 30
 checkpoint c_feats_done
-# Cade's spells: Larloch's Minor Drain (379,222), Mage Armor (422,222),
-# Charm Person (336,179), Eagle's Splendor (508,179).
-click 379 222
-wait 15
-click 422 222
-wait 15
-click 336 179
+# Cade's spells: Ray of Enfeeblement (508,222), Grease (508,179);
+# Chromatic Orb (422,179) and Ice Dagger (293,222) come along as
+# spares - the casts below use only his first two.
+click 508 222
 wait 15
 click 508 179
+wait 15
+click 422 179
+wait 15
+click 293 222
 wait 15
 checkpoint c_spells_chosen
 click 536 562
@@ -449,24 +481,45 @@ wait 60
 click 250 399
 wait 120
 checkpoint opening_done
-# Select the whole party (OEM_PLUS is '=' , keymap index 37) so Bram
-# and Cade follow Aria on every leg: launch 1 left them on the ship.
-key OEM_PLUS
+# Bram and Cade must follow Aria without the select-all key: launch 2
+# showed OEM_PLUS took nothing (Bram 2321,926 and Cade 2383,931 never
+# left the ship). Every leg below is walked per character instead:
+# key 1 selects Aria and her click walks her, key 2 + the same click
+# walks Bram, key 3 + the click walks Cade. The proof field is
+# world.party in the checkpoints: all three members' x,y must move on
+# every leg.
 # Centre the view on Aria (the right panel's first portrait, double
 # click), as first_fight does: the legs below need the view exact.
 origin ui
 click 528 460
 click 528 460
 wait 10
-# Click-to-move on the deck.
+# Click-to-move on the deck, per character.
 origin screen
+key 1
+wait 10
+click 314 224
+key 2
+wait 10
+click 314 224
+key 3
+wait 10
 click 314 224
 wait 90
 checkpoint moved
 # Hedron's circle: the party walks up and his dialog opens at entry 34
 # with 5 responses.
+origin screen
+key 1
+wait 10
 move 497 217
 wait 5
+click 497 217
+key 2
+wait 10
+click 497 217
+key 3
+wait 10
 click 497 217
 wait 90
 checkpoint dialog
@@ -481,6 +534,14 @@ click 528 460
 click 528 460
 wait 10
 origin screen
+key 1
+wait 10
+click 56 312
+key 2
+wait 10
+click 56 312
+key 3
+wait 10
 click 56 312
 wait 150
 # Leg 2: centre, walk along the dock.
@@ -489,6 +550,14 @@ click 528 460
 click 528 460
 wait 10
 origin screen
+key 1
+wait 10
+click 80 174
+key 2
+wait 10
+click 80 174
+key 3
+wait 10
 click 80 174
 wait 150
 # Leg 3: centre, walk towards the west; Reig stops the party with his
@@ -498,6 +567,14 @@ click 528 460
 click 528 460
 wait 10
 origin screen
+key 1
+wait 10
+click 144 180
+key 2
+wait 10
+click 144 180
+key 3
+wait 10
 click 144 180
 wait 150
 checkpoint reig_dialog
@@ -539,6 +616,14 @@ click 528 460
 click 528 460
 wait 10
 origin screen
+key 1
+wait 10
+click 85 113
+key 2
+wait 10
+click 85 113
+key 3
+wait 10
 click 85 113
 wait 150
 # Leg 5: centre, walk to in front of the houses.
@@ -547,6 +632,14 @@ click 528 460
 click 528 460
 wait 10
 origin screen
+key 1
+wait 10
+click 80 342
+key 2
+wait 10
+click 80 342
+key 3
+wait 10
 click 80 342
 wait 150
 # Leg 6: centre on Aria and walk west on the path south of the houses;
@@ -556,16 +649,33 @@ click 528 460
 click 528 460
 wait 10
 origin screen
+key 1
+wait 10
+click 128 269
+key 2
+wait 10
+click 128 269
+key 3
+wait 10
 click 128 269
 wait 150
 checkpoint leg6
 # Leg 7: the game is paused already. Centre and give the walk to the
-# north-south path the goblin stands on.
+# north-south path the goblin stands on. The keys still select and the
+# clicks still queue while paused.
 origin ui
 click 528 460
 click 528 460
 wait 10
 origin screen
+key 1
+wait 10
+click 160 82
+key 2
+wait 10
+click 160 82
+key 3
+wait 10
 click 160 82
 wait 150
 checkpoint goblin_sighted
@@ -580,141 +690,111 @@ wait 120
 checkpoint attacked
 shot attacked
 # Centre on Aria (view 119,686: her at 400,216, the goblin at 385,196)
-# and queue the twelve casts while paused. Aria's four: Magic Missile
-# (slot 1, at the goblin 390,188), Shield (slot 2, needs no target),
-# Burning Hands (slot 3, ground north 386,120), Grease (slot 4, ground
-# north 386,120).
+# and give the ten casts while paused, one caster at a time. Bram
+# first: key 2 selects him, F5 opens his cast list, F1 to F4 are his
+# picks in order. Ray of Enfeeblement: no damage, the goblin's 4 hit
+# points stay for the next two casts. Target: the goblin (390,188).
 origin ui
 click 528 460
 click 528 460
 wait 10
-key 1
-wait 20
-click 179 463
-wait 20
-click 27 463
-wait 20
-origin screen
-move 390 188
-wait 5
-click 390 188
-wait 20
-origin ui
-shot a1_queued
-click 179 463
-wait 20
-click 65 463
-wait 30
-shot a2_queued
-click 179 463
-wait 20
-click 103 463
-wait 20
-origin screen
-move 386 120
-wait 5
-click 386 120
-wait 20
-origin ui
-shot a3_queued
-click 179 463
-wait 20
-click 141 463
-wait 20
-origin screen
-move 386 120
-wait 5
-click 386 120
-wait 20
-origin ui
-shot a4_queued
-# Bram's four (his key, once): Ice Dagger (slot 1, at the goblin), Color
-# Spray (slot 2, ground north), Minor Mirror Image (slot 3, no target),
-# Sleep (slot 4, ground further north 386,90).
 key 2
 wait 20
-click 179 463
+key F5
 wait 20
-click 27 463
+key F1
 wait 20
 origin screen
 move 390 188
 wait 5
 click 390 188
 wait 20
-origin ui
-shot b1_queued
-click 179 463
+shot b1_ray
+# Ice Dagger at the goblin (1d4).
+key F5
 wait 20
-click 65 463
+key F2
 wait 20
-origin screen
-move 386 120
-wait 5
+click 390 188
+wait 20
+shot b2_icedagger
+# Magic Missile at the goblin (1d4+1; with the Ice Dagger at least
+# 2 + 2 damage by now, so the goblin drops here).
+key F5
+wait 20
+key F3
+wait 20
+click 390 188
+wait 20
+shot b3_magicmissile
+# Color Spray: ground north of the party (386,120).
+key F5
+wait 20
+key F4
+wait 20
 click 386 120
 wait 20
-origin ui
-shot b2_queued
-click 179 463
+shot b4_colorspray
+# Aria: key 1 selects her. Her creature casts target Bram (key 2 while
+# armed): he is done casting, so his hit points are free to spend.
+# Larloch's Minor Drain (1d4).
+key 1
 wait 20
-click 103 463
-wait 30
-shot b3_queued
-click 179 463
+key F5
 wait 20
-click 141 463
+key F1
 wait 20
-origin screen
-move 386 90
-wait 5
+key 2
+wait 20
+shot a1_larlochs
+# Chromatic Orb at Bram (1d8).
+key F5
+wait 20
+key F2
+wait 20
+key 2
+wait 20
+shot a2_chromaticorb
+# Burning Hands: ground north (386,120).
+key F5
+wait 20
+key F3
+wait 20
+click 386 120
+wait 20
+shot a3_burninghands
+# Sleep: ground further north (386,90).
+key F5
+wait 20
+key F4
+wait 20
 click 386 90
 wait 20
-origin ui
-shot b4_queued
-# Cade's four (his key, once): Larloch's Minor Drain (slot 1, at the
-# goblin), Mage Armor (slot 2, at Aria: key 1 while armed), Charm Person
-# (slot 3, at the goblin), Eagle's Splendor (slot 4, at Aria: key 1).
+shot a4_sleep
+# Cade: key 3 selects him. His Ray of Enfeeblement targets Aria (key 1
+# while armed): no damage, and she is done casting.
 key 3
 wait 20
-click 179 463
+key F5
 wait 20
-click 27 463
-wait 20
-origin screen
-move 390 188
-wait 5
-click 390 188
-wait 20
-origin ui
-shot c1_queued
-click 179 463
-wait 20
-click 65 463
+key F1
 wait 20
 key 1
 wait 20
-shot c2_queued
-click 179 463
+shot c1_ray
+# Grease: ground north (386,120). His spares (Chromatic Orb, Ice
+# Dagger) stay uncast.
+key F5
 wait 20
-click 103 463
+key F2
 wait 20
-origin screen
-move 390 188
-wait 5
-click 390 188
+click 386 120
 wait 20
-origin ui
-shot c3_queued
-click 179 463
-wait 20
-click 141 463
-wait 20
-key 1
-wait 20
-shot c4_queued
-# Space ends the pause and the twelve casts play out: projectiles fly,
-# cones and areas land, the self and friend effects stick. Thirty
-# seconds of casting and aftermath.
+shot c2_grease
+# Space ends the pause and the ten casts play out: the Rays and
+# Larloch's fly as travelling projectiles, Magic Missile and Ice
+# Dagger fly at the goblin, the cones and areas land north of the
+# party. Thirty seconds of casting and aftermath.
 key SPACE
 wait 900
 checkpoint cast_done
