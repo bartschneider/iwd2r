@@ -5474,7 +5474,7 @@ BOOL IcewindCGameEffectFeatArterialStrike::ApplyEffect(CGameSprite* pSprite)
     if (nRank > 0) {
         pSprite->GetDerivedStats()->m_spellStates[SPLSTATE_FEAT_ARTERIAL_STRIKE] = true;
         if (m_secondaryType != 0) {
-            if (pSprite->GetDerivedStats()->m_spellStates[SPLSTATE_FEAT_HAMSTRING]) {
+            if (pSprite->GetDerivedStats()->m_spellStates[CGAMESPRITE_FEAT_HAMSTRING]) {
                 pSprite->FeedBack(CGameSprite::FEEDBACK_TOGGLEFEAT,
                     1,
                     0,
@@ -5491,7 +5491,7 @@ BOOL IcewindCGameEffectFeatArterialStrike::ApplyEffect(CGameSprite* pSprite)
                 0,
                 0);
         }
-        pSprite->GetDerivedStats()->m_spellStates[SPLSTATE_FEAT_HAMSTRING] = false;
+        pSprite->GetDerivedStats()->m_spellStates[CGAMESPRITE_FEAT_HAMSTRING] = false;
     } else {
         pSprite->GetDerivedStats()->m_spellStates[SPLSTATE_FEAT_ARTERIAL_STRIKE] = false;
         m_done = TRUE;
