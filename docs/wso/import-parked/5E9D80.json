@@ -1,0 +1,7 @@
+{
+  "address": "0x5E9D80",
+  "name": "CScreenCharacter::OnCustomPortraitsButtonClick",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
