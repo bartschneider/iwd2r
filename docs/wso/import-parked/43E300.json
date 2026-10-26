@@ -1,0 +1,7 @@
+{
+  "address": "0x43E300",
+  "name": "CBaldurProjector::sub_43E300",
+  "file": "src/CBaldurProjector.cpp",
+  "batch": "i036",
+  "needs": "import is a no-op: the fork body is ours with one member rename (field_65A -> m_nFadeInFrames) and both bodies stop at the same '// TODO: Incomplete (subtitles).' point, while the exe body (0x43e300 through 0x43e633, ending ret $0x4) goes on to render subtitle text; needs that subtitle rendering recovered against the exe before the row can import"
+}

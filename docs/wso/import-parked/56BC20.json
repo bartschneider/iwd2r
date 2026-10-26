@@ -1,0 +1,7 @@
+{
+  "address": "0x56BC20",
+  "name": "IcewindCGameEffectFeatHamstring::ApplyEffect",
+  "file": "src/IcewindCGameEffects.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}

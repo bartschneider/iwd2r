@@ -1,0 +1,7 @@
+{
+  "address": "0x654960",
+  "name": "CScreenOptions::OnCancelButtonClick",
+  "file": "src/CScreenOptions.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}

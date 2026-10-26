@@ -1,0 +1,7 @@
+{
+  "address": "0x77E8A0",
+  "name": "CResWave::ParseNormalWave",
+  "file": "src/CResWave.cpp",
+  "batch": "i036",
+  "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"
+}

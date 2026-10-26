@@ -1,0 +1,7 @@
+{
+  "address": "0x481350",
+  "name": "CGameContainer::OpenContainer",
+  "file": "src/CGameContainer.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}

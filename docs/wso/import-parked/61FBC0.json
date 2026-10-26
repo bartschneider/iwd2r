@@ -1,0 +1,7 @@
+{
+  "address": "0x61FBC0",
+  "name": "CUIControlScrollBarCharGenHatedRace::InvalidateItems",
+  "file": "src/CScreenCreateChar.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}

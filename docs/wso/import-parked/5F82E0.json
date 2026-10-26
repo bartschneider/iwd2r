@@ -1,0 +1,7 @@
+{
+  "address": "0x5F82E0",
+  "name": "CUIControlScrollBarCharacterSkills::InvalidateItems",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}
