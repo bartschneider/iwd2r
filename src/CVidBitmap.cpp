@@ -886,16 +886,16 @@ BOOL CVidBitmap::Render3d(INT x, INT y, const CRect& rClip, DWORD dwFlags, BOOLE
                     dwFlags);
                 break;
             case 24:
-                if ((dwFlags & 0xFFFF0000) == 0
-                    && g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) == RGB(128, 128, 128)) {
-                    bResult = BltBmp24To32(&(CVideo3d::texImageData[lTilePitch * (tileSize.cy - 1) / CVidTile::BYTES_PER_TEXEL]),
+                if ((dwFlags & 0xFFFF0000) != 0
+                    && g_pChitin->GetCurrentVideoMode()->ApplyBrightnessContrast(RGB(128, 128, 128)) != RGB(128, 128, 128)) {
+                    bResult = BltBmp24To32Tint(&(CVideo3d::texImageData[lTilePitch * (tileSize.cy - 1) / CVidTile::BYTES_PER_TEXEL]),
                         lTilePitch,
                         pTileData,
                         tileSize,
                         nDataJump + nTileDataJump,
                         dwFlags);
                 } else {
-                    bResult = BltBmp24To32Tint(&(CVideo3d::texImageData[lTilePitch * (tileSize.cy - 1) / CVidTile::BYTES_PER_TEXEL]),
+                    bResult = BltBmp24To32(&(CVideo3d::texImageData[(lTilePitch * (tileSize.cy - 1) / CVidTile::BYTES_PER_TEXEL)]),
                         lTilePitch,
                         pTileData,
                         tileSize,
@@ -910,7 +910,7 @@ BOOL CVidBitmap::Render3d(INT x, INT y, const CRect& rClip, DWORD dwFlags, BOOLE
             }
 
             if (!bResult) {
-                if (!bDemanded) {
+                if (bDemanded) {
                     pRes->Release();
                 }
                 return FALSE;
