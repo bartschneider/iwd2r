@@ -180,6 +180,9 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_PLAY_SOUND = 32;
 // 0x84CEF8
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_PLAY_SOUND_REF = 33;
 
+// 0x84CEF9
+const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_REMOVE_ITEM = 34;
+
 // 0x84CEFA
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_REMOVE_REPLIES = 35;
 
@@ -7098,6 +7101,79 @@ void CMessageAddItem::Run()
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
         CGameObjectArray::THREAD_ASYNCH,
         INFINITE);
+}
+
+// -----------------------------------------------------------------------------
+
+// 0x4F5C70
+CMessageRemoveItem::CMessageRemoveItem(SHORT slot, LONG caller, LONG target)
+    : CMessage(caller, target), m_slot(slot)
+{
+}
+
+// 0x4B2340
+CMessageRemoveItem::~CMessageRemoveItem()
+{
+}
+
+// 0x40A0D0
+SHORT CMessageRemoveItem::GetCommType()
+{
+    return SEND;
+}
+
+// 0x40A0E0
+BYTE CMessageRemoveItem::GetMsgType()
+{
+    return CBaldurMessage::MSG_TYPE_CMESSAGE;
+}
+
+// 0x4641F0
+BYTE CMessageRemoveItem::GetMsgSubType()
+{
+    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_REMOVE_ITEM;
+}
+
+// 0x504250
+void CMessageRemoveItem::Run()
+{
+    CInfGame* game = g_pBaldurChitin->GetObjectGame();
+    CGameObjectArray* array = game->GetObjectArray();
+    CGameObject* object;
+    BYTE rc;
+    do {
+        rc = array->GetDeny(m_targetId, CGameObjectArray::THREAD_ASYNCH, &object, INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+    if (object->GetObjectType() == CGameObject::TYPE_SPRITE) {
+        CGameSprite* sprite = static_cast<CGameSprite*>(object);
+        if (sprite->m_equipment.m_items[m_slot] != NULL) {
+            sprite->Unequip(m_slot);
+            game->AddDisposableItem(sprite->m_equipment.m_items[m_slot]);
+            sprite->m_equipment.m_items[m_slot] = NULL;
+            if (m_slot == sprite->m_equipment.m_selectedWeapon) {
+                sprite->EquipMostDamagingMelee();
+            }
+        }
+        CMessage* message = new CMessageSpriteEquipment(sprite, sprite->GetId(), sprite->GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE, message->GetCommType());
+        g_pBaldurChitin->GetActiveEngine()->UpdatePersonalItemStatus(m_targetId);
+        if (m_slot >= 43 && m_slot <= 50) {
+            sprite->SetQuickWeapon(static_cast<BYTE>(m_slot - 43), CButtonData());
+            sprite->SetQuickWeapon(static_cast<BYTE>(m_slot - 43), static_cast<BYTE>(0));
+        } else if (m_slot >= 15 && m_slot <= 17) {
+            sprite->SetQuickItem(static_cast<BYTE>(m_slot - 15), CButtonData());
+        }
+        if ((static_cast<int>(m_slot) - 43) / 2 == sprite->m_nWeaponSet) {
+            sprite->sub_726F20();
+            if (game->GetCharacterPortraitNum(sprite->GetId()) == g_pBaldurChitin->m_pEngineWorld->GetSelectedCharacter()) {
+                game->GetButtonArray()->UpdateButtons();
+            }
+        }
+    }
+    array->ReleaseDeny(m_targetId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
 }
 
 // -----------------------------------------------------------------------------
