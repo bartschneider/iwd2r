@@ -7012,7 +7012,7 @@ void CMessageContainerItems::Run()
 
     if (rc == CGameObjectArray::SUCCESS) {
         SHORT maxcnt = max(m_nItems, pContainer->m_lstItems.GetCount());
-        for (SHORT cnt = 0; cnt < m_nItems; cnt++) {
+        for (SHORT cnt = 0; cnt < maxcnt; cnt++) {
             CItem* oldItem = pContainer->GetItem(cnt);
             if (cnt < m_nItems) {
                 pContainer->SetItem(cnt, m_pItems[cnt]);
