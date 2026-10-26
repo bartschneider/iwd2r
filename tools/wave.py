@@ -1998,6 +1998,22 @@ def _labels():
     return _labels_module
 
 
+_xrec_module = None
+
+
+def _xrec():
+    """tools/xrec.py (funcs/stubby for reading a body back), loaded by path."""
+    global _xrec_module
+    if _xrec_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'wave_xrec', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      'xrec.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _xrec_module = module
+    return _xrec_module
+
+
 def address_from_header(source_text, name):
     """'0x<ADDR>' of the function `name` (qualified) defined in
     source_text under a `// 0x<ADDR>` header comment, or None when it is
@@ -2117,6 +2133,21 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
     if source_of is None:
         source_of = lambda f: _git_show(repo, ours, f)
     filled, _ = fill_addresses(theirs, source_of)
+    # Task 40: an only_theirs row our src labels at `ours` is not theirs-only:
+    # xrec matched per-file, so ours may already carry the body.  Read the
+    # fork's body at the tip and say what the pair really is; the import
+    # queue never cuts such a row.
+    reclassified = []
+    for r in theirs:
+        if (r.get('category') == 'only_theirs' and r.get('address')
+                and _labelled_at(repo, ours, r['address'])):
+            body = _func_body(repo, sha, r.get('file'), r['address'])
+            if body is None:
+                continue
+            stub = _xrec().stubby(body)
+            r['category'] = ('ours_real_theirs_stub' if stub
+                             else 'both_changed_differ')
+            reclassified.append((r, stub))
     with _filelock().hold(os.path.join(
             os.path.dirname(os.path.abspath(state_path)), 'claims.json.lock'),
             'wave recompare'):
@@ -2249,6 +2280,10 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
     if filled:
         text += (f'address from our header comment: {len(filled)} row(s): '
                  + ', '.join(f'{r["name"]} {r["address"]}' for r in filled) + '\n')
+    for r, stub in reclassified:
+        text += ('reclassified %s %s: ours already carries the body; theirs is '
+                 '%s -> %s\n' % (r['address'], r.get('name', ''),
+                                 'a stub' if stub else 'not a stub', r['category']))
     text += unaddressed_text(listed)
     if added:
         text += (f'coverage: {len(added)} new candidate(s) recorded in '
@@ -2265,6 +2300,26 @@ def _git_show(repo, ref, path):
     r = subprocess.run(['git', '-C', repo, 'show', f'{ref}:{path}'],
                        capture_output=True, text=True, errors='replace')
     return r.stdout if r.returncode == 0 else ''
+
+
+def _func_body(repo, ref, path, address):
+    """The stripped body xrec.funcs() reads for the function `address` labels
+    in repo's `ref` (path first, else every other src/*.cpp), or None when no
+    such function is there."""
+    ce = _check_evidence()
+    r = ce.git(repo, 'ls-tree', '-r', '--name-only', ref, '--', 'src/',
+               check=False)
+    if r.returncode != 0:
+        return None
+    paths = [p for p in r.stdout.splitlines() if p.endswith('.cpp')]
+    if path:
+        paths = [path] + [p for p in paths if p != path]
+    want = _addr_key(address)
+    for rel in paths:
+        for a, body in _xrec().funcs(_git_show(repo, ref, rel)).values():
+            if a is not None and _addr_key(a) == want:
+                return body
+    return None
 
 
 # -- resolve -------------------------------------------------------------

@@ -8313,6 +8313,70 @@ class WaveTest(unittest.TestCase):
         rc, out = self._recompare(tip_rows)
         self.assertIn('recompare: 0 new rows', out)
 
+    def test_recompare_reclassifies_a_present_row_by_their_body(self):
+        # Task 40: an only_theirs row our src labels is not theirs-only —
+        # ours carries the body.  The fork's body decides the class: a stub
+        # there is ours_real_theirs_stub, anything else both_changed_differ.
+        R = self._row
+        self.write_disagreements([])
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {}}, f)
+        stub = '{return1;}'
+        real = '{return' + '+'.join(str(i) for i in range(1, 30)) + ';}'
+        bodies = {'0x600100': stub, '0x600200': real}
+        tip_rows = [R('0x600100', cat='only_theirs'),
+                    R('0x600200', cat='only_theirs')]
+        with mock.patch.object(self.wave, '_resolve_tip', return_value='b' * 40), \
+                mock.patch.object(self.wave, '_xrec_rows',
+                                  return_value=tip_rows), \
+                mock.patch.object(self.wave, '_labelled_at',
+                                  side_effect=lambda repo, ref, addr:
+                                      addr in bodies), \
+                mock.patch.object(self.wave, '_func_body',
+                                  side_effect=lambda repo, ref, path, addr:
+                                      bodies.get(addr)):
+            rc, out = self.wave.recompare(self.state, self.disagreements,
+                                          repo=self.tmp, fetch=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(
+            out, 'recompare: 1 new rows at bbbbbbb '
+                 '(0 already queued, 0 decided)\n'
+                 'reclassified 0x600100 F0x600100: ours already carries the '
+                 'body; theirs is a stub -> ours_real_theirs_stub\n'
+                 'reclassified 0x600200 F0x600200: ours already carries the '
+                 'body; theirs is not a stub -> both_changed_differ\n')
+        with open(self.disagreements) as f:
+            rows = json.load(f)
+        # the stub pair is ours_real_theirs_stub: nothing to import, and the
+        # queue counts only both_changed_differ rows, so the file gains just
+        # the not-a-stub one (at its reclassified class)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]['address'], '0x600200')
+        self.assertEqual(rows[0]['category'], 'both_changed_differ')
+
+    def test_recompare_leaves_a_present_row_theirs_only_when_unreadable(self):
+        # no fork body to read: no reclassification, the row stays as xrec
+        # saw it (and, being only_theirs, out of the wave-1 file)
+        R = self._row
+        self.write_disagreements([])
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {}}, f)
+        tip_rows = [R('0x600100', cat='only_theirs')]
+        with mock.patch.object(self.wave, '_resolve_tip', return_value='b' * 40), \
+                mock.patch.object(self.wave, '_xrec_rows',
+                                  return_value=tip_rows), \
+                mock.patch.object(self.wave, '_labelled_at', return_value=True), \
+                mock.patch.object(self.wave, '_func_body', return_value=None):
+            rc, out = self.wave.recompare(self.state, self.disagreements,
+                                          repo=self.tmp, fetch=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(
+            out, 'recompare: 0 new rows at bbbbbbb '
+                 '(0 already queued, 0 decided)\n')
+        self.assertNotIn('reclassified', out)
+        with open(self.disagreements) as f:
+            self.assertEqual(json.load(f), [])
+
     def test_recompare_regenerates_triage_and_demotes_open_rows(self):
         # Task 23: after a fork_base move disables fork-stub, the closed row
         # keeps its class, every open row (fresh or kept) is demoted, and the
