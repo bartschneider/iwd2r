@@ -1,0 +1,7 @@
+{
+  "address": "0x66DB60",
+  "name": "CUIControlButtonSpellbookSpell::OnRButtonClick",
+  "file": "src/CScreenSpellbook.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
