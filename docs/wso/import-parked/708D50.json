@@ -1,0 +1,7 @@
+{
+  "address": "0x708D50",
+  "name": "CGameSprite::RenderSpriteCover",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}
