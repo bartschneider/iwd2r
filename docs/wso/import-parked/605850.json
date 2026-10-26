@@ -1,0 +1,1 @@
+{"address": "0x605850", "name": "CScreenConnection::ShowSessionTerminatedMessage", "file": "src/CScreenConnection.cpp", "batch": "i042", "needs": "not exercised; ours reading matches the decompile"}
