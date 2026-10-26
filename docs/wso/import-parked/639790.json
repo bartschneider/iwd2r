@@ -1,0 +1,7 @@
+{
+  "address": "0x639790",
+  "name": "CScreenKeymaps::OnLButtonDown",
+  "file": "src/CScreenKeymaps.cpp",
+  "batch": "i034",
+  "needs": "not exercised; ours reading matches the decompile"
+}
