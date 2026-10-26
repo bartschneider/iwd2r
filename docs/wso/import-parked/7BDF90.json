@@ -1,0 +1,7 @@
+{
+  "address": "0x7BDF90",
+  "name": "CVidInf::CreateSurfaces3d",
+  "file": "src/CVideo3d.cpp",
+  "batch": "i032",
+  "needs": "not exercised; ours reading matches the decompile"
+}
