@@ -22101,6 +22101,79 @@ SHORT CGameSprite::PlayDead()
     return ACTION_DONE;
 }
 
+// 0x745450
+SHORT CGameSprite::Formation(CGameSprite* pTarget)
+{
+    CPoint offset = m_curAction.m_dest;
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+    CPoint targetDest = pTarget->m_curDest;
+    if (targetDest.x == -1 || targetDest.y == -1) {
+        targetDest = pTarget->GetPos();
+    }
+    CPoint dest(targetDest.x + CPathSearch::GRID_SQUARE_SIZEX * offset.x,
+        targetDest.y + CPathSearch::GRID_SQUARE_SIZEY * offset.y);
+    if (dest == m_curDest && field_5618 != 0) {
+        field_5616 = 0;
+        return ACTION_INTERRUPTABLE;
+    }
+
+    CPoint self = GetPos();
+    CPoint selfCell(self.x / CPathSearch::GRID_SQUARE_SIZEX,
+        self.y / CPathSearch::GRID_SQUARE_SIZEY);
+    CPoint destCell(dest.x / CPathSearch::GRID_SQUARE_SIZEX,
+        dest.y / CPathSearch::GRID_SQUARE_SIZEY);
+    LONG distance = CAIUtil::CountSquares(selfCell, destCell);
+    BYTE range = m_animation.GetPersonalSpace();
+    BYTE targetSpace = pTarget->m_animation.GetPersonalSpace();
+    range = static_cast<BYTE>(((targetSpace - 1) >> 1) + ((range - 1) >> 1) - 1);
+    if (distance * distance <= (range + 1) * (range + 1)) {
+        field_5616 = 0;
+        field_5618 = 0;
+        return ACTION_INTERRUPTABLE;
+    }
+
+    m_curDest = dest;
+    field_5618 = 0;
+    self = GetPos();
+    CPoint targetPos = pTarget->GetPos();
+    LONG dx = targetPos.x / CPathSearch::GRID_SQUARE_SIZEX - self.x / CPathSearch::GRID_SQUARE_SIZEX;
+    LONG dy = targetPos.y / CPathSearch::GRID_SQUARE_SIZEY - self.y / CPathSearch::GRID_SQUARE_SIZEY;
+    BOOL withinRange = dx * dx + dy * dy < 16 * 16;
+    if (field_5616 % 8 == 0) {
+        CSearchRequest* pRequest = new CSearchRequest();
+        if (pRequest == NULL) {
+            return ACTION_ERROR;
+        }
+        pRequest->m_searchBitmap = &(m_pArea->m_search);
+        memcpy(pRequest->m_terrainTable, m_terrainTable, sizeof(m_terrainTable));
+        pRequest->m_pathSmooth = m_animation.GetPathSmooth();
+        pRequest->m_sourceId = m_id;
+        pRequest->m_nTargetPoints = 2;
+        pRequest->m_exclusiveTargetPoints = TRUE;
+        pRequest->m_targetPoints = new POINT[2];
+        if (pRequest->m_targetPoints == NULL) {
+            delete pRequest;
+            return ACTION_ERROR;
+        }
+        pRequest->m_nPartyIds = m_pArea->m_pGame->GetGroup()->GetCount();
+        pRequest->m_partyIds = m_pArea->m_pGame->GetGroup()->GetGroupList();
+        pRequest->m_targetPoints[0] = m_curDest;
+        pRequest->m_targetPoints[1] = targetDest;
+        pRequest->m_sourceSide = m_typeAI.GetEnemyAlly();
+        if (!withinRange) {
+            field_5618 = 1;
+        }
+        SetTarget(pRequest, FALSE, CSearchRequest::LIST_FRONT);
+        if (withinRange) {
+            field_5618 = 1;
+        }
+    }
+    field_5616++;
+    return ACTION_INTERRUPTABLE;
+}
+
 // 0x745950
 SHORT CGameSprite::JumpToPoint(CPoint dest, BOOL spriteUpdate)
 {
