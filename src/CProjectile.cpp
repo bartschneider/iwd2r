@@ -77,6 +77,11 @@ void CProjectile::RemoveSelf()
     }
 }
 
+// 0x579B10
+CProjectile850D54::~CProjectile850D54()
+{
+}
+
 // 0x51EA90
 void CProjectile::AddEffect(CGameEffect* pEffect)
 {
