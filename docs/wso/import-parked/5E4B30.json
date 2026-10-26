@@ -1,0 +1,7 @@
+{
+  "address": "0x5E4B30",
+  "name": "CScreenCharacter::sub_5E4B30",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
