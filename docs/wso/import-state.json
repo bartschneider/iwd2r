@@ -5878,7 +5878,7 @@
     "i039": {
       "assigned_at": "2026-10-26T09:05:21+00:00",
       "branch": "p3/wso-i039",
-      "closed_at": null,
+      "closed_at": "2026-10-26T10:50:02+00:00",
       "files": [
         "src/CResWave.cpp",
         "src/CScreenWorldMap.cpp",
@@ -5897,6 +5897,7 @@
         "src/CUIControlSlider.cpp",
         "src/CScreenInventory.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -6058,6 +6059,186 @@
           "name": "CScreenSpellbook::OnDoneButtonClick",
           "our_len": 457,
           "their_len": 459
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i040": {
+      "assigned_at": "2026-10-26T10:19:09+00:00",
+      "branch": "p3/wso-i040",
+      "closed_at": null,
+      "files": [
+        "src/CScreenConnection.cpp",
+        "src/CMessage.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CGameEffect.cpp",
+        "src/IcewindMisc.cpp",
+        "src/CScreenSave.cpp",
+        "src/CInfGame.cpp",
+        "src/CAIObjectType.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x604410",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionSerialBaudRate::OnLButtonClick",
+          "our_len": 586,
+          "their_len": 588
+        },
+        {
+          "address": "0x600600",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::ResetImportPanel",
+          "our_len": 549,
+          "their_len": 594
+        },
+        {
+          "address": "0x514A30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageWeaponImmumityUpdate::Run",
+          "our_len": 556,
+          "their_len": 554
+        },
+        {
+          "address": "0x603D30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionProtocolProtocol::OnLButtonClick",
+          "our_len": 547,
+          "their_len": 549
+        },
+        {
+          "address": "0x56AAE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectTortoiseShell::ApplyEffect",
+          "our_len": 535,
+          "their_len": 548
+        },
+        {
+          "address": "0x5FEA60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnJoinGameButtonClick",
+          "our_len": 518,
+          "their_len": 520
+        },
+        {
+          "address": "0x56BD10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectFeatRapidShot::ApplyEffect",
+          "our_len": 500,
+          "their_len": 498
+        },
+        {
+          "address": "0x5139B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage92::Run",
+          "our_len": 488,
+          "their_len": 497
+        },
+        {
+          "address": "0x513420",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage90::Run",
+          "our_len": 488,
+          "their_len": 493
+        },
+        {
+          "address": "0x515B00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage107::Run",
+          "our_len": 488,
+          "their_len": 486
+        },
+        {
+          "address": "0x4B2560",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectStun::ApplyEffect",
+          "our_len": 475,
+          "their_len": 480
+        },
+        {
+          "address": "0x6007F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnErrorButtonClick",
+          "our_len": 464,
+          "their_len": 479
+        },
+        {
+          "address": "0x585E00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindMisc.cpp",
+          "name": "IcewindMisc::CreateButtonData",
+          "our_len": 440,
+          "their_len": 448
+        },
+        {
+          "address": "0x65B430",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSave.cpp",
+          "name": "CScreenSave::OnDeleteButtonClick",
+          "our_len": 442,
+          "their_len": 444
+        },
+        {
+          "address": "0x5693B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectBarkskin::ApplyEffect",
+          "our_len": 423,
+          "their_len": 447
+        },
+        {
+          "address": "0x605470",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnection6052A0::OnLButtonClick",
+          "our_len": 414,
+          "their_len": 446
+        },
+        {
+          "address": "0x6040F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionSerialPort::OnLButtonClick",
+          "our_len": 425,
+          "their_len": 427
+        },
+        {
+          "address": "0x5C2570",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::ReadyCharacterTerminationSequence",
+          "our_len": 418,
+          "their_len": 421
+        },
+        {
+          "address": "0x5FE930",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnCancelButtonClick",
+          "our_len": 398,
+          "their_len": 400
+        },
+        {
+          "address": "0x40D050",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CAIObjectType.cpp",
+          "name": "CAIObjectType::sub_40D050",
+          "our_len": 394,
+          "their_len": 399
         }
       ],
       "status": "assigned",
