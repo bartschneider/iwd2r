@@ -1,0 +1,7 @@
+{
+  "address": "0x66BBE0",
+  "name": "CScreenSpellbook::OnRestButtonClick",
+  "file": "src/CScreenSpellbook.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}
