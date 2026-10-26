@@ -1,0 +1,7 @@
+{
+  "address": "0x4BF140",
+  "name": "CGameEffectImmunitySpell::Evaluate",
+  "file": "src/CGameEffect.cpp",
+  "batch": "i031",
+  "needs": "not exercised; ours reading matches the decompile"
+}
