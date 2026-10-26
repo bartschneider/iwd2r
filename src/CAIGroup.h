@@ -84,6 +84,7 @@ public:
     void GroupAction(CAIAction action, BOOL override, CAIAction* leaderAction);
     void SetGroupTriggerId(LONG triggerId);
     CPoint* GetOffsets(SHORT formationType, SHORT nDirection, BOOL bAtLeastSix);
+    SHORT* GetFormationFaces(SHORT formationType, SHORT rotationDegrees);
     static void RotateOffsets(CPoint* pOffsets, SHORT nOffsets, SHORT nDirection);
     void RemoveFromSearch(CSearchBitmap* search);
     void AddToSearch(CSearchBitmap* search);
