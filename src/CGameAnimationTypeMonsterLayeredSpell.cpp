@@ -745,6 +745,45 @@ void CGameAnimationTypeMonsterLayeredSpell::SetColorEffectAll(BYTE effectType, C
             }
         }
     }
+
+    // 0x6C16D0: when this animation carries a layered weapon, its overlay
+    // cells get the same colour effect as the body. The upstream recovery
+    // dropped this whole block, so spell/colour tints never reached the
+    // weapon overlay.
+    if (m_currentVidCellWeapon != NULL) {
+        if (m_falseColor) {
+            // 0x6C16F6 (or ecx,0x10): the weapon overlay tints palette ranges
+            // 0x10..0x16, not the body ranges 0..6 (cf. SetRange's case 0x10).
+            for (BYTE colorRange = 0; colorRange < CVidPalette::NUM_RANGES; colorRange++) {
+                SetColorEffect(effectType, colorRange | 0x10, tintColor, periodLength);
+            }
+        } else {
+            if (effectType != 0) {
+                m_g1VidCellWeaponBase.AddResPaletteAffect(effectType, tintColor, periodLength);
+                m_g2VidCellWeaponBase.AddResPaletteAffect(effectType, tintColor, periodLength);
+
+                m_g1VidCellWeaponBase.SuppressTint(0);
+                m_g2VidCellWeaponBase.SuppressTint(0);
+
+                if (!MIRROR_BAM) {
+                    m_g1VidCellWeaponExtend.AddResPaletteAffect(effectType, tintColor, periodLength);
+                    m_g2VidCellWeaponExtend.AddResPaletteAffect(effectType, tintColor, periodLength);
+
+                    m_g1VidCellWeaponExtend.SuppressTint(0);
+                    m_g2VidCellWeaponExtend.SuppressTint(0);
+                }
+            } else {
+                m_g1VidCellWeaponBase.SetTintColor(tintColor);
+                m_g2VidCellWeaponBase.SetTintColor(tintColor);
+
+                if (!MIRROR_BAM) {
+                    m_g1VidCellWeaponExtend.SetTintColor(tintColor);
+                    m_g2VidCellWeaponExtend.SetTintColor(tintColor);
+                }
+            }
+        }
+    }
+
 }
 
 // 0x6C17E0
