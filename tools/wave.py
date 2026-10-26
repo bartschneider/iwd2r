@@ -17,6 +17,7 @@ The coordinator's wave loop, one command each::
                                                 # Frida-only pass over closed rows: trace
                                                 # evidence on a p3/remeasure-<stamp> branch
     python3 tools/wave.py status
+    python3 tools/wave.py unmeasured-imports   # every import no scenario exercised (rule 1)
     python3 tools/wave.py recompare [--tip SHA] [--no-fetch]   # queue what Will's tip adds
     python3 tools/wave.py run [--queue wave1|import|probes] [--pool SPEC]... [--budget C] [--seed S]   # the driver
     python3 tools/wave.py next --queue import   # cut an import batch i<NNN> (covered rows first;
@@ -138,6 +139,14 @@ DISPLAY_ORDER = ('oracle', 'replay', 'read-only', 'trace')
 IMPORT_KINDS = ('trace', 'replay', 'oracle')
 EVIDENCE_PHRASES = ('disagreed with WSO', 'corroborated by WSO')
 EVIDENCE_DIR = 'docs/evidence'
+# Rule 1 of the 2026-10-26 ruling: where we lack the body (only_theirs,
+# theirs_real_ours_stub) a row no scenario exercises is imported, not parked.
+# Its evidence file stays `kind: read-only` and its `exemption:` starts with
+# this marking (the driver writes it, never the worker, like the frida
+# trace_source line); check_evidence accepts it as a non-empty exemption,
+# `close --kind import` accepts it through _import_bar, and `unmeasured-imports`
+# lists every file that carries it.
+UNMEASURED_WSO = 'unmeasured WSO import'
 KIND_RE = re.compile(r'^kind:\s*(\S+)\s*$', re.M)
 # A batch branch must not change the gate that certifies it; `close`
 # refuses when the branch's diff against the base touches either path.
@@ -427,6 +436,15 @@ def _mismatch_finding(repo, base, address):
     return ' '.join(f.group(1).split()) if f else None
 
 
+def unmeasured_wso(text):
+    """True when an evidence text carries the unmeasured WSO import marking
+    (rule 1 of the 2026-10-26 ruling): an `exemption:` whose value starts
+    with UNMEASURED_WSO.  Only the driver writes it, so a frida trace or an
+    oracle case never needs it."""
+    ex = _check_evidence().front_matter(text or '').get('exemption') or ''
+    return isinstance(ex, str) and ex.strip().startswith(UNMEASURED_WSO)
+
+
 def _import_bar(worktree, merge_base, address, name, rel, text, batch_id=None, want=None,
                 file=None):
     """The close's problem with an import function's evidence, or None:
@@ -435,6 +453,11 @@ def _import_bar(worktree, merge_base, address, name, rel, text, batch_id=None, w
     batch wrote measured that batch's body: it passes only while the body
     here is the one this batch's phase recorded (`want`, a measured_body or
     measured_deps digest), never as evidence that stands."""
+    if unmeasured_wso(text):
+        # The driver marked this row an unmeasured WSO import (rule 1): the
+        # marking stands as its evidence, like the two forms kept_evidence
+        # knows, so the close holds it to the build, checks and gate only.
+        return None
     m = KIND_RE.search(text)
     have = m.group(1) if m else 'none'
     if have not in IMPORT_KINDS:
@@ -2906,6 +2929,33 @@ def write_scorecard(state_path=STATE_PATH, report_path=REPORT_PATH,
 
 # -- status / main -------------------------------------------------------
 
+def unmeasured_imports(repo=ROOT):
+    """Every unmeasured WSO import by address (rule 1): (rc, lines), one line
+    per evidence file under docs/evidence/ whose `exemption:` starts with the
+    UNMEASURED_WSO marking, sorted by address, then a count line.  A later
+    verification pass runs this one command to list them all."""
+    root = os.path.join(repo, EVIDENCE_DIR)
+    if not os.path.isdir(root):
+        return 2, [f'unmeasured-imports: no {EVIDENCE_DIR} under {repo}']
+    ce = _check_evidence()
+    hits = []
+    for fn in sorted(os.listdir(root)):
+        if not fn.endswith('.md') or not re.fullmatch(r'[0-9A-Fa-f]+', fn[:-3]):
+            continue
+        try:
+            with open(os.path.join(root, fn), encoding='utf-8',
+                      errors='replace') as f:
+                fields = ce.front_matter(f.read())
+        except OSError:
+            continue
+        ex = fields.get('exemption') or ''
+        if isinstance(ex, str) and ex.strip().startswith(UNMEASURED_WSO):
+            hits.append((fn[:-3], fields.get('name') or ''))
+    lines = [f'0x{stem.upper()} {name}'.rstrip() for stem, name in hits]
+    lines.append(f'{len(hits)} unmeasured WSO import(s)')
+    return 0, lines
+
+
 def status(state_path=STATE_PATH):
     state = load_state(state_path)
     if not state['batches']:
@@ -3116,6 +3166,13 @@ def main(argv=None):
         rc, out = write_scorecard()
     elif cmd == 'status':
         rc, out = status()
+    elif cmd == 'unmeasured-imports':
+        if rest and (len(rest) != 2 or rest[0] != '--repo'):
+            print('usage: wave.py unmeasured-imports [--repo PATH]',
+                  file=sys.stderr)
+            return 2
+        rc, lines = unmeasured_imports(repo=rest[1] if rest else ROOT)
+        out = '\n'.join(lines) + '\n'
     elif cmd == 'run':
         return _driver().main(rest)
     elif cmd == 'remeasure':

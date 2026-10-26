@@ -19536,6 +19536,63 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('i001 closed p3/wso-i001 1 rows', out)
 
+    # -- unmeasured WSO imports (rule 1 of the 2026-10-26 ruling) ----------------
+
+    def _marked_evidence(self):
+        """docs/evidence under self.root: 401000 carries the driver's
+        unmeasured-WSO marking, 402000 a plain read-only reading, 403000 a
+        file with no exemption, 404000 no front matter at all."""
+        folder = os.path.join(self.root, 'docs', 'evidence')
+        os.makedirs(folder, exist_ok=True)
+        texts = {
+            '401000': ('---\naddress: 0x401000\nname: Rules::Roll\n'
+                       'kind: read-only\nexemption: unmeasured WSO import: '
+                       'world_entry: not exercised; reading follows the decompile\n'
+                       '---\n\n# 0x401000\n\nreading.\n'),
+            '402000': ('---\naddress: 0x402000\nname: IcewindMisc::Roll\n'
+                       'kind: read-only\nexemption: checked against the disassembly\n'
+                       '---\n\n# 0x402000\n\nreading.\n'),
+            '403000': ('---\naddress: 0x403000\nname: Rules::Tick\n'
+                       'kind: read-only\n---\n\n# 0x403000\n\nreading.\n'),
+            '404000': 'no front matter at all\n'}
+        for stem, text in texts.items():
+            with open(os.path.join(folder, stem + '.md'), 'w') as f:
+                f.write(text)
+        return texts
+
+    def test_unmeasured_imports_lists_exactly_the_marked_rows(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self._marked_evidence()
+        rc, lines = wave.unmeasured_imports(repo=self.root)
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines, ['0x401000 Rules::Roll', '1 unmeasured WSO import(s)'])
+        # the same one command through the CLI
+        self.assertEqual(wave.main(['unmeasured-imports', '--repo', self.root]), 0)
+
+    def test_check_evidence_accepts_the_unmeasured_marking(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self._marked_evidence()
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'evidence')
+        ce = wave._check_evidence()
+        # the marking is a non-empty exemption: the checker accepts it
+        self.assertIsNone(ce.problem(self.root, 0x401000, 'Rules::Roll')[0])
+        # a read-only file with no exemption is still refused
+        why = ce.problem(self.root, 0x403000, 'Rules::Tick')[0]
+        self.assertIn('neither oracle_case nor exemption', why)
+        self.assertIsNone(ce.problem(self.root, 0x402000, 'IcewindMisc::Roll')[0])
+
+    def test_import_bar_accepts_the_unmeasured_marking(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        texts = self._marked_evidence()
+        self.assertIsNone(wave._import_bar(
+            self.root, 'first', '0x401000', 'Rules::Roll',
+            'docs/evidence/401000.md', texts['401000']))
+        why = wave._import_bar(
+            self.root, 'first', '0x402000', 'IcewindMisc::Roll',
+            'docs/evidence/402000.md', texts['402000'])
+        self.assertIn('kind read-only is not trace or better', why)
+
     def test_queue_import_driver_wiring(self):
         tmp, dp, ip = self._import_repo()
         d, err = driver.driver_from_args(
