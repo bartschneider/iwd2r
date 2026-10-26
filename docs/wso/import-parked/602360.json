@@ -1,0 +1,7 @@
+{
+  "address": "0x602360",
+  "name": "CScreenConnection::OnLobbyLoadGameButtonClick",
+  "file": "src/CScreenConnection.cpp",
+  "batch": "i036",
+  "needs": "not exercised; ours reading matches the decompile"
+}
