@@ -5324,6 +5324,375 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i036": {
+      "assigned_at": "2026-10-26T07:02:45+00:00",
+      "branch": "p3/wso-i036",
+      "closed_at": "2026-10-26T08:49:32+00:00",
+      "files": [
+        "src/CScreenInventory.cpp",
+        "src/CBaldurProjector.cpp",
+        "src/CGameSprite.cpp",
+        "src/CImm.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CMessage.cpp",
+        "src/CGameContainer.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CResWave.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CScreenOptions.cpp"
+      ],
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x62A2F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::OnErrorButtonClick",
+          "our_len": 861,
+          "their_len": 863
+        },
+        {
+          "address": "0x43E300",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CBaldurProjector.cpp",
+          "name": "CBaldurProjector::sub_43E300",
+          "our_len": 851,
+          "their_len": 863
+        },
+        {
+          "address": "0x761470",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ForceHide",
+          "our_len": 820,
+          "their_len": 830
+        },
+        {
+          "address": "0x7C2680",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CImm.cpp",
+          "name": "CImm::sub_7C2680",
+          "our_len": 785,
+          "their_len": 796
+        },
+        {
+          "address": "0x5EE6D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlScrollBarCharacterHatedRace::InvalidateItems",
+          "our_len": 772,
+          "their_len": 774
+        },
+        {
+          "address": "0x629DB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::OnAbilitiesButtonClick",
+          "our_len": 749,
+          "their_len": 751
+        },
+        {
+          "address": "0x4FBA30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageContainerItems::Run",
+          "our_len": 750,
+          "their_len": 748
+        },
+        {
+          "address": "0x481350",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::OpenContainer",
+          "our_len": 745,
+          "their_len": 749
+        },
+        {
+          "address": "0x5E4D50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnExportButtonClick",
+          "our_len": 741,
+          "their_len": 743
+        },
+        {
+          "address": "0x56BB30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectFeatArterialStrike::ApplyEffect",
+          "our_len": 739,
+          "their_len": 737
+        },
+        {
+          "address": "0x77E8A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResWave.cpp",
+          "name": "CResWave::ParseNormalWave",
+          "our_len": 729,
+          "their_len": 738
+        },
+        {
+          "address": "0x6FF6D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::MoveToFront",
+          "our_len": 725,
+          "their_len": 730
+        },
+        {
+          "address": "0x61FBC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlScrollBarCharGenHatedRace::InvalidateItems",
+          "our_len": 720,
+          "their_len": 722
+        },
+        {
+          "address": "0x61A630",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlScrollBarCharGenSkills::InvalidateItems",
+          "our_len": 720,
+          "their_len": 722
+        },
+        {
+          "address": "0x56BC20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectFeatHamstring::ApplyEffect",
+          "our_len": 721,
+          "their_len": 719
+        },
+        {
+          "address": "0x622F50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlScrollBarCharGenFeats::InvalidateItems",
+          "our_len": 712,
+          "their_len": 714
+        },
+        {
+          "address": "0x602360",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnLobbyLoadGameButtonClick",
+          "our_len": 707,
+          "their_len": 709
+        },
+        {
+          "address": "0x654960",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CScreenOptions::OnCancelButtonClick",
+          "our_len": 705,
+          "their_len": 707
+        },
+        {
+          "address": "0x5F6CA0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlScrollBarCharacterFeats::InvalidateItems",
+          "our_len": 702,
+          "their_len": 704
+        },
+        {
+          "address": "0x5F82E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlScrollBarCharacterSkills::InvalidateItems",
+          "our_len": 702,
+          "their_len": 704
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i037": {
+      "assigned_at": "2026-10-26T07:02:46+00:00",
+      "branch": "p3/wso-i037",
+      "closed_at": null,
+      "files": [
+        "src/CDimm.cpp",
+        "src/CGameAnimationTypeCharacterOld.cpp",
+        "src/CScreenStore.cpp",
+        "src/CScreenMap.cpp",
+        "src/CScreenJournal.cpp",
+        "src/CVidMode.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/IcewindMisc.cpp",
+        "src/CInfGame.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CAlias.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x787A70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::ReduceServicedList",
+          "our_len": 648,
+          "their_len": 678
+        },
+        {
+          "address": "0x6DD5B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeCharacterOld.cpp",
+          "name": "CGameAnimationTypeCharacterOld::GetSndArmor",
+          "our_len": 648,
+          "their_len": 675
+        },
+        {
+          "address": "0x679F80",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::IsSellItemButtonClickable",
+          "our_len": 655,
+          "their_len": 661
+        },
+        {
+          "address": "0x646880",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenMap.cpp",
+          "name": "CUIControlButtonMapNoteFlagChoice::OnLButtonClick",
+          "our_len": 655,
+          "their_len": 658
+        },
+        {
+          "address": "0x6379C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenJournal.cpp",
+          "name": "CScreenJournal::OnErrorButtonClick",
+          "our_len": 648,
+          "their_len": 650
+        },
+        {
+          "address": "0x6422D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenMap.cpp",
+          "name": "CScreenMap::OnErrorButtonClick",
+          "our_len": 647,
+          "their_len": 649
+        },
+        {
+          "address": "0x67C570",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnRentRoomButtonClick",
+          "our_len": 644,
+          "their_len": 646
+        },
+        {
+          "address": "0x799CB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidMode.cpp",
+          "name": "CVidMode::CVidMode",
+          "our_len": 639,
+          "their_len": 643
+        },
+        {
+          "address": "0x660B90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::OnKeyDown",
+          "our_len": 631,
+          "their_len": 637
+        },
+        {
+          "address": "0x585440",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindMisc.cpp",
+          "name": "IcewindMisc::CreateEffectDamage",
+          "our_len": 624,
+          "their_len": 634
+        },
+        {
+          "address": "0x67CBD0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnDoneButtonClick",
+          "our_len": 627,
+          "their_len": 629
+        },
+        {
+          "address": "0x67CE40",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnCancelButtonClick",
+          "our_len": 622,
+          "their_len": 624
+        },
+        {
+          "address": "0x67DD30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::OnErrorButtonClick",
+          "our_len": 585,
+          "their_len": 587
+        },
+        {
+          "address": "0x5C93E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::sub_5C93E0",
+          "our_len": 579,
+          "their_len": 578
+        },
+        {
+          "address": "0x6853E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreOpenBag::OnLButtonClick",
+          "our_len": 564,
+          "their_len": 566
+        },
+        {
+          "address": "0x6984F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::OnRestButtonClick",
+          "our_len": 548,
+          "their_len": 550
+        },
+        {
+          "address": "0x66A040",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::OnPortraitLClick",
+          "our_len": 543,
+          "their_len": 548
+        },
+        {
+          "address": "0x6926A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::HideInterface",
+          "our_len": 541,
+          "their_len": 545
+        },
+        {
+          "address": "0x692850",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::UnhideInterface",
+          "our_len": 538,
+          "their_len": 542
+        },
+        {
+          "address": "0x781800",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CAlias.cpp",
+          "name": "CAlias::ParseRawData",
+          "our_len": 526,
+          "their_len": 539
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   }
 }
