@@ -3205,6 +3205,151 @@ void CScreenWorld::AddGold(DWORD dwGold)
     pGame->AddPartyGold(dwGold);
 }
 
+// 0x690820
+void CScreenWorld::ConfigureContainer()
+{
+    // Close whatever popup sub-panel is already up before showing the container.
+    switch (field_EA4) {
+    case 0:
+    case 7:
+    case 17:
+    case 19:
+    case 21:
+    case 22:
+    case -1:
+        break;
+    case 6:
+        StopCommand();
+        field_EA4 = -1;
+        break;
+    case 8:
+        StopContainer();
+        field_EA4 = -1;
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 5469
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    // NOTE: field_EA4 is the popup sub-panel state (6 command, 8 container,
+    // 17 death, -1 none).
+    field_EA4 = 8;
+    m_cUIManager.ClearTooltip();
+
+    if (!GetManager()->m_bHidden) {
+        if (m_nAutoHideInterface > 0) {
+            m_nAutoHideInterface++;
+        }
+    } else {
+        m_nAutoHideInterface++;
+        UnhideInterface();
+    }
+
+    // NOTE: the original also selects the right-side info panel here (id 7, or
+    // 15 when two engine globals read non-zero), re-checks it through a
+    // vtable+0xCC call that takes an argument our GetManager() does not, and
+    // records the id in field_114C when the panel's +0xF4 flag reads 1; those
+    // globals and that argument-taking call are unmapped, so the panel swap is
+    // left unrecovered.
+
+    sub_695570(FALSE, FALSE);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 5172
+    UTIL_ASSERT(pGame != NULL);
+
+    CUIPanel* pPanel = m_cUIManager.GetPanel(8);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 5174
+    UTIL_ASSERT(pPanel != NULL);
+
+    pPanel->SetActive(TRUE);
+    pPanel->InvalidateRect(NULL);
+
+    // Shrink the world viewport to make room for the container panel.
+    SetNewViewSize(CInfinity::stru_8E79F8, FALSE);
+
+    m_pCurrentScrollBar = static_cast<CUIControlScrollBar*>(pPanel->GetControl(0x34));
+
+    m_nTopContainerRow = 0;
+    static_cast<CUIControlScrollBarWorldContainer*>(pPanel->GetControl(0x34))->UpdateScrollBar();
+
+    m_nTopGroupRow = 0;
+    static_cast<CUIControlScrollBarWorldContainer*>(pPanel->GetControl(0x35))->UpdateScrollBar();
+
+    // Open sound + container graphic (control 0x32) by container type.
+    CResRef cContainerBam;
+    switch (pGame->GetContainerType(pGame->m_iContainer)) {
+    case 1:  PlayGUISound(CResRef("GAM_12A"));  cContainerBam = CResRef("CONTSACK"); break;
+    case 2:  PlayGUISound(CResRef("AMB_D05A")); cContainerBam = CResRef("CONTCHST"); break;
+    case 3:  PlayGUISound(CResRef("AMB_D05A")); cContainerBam = CResRef("CONTDRWR"); break;
+    case 4:  PlayGUISound(CResRef("AMB_D18"));  cContainerBam = CResRef("CONTGRND"); break;
+    case 5:  PlayGUISound(CResRef("AMB_D08"));  cContainerBam = CResRef("CONTTABL"); break;
+    case 6:  PlayGUISound(CResRef("AMB_D07"));  cContainerBam = CResRef("CONTSHLF"); break;
+    case 7:  PlayGUISound(CResRef("AMB_D07"));  cContainerBam = CResRef("CONTALTR"); break;
+    case 8:  PlayGUISound(CResRef("AMB_D18"));  cContainerBam = CResRef(""); break;
+    case 9:  PlayGUISound(CResRef("GAM_06"));   cContainerBam = CResRef("CONTBOOK"); break;
+    case 10: PlayGUISound(CResRef("AMB_D08G")); cContainerBam = CResRef("CONTBODY"); break;
+    case 11: PlayGUISound(CResRef("AMB_D12"));  cContainerBam = CResRef("CONTBARL"); break;
+    case 12: PlayGUISound(CResRef("AMB_D05A")); cContainerBam = CResRef("CONTCRAT"); break;
+    default: cContainerBam = CResRef("CONTBODY"); break;
+    }
+
+    static_cast<CUIControlButtonWorldContainerIcon*>(pPanel->GetControl(0x32))->m_resRef = cContainerBam;
+
+    // Looting character's encumbrance/volume (control 0x36) and party gold
+    // (control 0x10000036); inlined in the original.
+    LONG nLooterId = pGame->m_iContainerSprite;
+
+    CGameSprite* pLooter;
+    BYTE rc;
+    do {
+        rc = pGame->GetObjectArray()->GetShare(nLooterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pLooter),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc == CGameObjectArray::SUCCESS) {
+        CUIControlEncumbrance* pEncumbrance =
+            static_cast<CUIControlEncumbrance*>(pPanel->GetControl(0x36));
+
+        INT nWeight = static_cast<INT>(pLooter->GetCarriedWeight());
+
+        CDerivedStats* pDStats = pLooter->GetDerivedStats();
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 5290
+        UTIL_ASSERT(pDStats != NULL);
+
+        SHORT nStr = pDStats->m_nSTR;
+
+        // Max carry weight: the STRENGTH_MODIFIERS table's max-load column (3)
+        // for this STR, scaled by the character's encumbrance modifier (percent).
+        INT nMaxWeight = static_cast<INT>(
+            static_cast<float>(pGame->GetRuleTables().GetEncumbranceMod(pLooter)) / 100.0f
+            * static_cast<float>(atol(pGame->GetRuleTables().m_tStrengthMod.GetAt(CPoint(3, nStr)))));
+
+        INT nUsedSlots;
+        INT nTotalSlots;
+        pLooter->GetNumInventoryPersonalSlots(nUsedSlots, nTotalSlots);
+
+        pEncumbrance->SetEncumbrance(nWeight, nMaxWeight);
+        pEncumbrance->SetVolume(nUsedSlots, nTotalSlots);
+
+        pGame->GetObjectArray()->ReleaseShare(nLooterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+
+        UpdateLabel(pPanel, 0x10000036, "%d", pGame->GetGameSave()->m_nPartyGold);
+    }
+}
+
 // 0x690EB0
 void CScreenWorld::StopContainer()
 {
