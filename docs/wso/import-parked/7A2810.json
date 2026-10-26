@@ -1,0 +1,7 @@
+{
+  "address": "0x7A2810",
+  "name": "CNetworkWindow::ShutDown",
+  "file": "src/CNetwork.cpp",
+  "batch": "i031",
+  "needs": "not exercised; ours reading matches the decompile"
+}

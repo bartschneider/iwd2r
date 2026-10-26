@@ -1,0 +1,7 @@
+{
+  "address": "0x605C40",
+  "name": "CScreenCreateChar::CScreenCreateChar",
+  "file": "src/CScreenCreateChar.cpp",
+  "batch": "i031",
+  "needs": "the fork's ctor adds `field_4FA = 0;` between the field_4F6 and field_4FE zeroings; the exe agrees (bundle 0x605C40.md: `*(undefined4 *)((int)in_ECX + 0x4fa) = 0;` in the 0x4f6/0x4fa/0x4fe/0x502/0x506/0x50a run). Our header src/CScreenCreateChar.h has no member at 0x4FA at all (the layout jumps 0x4F6 -> 0x4FE; the fork's header declares `/* 04FA */ int field_4FA;`), so the one-line ctor fix does not compile in our tree. Import needs the 0x4FA member declared in src/CScreenCreateChar.h first, which is outside this batch's owned files. Rest of the fork diff for this row is rename-only (`field_1624` -> `m_pActiveScrollBar`, same offset/type), no need to adopt it."
+}

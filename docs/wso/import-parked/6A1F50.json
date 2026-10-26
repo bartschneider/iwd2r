@@ -1,0 +1,7 @@
+{
+  "address": "0x6A1F50",
+  "name": "CGameAnimationTypeEffect::CGameAnimationTypeEffect",
+  "file": "src/CGameAnimationTypeEffect.cpp",
+  "batch": "i031",
+  "needs": "not exercised; ours reading matches the decompile"
+}

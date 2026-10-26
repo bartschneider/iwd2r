@@ -1,0 +1,7 @@
+{
+  "address": "0x569D30",
+  "name": "IcewindCGameEffectEntropyShield::ApplyEffect",
+  "file": "src/IcewindCGameEffects.cpp",
+  "batch": "i031",
+  "needs": "not exercised; ours reading matches the decompile"
+}
