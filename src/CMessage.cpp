@@ -9534,11 +9534,8 @@ BOOL CMessageScreenShake::UnmarshalMessage(BYTE* pData, DWORD dwSize)
 void CMessageScreenShake::Run()
 {
     if (g_pBaldurChitin->GetObjectGame()->GetOptions()->m_bAllScreenShake) {
-        // The binary jumps to the exit when a shake is already running: an
-        // override always shakes, otherwise one in progress is left alone
-        // rather than restarted.
         if (m_bOverride
-            || !g_pBaldurChitin->GetObjectGame()->GetVisibleArea()->GetInfinity()->m_bScreenShake) {
+            || g_pBaldurChitin->GetObjectGame()->GetVisibleArea()->GetInfinity()->m_bScreenShake) {
             g_pBaldurChitin->GetObjectGame()->GetVisibleArea()->GetInfinity()->SetScreenShake(TRUE,
                 m_duration,
                 CPoint(m_magnitudeX, m_magnitudeY));
