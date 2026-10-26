@@ -1,0 +1,1 @@
+{"address": "0x5FF450", "name": "CScreenConnection::UpdateSessionList", "file": "src/CScreenConnection.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
