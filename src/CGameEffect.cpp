@@ -15514,7 +15514,7 @@ CGameEffect* CGameEffectRemoveInnateAbility::Copy()
 BOOL CGameEffectRemoveInnateAbility::ApplyEffect(CGameSprite* pSprite)
 {
     pSprite->RemoveSpecialAbility(m_res);
-
+    m_done = TRUE;
     return TRUE;
 }
 
