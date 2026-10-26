@@ -30,6 +30,7 @@ struct Command {
     int x = 0; // wait: the frame count
     int y = 0;
     int vk = 0; // key
+    std::vector<int> mods; // key: the CTRL/SHIFT/ALT held around the press, written order
     std::string text; // type, shot, checkpoint
     bool ui = true; // move, click, rclick: X Y in UI coordinates; origin: the mode set
 };
@@ -104,7 +105,8 @@ private:
         int line = 0;
     };
 
-    static void AddKey(std::vector<Step>& steps, int vk, int line, bool shift);
+    static void AddKey(std::vector<Step>& steps, int vk, int line, bool shift,
+                       const std::vector<int>& mods = {});
     static std::vector<Step> Expand(const std::vector<Command>& commands, int screenWidth, int screenHeight);
     bool Begin(const Step& step, Effects& effects);
 
