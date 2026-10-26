@@ -3,5 +3,5 @@
   "name": "CScreenWorld::StartCommand",
   "file": "src/CScreenWorld.cpp",
   "batch": "i041",
-  "needs": "not exercised; ours reading matches the decompile"
+  "needs": "not exercised; pre-existing divergence: at 0x6911cb-0x6911e9 the exe calls SetActive(FALSE) straight on the GetControl return with no NULL test, ours wraps it in if (pControl != NULL)"
 }
