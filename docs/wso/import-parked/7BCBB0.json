@@ -1,0 +1,7 @@
+{
+  "address": "0x7BCBB0",
+  "name": "CVidMode::DrawEllipseHOctant3d",
+  "file": "src/CVideo3d.cpp",
+  "batch": "i034",
+  "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"
+}
