@@ -436,6 +436,11 @@ std::vector<Player::Step> Player::Expand(const std::vector<Command>& commands, i
                         if (k.ch == ch)
                             key = &k;
                     }
+                    // Unreachable: Parse range-checks 0x20-0x7e and the
+                    // parity test pins kTypeKeys to TYPE_KEYS. A dropped row
+                    // must skip its character, not dereference null.
+                    if (key == nullptr)
+                        continue;
                     AddKey(steps, key->vk, c.line, key->shift);
                 }
             }

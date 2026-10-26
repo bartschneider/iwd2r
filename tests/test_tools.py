@@ -569,6 +569,10 @@ class ScenarioParseTest(unittest.TestCase):
                  'line 2: cheats needs 0 or 1'),
                 ('# cheats: on\n',
                  'line 1: cheats needs 0 or 1'),
+                ('# cheats: 1 (note)\n',
+                 'line 1: cheats needs 0 or 1'),
+                ('# cheats:\n',
+                 'line 1: cheats needs 0 or 1'),
                 ('# cheats: 1\n# cheats: 0\n',
                  'line 2: duplicate cheats (first on line 1)')):
             with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
@@ -676,7 +680,9 @@ class ScenarioParseTest(unittest.TestCase):
     def test_vk_names_match_script_core_cpp(self):
         # Every name in platform/script_core.cpp's kNamedKeys, and no other
         # (kModifiers holds the CTRL/SHIFT/ALT `key` prefixes and mirrors
-        # realinput's MODIFIER_VK, a table of its own).
+        # realinput's MODIFIER_VK, a table of its own), and kTypeKeys mirrors
+        # TYPE_KEYS's punctuation rows (letters, digits and space are inline
+        # in Expand).
         with open(os.path.join(ROOT, 'platform', 'script_core.cpp')) as f:
             text = f.read()
         names = set(re.findall(
@@ -687,6 +693,17 @@ class ScenarioParseTest(unittest.TestCase):
             r'\{ "([A-Z0-9_]+)", VK_',
             text.split('kModifiers[] = {', 1)[1].split('};', 1)[0]))
         self.assertEqual(mods, set(realinput.MODIFIER_VK))
+        types = {}
+        for ch, vk, digit, shift in re.findall(
+                r"\{ '(.+?)', (VK_[A-Z0-9_]+|'(.+?)'), (true|false) \}",
+                text.split('kTypeKeys[] = {', 1)[1].split('};', 1)[0]):
+            ch = {'\\\\': '\\', "\\'": "'"}.get(ch, ch)
+            name = digit if digit else vk[len('VK_'):]
+            self.assertTrue(realinput.vk_for_name(name), name)
+            types[ch] = (name, shift == 'true')
+        punct = {ch: row for ch, row in realinput.TYPE_KEYS.items()
+                 if ch != ' ' and not ch.isalnum()}
+        self.assertEqual(types, punct)
         self.assertEqual(realinput.vk_for_name('escape'), 0x1B)
         self.assertEqual(realinput.vk_for_name('z'), ord('Z'))
         self.assertEqual(realinput.vk_for_name('NOPE'), 0)
