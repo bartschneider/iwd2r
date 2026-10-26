@@ -556,6 +556,7 @@ public:
     BOOL sub_7202E0();
     BOOL sub_727720(const CResRef& resRef, BYTE& nClass, DWORD& nSpecialization, BYTE& nLevel);
     BOOL sub_71CFF0();
+    void sub_737990();
     void sub_71D0B0();
     void sub_72FBF0();
     void CheckSequence(BYTE& sequence);
