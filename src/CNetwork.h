@@ -33,6 +33,7 @@ public:
     BOOLEAN CheckIncomingQueue();
     BOOLEAN CheckIncomingQueueSpecific(BYTE nSpecMsgType, BYTE nSpecMsgSubType);
     BOOLEAN CheckOutgoingQueueForAppendableMsgs(DWORD dwSize);
+    void FrameSend(BYTE nFrameKind, WORD nFrameNumber);
     void Initialize(INT nIndex);
     void ShutDown();
     void RemoveFromAllQueues();

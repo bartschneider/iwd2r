@@ -352,6 +352,74 @@ BOOLEAN CNetworkWindow::CheckOutgoingQueueForAppendableMsgs(DWORD dwSize)
     return FALSE;
 }
 
+// 0x7A2590
+void CNetworkWindow::FrameSend(BYTE nFrameKind, WORD nFrameNumber)
+{
+    BYTE* pData;
+    DWORD dwSize;
+
+    if (nFrameKind != 0) {
+        pData = new BYTE[CNetwork::dword_85E698];
+        dwSize = CNetwork::dword_85E698;
+    } else {
+        pData = m_pOutgoingBuffers[0].pData;
+        dwSize = m_pOutgoingBuffers[0].dwSize;
+    }
+
+    if (pData == NULL) {
+        // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
+        // __LINE__: 913
+        UTIL_ASSERT_MSG(FALSE, "FrameSend:: Null Message!\n");
+    }
+
+    pData[0] = nFrameKind;
+    pData[1] = static_cast<BYTE>(nFrameNumber >> 8);
+    pData[2] = static_cast<BYTE>(nFrameNumber);
+    pData[3] = static_cast<BYTE>((m_nFrameExpected - 1) >> 8);
+    pData[4] = static_cast<BYTE>(m_nFrameExpected - 1);
+
+    if (dwSize >= 10) {
+        DWORD dwCRC = 0;
+        pData[6] = 0;
+        pData[7] = 0;
+        pData[8] = 0;
+        pData[9] = 0;
+        for (DWORD dwIndex = 0; dwIndex < dwSize; dwIndex++) {
+            dwCRC = g_pChitin->cNetwork.m_dwCRC32[(dwCRC & 0xFF) ^ pData[dwIndex]] ^ (dwCRC >> 8);
+        }
+        pData[6] = static_cast<BYTE>(dwCRC >> 24);
+        pData[7] = static_cast<BYTE>(dwCRC >> 16);
+        pData[8] = static_cast<BYTE>(dwCRC >> 8);
+        pData[9] = static_cast<BYTE>(dwCRC);
+    }
+
+    if (nFrameKind == 2) {
+        m_bNoNak = TRUE;
+    }
+
+    PLAYER_ID idTo = g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber);
+
+    EnterCriticalSection(&(g_pChitin->cNetwork.field_F6A));
+    // NOTE: iwd2r: DirectPlay is gone; the original sends the frame via
+    // IDirectPlay4A::Send here.
+    LeaveCriticalSection(&(g_pChitin->cNetwork.field_F6A));
+
+    if (nFrameKind == 0) {
+        m_pbTimeOutSet[0] = TRUE;
+        m_pnTimeOut[0] = m_nPacketTimeout + GetTickCount();
+        if (m_pnTimeOut[0] > MAX_TIMEOUT_TICK_COUNT) {
+            m_pnTimeOut[0] = 0;
+        }
+    } else {
+        delete pData;
+    }
+
+    m_bAckTimerSet = FALSE;
+
+    // NOTE: Uninline.
+    SetNoMessageTimeout();
+}
+
 // #binary-identical
 // 0x7A2770
 void CNetworkWindow::Initialize(INT nIndex)
