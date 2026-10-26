@@ -1818,8 +1818,9 @@ LONG CVidMode::DrawEllipseVOctant3d(LONG x, LONG y, INT nArcLength, int a4, int 
     if (rClip != NULL) {
         while (nArcLength != 0) {
             if (rClip->PtInRect(pt)) {
-                CVideo3d::glVertex3f(static_cast<float>(pt.x) + CVideo3d::SUB_PIXEL_SHIFT,
-                    static_cast<float>(pt.y) + CVideo3d::SUB_PIXEL_SHIFT,
+                // NOTE: See rounding issue above.
+                CVideo3d::glVertex3f(static_cast<float>(pt.x) + 0.5f,
+                    static_cast<float>(pt.y) + 0.5f,
                     0.0f);
             }
             if (*pPixelList++ != 0) {
@@ -1830,8 +1831,9 @@ LONG CVidMode::DrawEllipseVOctant3d(LONG x, LONG y, INT nArcLength, int a4, int 
         }
     } else {
         while (nArcLength != 0) {
-            CVideo3d::glVertex3f(static_cast<float>(pt.x) + CVideo3d::SUB_PIXEL_SHIFT,
-                static_cast<float>(pt.y) + CVideo3d::SUB_PIXEL_SHIFT,
+            // NOTE: See rounding issue above.
+            CVideo3d::glVertex3f(static_cast<float>(pt.x) + 0.5f,
+                static_cast<float>(pt.y) + 0.5f,
                 0.0f);
             if (*pPixelList++ != 0) {
                 pt.x += a4;
