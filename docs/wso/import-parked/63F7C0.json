@@ -1,0 +1,1 @@
+{"address": "0x63F7C0", "name": "CUIControlButtonLoadError::OnLButtonClick", "file": "src/CScreenLoad.cpp", "batch": "i039", "needs": "exe dismisses the popup on id 2 and calls OnErrorButtonClick(m_nID-1) on id 1/absent; ours/fork dismiss on 1 and error on default"}
