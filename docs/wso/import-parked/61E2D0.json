@@ -1,0 +1,1 @@
+{"address": "0x61E2D0", "name": "CUIControlButtonCharGenHairSkinColor::OnLButtonClick", "file": "src/CScreenCreateChar.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
