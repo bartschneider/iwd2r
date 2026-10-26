@@ -6248,7 +6248,7 @@
     "i041": {
       "assigned_at": "2026-10-26T10:51:05+00:00",
       "branch": "p3/wso-i041",
-      "closed_at": null,
+      "closed_at": "2026-10-26T14:07:53+00:00",
       "files": [
         "src/CScreenInventory.cpp",
         "src/CScreenWorld.cpp",
@@ -6264,6 +6264,7 @@
         "src/CScreenSpellbook.cpp",
         "src/CBaldurChitin.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -6427,7 +6428,7 @@
           "their_len": 286
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i042": {
@@ -6715,6 +6716,113 @@
         }
       ],
       "status": "closed",
+      "verdicts": {}
+    },
+    "i044": {
+      "assigned_at": "2026-10-26T14:05:56+00:00",
+      "branch": "p3/wso-i044",
+      "closed_at": null,
+      "files": [
+        "src/CMessage.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CInfGame.cpp",
+        "src/CScreenKeymaps.cpp",
+        "src/CGameEffect.cpp",
+        "src/CImm.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x4FFB70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageExitDialogMode::Run",
+          "our_len": 163,
+          "their_len": 182
+        },
+        {
+          "address": "0x725E70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteSpellList::Find",
+          "our_len": 168,
+          "their_len": 168
+        },
+        {
+          "address": "0x55ED20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectSavingThrowChange::ApplyEffect",
+          "our_len": 155,
+          "their_len": 178
+        },
+        {
+          "address": "0x5A9830",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::sub_5A9830",
+          "our_len": 123,
+          "their_len": 129
+        },
+        {
+          "address": "0x725F00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteGroupedSpellList::sub_725F00",
+          "our_len": 112,
+          "their_len": 120
+        },
+        {
+          "address": "0x639940",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenKeymaps.cpp",
+          "name": "CScreenKeymaps::OnMouseMove",
+          "our_len": 106,
+          "their_len": 112
+        },
+        {
+          "address": "0x7260B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteGroupedSpellList::sub_7260B0",
+          "our_len": 88,
+          "their_len": 102
+        },
+        {
+          "address": "0x726060",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteGroupedSpellList::sub_726060",
+          "our_len": 88,
+          "their_len": 95
+        },
+        {
+          "address": "0x43E060",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageDisplayText::GetMsgSubType",
+          "our_len": 67,
+          "their_len": 58
+        },
+        {
+          "address": "0x4BE1B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectRemoveInnateAbility::ApplyEffect",
+          "our_len": 50,
+          "their_len": 62
+        },
+        {
+          "address": "0x4D89E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CImm.cpp",
+          "name": "CImm::sub_4D89E0",
+          "our_len": 44,
+          "their_len": 56
+        }
+      ],
+      "status": "assigned",
       "verdicts": {}
     }
   }
