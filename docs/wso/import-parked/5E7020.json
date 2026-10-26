@@ -1,0 +1,7 @@
+{
+  "address": "0x5E7020",
+  "name": "CScreenCharacter::OnRestButtonClick",
+  "file": "src/CScreenCharacter.cpp",
+  "batch": "i034",
+  "needs": "not exercised; ours reading matches the decompile"
+}
