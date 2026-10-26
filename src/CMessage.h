@@ -82,7 +82,6 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_PATH;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_SEQUENCE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_TRIGGER;
-    static const BYTE MSG_SUBTYPE_CMESSAGE_SET_VARIABLE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SPRITE_DEATH;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SPRITE_EQUIPMENT;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SPRITE_PETRIFY;
@@ -1103,7 +1102,8 @@ public:
 
     SHORT GetCommType() override { return BROADCAST_FORCED; }
     BYTE GetMsgType() override { return CBaldurMessage::MSG_TYPE_CMESSAGE; }
-    BYTE GetMsgSubType() override;
+    // NOTE: The BYTE at 0x84CF0C (53).
+    BYTE GetMsgSubType() override { return 53; }
     void Run() override;
 
     /* 000C */ CString m_sScope;

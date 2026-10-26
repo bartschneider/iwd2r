@@ -224,9 +224,6 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_SEQUENCE = 50;
 // 0x84CF0B
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_TRIGGER = 52;
 
-// 0x84CF0C
-const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_VARIABLE = 53;
-
 // 0x84CF06
 const BYTE CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_LAST_OBJECT = 47;
 
@@ -17909,12 +17906,6 @@ void CMessagePickedDialogResponse::Run()
 }
 
 // -----------------------------------------------------------------------------
-
-// 0x453560
-BYTE CMessageSetVariable::GetMsgSubType()
-{
-    return CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_VARIABLE;
-}
 
 // 0x50A820
 void CMessageSetVariable::Run()
