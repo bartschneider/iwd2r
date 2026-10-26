@@ -1,0 +1,7 @@
+{
+  "address": "0x663860",
+  "name": "CScreenSinglePlayer::OnErrorButtonClick",
+  "file": "src/CScreenSinglePlayer.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
