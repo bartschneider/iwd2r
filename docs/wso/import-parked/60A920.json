@@ -1,0 +1,7 @@
+{
+  "address": "0x60A920",
+  "name": "CScreenCreateChar::ResetMemorizeArcaneSpellsPanel",
+  "file": "src/CScreenCreateChar.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
