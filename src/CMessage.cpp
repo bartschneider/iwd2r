@@ -13186,19 +13186,12 @@ void CMessageVisualEffect::Run()
                 pSprite->GetDerivedStats()->m_nStoneSkins = m_nEffectProperty;
 
                 if (m_nEffectProperty == 0) {
-                    // The binary's loop bound really is 8, not 7 -- and since
-                    // m_colors is BYTE[7] the eighth value is the byte that
-                    // follows it in the stats block, m_effectVersion.  Written
-                    // as an explicit eighth call rather than an over-read, same
-                    // observable effect without the UB.  (Our CMessageColorReset
-                    // still uses the raw < 8 loop; it is outside this batch.)
-                    for (BYTE colorRange = 0; colorRange < 7; colorRange++) {
+                    // TODO: Probably should be 7, check for overrun in
+                    // debugger.
+                    for (BYTE colorRange = 0; colorRange < 8; colorRange++) {
                         pSprite->GetAnimation()->SetColorRange(colorRange,
                             pSprite->GetBaseStats()->m_colors[colorRange]);
                     }
-                    pSprite->GetAnimation()->SetColorRange(7,
-                        pSprite->GetBaseStats()->m_effectVersion);
-
                     pSprite->GetAnimation()->ClearColorEffectsAll();
                 } else {
                     pSprite->SetColorRange(14);
