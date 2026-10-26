@@ -507,9 +507,10 @@ launches per attempt until `--new-attempt "<why>"`; and every merge into
   back through `python3 -I tools/wave.py requeue [--dry-run] [--reason
   TEXT]`: every parked rule-1 row whose `needs` ends in
   `not exercised` re-enters the queue (unpark's move). A row parked for
-  any other reason — a dependency, an exe contradiction, a failed check —
-  a base-body row (rule 2 keeps those ours) and a row of a batch that is
-  not closed stay parked. `--dry-run` lists the rows and moves nothing.
+  any other reason (a dependency, an exe contradiction, a failed check)
+  stays parked, as do a base-body row (rule 2 keeps those ours) and a row
+  of a batch that is not closed. `--dry-run` lists the rows and moves
+  nothing.
 
   `close --kind import` accepts a batch when
   every row that is not parked is imported (its body changed against the
