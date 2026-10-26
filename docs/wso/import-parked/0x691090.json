@@ -1,0 +1,7 @@
+{
+  "address": "0x691090",
+  "name": "CScreenWorld::CancelPopup",
+  "file": "src/CScreenWorld.cpp",
+  "batch": "i045",
+  "needs": "ours and fork both handle popup states 15/17 with StopDeath() + state reset, but the exe's CancelPopup never calls StopDeath: field_EA4 > 17 goes to a range check where 18/20 fall to UtilAssert (0x780c00 at 0x6910f9) and 19/21/22 return silently; == 17 jumps straight to the bare return at 0x691101; 9..16 (including 15) go to UtilAssert via ja 0x6910e8; the only real work is the jump table at 0x691104 where case 6 calls StopCommand (0x6912a0) and case 8 calls StopContainer (0x690eb0), both resetting field_EA4 to -1. A correct body needs case 15 -> UTIL_ASSERT path and case 17 -> silent return with no state reset, and no StopDeath call at all"
+}
