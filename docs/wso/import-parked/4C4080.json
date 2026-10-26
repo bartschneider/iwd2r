@@ -1,0 +1,1 @@
+{"address": "0x4C4080", "name": "CGameEffect::AddSlowEffect", "file": "src/CGameEffect.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
