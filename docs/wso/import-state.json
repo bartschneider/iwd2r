@@ -4586,7 +4586,7 @@
     "i032": {
       "assigned_at": "2026-10-26T03:03:45+00:00",
       "branch": "p3/wso-i032",
-      "closed_at": null,
+      "closed_at": "2026-10-26T05:08:27+00:00",
       "files": [
         "src/CScreenKeymaps.cpp",
         "src/CGameContainer.cpp",
@@ -4607,6 +4607,7 @@
         "src/CScreenInventory.cpp",
         "src/CCacheStatus.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -4768,6 +4769,211 @@
           "name": "CCacheStatus::Init",
           "our_len": 1188,
           "their_len": 1190
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i033": {
+      "assigned_at": "2026-10-26T04:12:37+00:00",
+      "branch": "p3/wso-i033",
+      "closed_at": null,
+      "files": [
+        "src/CGameAnimationTypeEffect.cpp",
+        "src/CScreenStore.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CGameEffect.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CScreenJournal.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CGameRemoteObjectArray.cpp",
+        "src/CScreenStart.cpp",
+        "src/CGameAreaNotes.cpp",
+        "src/CUIControlSlider.cpp",
+        "src/CResCache.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x6A33F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeEffect.cpp",
+          "name": "CGameAnimationTypeEffect::CalculateGCBoundsRect",
+          "our_len": 250,
+          "outcome": "kept",
+          "their_len": 585
+        },
+        {
+          "address": "0x672A00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::TimerAsynchronousUpdate",
+          "our_len": 2938,
+          "outcome": "kept",
+          "their_len": 2952
+        },
+        {
+          "address": "0x61E9C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlButtonCharGenColorChoice::OnLButtonClick",
+          "our_len": 2311,
+          "outcome": "kept",
+          "their_len": 2313
+        },
+        {
+          "address": "0x60AF60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::ResetMemorizeDivineSpellsPanel",
+          "our_len": 2285,
+          "outcome": "kept",
+          "their_len": 2326
+        },
+        {
+          "address": "0x60A920",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::ResetMemorizeArcaneSpellsPanel",
+          "our_len": 2159,
+          "outcome": "kept",
+          "their_len": 2190
+        },
+        {
+          "address": "0x56B790",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectFeatPowerAttack::ApplyEffect",
+          "our_len": 1984,
+          "outcome": "kept",
+          "their_len": 1982
+        },
+        {
+          "address": "0x56B960",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectFeatExpertise::ApplyEffect",
+          "our_len": 1978,
+          "outcome": "kept",
+          "their_len": 1976
+        },
+        {
+          "address": "0x6171A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::OnCancelButtonClick",
+          "our_len": 1754,
+          "outcome": "kept",
+          "their_len": 1756
+        },
+        {
+          "address": "0x4B5790",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectDisease::ApplyEffect",
+          "our_len": 1694,
+          "outcome": "kept",
+          "their_len": 1729
+        },
+        {
+          "address": "0x6014A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::HandleJoinCompletion",
+          "our_len": 1673,
+          "outcome": "kept",
+          "their_len": 1687
+        },
+        {
+          "address": "0x637580",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenJournal.cpp",
+          "name": "CScreenJournal::ResetAnnotatePanel",
+          "our_len": 1403,
+          "outcome": "kept",
+          "their_len": 1440
+        },
+        {
+          "address": "0x60B610",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::ResetMemorizeDomainSpellsPanel",
+          "our_len": 1317,
+          "outcome": "kept",
+          "their_len": 1338
+        },
+        {
+          "address": "0x663860",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::OnErrorButtonClick",
+          "our_len": 1185,
+          "outcome": "kept",
+          "their_len": 1187
+        },
+        {
+          "address": "0x59BB90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameRemoteObjectArray.cpp",
+          "name": "CGameRemoteObjectArray::RemovePlayer",
+          "our_len": 1182,
+          "outcome": "kept",
+          "their_len": 1184
+        },
+        {
+          "address": "0x5FEB70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::sub_5FEB70",
+          "our_len": 1096,
+          "outcome": "kept",
+          "their_len": 1102
+        },
+        {
+          "address": "0x670440",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStart.cpp",
+          "name": "CUIControlButtonStartMenu::OnLButtonClick",
+          "our_len": 1092,
+          "outcome": "kept",
+          "their_len": 1099
+        },
+        {
+          "address": "0x47AEE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAreaNotes.cpp",
+          "name": "CGameAreaNotes::AddButton",
+          "our_len": 1065,
+          "outcome": "kept",
+          "their_len": 1068
+        },
+        {
+          "address": "0x4D6120",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlSlider.cpp",
+          "name": "CUIControlSlider::OnLButtonDown",
+          "our_len": 1059,
+          "outcome": "kept",
+          "their_len": 1063
+        },
+        {
+          "address": "0x78CD90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResCache.cpp",
+          "name": "CResCache::FlushCache",
+          "our_len": 1049,
+          "outcome": "kept",
+          "their_len": 1067
+        },
+        {
+          "address": "0x6627C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::UpdateModifyCharacterPanel",
+          "our_len": 1051,
+          "outcome": "kept",
+          "their_len": 1054
         }
       ],
       "status": "assigned",
