@@ -1,0 +1,2 @@
+{"address": "0x680160", "name": "CUIControlScrollBarStoreStore", "file": ":InvalidateItems:src/CScreenStore.cpp", "batch": "i045",
+ "needs": "not exercised; ours reading matches the decompile"}
