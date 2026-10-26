@@ -1,0 +1,7 @@
+{
+  "address": "0x426DC0",
+  "name": "CBaldurChitin::GetFirstCDRomDrive",
+  "file": "src/CBaldurChitin.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
