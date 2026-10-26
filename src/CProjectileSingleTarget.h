@@ -59,7 +59,6 @@ public:
 class CProjectile850D54 : public CProjectileSingleTarget {
 public:
     CProjectile850D54(CResRef resRef);
-    /* 0000 */ ~CProjectile850D54() override;
     /* 0078 */ void DeliverEffects() override;
 };
 

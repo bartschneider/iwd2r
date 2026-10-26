@@ -1,0 +1,1 @@
+{"address": "0x579B10", "name": "CProjectileConePulseVisual::~CProjectileConePulseVisual", "file": "src/CProjectile.cpp", "batch": "i030", "needs": "no Frida hook: no entry for CProjectileConePulseVisual::~CProjectileConePulseVisual in our map"}
