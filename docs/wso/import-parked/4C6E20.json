@@ -1,0 +1,7 @@
+{
+  "address": "0x4C6E20",
+  "name": "CGameJournal::ChangeEntry",
+  "file": "src/CGameJournal.cpp",
+  "batch": "i032",
+  "needs": "no Frida hook: ambiguous: 2 overloads of CGameJournal::ChangeEntry in our map"
+}

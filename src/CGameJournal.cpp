@@ -445,15 +445,11 @@ void CGameJournal::ChangeEntry(DWORD nIndex, CString szNewText, INT nChapter, BY
     UTIL_ASSERT(m_aChapters[nChapter] != NULL);
 
     CGameJournalEntry* pEntry;
-    DWORD nTempIndex = 0;
     POSITION pos = m_aChapters[nChapter]->GetHeadPosition();
     while (pos != NULL) {
         pEntry = m_aChapters[nChapter]->GetAt(pos);
         if ((nCharacter & pEntry->m_bCharacter) != 0) {
-            if (nTempIndex == nIndex) {
-                break;
-            }
-            nTempIndex++;
+            break;
         }
         m_aChapters[nChapter]->GetNext(pos);
     }
