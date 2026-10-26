@@ -1,0 +1,7 @@
+{
+  "address": "0x605720",
+  "name": "CUIControlButtonConnection605570::OnLButtonClick",
+  "file": "src/CScreenConnection.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
