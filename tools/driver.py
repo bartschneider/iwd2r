@@ -6618,6 +6618,7 @@ class Driver:
         retries = [b for b in retries if b not in in_flight]
         running = 0
         exhausted = None      # the exit code once a cut finds nothing
+        budget_stop = False   # the budget, not a verdict, ended the run
         cut_blocked = False   # stalled while batches run: retry after one ends
         failure = None        # 1 when the run must stop
         adopt = self._adoptable([b for b, _w, _n in pending] + retries)
@@ -6628,7 +6629,7 @@ class Driver:
 
         threads = self._threads = []
 
-        def body(batch_id, why, name):
+        def body(batch_id, why, name, resumed):
             err = None
             try:
                 code = self._one(batch_id, why, name)
@@ -6637,19 +6638,19 @@ class Driver:
             finally:
                 with self._lock:
                     self._busy[name] -= 1
-            done.put((code, err))
+            done.put((batch_id, code, err, resumed))
 
-        def launch(batch_id, why, name):
+        def launch(batch_id, why, name, resumed=False):
             nonlocal running
             running += 1
             self._began += 1
             launched.add(batch_id)
-            self._start(lambda: body(batch_id, why, name))
+            self._start(lambda: body(batch_id, why, name, resumed))
 
         def reap(block):
-            nonlocal running, cut_blocked, failure, crash
+            nonlocal running, cut_blocked, failure, crash, exhausted
             try:
-                code, err = done.get(block=block)
+                batch_id, code, err, resumed = done.get(block=block)
             except queue_mod.Empty:
                 return False
             running -= 1
@@ -6658,10 +6659,20 @@ class Driver:
                 crash = err
             if code == 1:
                 failure = 1
+            if (resumed and exhausted is not None and not budget_stop
+                    and code != 1 and err is None):
+                # A retried or resumed batch holds files that keep rows out
+                # of the cut's eligible set until it finishes; an exhaustion
+                # verdict formed while it ran (run 24, 2026-10-25) never saw
+                # those rows freed, so one more cut is tried before the run
+                # exits on it.
+                self.log('%s finished after the pool was judged exhausted; '
+                         'trying one more cut' % batch_id)
+                exhausted = None
             return True
 
         def launch_next():
-            nonlocal exhausted, cut_blocked, failure, capped, base_blocked
+            nonlocal exhausted, cut_blocked, failure, capped, base_blocked, budget_stop
             if self._stopping:
                 return False
             if self._halt:
@@ -6689,12 +6700,13 @@ class Driver:
                     # A resumed batch is in flight again, not parked: off
                     # every pool's map (ruling R64).
                     self._update_status(lambda s: _unpark_everywhere(s, batch_id))
-                    launch(batch_id, why, name)
+                    launch(batch_id, why, name, resumed=True)
                     return True
                 # Its pool is busy: the idle pools go on with new cuts.
             if exhausted is not None or cut_blocked:
                 return False
             if self._over_budget():
+                budget_stop = True
                 exhausted = 0
                 return False
             with self._lock:
@@ -6726,7 +6738,7 @@ class Driver:
                         return False
                     self._record_pool(bid, name)
                     why = None
-                launch(bid, why, name)
+                launch(bid, why, name, resumed=True)
                 return True
             if adopt:
                 batch_id = adopt.pop(0)

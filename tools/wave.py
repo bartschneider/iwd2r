@@ -296,13 +296,15 @@ def merge_base_sha(worktree, base):
     return r.stdout.strip() or None if r.returncode == 0 else None
 
 
-ORACLE_CASE_RE = re.compile(r'ORACLE_CASE\(\s*"([^"]+)"')
+ORACLE_CASE_RE = re.compile(r'ORACLE_CASE(?:_[A-Z]+)?\(\s*"([^"]+)"')
 
 
 def _oracle_case_names(worktree):
-    """Every case id registered (ORACLE_CASE) by an oracle/cases/*.cpp of the
-    worktree that oracle/CMakeLists.txt lists: a case file the runner does
-    not build never runs, so its ids count for nothing."""
+    """Every case id registered by an oracle/cases/*.cpp of the worktree
+    that oracle/CMakeLists.txt lists, whatever the spelling of the family
+    (ORACLE_CASE, ORACLE_CASE_EXPECT, ORACLE_CASE_PENDING — a pending case
+    stands as written): a case file the runner does not build never runs,
+    so its ids count for nothing."""
     names = set()
     folder = os.path.join(worktree, 'oracle', 'cases')
     try:

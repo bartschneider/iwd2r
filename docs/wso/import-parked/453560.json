@@ -1,0 +1,1 @@
+{"address": "0x453560", "name": "CMessageSetVariable::GetMsgSubType", "file": "src/CMessage.cpp", "batch": "i029", "needs": "not-exercised (coverage: no scenario hits it; consulted world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map)"}
