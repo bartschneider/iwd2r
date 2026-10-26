@@ -1,0 +1,1 @@
+{"address": "0x5D4CF0", "name": "CUIControlButtonChapterReplay::OnLButtonClick", "file": "src/CScreenChapter.cpp", "batch": "i042", "needs": "not exercised; ours reading matches the decompile"}

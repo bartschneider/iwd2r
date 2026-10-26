@@ -1,0 +1,1 @@
+{"address": "0x65F840", "name": "CUIControlButtonSaveError::OnLButtonClick", "file": "src/CScreenSave.cpp", "batch": "i042", "needs": "not exercised; ours reading matches the decompile"}

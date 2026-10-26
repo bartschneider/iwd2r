@@ -1,0 +1,1 @@
+{"address": "0x4BC630", "name": "CGameEffectCastSpell::ApplyEffect", "file": "src/CGameEffect.cpp", "batch": "i042", "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"}

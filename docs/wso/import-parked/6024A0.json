@@ -1,0 +1,1 @@
+{"address": "0x6024A0", "name": "CScreenConnection::OnLobbyExitButtonClick", "file": "src/CScreenConnection.cpp", "batch": "i042", "needs": "not exercised; ours reading matches the decompile"}
