@@ -24025,6 +24025,93 @@ void CGameSprite::SelectWeaponAbility(unsigned char buttonNum, unsigned char abi
     }
 }
 
+// 0x7555F0
+SHORT CGameSprite::UseContainer()
+{
+    if (m_actionCount >= 1) {
+        return ACTION_INTERRUPTABLE;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    LONG nContainerId = m_curAction.m_specificID;
+
+    if ((pGame->GetCharacterPortraitNum(m_id) == -1
+            && pGame->m_familiars.Find(reinterpret_cast<int*>(m_id), NULL) == NULL)
+        || !Orderable(FALSE)
+        || !m_bSelected) {
+        return ACTION_DONE;
+    }
+
+    CGameObject* pContainer;
+    if (pGame->GetObjectArray()->GetShare(nContainerId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pContainer,
+            INFINITE)
+        != CGameObjectArray::SUCCESS) {
+        return ACTION_ERROR;
+    }
+
+    CAITrigger trigger(CAITRIGGER_CLICKED, m_typeAI, 0);
+    CMessage* message = new CMessageSetTrigger(trigger, m_id, nContainerId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    message = new CMessageSetForceActionPick(TRUE, m_id, nContainerId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    CPoint posContainer = pContainer->GetPos();
+
+    LONG dy = posContainer.y - m_pos.y;
+    LONG dx = posContainer.x - m_pos.x;
+    if (dy * dy * 16 / 9 + dx * dx > CGameTrigger::RANGE_TRIGGER) {
+        // Not next to the container yet.
+        pGame->GetObjectArray()->ReleaseShare(nContainerId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return ACTION_DONE;
+    }
+
+    // Touching a container cancels the actor's invisibility.
+    if (!IsVisibleToCaller(FALSE)) {
+        ITEM_EFFECT effect;
+        CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_FORCEVISIBLE);
+        effect.durationType = 1;
+
+        CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, m_pos, m_id, CPoint(-1, -1));
+        message = new CMessageAddEffect(pEffect, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    if (pContainer->GetObjectType() == CGameObject::TYPE_CONTAINER) {
+        CGameContainer* pCont = static_cast<CGameContainer*>(pContainer);
+        if ((pCont->m_dwFlags & 0x1) != 0
+            && (pCont->m_keyType == "" || !PartyHasItem(pCont->m_keyType))) {
+            // Locked, and the party is not carrying its key.
+            DisplayTextRef(-1, 19862, 0, RGB(0xD7, 0xD7, 0xBE));
+            pGame->GetObjectArray()->ReleaseShare(nContainerId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return ACTION_DONE;
+        }
+        pCont->OpenContainer(m_typeAI);
+    }
+
+    pGame->GetObjectArray()->ReleaseShare(nContainerId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    if (pGame->GetCharacterPortraitNum(m_id) == -1) {
+        DisplayTextRef(-1, 7546, 255, 255);
+    } else {
+        pGame->m_iContainer = nContainerId;
+        pGame->m_iContainerSprite = m_id;
+        g_pBaldurChitin->GetScreenWorld()->ConfigureContainer();
+    }
+
+    ClearActions(FALSE);
+
+    return ACTION_INTERRUPTABLE;
+}
+
 // 0x755A70
 void CGameSprite::sub_755A70(CSpell* pSpell, const SPELL_ABILITY* pAbility, const CPoint& ptTarget)
 {

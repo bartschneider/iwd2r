@@ -564,6 +564,7 @@ public:
     void sub_71C0C0();
     SHORT Formation(CGameSprite* pTarget);
     SHORT Follow();
+    SHORT UseContainer();
     void sub_71D0B0();
     void sub_72FBF0();
     void CheckSequence(BYTE& sequence);
