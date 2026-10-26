@@ -1,0 +1,7 @@
+{
+  "address": "0x63A910",
+  "name": "CScreenKeymaps::SetKeymap",
+  "file": "src/CScreenKeymaps.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}
