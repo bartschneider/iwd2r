@@ -6763,6 +6763,11 @@ void CMessageColorReset::Run()
                 pSprite->GetAnimation()->SetColorRange(index, colors[index]);
             }
 
+            // The binary's loop bound is 8, not 7: it runs an eighth range
+            // whose value is the byte after m_colors[6], i.e. m_effectVersion.
+            // NOTE: Uninline.
+            pSprite->GetAnimation()->SetColorRange(7, pSprite->GetBaseStats()->m_effectVersion);
+
             // NOTE: Uninline.
             pSprite->GetAnimation()->ClearColorEffectsAll();
         }
