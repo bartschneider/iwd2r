@@ -1,0 +1,7 @@
+{
+  "address": "0x661B30",
+  "name": "CScreenSinglePlayer::OnCancelButtonClick",
+  "file": "src/CScreenSinglePlayer.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
