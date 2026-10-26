@@ -4963,7 +4963,7 @@
     "i034": {
       "assigned_at": "2026-10-26T05:09:27+00:00",
       "branch": "p3/wso-i034",
-      "closed_at": null,
+      "closed_at": "2026-10-26T06:39:29+00:00",
       "files": [
         "src/CScreenInventory.cpp",
         "src/CScreenMap.cpp",
@@ -4977,6 +4977,7 @@
         "src/CScreenKeymaps.cpp",
         "src/CMessage.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -5138,6 +5139,186 @@
           "name": "CUIControlButtonInventorySlot::OnLButtonDblClk",
           "our_len": 879,
           "their_len": 881
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i035": {
+      "assigned_at": "2026-10-26T05:19:26+00:00",
+      "branch": "p3/wso-i035",
+      "closed_at": null,
+      "files": [
+        "src/CScreenConnection.cpp",
+        "src/CGameEffect.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CScreenStart.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CScreenJournal.cpp",
+        "src/CScreenWorldMap.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5FF450",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::UpdateSessionList",
+          "our_len": 1043,
+          "their_len": 1052
+        },
+        {
+          "address": "0x4B3D00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectDispelEffects::ApplyEffect",
+          "our_len": 1041,
+          "their_len": 1044
+        },
+        {
+          "address": "0x4A6E90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectColorGlowPulse::ApplyEffect",
+          "our_len": 1031,
+          "their_len": 1034
+        },
+        {
+          "address": "0x6018E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::AutoStartConnect",
+          "our_len": 997,
+          "their_len": 1002
+        },
+        {
+          "address": "0x61E2D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlButtonCharGenHairSkinColor::OnLButtonClick",
+          "our_len": 982,
+          "their_len": 984
+        },
+        {
+          "address": "0x56B0F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectTensersTransformation::ApplyEffect",
+          "our_len": 979,
+          "their_len": 987
+        },
+        {
+          "address": "0x56B520",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectGlobeOfInvulnerability::ApplyEffect",
+          "our_len": 873,
+          "their_len": 1076
+        },
+        {
+          "address": "0x5FFDF0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::UpdateMissionPackPanel",
+          "our_len": 950,
+          "their_len": 960
+        },
+        {
+          "address": "0x603170",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionLoadGame::OnLButtonClick",
+          "our_len": 936,
+          "their_len": 942
+        },
+        {
+          "address": "0x610190",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::UpdateHatedRacePanel",
+          "our_len": 891,
+          "their_len": 915
+        },
+        {
+          "address": "0x4A6D30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectColorGlowSolid::ApplyEffect",
+          "our_len": 898,
+          "their_len": 901
+        },
+        {
+          "address": "0x4AE000",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectHaste::ApplyEffect",
+          "our_len": 891,
+          "their_len": 899
+        },
+        {
+          "address": "0x66F320",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStart.cpp",
+          "name": "CScreenStart::OnKeyDown",
+          "our_len": 890,
+          "their_len": 896
+        },
+        {
+          "address": "0x4C4080",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffect::AddSlowEffect",
+          "our_len": 855,
+          "their_len": 863
+        },
+        {
+          "address": "0x4B2990",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectForceVisible::ApplyEffect",
+          "our_len": 859,
+          "their_len": 859
+        },
+        {
+          "address": "0x690EB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StopContainer",
+          "our_len": 841,
+          "their_len": 855
+        },
+        {
+          "address": "0x637EA0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenJournal.cpp",
+          "name": "CUIControlButtonJournalAnnotate::OnLButtonClick",
+          "our_len": 774,
+          "their_len": 826
+        },
+        {
+          "address": "0x69A640",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorldMap.cpp",
+          "name": "CScreenWorldMap::OnMapMouseDown",
+          "our_len": 790,
+          "their_len": 798
+        },
+        {
+          "address": "0x5698E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectFreeAction::ApplyEffect",
+          "our_len": 763,
+          "their_len": 775
+        },
+        {
+          "address": "0x4B5BF0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectDisease::sub_4B5BF0",
+          "our_len": 749,
+          "their_len": 773
         }
       ],
       "status": "assigned",
