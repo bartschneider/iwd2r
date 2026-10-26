@@ -1,0 +1,7 @@
+{
+  "address": "0x74FC50",
+  "name": "CGameSprite::GroupAttack",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i041",
+  "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"
+}
