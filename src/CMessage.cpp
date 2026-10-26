@@ -24,6 +24,7 @@
 #include "CScreenSinglePlayer.h"
 #include "CScreenStore.h"
 #include "CScreenWorld.h"
+#include "CSpell.h"
 #include "CStore.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
@@ -5906,6 +5907,232 @@ void CMessageAddEffect::Run()
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
     }
+}
+
+// 0x4F8470
+void CMessageAddEffect::MarshalMessage(BYTE** pData, DWORD* dwSize)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 4910
+    UTIL_ASSERT(pData != NULL && dwSize != NULL);
+
+    CResRef res;
+    CString effectRes, sourceRes;
+
+    CGameObject* object;
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_targetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &object,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        *dwSize = 0;
+        return;
+    }
+
+    PLAYER_ID targetPlayer = object->m_remotePlayerID;
+    LONG targetObject = object->m_remoteObjectID;
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_targetId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    res = m_effect->m_res;
+    res.CopyToString(effectRes);
+    res = m_effect->m_sourceRes;
+    res.CopyToString(sourceRes);
+
+    *dwSize = 89;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 4961
+    UTIL_ASSERT(*dwSize <= STATICBUFFERSIZE);
+
+    DWORD cnt = 0;
+    auto write = [&](const void* value, DWORD size) {
+        memcpy(*pData + cnt, value, size);
+        cnt += size;
+    };
+
+    write(&targetPlayer, sizeof(targetPlayer));
+    write(&targetObject, sizeof(targetObject));
+
+    WORD opcode = static_cast<WORD>(m_effect->m_effectID);
+    BYTE targetType = static_cast<BYTE>(m_effect->m_targetType);
+    BYTE level = static_cast<BYTE>(m_effect->m_spellLevel);
+    WORD durationType = static_cast<WORD>(m_effect->m_durationType);
+    BYTE upper = static_cast<BYTE>(m_effect->m_probabilityUpper);
+    BYTE lower = static_cast<BYTE>(m_effect->m_probabilityLower);
+
+    write(&opcode, sizeof(opcode));
+    write(&targetType, sizeof(targetType));
+    write(&level, sizeof(level));
+    write(&m_effect->m_effectAmount, sizeof(LONG));
+    write(&m_effect->m_dwFlags, sizeof(DWORD));
+    write(&durationType, sizeof(durationType));
+    write(&m_effect->m_duration, sizeof(DWORD));
+    write(&upper, sizeof(upper));
+    write(&lower, sizeof(lower));
+
+    memset(*pData + cnt, 0, RESREF_SIZE);
+    memcpy(*pData + cnt, effectRes.GetBuffer(effectRes.GetLength()), effectRes.GetLength());
+    cnt += RESREF_SIZE;
+
+    memset(*pData + cnt, 0, RESREF_SIZE);
+    memcpy(*pData + cnt, sourceRes.GetBuffer(sourceRes.GetLength()), sourceRes.GetLength());
+    cnt += RESREF_SIZE;
+
+    if (m_effect->UsesDice()) {
+        write(&m_effect->m_numDice, sizeof(DWORD));
+        write(&m_effect->m_diceSize, sizeof(DWORD));
+    } else {
+        write(&m_effect->m_maxLevel, sizeof(DWORD));
+        write(&m_effect->m_minLevel, sizeof(DWORD));
+    }
+
+    write(&m_effect->m_savingThrow, sizeof(DWORD));
+    write(&m_effect->m_saveMod, sizeof(LONG));
+    write(&m_effect->m_special, sizeof(DWORD));
+    write(&m_effect->m_source, sizeof(CPoint));
+
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_effect->m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            &object,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    PLAYER_ID sourcePlayer = 0;
+    LONG sourceObject = CGameObjectArray::INVALID_INDEX;
+    if (rc == CGameObjectArray::SUCCESS) {
+        sourcePlayer = object->m_remotePlayerID;
+        sourceObject = object->m_remoteObjectID;
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_effect->m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    write(&sourcePlayer, sizeof(sourcePlayer));
+    write(&sourceObject, sizeof(sourceObject));
+
+    write(&m_effect->m_target, sizeof(CPoint));
+
+    BYTE field188 = static_cast<BYTE>(m_effect->field_188);
+    write(&field188, sizeof(field188));
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 5139
+    UTIL_ASSERT(cnt == *dwSize);
+}
+
+// 0x4F8880
+BOOL CMessageAddEffect::UnmarshalMessage(BYTE* pData, DWORD dwSize)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 5180
+    UTIL_ASSERT(pData != NULL);
+
+    DWORD cnt = CNetwork::SPEC_MSG_HEADER_LENGTH;
+    auto read = [&](void* value, DWORD size) {
+        memcpy(value, pData + cnt, size);
+        cnt += size;
+    };
+
+    PLAYER_ID player;
+    LONG remote, local;
+    read(&player, sizeof(player));
+    read(&remote, sizeof(remote));
+
+    if (g_pBaldurChitin->GetObjectGame()->GetRemoteObjectArray()->Find(player, remote, local) != TRUE) {
+        return FALSE;
+    }
+
+    m_targetId = local;
+
+    ITEM_EFFECT effect;
+    read(&effect.effectID, sizeof(WORD));
+    read(&effect.targetType, sizeof(BYTE));
+    read(&effect.spellLevel, sizeof(BYTE));
+    read(&effect.effectAmount, sizeof(LONG));
+    read(&effect.dwFlags, sizeof(DWORD));
+    read(&effect.durationType, sizeof(WORD));
+    read(&effect.duration, sizeof(DWORD));
+    read(&effect.probabilityUpper, sizeof(BYTE));
+    read(&effect.probabilityLower, sizeof(BYTE));
+    read(effect.res, RESREF_SIZE);
+
+    RESREF sourceRes;
+    read(sourceRes, RESREF_SIZE);
+
+    read(&effect.numDice, sizeof(DWORD));
+    read(&effect.diceSize, sizeof(DWORD));
+    read(&effect.savingThrow, sizeof(DWORD));
+    read(&effect.saveMod, sizeof(LONG));
+    read(&effect.special, sizeof(DWORD));
+
+    CPoint source, target;
+    read(&source, sizeof(CPoint));
+    read(&player, sizeof(player));
+    read(&remote, sizeof(remote));
+
+    if (player == 0 && remote == CGameObjectArray::INVALID_INDEX) {
+        local = CGameObjectArray::INVALID_INDEX;
+    } else if (g_pBaldurChitin->GetObjectGame()->GetRemoteObjectArray()->Find(player, remote, local) != TRUE) {
+        return FALSE;
+    }
+
+    read(&target, sizeof(CPoint));
+
+    BYTE field188;
+    read(&field188, sizeof(field188));
+
+    m_effect = CGameEffect::DecodeEffect(&effect, source, local, target);
+    if (effect.effectID == CGAMEEFFECT_DAMAGE) {
+        m_effect->m_special = effect.special;
+    }
+
+    CResRef res(sourceRes);
+    CSpell spell;
+    spell.SetResRef(res, TRUE, TRUE);
+
+    CGameObject* object;
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_effect->m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            &object,
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc == CGameObjectArray::SUCCESS) {
+        if ((object->GetObjectType() & CGameObject::TYPE_AIBASE) != 0
+                && object->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            auto* sprite = static_cast<CGameSprite*>(object);
+            m_effect->m_casterLevel = static_cast<LONG>(sprite->GetCasterLevel(&spell, 0, 0));
+            m_effect->m_spellPenetrationBonus = static_cast<DWORD>(sprite->GetFeatValue(0x40)) << 1;
+        } else {
+            m_effect->m_casterLevel = 1;
+        }
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_effect->m_sourceID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    } else {
+        m_effect->m_casterLevel = 1;
+    }
+
+    m_effect->m_sourceRes = sourceRes;
+    m_effect->field_188 = field188;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CMessage.cpp
+    // __LINE__: 5378
+    UTIL_ASSERT(cnt == dwSize);
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
