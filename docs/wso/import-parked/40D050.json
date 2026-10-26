@@ -1,0 +1,1 @@
+{"address": "0x40D050", "name": "CAIObjectType::sub_40D050", "file": "src/CAIObjectType.cpp", "batch": "i040", "needs": "exe null-checks the sub_40D0F0 result (test/je to a NULL return at 0x40d062) before use; ours and the fork both dereference pObject unconditionally - fix ours to return NULL when the lookup fails"}

@@ -1,0 +1,1 @@
+{"address": "0x56BD10", "name": "IcewindCGameEffectFeatRapidShot::ApplyEffect", "file": "src/IcewindCGameEffects.cpp", "batch": "i040", "needs": "not exercised; ours reading matches the decompile"}

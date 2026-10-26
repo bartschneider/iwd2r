@@ -1,0 +1,1 @@
+{"address": "0x6007F0", "name": "CScreenConnection::OnErrorButtonClick", "file": "src/CScreenConnection.cpp", "batch": "i040", "needs": "not exercised; ours reading matches the decompile"}

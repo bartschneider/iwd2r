@@ -1,0 +1,1 @@
+{"address": "0x65B430", "name": "CScreenSave::OnDeleteButtonClick", "file": "src/CScreenSave.cpp", "batch": "i040", "needs": "exe asserts the slot bounds twice (UtilAssert with InfScreenSave.cpp:991 at 0x65b47c and again with :963 at 0x65b49e, same 0 <= nSlot < 5 expression); ours keeps only the 991 assert - restore the second assert"}

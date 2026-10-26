@@ -1,0 +1,1 @@
+{"address": "0x5693B0", "name": "IcewindCGameEffectBarkskin::ApplyEffect", "file": "src/IcewindCGameEffects.cpp", "batch": "i040", "needs": "exe stores m_done = FALSE (effect+0x110) at the end of the applied branch (0x56945c) and adds to derivedStats field_C as a 16-bit short (addw on +0x92c); ours omits the m_done store - add it and match the 16-bit adds"}

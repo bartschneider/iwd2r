@@ -1,0 +1,1 @@
+{"address": "0x5FEA60", "name": "CScreenConnection::OnJoinGameButtonClick", "file": "src/CScreenConnection.cpp", "batch": "i040", "needs": "not exercised; ours reading matches the decompile"}

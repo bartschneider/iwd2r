@@ -1,0 +1,1 @@
+{"address": "0x600600", "name": "CScreenConnection::ResetImportPanel", "file": "src/CScreenConnection.cpp", "batch": "i040", "needs": "exe formats iwd1.chr-iwd6.chr (sprintf counter starts at 1, loops while counter < 6); ours loops 0..5 and scans iwd0.chr-iwd5.chr - fix the loop bounds"}
