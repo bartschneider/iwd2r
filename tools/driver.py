@@ -1547,7 +1547,9 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
     this branch added or changed against the merge base (`changed_paths`): a
     parked file `first` already carried, for a row outside the batch, is not
     this batch's problem.  A kept row must be a base-body row of the batch,
-    not parked, with the merge base's body and an evidence file."""
+    or an only-theirs row ours already carries a body for (our src labels the
+    address at the merge base), not parked, with the merge base's body and an
+    evidence file."""
     wave = _tool('wave')
     problems = []
     parked, _bad = wave._parked_rows(worktree)
@@ -1578,13 +1580,19 @@ def _kept_and_parked_problems(batch, worktree, base, kept, key, changed_paths=()
     for a in sorted(kept, key=key):
         k = key(a)
         row = rows.get(k)
+        # Task 40: an only-theirs row ours already carries a body for (our
+        # src labels the address at the merge base) is a present row: it
+        # reports under ## Kept like a base-body row, so the only-theirs
+        # refusal below fires only for a row without a body there.
+        present = (row is not None and row.get('category') == 'only_theirs'
+                   and wave._labelled_at(worktree, mb, row.get('address')))
         if row is None:
             problems.append('%s: kept line for an address outside this batch; remove that '
                             'line' % a)
-        elif row.get('category') == 'only_theirs':
+        elif row.get('category') == 'only_theirs' and not present:
             problems.append('%s: listed under ## Kept but ours has no body there; an only-theirs '
                             'row is never kept: import it or park it (remove the function)' % a)
-        elif row.get('category') != 'theirs_changed_ours_base':
+        elif row.get('category') != 'theirs_changed_ours_base' and not present:
             problems.append('%s: listed under ## Kept but ours is a stub there; a stub is '
                             'never kept: import it or park it' % a)
         elif k in parked:
@@ -3949,13 +3957,17 @@ class Driver:
             self.log('%s: frida: cannot tell which functions the batch touched (%s)'
                      % (batch_id, _one_line(repr(e), 200)))
         # A kept row is a base-body row whose body is untouched against the
-        # merge base; any other row on the list is measured as an import, with
-        # no outcome (the mechanical check already tells the worker).
+        # merge base, or an only-theirs row ours already carries a body for
+        # (our src labels the address, Task 40); any other row on the list is
+        # measured as an import, with no outcome (the mechanical check
+        # already tells the worker).
         moved = {key('0x%X' % addr) for _p, addr, _n in touched}
         for r in rows:
             k = key(r['address'])
             if (k in kept and k not in moved
-                    and r.get('category') == 'theirs_changed_ours_base'):
+                    and (r.get('category') == 'theirs_changed_ours_base'
+                         or (r.get('category') == 'only_theirs'
+                             and wave._labelled_at(worktree, mb_sha, r['address'])))):
                 r['kept'] = True
         for path, addr, name in touched:
             k = key('0x%X' % addr)

@@ -8313,6 +8313,70 @@ class WaveTest(unittest.TestCase):
         rc, out = self._recompare(tip_rows)
         self.assertIn('recompare: 0 new rows', out)
 
+    def test_recompare_reclassifies_a_present_row_by_their_body(self):
+        # Task 40: an only_theirs row our src labels is not theirs-only —
+        # ours carries the body.  The fork's body decides the class: a stub
+        # there is ours_real_theirs_stub, anything else both_changed_differ.
+        R = self._row
+        self.write_disagreements([])
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {}}, f)
+        stub = '{return1;}'
+        real = '{return' + '+'.join(str(i) for i in range(1, 30)) + ';}'
+        bodies = {'0x600100': stub, '0x600200': real}
+        tip_rows = [R('0x600100', cat='only_theirs'),
+                    R('0x600200', cat='only_theirs')]
+        with mock.patch.object(self.wave, '_resolve_tip', return_value='b' * 40), \
+                mock.patch.object(self.wave, '_xrec_rows',
+                                  return_value=tip_rows), \
+                mock.patch.object(self.wave, '_labelled_at',
+                                  side_effect=lambda repo, ref, addr:
+                                      addr in bodies), \
+                mock.patch.object(self.wave, '_func_body',
+                                  side_effect=lambda repo, ref, path, addr:
+                                      bodies.get(addr)):
+            rc, out = self.wave.recompare(self.state, self.disagreements,
+                                          repo=self.tmp, fetch=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(
+            out, 'recompare: 1 new rows at bbbbbbb '
+                 '(0 already queued, 0 decided)\n'
+                 'reclassified 0x600100 F0x600100: ours already carries the '
+                 'body; theirs is a stub -> ours_real_theirs_stub\n'
+                 'reclassified 0x600200 F0x600200: ours already carries the '
+                 'body; theirs is not a stub -> both_changed_differ\n')
+        with open(self.disagreements) as f:
+            rows = json.load(f)
+        # the stub pair is ours_real_theirs_stub: nothing to import, and the
+        # queue counts only both_changed_differ rows, so the file gains just
+        # the not-a-stub one (at its reclassified class)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]['address'], '0x600200')
+        self.assertEqual(rows[0]['category'], 'both_changed_differ')
+
+    def test_recompare_leaves_a_present_row_theirs_only_when_unreadable(self):
+        # no fork body to read: no reclassification, the row stays as xrec
+        # saw it (and, being only_theirs, out of the wave-1 file)
+        R = self._row
+        self.write_disagreements([])
+        with open(self.state, 'w') as f:
+            json.dump({'fork_base': 'a' * 40, 'batches': {}}, f)
+        tip_rows = [R('0x600100', cat='only_theirs')]
+        with mock.patch.object(self.wave, '_resolve_tip', return_value='b' * 40), \
+                mock.patch.object(self.wave, '_xrec_rows',
+                                  return_value=tip_rows), \
+                mock.patch.object(self.wave, '_labelled_at', return_value=True), \
+                mock.patch.object(self.wave, '_func_body', return_value=None):
+            rc, out = self.wave.recompare(self.state, self.disagreements,
+                                          repo=self.tmp, fetch=False)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(
+            out, 'recompare: 0 new rows at bbbbbbb '
+                 '(0 already queued, 0 decided)\n')
+        self.assertNotIn('reclassified', out)
+        with open(self.disagreements) as f:
+            self.assertEqual(json.load(f), [])
+
     def test_recompare_regenerates_triage_and_demotes_open_rows(self):
         # Task 23: after a fork_base move disables fork-stub, the closed row
         # keeps its class, every open row (fresh or kept) is demoted, and the
@@ -10656,6 +10720,29 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(len(probs), 1, probs)
         self.assertTrue(probs[0].startswith('0x401000: listed under ## Kept but ours has no '
                                             'body there; an only-theirs row is never kept'), probs)
+
+    def test_present_only_theirs_row_under_kept_is_accepted(self):
+        # Task 40: an only-theirs row whose address our src labels at the
+        # merge base is present, so its kept line reads like a base-body
+        # row's: neither only-theirs refusal fires for it
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        def g(*a):
+            return subprocess.run(['git', '-C', d, '-c', 'user.name=T',
+                                   '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a],
+                                  check=True, capture_output=True, text=True)
+        g('init', '-q', '-b', 'first')
+        _write(os.path.join(d, 'src', 'A.cpp'),
+               '// 0x401000\nint F()\n{\n  return 1;\n}\n')
+        _write(os.path.join(d, 'docs', 'evidence', '401000.md'), 'kind: read-only\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'only_theirs'}]}
+        key = driver._tool('wave')._addr_key
+        self.assertEqual(
+            driver._kept_and_parked_problems(batch, d, 'first', ('0x401000',), key, []), [])
 
     def test_parked_evidence_check_covers_the_batch_and_what_the_branch_changed(self):
         d = self._mc_repo({'401000': 'kind: read-only', '405000': 'stray'})
@@ -22161,6 +22248,63 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn('row 0x643CD0 not imported: body unchanged', out)
 
+    def _present_ready(self, body=7, evidence='trace'):
+        """Draw (0x643CD0) an only-theirs row ours already carries the body
+        for (Task 40): `first` holds the labelled body, the branch keeps it
+        (`body`) or changes it, the state row marked kept; Render imported."""
+        self.init_repo()
+        _write(os.path.join(self.root, 'src', 'A.cpp'), self.SRC_BODY % 7)
+        self.git('add', '-A', cwd=self.root)
+        self.git('commit', '-qm', 'draw', cwd=self.root)
+        self.git('merge', '-q', 'first', cwd=self.wt)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CC0.md'),
+               f'---\naddress: 0x643CC0\nname: fn\nkind: trace\n'
+               f'trace_source: {self.FRIDA}\n---\n\nnotes\n')
+        head = ('kind: trace\ntrace_source: %s' % self.FRIDA if evidence == 'trace'
+                else 'kind: oracle\noracle_case: rules/draw')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               f'---\naddress: 0x643CD0\nname: fn\n{head}\n---\n\nnotes\n')
+        if evidence != 'trace':
+            _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+                   'ORACLE_CASE("rules/draw", Draw);\n')
+            _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+                   'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        _write(os.path.join(self.wt, 'src', 'A.cpp'),
+               self.RENDER_BODY + self.SRC_BODY % body)
+        self.commit_worktree()
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            if r['address'] == '0x643CD0':
+                r['category'] = 'only_theirs'
+                r['outcome'] = 'kept'
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_import_close_accepts_a_present_row_on_standing_evidence(self):
+        # Task 40: an only-theirs row ours already carries the body for is
+        # present, so it closes as kept on the oracle evidence that stands
+        # for it — no trace, no measured_body, no parking
+        self._present_ready(evidence='oracle')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('not imported', out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_accepts_a_present_row_measured_by_this_batch(self):
+        self._present_ready(evidence='trace')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_refuses_a_present_row_whose_body_changed(self):
+        # a present row is kept like any other: its body must stay as it is
+        self._present_ready(body=8)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: kept but its body changed against', out)
+        self.assertNotIn('not imported: body unchanged', out)
+
     def test_import_close_accepts_parked_rows(self):
         self._import_ready(parked=self.PARKED)
         rc, out = self.close(kind='import')
@@ -24072,6 +24216,27 @@ class ImportSecondSourceTest(unittest.TestCase):
         self.assertIn('(the delete instruction above is for stub rows only). 2. **Every commit',
                       flat(texts['i002']))
 
+    def test_brief_renders_the_present_row_sentence_with_the_kept_paragraph(self):
+        # Task 40: the Kept paragraph says a present only-theirs row (ours
+        # already carries the body) is reported there too — never imported,
+        # never parked — and, like the rest of that paragraph, only for the
+        # batches that have one
+        self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
+        self.next_import()
+        self.next_import()
+        texts = {}
+        for bid in ('i001', 'i002'):
+            rc, texts[bid] = self.wave.render_brief(
+                self.wave.IMPORT_TEMPLATE_PATH, os.path.join(self.tmp, 'import-state.json'),
+                bid, bundle_dir=os.path.join(self.tmp, 'b'), bundle_fn=lambda a: 'x')
+            self.assertEqual(rc, 0, texts[bid])
+            self.assertNotIn('{{', texts[bid])
+        flat = lambda t: t.replace('\n   ', ' ').replace('\n', ' ')
+        for needle in ('An only-theirs row whose address our src already labels',
+                       'ours already has the body', 'never imported, never parked'):
+            self.assertIn(needle, flat(texts['i002']), needle)
+            self.assertNotIn(needle, flat(texts['i001']), needle)
+
     ONLY = 'only_theirs'
     ONLY_ROWS = [
         {'address': '0x409000', 'category': ONLY, 'file': 'src/P.cpp',
@@ -24102,6 +24267,48 @@ class ImportSecondSourceTest(unittest.TestCase):
         self.assertEqual(got[3], ['0x409000', '0x40A000'])
         self.assertEqual([r['category'] for r in self.state()['batches']['i004']['rows']],
                          [self.ONLY] * 2)
+
+    def test_next_import_skips_a_present_only_theirs_row(self):
+        # Task 40: an only-theirs row whose address our src labels at the
+        # base is present — ours already carries the body — so the queue
+        # never cuts it, and says so once per cut
+        _write(self.dp, json.dumps(self.ONLY_ROWS))
+        self.cov({'world_entry': {'0x409000': 1, '0x40A000': 1}})
+        repo = os.path.join(self.tmp, 'repo')
+        os.makedirs(repo)
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@t',
+                   GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1')
+        subprocess.run(['git', 'init', '-q', '-b', 'first'], cwd=repo, env=env,
+                       check=True, capture_output=True)
+        _write(os.path.join(repo, 'src', 'P.cpp'),
+               '// 0x409000\nint P()\n{\n  return 1;\n}\n')
+        subprocess.run(['git', 'add', '-A'], cwd=repo, env=env, check=True,
+                       capture_output=True)
+        subprocess.run(['git', 'commit', '-qm', 'p'], cwd=repo, env=env,
+                       check=True, capture_output=True)
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, os.path.join(self.tmp, 'import-state.json'), 2, queue='import',
+                repo=repo, import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first', coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x40A000'], out)
+        self.assertIn('1 only_theirs row(s) skipped: ours already carries the body '
+                      '(recompare will reclassify)', out)
+        self.assertEqual([r['address'] for r in self.state()['batches']['i001']['rows']],
+                         ['0x40A000'])
+        # with the rest batched, the one present row left explains the empty pool
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(
+                self.dp, os.path.join(self.tmp, 'import-state.json'), 2, queue='import',
+                repo=repo, import_path=os.path.join(self.tmp, 'import-list.json'),
+                base='first', coverage_root=self.tmp,
+                claims_path=os.path.join(self.tmp, 'claims.json'))
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(out, '1 only_theirs row(s) skipped: ours already carries the body '
+                              '(recompare will reclassify)\n')
 
     def test_brief_renders_the_only_theirs_paragraph_only_for_such_batches(self):
         self.with_only()
@@ -24142,6 +24349,18 @@ class ImportSecondSourceTest(unittest.TestCase):
             self.wave._import_tally(st),
             'imports: stubs 1 imported / 0 kept / 0 parked; '
             'base-body 0 imported / 0 kept / 0 parked')
+
+    def test_scorecard_counts_a_present_only_theirs_row_as_kept(self):
+        # Task 40: a present only-theirs row that closed as kept (ours
+        # already carried the body) counts as kept in the tally, not imported
+        st = {'batches': {'i001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'category': self.ONLY, 'outcome': 'kept'},
+            {'address': '0x2', 'category': self.ONLY}]}}}
+        self.assertEqual(
+            self.wave._import_tally(st),
+            'imports: stubs 0 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked; '
+            'only-theirs 1 imported; 1 kept / 0 parked')
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')
