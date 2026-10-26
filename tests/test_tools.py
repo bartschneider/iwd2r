@@ -8933,6 +8933,124 @@ class WaveTest(unittest.TestCase):
         with open(report) as f:
             self.assertEqual(f.read(), first)
 
+    # -- Task 42: addresses for the address-less rows ----------------------
+
+    def test_addresses_resolves_each_source_kind(self):
+        addr = load_tool('addresses')
+        rows = [self._noaddr('CGameSprite::sub_71C0C0', cat='only_theirs'),
+                self._noaddr('IcewindMisc::Roll', cat='only_theirs'),
+                self._noaddr('CResStore::Parse', file='src/B.cpp'),
+                self._noaddr('Moved::Help')]
+        self.write_disagreements(rows)
+        rc, out = addr.addresses(self.disagreements, repo=self.tmp,
+                                 ghidra_of=lambda names: {'IcewindMisc::Roll': {'0x5845D0'}},
+                                 our_names={'CResStore::Parse': {'0x4026C0'},
+                                            'IcewindMisc::Roll': {'0x999999'}},
+                                 fork_names={'Moved::Help': {'0x402660'}})
+        self.assertEqual(rc, 0, out)
+        with open(self.disagreements) as f:
+            got = {r['name']: (r.get('address'), r.get('address_source'))
+                   for r in json.load(f)}
+        self.assertEqual(got['CGameSprite::sub_71C0C0'], ('0x71C0C0', 'sub-name'))
+        self.assertEqual(got['IcewindMisc::Roll'], ('0x5845D0', 'ghidra'))
+        self.assertEqual(got['CResStore::Parse'], ('0x4026C0', 'ours'))
+        self.assertEqual(got['Moved::Help'], ('0x402660', 'fork-header'))
+        # the summary line, and the only_theirs subset it calls out; ghidra
+        # outranks ours for a name both name.
+        self.assertIn('addresses: 4 row(s) without an address: 4 resolved '
+                      '(sub-name 1, ghidra 1, ours 1, fork-header 1), 0 unresolved', out)
+        self.assertIn('addresses: only_theirs 2 of them: 2 resolved '
+                      '(sub-name 1, ghidra 1, ours 0, fork-header 0), 0 unresolved', out)
+        self.assertIn('wrote 4 resolved row(s)', out)
+
+    def test_addresses_leaves_an_ambiguous_name_unresolved_with_candidates(self):
+        addr = load_tool('addresses')
+        rows = [self._noaddr('CMessage::EnsureDispatch'),
+                self._noaddr('Dup::Go', cat='only_theirs')]
+        self.write_disagreements(rows)
+        rc, out = addr.addresses(self.disagreements, repo=self.tmp,
+                                 ghidra_of=lambda names: {'CMessage::EnsureDispatch':
+                                                          {'0x64BE20', '0x64BE30'}},
+                                 our_names={'CMessage::EnsureDispatch': {'0x64BE20'},
+                                            'Dup::Go': {'0x4026D0', '0x4026E0'}},
+                                 fork_names={'Dup::Go': {'0x4026D0', '0x4026E0'}})
+        self.assertEqual(rc, 0, out)
+        # ghidra's two symbols fall through to ours' one address; a name every
+        # source splits stays unresolved, its candidates listed.
+        self.assertIn('addresses: 2 row(s) without an address: 1 resolved '
+                      '(sub-name 0, ghidra 0, ours 1, fork-header 0), 1 unresolved', out)
+        self.assertIn('addresses: unresolved with candidates:', out)
+        self.assertIn('  Dup::Go  src/A.cpp  ours: 0x4026D0, 0x4026E0; '
+                      'fork-header: 0x4026D0, 0x4026E0', out)
+        self.assertIn('0 unresolved without candidates', out)
+        with open(self.disagreements) as f:
+            dup = [r for r in json.load(f) if r['name'] == 'Dup::Go'][0]
+        self.assertFalse(dup.get('address'))
+        self.assertNotIn('address_source', dup)
+
+    def test_addresses_dry_run_resolves_but_writes_nothing(self):
+        addr = load_tool('addresses')
+        self.write_disagreements([self._noaddr('CResStore::Parse')])
+        with open(self.disagreements) as f:
+            before = f.read()
+        rc, out = addr.addresses(self.disagreements, repo=self.tmp, dry=True,
+                                 ghidra_of=lambda names: {},
+                                 our_names={'CResStore::Parse': {'0x4026C0'}},
+                                 fork_names={})
+        self.assertEqual(rc, 0, out)
+        self.assertIn('1 resolved (sub-name 0, ghidra 0, ours 1, fork-header 0)', out)
+        self.assertIn('dry run: nothing written', out)
+        with open(self.disagreements) as f:
+            self.assertEqual(f.read(), before)
+
+    def test_sub_name_address_needs_the_text_segment(self):
+        addr = load_tool('addresses')
+        self.assertEqual(addr.sub_name_address('sub_71C0C0'), '0x71C0C0')
+        self.assertEqual(addr.sub_name_address('CGameSprite::sub_737990'), '0x737990')
+        self.assertIsNone(addr.sub_name_address('CGameSprite::Draw'))
+        self.assertIsNone(addr.sub_name_address('sub_9FFFFF'))      # outside .text
+
+    def test_parse_query_output_keeps_functions_and_ambiguities(self):
+        addr = load_tool('addresses')
+        got = addr.parse_query_output(
+            'QUERY A::B\t0X5845D0\tA::B\tfunction=yes\n'
+            'junk\n'
+            'QUERY A::C\t0X401000\tA::C\tfunction=no\n'
+            'QUERY A::D\tnot found\n'
+            'QUERY A::B\t0X5845E0\tA::B\tfunction=yes (GhidraScript)\n'
+            'QUERY A::E\t0x004AD250\tA::E\tfunction=yes\n')
+        self.assertEqual(got, {'A::B': {'0x5845D0', '0x5845E0'},
+                               'A::E': {'0x4AD250'}})
+
+    def test_name_addresses_skips_overloads_and_unions_files(self):
+        addr = load_tool('addresses')
+        repo = os.path.join(self.tmp, 'repo')
+        os.makedirs(os.path.join(repo, 'src'))
+        self.git('init', '-q', cwd=repo)
+        with open(os.path.join(repo, 'src', 'A.cpp'), 'w') as f:
+            f.write(self.SRC_A)   # CResStore::CResStore, CResStore::Parse, the Dup::Go overload
+        with open(os.path.join(repo, 'src', 'B.cpp'), 'w') as f:
+            f.write('// 0x403000\nvoid CResStore::Parse(int b)\n{\n}\n\n'
+                    '// 0x403100\nvoid Else::Where()\n{\n}\n')
+        self.git('add', '-A', cwd=repo)
+        self.git('commit', '-qm', 'src', cwd=repo)
+        got = addr.name_addresses(repo, 'HEAD')
+        self.assertEqual(got['Else::Where'], {'0x403100'})
+        # Parse once per file: two addresses, so a row of that name is ambiguous
+        self.assertEqual(got['CResStore::Parse'], {'0x4026C0', '0x403000'})
+        # the overload pair of one file is dropped outright
+        self.assertNotIn('Dup::Go', got)
+        self.assertEqual(addr.name_addresses(repo, 'no-such-ref'), {})
+
+    def test_wave_addresses_command_reaches_the_tool(self):
+        from unittest import mock
+        addr = load_tool('addresses')
+        with mock.patch.object(self.wave, '_addresses', return_value=addr):
+            with mock.patch.object(addr, 'addresses', return_value=(0, 'ok\n')) as run:
+                rc = self.wave.main(['addresses', '--dry'])
+        self.assertEqual(rc, 0)
+        run.assert_called_once_with(dry=True)
+
 
 class GltraceTest(unittest.TestCase):
     """tools/gltrace.summarize -- apitrace dump text to per-frame counts."""

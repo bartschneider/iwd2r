@@ -21322,10 +21322,11 @@
  {
   "file": "src/CGameEffect.cpp",
   "name": "CPersistantEffect::CPersistantEffect",
-  "address": null,
+  "address": "0x4AD250",
   "category": "same",
   "their_len": 172,
-  "our_len": 172
+  "our_len": 172,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CObjectMarker.cpp",
@@ -24946,10 +24947,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::GetQuickItem",
-  "address": null,
+  "address": "0x71B400",
   "category": "same",
   "their_len": 125,
-  "our_len": 125
+  "our_len": 125,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CGameSprite.cpp",
@@ -27378,18 +27380,20 @@
  {
   "file": "src/CGameEffect.cpp",
   "name": "CPersistantEffect84C4B4::CPersistantEffect84C4B4",
-  "address": null,
+  "address": "0x4C1980",
   "category": "same",
   "their_len": 98,
-  "our_len": 98
+  "our_len": 98,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CGameEffect.cpp",
   "name": "CPersistantEffect84C4D4::CPersistantEffect84C4D4",
-  "address": null,
+  "address": "0x4C2A20",
   "category": "same",
   "their_len": 98,
-  "our_len": 98
+  "our_len": 98,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CInfGame.cpp",
@@ -29098,18 +29102,20 @@
  {
   "file": "src/CTimerWorld.cpp",
   "name": "CTimerWorld::IsDusk",
-  "address": null,
+  "address": "0x45B5D0",
   "category": "same",
   "their_len": 85,
-  "our_len": 85
+  "our_len": 85,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CTimerWorld.cpp",
   "name": "CTimerWorld::IsNight",
-  "address": null,
+  "address": "0x45B570",
   "category": "same",
   "their_len": 85,
-  "our_len": 85
+  "our_len": 85,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CUIControlEdit.cpp",
@@ -29226,18 +29232,20 @@
  {
   "file": "src/CTimerWorld.cpp",
   "name": "CTimerWorld::IsDawn",
-  "address": null,
+  "address": "0x45B5A0",
   "category": "same",
   "their_len": 83,
-  "our_len": 83
+  "our_len": 83,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CTimerWorld.cpp",
   "name": "CTimerWorld::IsDay",
-  "address": null,
+  "address": "0x45B540",
   "category": "same",
   "their_len": 83,
-  "our_len": 83
+  "our_len": 83,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CAIScriptFile.cpp",
@@ -33482,18 +33490,20 @@
  {
   "file": "src/CGameEffect.cpp",
   "name": "CPersistantEffect84C420::CPersistantEffect84C420",
-  "address": null,
+  "address": "0x4C2570",
   "category": "same",
   "their_len": 50,
-  "our_len": 50
+  "our_len": 50,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CGameEffect.cpp",
   "name": "CPersistantEffect84C4C4::CPersistantEffect84C4C4",
-  "address": null,
+  "address": "0x4C2070",
   "category": "same",
   "their_len": 50,
-  "our_len": 50
+  "our_len": 50,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CScreenInventory.cpp",
@@ -36714,10 +36724,11 @@
  {
   "file": "src/CSpawn.cpp",
   "name": "CSpawnVar::CSpawnVar",
-  "address": null,
+  "address": "0x76C010",
   "category": "same_stub",
   "their_len": 30,
-  "our_len": 30
+  "our_len": 30,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CBaldurChitin.cpp",
@@ -51450,10 +51461,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::CheckSpellUseful",
-  "address": null,
+  "address": "0x764880",
   "category": "only_theirs",
   "their_len": 9266,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CGameSprite.cpp",
@@ -51538,10 +51550,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::sub_71C0C0",
-  "address": null,
+  "address": "0x71C0C0",
   "category": "only_theirs",
   "their_len": 4254,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "sub-name"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -51634,10 +51647,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::sub_737990",
-  "address": null,
+  "address": "0x737990",
   "category": "only_theirs",
   "their_len": 3252,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "sub-name"
  },
  {
   "file": "src/CAIGroup.cpp",
@@ -52010,10 +52024,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::sub_71CC90",
-  "address": null,
+  "address": "0x71CC90",
   "category": "only_theirs",
   "their_len": 1695,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "sub-name"
  },
  {
   "file": "src/CNetwork.cpp",
@@ -52482,10 +52497,11 @@
  {
   "file": "src/CGameAIBase.cpp",
   "name": "CGameAIBase::CheckTargetVisibility",
-  "address": null,
+  "address": "0x44DAC0",
   "category": "only_theirs",
   "their_len": 918,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -52498,10 +52514,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::sub_71CEA0",
-  "address": null,
+  "address": "0x71CEA0",
   "category": "only_theirs",
   "their_len": 915,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "sub-name"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -53170,10 +53187,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::CheckSpellTarget",
-  "address": null,
+  "address": "0x764810",
   "category": "only_theirs",
   "their_len": 390,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -53506,18 +53524,20 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileEyeOfStone::CProjectileEyeOfStone",
-  "address": null,
+  "address": "0x572E60",
   "category": "only_theirs",
   "their_len": 206,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileHaltUndead::CProjectileHaltUndead",
-  "address": null,
+  "address": "0x573160",
   "category": "only_theirs",
   "their_len": 206,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -53530,10 +53550,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileSleep::CProjectileSleep",
-  "address": null,
+  "address": "0x574300",
   "category": "only_theirs",
   "their_len": 206,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -53546,10 +53567,11 @@
  {
   "file": "src/CProjectile.cpp",
   "name": "CProjectileHoldAnimal::CProjectileHoldAnimal",
-  "address": null,
+  "address": "0x572830",
   "category": "only_theirs",
   "their_len": 205,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CProjectile.cpp",
@@ -54266,10 +54288,11 @@
  {
   "file": "src/CGameAIBase.cpp",
   "name": "CGameAIBase::UpdateTarget",
-  "address": null,
+  "address": "0x799E60",
   "category": "only_theirs",
   "their_len": 2,
-  "our_len": 0
+  "our_len": 0,
+  "address_source": "fork-header"
  },
  {
   "file": "src/CGameEffect.cpp",
@@ -55330,10 +55353,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::sub_75F3D0",
-  "address": null,
+  "address": "0x75F3D0",
   "category": "only_ours",
   "their_len": 0,
-  "our_len": 1612
+  "our_len": 1612,
+  "address_source": "sub-name"
  },
  {
   "file": "src/CUIControlEditMultiLine.cpp",
@@ -55562,10 +55586,11 @@
  {
   "file": "src/CGameText.cpp",
   "name": "CGameText::SetPositionInView",
-  "address": null,
+  "address": "0x4CB820",
   "category": "only_ours",
   "their_len": 0,
-  "our_len": 1084
+  "our_len": 1084,
+  "address_source": "ghidra"
  },
  {
   "file": "src/IcewindCGameEffects.cpp",
@@ -55706,10 +55731,11 @@
  {
   "file": "src/CGameText.cpp",
   "name": "CGameText::IsOnScreen",
-  "address": null,
+  "address": "0x4CB9B0",
   "category": "only_ours",
   "their_len": 0,
-  "our_len": 890
+  "our_len": 890,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CMessage.cpp",
@@ -56234,10 +56260,11 @@
  {
   "file": "src/CRuleTables.cpp",
   "name": "CRuleTables::sub_547620",
-  "address": null,
+  "address": "0x547620",
   "category": "only_ours",
   "their_len": 0,
-  "our_len": 224
+  "our_len": 224,
+  "address_source": "sub-name"
  },
  {
   "file": "src/CVidMode.cpp",
@@ -56554,10 +56581,11 @@
  {
   "file": "src/CGameSprite.cpp",
   "name": "CGameSprite::sub_717250",
-  "address": null,
+  "address": "0x717250",
   "category": "only_ours",
   "their_len": 0,
-  "our_len": 31
+  "our_len": 31,
+  "address_source": "sub-name"
  },
  {
   "file": "src/CGameEffect.cpp",
@@ -64762,10 +64790,11 @@
  {
   "file": "src/CGameEffect.cpp",
   "name": "CPersistantEffect84C4A4::CPersistantEffect84C4A4",
-  "address": null,
+  "address": "0x4C18A0",
   "category": "ours_changed_theirs_base",
   "their_len": 243,
-  "our_len": 171
+  "our_len": 171,
+  "address_source": "ghidra"
  },
  {
   "file": "src/CAIGroup.cpp",
