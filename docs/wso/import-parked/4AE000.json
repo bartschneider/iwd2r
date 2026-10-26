@@ -1,0 +1,1 @@
+{"address": "0x4AE000", "name": "CGameEffectHaste::ApplyEffect", "file": "src/CGameEffect.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
