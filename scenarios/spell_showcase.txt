@@ -1,5 +1,5 @@
 # Task 37's scenario: a three-sorcerer party whose way through the start
-# area (AR1000) ends with ten spells cast - projectiles at the goblin,
+# area (AR1000) ends with six spells cast - projectiles at the party,
 # cones and areas on the ground north of the party - to exercise the
 # projectile and effect rows (CProjectile, IcewindCVisualEffect).
 #
@@ -40,20 +40,21 @@
 # the cones' and areas' radius, Sleep further out at 386,90), and 5
 # needs no target. None of the ten is actionType 5.
 #
-# Bram casts first, all four of his: Ray of Enfeeblement at the goblin
-# (strength drain, no hit-point damage, so the goblin's 4 hit points
-# stay for the damage casts), Ice Dagger (1d4) and Magic Missile
-# (1d4+1) at it - 2 + 2 damage at the least, so it drops here - and
-# Color Spray north. Aria's and Cade's creature casts target party
-# members by character key instead: Bram is done casting, so his hit
-# points are free to spend, and a party member is always a valid
-# creature target. That also avoids the one trap the route has: a cast
-# canceled for an invalid target stays armed, and the next character
-# key would then target that member with the armed spell. Larloch's
-# Minor Drain (1d4) and Chromatic Orb (1d8) land on Bram, Cade's
-# second Ray (no damage) on Aria, who is done casting by then. The
-# ground casts are Color Spray, Burning Hands and Grease at 386,120
-# and Sleep at 386,90.
+# Six casts, two per caster, every one on F1 or F2: attempt 1 of Task
+# 43 proved the original never arms the cast list's rows three and
+# four (their F3/F4 picks armed nothing - the target click became a
+# walk), and that a cast targeted at the caster herself hangs her
+# mid-cast. So each caster's first two chargen picks are the ones cast,
+# the creature casts target a living other member by character key
+# (never the caster), and only the point spells click the ground, at
+# 386,165 where Grease landed as a cast-at-point (action 95). Bram
+# opens with his Ray of Enfeeblement at Aria (strength drain only);
+# Aria answers with her Ray at Bram, then Greases the ground north.
+# Bram's Burning Hands and Cade's Color Spray cone that same ground -
+# the cone points north, away from the party, into the goblin's melee.
+# Damage goes last: Cade's Magic Missile at Bram, 1d4+1 that cannot
+# miss, after every other cast has fired (Bram's hit points untouched
+# until then - the Rays drain strength, and the cones face away).
 #
 # Space ends the pause and the casts play out: the Rays and Larloch's
 # fly as travelling projectiles, Magic Missile and Ice Dagger fly at
@@ -185,16 +186,17 @@ checkpoint a_feats_done
 # launch 2's run showed the clicks bought other spells, and this
 # mapping is the correction.
 #
-# Aria's spells (pick order, the cast list's F1 to F4): Larloch's
-# Minor Drain (379,222), Chromatic Orb (422,179), Burning Hands
-# (293,179), Sleep (508,265); then Next back to the main menu.
+# Aria's spells (pick order, the cast list's F1 to F4; her casts use
+# the first two): Ray of Enfeeblement (508,222), Grease (508,179);
+# Larloch's Minor Drain (379,222) and Chromatic Orb (422,179) come
+# along as spares. Then Next back to the main menu.
+click 508 222
+wait 15
+click 508 179
+wait 15
 click 379 222
 wait 15
 click 422 179
-wait 15
-click 293 179
-wait 15
-click 508 265
 wait 15
 checkpoint a_spells_chosen
 click 536 562
@@ -307,15 +309,16 @@ wait 15
 click 536 562
 wait 30
 checkpoint b_feats_done
-# Bram's spells: Ray of Enfeeblement (508,222), Ice Dagger (293,222),
-# Magic Missile (465,222), Color Spray (465,179).
+# Bram's spells: Ray of Enfeeblement (508,222) and Burning Hands
+# (293,179) are his casts; Ice Dagger (293,222) and Magic Missile
+# (465,222) ride along as spares.
 click 508 222
+wait 15
+click 293 179
 wait 15
 click 293 222
 wait 15
 click 465 222
-wait 15
-click 465 179
 wait 15
 checkpoint b_spells_chosen
 click 536 562
@@ -425,16 +428,16 @@ wait 15
 click 536 562
 wait 30
 checkpoint c_feats_done
-# Cade's spells: Ray of Enfeeblement (508,222), Grease (508,179);
-# Chromatic Orb (422,179) and Ice Dagger (293,222) come along as
-# spares - the casts below use only his first two.
+# Cade's spells (his casts use the first two): Magic Missile (465,222)
+# - the damage tail - and Color Spray (465,179); Ray of Enfeeblement
+# (508,222) and Grease (508,179) come along as spares.
+click 465 222
+wait 15
+click 465 179
+wait 15
 click 508 222
 wait 15
 click 508 179
-wait 15
-click 422 179
-wait 15
-click 293 222
 wait 15
 checkpoint c_spells_chosen
 click 536 562
@@ -689,25 +692,22 @@ shot engaged
 wait 120
 checkpoint attacked
 shot attacked
-# Centre on Aria (view 119,686) and give the ten casts. Launch-1 of
-# Task 43 proved, on the original, that the digit-key target is the
-# one delivery path that always lands: Aria's Larloch's Minor Drain
-# (key 2 = Bram while armed) resolved and killed him, and Cade's Ray
-# (key 1 = Aria) and Grease (ground click, action 95 = cast-at-point)
-# both fired. The creature-target clicks did not: the goblin (hp 4 the
-# whole phase, id 1179666) never sat under (390,188) - Bram's b3 click
-# sent him WALKING to the click point, i.e. it landed on empty ground,
-# and Aria's Burning-Hands click did the same to her. So every
-# creature-target cast now targets a party member with its digit key
-# (on-screen, always valid), and only the point spells (cone/area)
-# keep the ground click at 386,165, which Grease proved in range.
-# Damage spells go last, globally, and spend their own caster or a
-# spent one, so no live caster or later target is ever lost first:
-# the six no-damage casts fire in any world state, floor 8 of 10.
-# Each cycle: reselect the caster (resets the action bar; if a cast
-# died un-armed its spell stays armed and the reselect fires it at
-# the caster - a bonus cast, never a loss), F5, F-pick, target,
-# Space, a wait long enough for the cast to resolve and land.
+# Centre on Aria (view 119,686) and give the six casts. Attempt 1 of
+# Task 43 proved the delivery paths on the original: the digit-key
+# party target is the one creature-spell delivery that always lands
+# (Aria's Larloch's at key 2 resolved and killed Bram; Cade's Ray at
+# key 1 fired), and the ground click at 386,165 delivered Grease as a
+# cast-at-point (action 95). It also proved the two failures this
+# shape avoids: F3 and F4 never arm a spell (their target clicks
+# became walks), and a cast targeted at the caster herself hangs her
+# in action 31 indefinitely. So every cast sits on F1 or F2 - the
+# caster's first two chargen picks - the creature casts target a
+# living other member by digit key, never the caster, and only the
+# point spells click the ground. Damage goes last. Each cycle:
+# reselect the caster (resets the action bar; if a cast died un-armed
+# its spell stays armed and the reselect fires it at the caster - a
+# bonus cast, never a loss), F5, F-pick, target, Space, a wait long
+# enough for the cast to resolve and land.
 origin ui
 click 528 460
 click 528 460
@@ -726,45 +726,9 @@ wait 10
 key SPACE
 wait 220
 shot b1_ray
-# Color Spray: cone at the ground north of the party.
-key 2
-wait 10
-key F5
-wait 10
-key F4
-wait 10
-click 386 165
-wait 10
-key SPACE
-wait 220
-shot b2_colorspray
-# Aria: key 1 selects her. Burning Hands: cone at the same ground.
+# Aria: key 1 selects her. Her Ray targets Bram (key 2 while armed):
+# no damage, and Bram's own casting is done.
 key 1
-wait 10
-key F5
-wait 10
-key F3
-wait 10
-click 386 165
-wait 10
-key SPACE
-wait 220
-shot a1_burninghands
-# Sleep: area at the same ground.
-key 1
-wait 10
-key F5
-wait 10
-key F4
-wait 10
-click 386 165
-wait 10
-key SPACE
-wait 220
-shot a2_sleep
-# Cade: key 3 selects him. His Ray of Enfeeblement targets Bram
-# (key 2 while armed): no damage, and Bram has finished casting.
-key 3
 wait 10
 key F5
 wait 10
@@ -774,9 +738,34 @@ key 2
 wait 10
 key SPACE
 wait 220
-shot c1_ray
-# Grease: ground north - the exact cast that landed as a
-# cast-at-point (action 95) in launch 1.
+shot a1_ray
+# Grease: ground north - the exact cast that landed as a cast-at-point
+# (action 95) in launch 1.
+key 1
+wait 10
+key F5
+wait 10
+key F2
+wait 10
+click 386 165
+wait 10
+key SPACE
+wait 220
+shot a2_grease
+# Bram's Burning Hands: cone at the same ground, pointing north, away
+# from the party, into the goblin's melee.
+key 2
+wait 10
+key F5
+wait 10
+key F2
+wait 10
+click 386 165
+wait 10
+key SPACE
+wait 220
+shot b2_burninghands
+# Cade: key 3 selects him. Color Spray cones the same ground.
 key 3
 wait 10
 key F5
@@ -787,58 +776,20 @@ click 386 165
 wait 10
 key SPACE
 wait 220
-shot c2_grease
-# Damage tail; every caster is done. Ice Dagger at Bram himself
-# (key 2 twice: select, then target while armed): 1d4+1 on his 4 hp.
-key 2
-wait 10
-key F5
-wait 10
-key F2
-wait 10
-key 2
-wait 10
-key SPACE
-wait 220
-shot b3_icedagger
-# Chromatic Orb at Aria herself (key 1 twice), after her own casting.
-key 1
-wait 10
-key F5
-wait 10
-key F2
-wait 10
-key 1
-wait 10
-key SPACE
-wait 220
-shot a4_chromaticorb
-# Larloch's Minor Drain at Aria herself: fires if the orb left her
-# alive, and heals her for what it drains.
-key 1
+shot c2_colorspray
+# Damage last: Magic Missile at Bram (key 2 while armed) - 1d4+1 that
+# cannot miss, and nothing before it touched Bram's hit points.
+key 3
 wait 10
 key F5
 wait 10
 key F1
 wait 10
-key 1
-wait 10
-key SPACE
-wait 220
-shot a3_larlochs
-# Magic Missile at Bram himself: fires if the Ice Dagger left him
-# alive.
-key 2
-wait 10
-key F5
-wait 10
-key F3
-wait 10
 key 2
 wait 10
 key SPACE
 wait 220
-shot b4_magicmissile
+shot c1_magicmissile
 # One more Space: the last queued cast resolves on the next toggle,
 # and nothing follows to unpause a world this one might pause.
 key SPACE
