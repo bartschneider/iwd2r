@@ -6620,7 +6620,7 @@
     "i043": {
       "assigned_at": "2026-10-26T12:56:42+00:00",
       "branch": "p3/wso-i043",
-      "closed_at": null,
+      "closed_at": "2026-10-26T14:04:25+00:00",
       "files": [
         "src/IcewindCVisualEffect.cpp",
         "src/CUIControlTextDisplay.cpp",
@@ -6630,6 +6630,7 @@
         "src/CMultiplayerSettings.cpp",
         "src/CUIManager.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -6638,7 +6639,6 @@
           "file": "src/IcewindCVisualEffect.cpp",
           "name": "IcewindCVisualEffect::sub_586AC0",
           "our_len": 122,
-          "outcome": "kept",
           "their_len": 136
         },
         {
@@ -6647,7 +6647,6 @@
           "file": "src/CUIControlTextDisplay.cpp",
           "name": "CUIControlTextDisplay::OnScrollUp",
           "our_len": 124,
-          "outcome": "kept",
           "their_len": 131
         },
         {
@@ -6656,7 +6655,6 @@
           "file": "src/CScreenJournal.cpp",
           "name": "CScreenJournal::OnCancelButtonClick",
           "our_len": 117,
-          "outcome": "kept",
           "their_len": 119
         },
         {
@@ -6665,7 +6663,6 @@
           "file": "src/CScreenMap.cpp",
           "name": "CScreenMap::OnCancelButtonClick",
           "our_len": 117,
-          "outcome": "kept",
           "their_len": 119
         },
         {
@@ -6674,7 +6671,6 @@
           "file": "src/CInfCursor.cpp",
           "name": "CInfToolTip::CInfToolTip",
           "our_len": 110,
-          "outcome": "kept",
           "their_len": 113
         },
         {
@@ -6683,7 +6679,6 @@
           "file": "src/CMultiplayerSettings.cpp",
           "name": "CMultiplayerSettings::sub_518660",
           "our_len": 100,
-          "outcome": "kept",
           "their_len": 107
         },
         {
@@ -6692,7 +6687,6 @@
           "file": "src/CUIManager.cpp",
           "name": "CUIManager::ForceToolTip",
           "our_len": 82,
-          "outcome": "kept",
           "their_len": 120
         },
         {
@@ -6701,7 +6695,6 @@
           "file": "src/CMultiplayerSettings.cpp",
           "name": "CMultiplayerSettings::sub_518560",
           "our_len": 91,
-          "outcome": "kept",
           "their_len": 106
         },
         {
@@ -6710,7 +6703,6 @@
           "file": "src/IcewindCVisualEffect.cpp",
           "name": "IcewindCVisualEffect::sub_586A60",
           "our_len": 88,
-          "outcome": "kept",
           "their_len": 102
         },
         {
@@ -6719,11 +6711,10 @@
           "file": "src/CMultiplayerSettings.cpp",
           "name": "CMultiplayerSettings::sub_5186A0",
           "our_len": 87,
-          "outcome": "kept",
           "their_len": 94
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     }
   }
