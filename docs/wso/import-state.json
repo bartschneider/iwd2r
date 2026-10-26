@@ -5513,7 +5513,7 @@
     "i037": {
       "assigned_at": "2026-10-26T07:02:46+00:00",
       "branch": "p3/wso-i037",
-      "closed_at": null,
+      "closed_at": "2026-10-26T09:04:19+00:00",
       "files": [
         "src/CDimm.cpp",
         "src/CGameAnimationTypeCharacterOld.cpp",
@@ -5528,6 +5528,7 @@
         "src/CScreenSpellbook.cpp",
         "src/CAlias.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -5689,6 +5690,185 @@
           "name": "CAlias::ParseRawData",
           "our_len": 526,
           "their_len": 539
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i038": {
+      "assigned_at": "2026-10-26T08:50:30+00:00",
+      "branch": "p3/wso-i038",
+      "closed_at": null,
+      "files": [
+        "src/IcewindCGameEffects.cpp",
+        "src/CGameEffect.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CMessage.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CImm.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x567500",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectProtectionFromEvil::ApplyEffect",
+          "our_len": 513,
+          "their_len": 520
+        },
+        {
+          "address": "0x4C3F30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffect::sub_4C3F30",
+          "our_len": 86,
+          "their_len": 106
+        },
+        {
+          "address": "0x61D9B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlButtonCharGenAppearanceCustom::OnLButtonClick",
+          "our_len": 702,
+          "their_len": 704
+        },
+        {
+          "address": "0x4FA840",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageColorReset::Run",
+          "our_len": 652,
+          "their_len": 735
+        },
+        {
+          "address": "0x5FB160",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnKeyDown",
+          "our_len": 679,
+          "their_len": 682
+        },
+        {
+          "address": "0x602960",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionQuitGame::OnLButtonClick",
+          "our_len": 674,
+          "their_len": 678
+        },
+        {
+          "address": "0x615680",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CUIControlButtonCharGenImport::OnLButtonClick",
+          "our_len": 671,
+          "their_len": 673
+        },
+        {
+          "address": "0x601790",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::AutoStartInitialize",
+          "our_len": 667,
+          "their_len": 669
+        },
+        {
+          "address": "0x605720",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnection605570::OnLButtonClick",
+          "our_len": 643,
+          "their_len": 683
+        },
+        {
+          "address": "0x5E9800",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnAppearanceButtonClick",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E47E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnBiographyButtonClick",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E9D80",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnCustomPortraitsButtonClick",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E4900",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnCustomizeBiographyButtonClick",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E46C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnInformationButtonClick",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E4C40",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnScriptButtonClick",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E9910",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnSoundsButtonClick",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E4A20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::sub_5E4A20",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x5E4B30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::sub_5E4B30",
+          "our_len": 619,
+          "their_len": 621
+        },
+        {
+          "address": "0x603510",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionJoinGame::OnLButtonClick",
+          "our_len": 618,
+          "their_len": 620
+        },
+        {
+          "address": "0x7C2E10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CImm.cpp",
+          "name": "CImm::sub_7C2E10",
+          "our_len": 594,
+          "their_len": 611
         }
       ],
       "status": "assigned",

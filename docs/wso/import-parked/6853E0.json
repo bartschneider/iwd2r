@@ -1,0 +1,1 @@
+{"address": "0x6853E0", "name": "CUIControlButtonStoreOpenBag::OnLButtonClick", "file": "src/CScreenStore.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}

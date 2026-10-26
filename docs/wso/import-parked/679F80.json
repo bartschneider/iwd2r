@@ -1,0 +1,1 @@
+{"address": "0x679F80", "name": "CScreenStore::IsSellItemButtonClickable", "file": "src/CScreenStore.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}

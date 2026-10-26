@@ -1,0 +1,1 @@
+{"address": "0x585440", "name": "IcewindMisc::CreateEffectDamage", "file": "src/IcewindMisc.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}

@@ -1,0 +1,1 @@
+{"address": "0x6422D0", "name": "CScreenMap::OnErrorButtonClick", "file": "src/CScreenMap.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}

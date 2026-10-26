@@ -6207,7 +6207,7 @@ void CScreenStore::SetGroupItemCount(INT nIndex, DWORD nCount)
     if (nIndex >= 0 && nIndex < m_lGroupItems.GetCount()) {
         CScreenStoreItem* pItem = m_lGroupItems.GetAt(m_lGroupItems.FindIndex(nIndex));
         pItem->m_nCount = min(nCount, pItem->m_nMaxCount);
-        pItem->m_nValue = pItem->m_nCount * pItem->m_nSingleValue;
+        pItem->m_nValue = nCount * pItem->m_nSingleValue;
     }
 }
 
@@ -6217,7 +6217,7 @@ void CScreenStore::SetStoreItemCount(INT nIndex, DWORD nCount)
     if (nIndex >= 0 && nIndex < m_lStoreItems.GetCount()) {
         CScreenStoreItem* pItem = m_lStoreItems.GetAt(m_lStoreItems.FindIndex(nIndex));
         pItem->m_nCount = min(nCount, pItem->m_nMaxCount);
-        pItem->m_nValue = pItem->m_nCount * pItem->m_nSingleValue;
+        pItem->m_nValue = nCount * pItem->m_nSingleValue;
     }
 }
 

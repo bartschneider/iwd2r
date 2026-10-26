@@ -1,0 +1,1 @@
+{"address": "0x66A040", "name": "CScreenSpellbook::OnPortraitLClick", "file": "src/CScreenSpellbook.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}

@@ -1,0 +1,1 @@
+{"address": "0x646880", "name": "CUIControlButtonMapNoteFlagChoice::OnLButtonClick", "file": "src/CScreenMap.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}
