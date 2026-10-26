@@ -4077,7 +4077,7 @@
     "i026": {
       "assigned_at": "2026-10-25T20:58:24+00:00",
       "branch": "p3/wso-i026",
-      "closed_at": null,
+      "closed_at": "2026-10-26T00:17:25+00:00",
       "files": [
         "src/CGameSprite.cpp",
         "src/CUIControlEditMultiLine.cpp",
@@ -4085,6 +4085,7 @@
         "src/CGameArea.cpp",
         "src/CProjectile.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -4125,6 +4126,7 @@
           "file": "src/CGameSprite.cpp",
           "name": "CGameSprite::sub_72DE60",
           "our_len": 0,
+          "outcome": "kept",
           "their_len": 22
         },
         {
@@ -4248,7 +4250,7 @@
           "their_len": 904
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i027": {
