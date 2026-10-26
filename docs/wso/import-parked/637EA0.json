@@ -1,0 +1,1 @@
+{"address": "0x637EA0", "name": "CUIControlButtonJournalAnnotate::OnLButtonClick", "file": "src/CScreenJournal.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
