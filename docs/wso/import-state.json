@@ -6067,7 +6067,7 @@
     "i040": {
       "assigned_at": "2026-10-26T10:19:09+00:00",
       "branch": "p3/wso-i040",
-      "closed_at": null,
+      "closed_at": "2026-10-26T12:03:40+00:00",
       "files": [
         "src/CScreenConnection.cpp",
         "src/CMessage.cpp",
@@ -6078,6 +6078,7 @@
         "src/CInfGame.cpp",
         "src/CAIObjectType.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -6239,6 +6240,191 @@
           "name": "CAIObjectType::sub_40D050",
           "our_len": 394,
           "their_len": 399
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i041": {
+      "assigned_at": "2026-10-26T10:51:05+00:00",
+      "branch": "p3/wso-i041",
+      "closed_at": null,
+      "files": [
+        "src/CScreenInventory.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CGameSprite.cpp",
+        "src/CScreenStore.cpp",
+        "src/CScreenLoad.cpp",
+        "src/CScreenStart.cpp",
+        "src/CGameAIBase.cpp",
+        "src/CUIControlEdit.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CUIControlScrollBar.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CBaldurChitin.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x632140",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventoryColor::OnLButtonClick",
+          "our_len": 442,
+          "their_len": 444
+        },
+        {
+          "address": "0x691140",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartCommand",
+          "our_len": 430,
+          "their_len": 434
+        },
+        {
+          "address": "0x74FC50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::GroupAttack",
+          "our_len": 384,
+          "their_len": 400
+        },
+        {
+          "address": "0x6839D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreBuyDrinksDrink::OnLButtonClick",
+          "our_len": 389,
+          "their_len": 391
+        },
+        {
+          "address": "0x63C3E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::OnDeleteButtonClick",
+          "our_len": 388,
+          "their_len": 390
+        },
+        {
+          "address": "0x670050",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStart.cpp",
+          "name": "CScreenStart::OnErrorButtonClick",
+          "our_len": 378,
+          "their_len": 380
+        },
+        {
+          "address": "0x466030",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::RevealAreaOnMap",
+          "our_len": 370,
+          "their_len": 378
+        },
+        {
+          "address": "0x4D7070",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlEdit.cpp",
+          "name": "CUIControlEdit::OnRButtonDown",
+          "our_len": 370,
+          "their_len": 376
+        },
+        {
+          "address": "0x667D10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CUIControlScrollBarSinglePlayerParties::InvalidateItems",
+          "our_len": 370,
+          "their_len": 372
+        },
+        {
+          "address": "0x5F89B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::sub_5F89B0",
+          "our_len": 353,
+          "their_len": 365
+        },
+        {
+          "address": "0x724FD0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_724FD0",
+          "our_len": 343,
+          "their_len": 364
+        },
+        {
+          "address": "0x4E4EC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlScrollBar.cpp",
+          "name": "CUIControlScrollBar::OnLButtonUp",
+          "our_len": 318,
+          "their_len": 324
+        },
+        {
+          "address": "0x67ED50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreBarPanel::OnLButtonClick",
+          "our_len": 311,
+          "their_len": 313
+        },
+        {
+          "address": "0x661B30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::OnCancelButtonClick",
+          "our_len": 307,
+          "their_len": 309
+        },
+        {
+          "address": "0x4E5950",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlScrollBar.cpp",
+          "name": "CUIControlEditScrollBar::OnLButtonUp",
+          "our_len": 307,
+          "their_len": 308
+        },
+        {
+          "address": "0x63E2C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::OnErrorButtonClick",
+          "our_len": 299,
+          "their_len": 301
+        },
+        {
+          "address": "0x66DB60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CUIControlButtonSpellbookSpell::OnRButtonClick",
+          "our_len": 299,
+          "their_len": 301
+        },
+        {
+          "address": "0x5F94C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CUIControlScrollbarCharacter5F9410::OnScrollDown",
+          "our_len": 279,
+          "their_len": 309
+        },
+        {
+          "address": "0x426DC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CBaldurChitin.cpp",
+          "name": "CBaldurChitin::GetFirstCDRomDrive",
+          "our_len": 271,
+          "their_len": 279
+        },
+        {
+          "address": "0x7615F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_7615F0",
+          "our_len": 257,
+          "their_len": 286
         }
       ],
       "status": "assigned",
