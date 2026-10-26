@@ -13,6 +13,7 @@ public:
 
     CGameDoor(CGameArea* pArea, CAreaFileDoorObject* pDoorObject, CAreaPoint* pPoints, WORD maxPts);
     /* 0000 */ ~CGameDoor() override;
+    /* 0078 */ void AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL immediateApply) override;
     /* 000C */ void AIUpdate() override;
     /* 0028 */ BOOLEAN CanSaveGame(STRREF& strError) override;
     /* 002C */ BOOLEAN CompressTime(DWORD deltaTime) override;
