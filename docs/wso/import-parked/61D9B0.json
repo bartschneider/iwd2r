@@ -1,0 +1,7 @@
+{
+  "address": "0x61D9B0",
+  "name": "CUIControlButtonCharGenAppearanceCustom::OnLButtonClick",
+  "file": "src/CScreenCreateChar.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
