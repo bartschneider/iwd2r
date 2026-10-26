@@ -23981,7 +23981,7 @@ SHORT CGameSprite::EquipItem()
 SHORT CGameSprite::FindTraps()
 {
     if (!m_typeAI.IsClassValid(CAIObjectType::C_ROGUE)
-        && !m_typeAI.IsClassValid(CAIObjectType::C_MONK)) {
+        || !m_typeAI.IsClassValid(CAIObjectType::C_MONK)) {
         return ACTION_ERROR;
     }
 
