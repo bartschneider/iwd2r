@@ -1701,11 +1701,26 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 # Imported means changed: a body left (or put back) as the
                 # stub cannot close on any evidence, and only touched
                 # functions have their trace_source checked by the gate.
+                present = (row.get('category') == 'only_theirs'
+                           and wt is not None
+                           and _labelled_at(wt, mb, row['address']))
+                if present and row.get('outcome') == 'kept' and k in touched:
+                    # Present (Task 40): ours already carries the body, so a
+                    # kept present row must keep it unchanged like any other
+                    # kept row; a change is an import, not a keep.
+                    problems.append(f'{row["address"]}: kept but its body changed against '
+                                    f'{mb[:12] if mb else base}; keep the change and move the '
+                                    f'row to ## Imported (take it off ## Kept), or edit it '
+                                    f'back and park it ({parked_rel(k)})')
+                    continue
                 if (k not in touched and row.get('outcome') == 'kept'
-                        and row.get('category') == 'theirs_changed_ours_base'):
+                        and (row.get('category') == 'theirs_changed_ours_base'
+                             or present)):
                     # Kept (Task 19): ours already matches the original, so the
                     # body is untouched; what the row needs instead is the
-                    # Frida phase's measurement of it, kind: trace.
+                    # Frida phase's measurement of it, kind: trace.  A present
+                    # row (Task 40) closes the same way: ours already has the
+                    # body, so it is kept, never imported.
                     bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text,
                                       batch_id, row.get('measured_body'), row.get('file'))
                     this_batch = frida_trace(text) and _frida_probe(text).startswith(
@@ -1877,6 +1892,40 @@ def _resolve_tip(repo, tip):
     r = subprocess.run(['git', '-C', repo, 'rev-parse', '--verify', '--quiet',
                         tip + '^{commit}'], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
+
+
+_labelled_cache = {}      # (repo, sha) -> {address key: file} over all src/*.cpp
+
+
+def _labelled_at(repo, ref, address):
+    """True when repo's `ref` carries a `// 0xADDR` header comment (our label
+    convention) for `address` in a src/*.cpp: our tree already has the
+    function, so an only_theirs row for it is present, not an import.  The
+    scan is cached per (repo, sha); False when the ref does not resolve or
+    git cannot read it (no repo, no commits)."""
+    if not ref or not address:
+        return False
+    sha = _resolve_tip(repo, ref) if repo else None
+    if sha is None:
+        return False
+    ce = _check_evidence()
+    key = (repo, sha)
+    if key not in _labelled_cache:
+        r = ce.git(repo, 'ls-tree', '-r', '--name-only', sha, '--', 'src/',
+                   check=False)
+        if r.returncode != 0:
+            return False
+        labels = {}
+        for rel in r.stdout.splitlines():
+            if not rel.endswith('.cpp'):
+                continue
+            text = ce.git(repo, 'show', f'{sha}:{rel}', check=False)
+            if text.returncode != 0:
+                continue
+            for _first, _last, a, _name in ce.spans(text.stdout.splitlines()):
+                labels.setdefault(_addr_key('0x%X' % a), rel)
+        _labelled_cache[key] = labels
+    return _addr_key(address) in _labelled_cache[key]
 
 
 def _xrec_rows(repo, base, theirs, ours):
@@ -2480,9 +2529,10 @@ def _import_tally(state, import_state=None, parked=None):
     i<NNN>) of `state` and `import_state`, split by each row's category
     (none: a stub); a row with a docs/wso/import-parked entry (`parked`,
     address keys) is parked, a row recorded outcome kept (the driver marks it
-    only for a base-body row untouched against the merge base, and close
-    lets it close only with this batch's trace) is kept, any other closed row
-    imported.  None without any."""
+    for a base-body row untouched against the merge base, and for an
+    only-theirs row ours already carries a body for, and close lets it close
+    only on standing evidence or this batch's trace) is kept, any other
+    closed row imported.  None without any."""
     parked = parked or {}
     seen = {}
     for st in (state, import_state):
@@ -2501,9 +2551,11 @@ def _import_tally(state, import_state=None, parked=None):
     text = ('imports: stubs %d imported / %d kept / %d parked; '
             'base-body %d imported / %d kept / %d parked' % (*n['stubs'], *n['base-body']))
     if any(n['only-theirs']):
-        # never kept; the clause appears once such a row has closed, so the
-        # line of a stub / base-body history reads as it always did
-        text += '; only-theirs %d imported / %d parked' % (n['only-theirs'][0], n['only-theirs'][2])
+        # kept appears once a present only-theirs row has closed (ours
+        # already carried the body); a history without one reads as before
+        kept = '; %d kept' % n['only-theirs'][1] if n['only-theirs'][1] else ''
+        text += '; only-theirs %d imported%s / %d parked' % (
+            n['only-theirs'][0], kept, n['only-theirs'][2])
     return text
 
 

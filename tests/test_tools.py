@@ -10657,6 +10657,29 @@ class DriverTest(unittest.TestCase):
         self.assertTrue(probs[0].startswith('0x401000: listed under ## Kept but ours has no '
                                             'body there; an only-theirs row is never kept'), probs)
 
+    def test_present_only_theirs_row_under_kept_is_accepted(self):
+        # Task 40: an only-theirs row whose address our src labels at the
+        # merge base is present, so its kept line reads like a base-body
+        # row's: neither only-theirs refusal fires for it
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, True)
+        def g(*a):
+            return subprocess.run(['git', '-C', d, '-c', 'user.name=T',
+                                   '-c', 'user.email=t@e.com',
+                                   '-c', 'commit.gpgsign=false', *a],
+                                  check=True, capture_output=True, text=True)
+        g('init', '-q', '-b', 'first')
+        _write(os.path.join(d, 'src', 'A.cpp'),
+               '// 0x401000\nint F()\n{\n  return 1;\n}\n')
+        _write(os.path.join(d, 'docs', 'evidence', '401000.md'), 'kind: read-only\n')
+        g('add', '-A')
+        g('commit', '-q', '-m', 'base')
+        batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
+            {'address': '0x401000', 'category': 'only_theirs'}]}
+        key = driver._tool('wave')._addr_key
+        self.assertEqual(
+            driver._kept_and_parked_problems(batch, d, 'first', ('0x401000',), key, []), [])
+
     def test_parked_evidence_check_covers_the_batch_and_what_the_branch_changed(self):
         d = self._mc_repo({'401000': 'kind: read-only', '405000': 'stray'})
         batch = {'id': 'i009', 'branch': 'p3/wso-i009', 'rows': [
@@ -22161,6 +22184,63 @@ class WaveCloseRulesTest(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn('row 0x643CD0 not imported: body unchanged', out)
 
+    def _present_ready(self, body=7, evidence='trace'):
+        """Draw (0x643CD0) an only-theirs row ours already carries the body
+        for (Task 40): `first` holds the labelled body, the branch keeps it
+        (`body`) or changes it, the state row marked kept; Render imported."""
+        self.init_repo()
+        _write(os.path.join(self.root, 'src', 'A.cpp'), self.SRC_BODY % 7)
+        self.git('add', '-A', cwd=self.root)
+        self.git('commit', '-qm', 'draw', cwd=self.root)
+        self.git('merge', '-q', 'first', cwd=self.wt)
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CC0.md'),
+               f'---\naddress: 0x643CC0\nname: fn\nkind: trace\n'
+               f'trace_source: {self.FRIDA}\n---\n\nnotes\n')
+        head = ('kind: trace\ntrace_source: %s' % self.FRIDA if evidence == 'trace'
+                else 'kind: oracle\noracle_case: rules/draw')
+        _write(os.path.join(self.wt, 'docs', 'evidence', '643CD0.md'),
+               f'---\naddress: 0x643CD0\nname: fn\n{head}\n---\n\nnotes\n')
+        if evidence != 'trace':
+            _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+                   'ORACLE_CASE("rules/draw", Draw);\n')
+            _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+                   'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        _write(os.path.join(self.wt, 'src', 'A.cpp'),
+               self.RENDER_BODY + self.SRC_BODY % body)
+        self.commit_worktree()
+        with open(self.state) as f:
+            state = json.load(f)
+        for r in state['batches']['b001']['rows']:
+            if r['address'] == '0x643CD0':
+                r['category'] = 'only_theirs'
+                r['outcome'] = 'kept'
+        with open(self.state, 'w') as f:
+            json.dump(state, f)
+
+    def test_import_close_accepts_a_present_row_on_standing_evidence(self):
+        # Task 40: an only-theirs row ours already carries the body for is
+        # present, so it closes as kept on the oracle evidence that stands
+        # for it — no trace, no measured_body, no parking
+        self._present_ready(evidence='oracle')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('not imported', out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_accepts_a_present_row_measured_by_this_batch(self):
+        self._present_ready(evidence='trace')
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.batches()['b001']['status'], 'closed')
+
+    def test_import_close_refuses_a_present_row_whose_body_changed(self):
+        # a present row is kept like any other: its body must stay as it is
+        self._present_ready(body=8)
+        rc, out = self.close(kind='import')
+        self.assertEqual(rc, 1, out)
+        self.assertIn('0x643CD0: kept but its body changed against', out)
+        self.assertNotIn('not imported: body unchanged', out)
+
     def test_import_close_accepts_parked_rows(self):
         self._import_ready(parked=self.PARKED)
         rc, out = self.close(kind='import')
@@ -24142,6 +24222,18 @@ class ImportSecondSourceTest(unittest.TestCase):
             self.wave._import_tally(st),
             'imports: stubs 1 imported / 0 kept / 0 parked; '
             'base-body 0 imported / 0 kept / 0 parked')
+
+    def test_scorecard_counts_a_present_only_theirs_row_as_kept(self):
+        # Task 40: a present only-theirs row that closed as kept (ours
+        # already carried the body) counts as kept in the tally, not imported
+        st = {'batches': {'i001': {'status': 'closed', 'rows': [
+            {'address': '0x1', 'category': self.ONLY, 'outcome': 'kept'},
+            {'address': '0x2', 'category': self.ONLY}]}}}
+        self.assertEqual(
+            self.wave._import_tally(st),
+            'imports: stubs 0 imported / 0 kept / 0 parked; '
+            'base-body 0 imported / 0 kept / 0 parked; '
+            'only-theirs 1 imported; 1 kept / 0 parked')
 
     def test_scorecard_splits_the_import_tally(self):
         docs = os.path.join(self.tmp, 'docs', 'wso')
