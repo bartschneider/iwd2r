@@ -1,0 +1,7 @@
+{
+  "address": "0x466030",
+  "name": "CGameAIBase::RevealAreaOnMap",
+  "file": "src/CGameAIBase.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
