@@ -4322,10 +4322,11 @@
     "i029": {
       "assigned_at": "2026-10-26T00:19:07+00:00",
       "branch": "p3/wso-i029",
-      "closed_at": null,
+      "closed_at": "2026-10-26T00:42:15+00:00",
       "files": [
         "src/CMessage.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -4335,6 +4336,59 @@
           "name": "CMessageSetVariable::GetMsgSubType",
           "our_len": 0,
           "their_len": 58
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i030": {
+      "assigned_at": "2026-10-26T00:33:12+00:00",
+      "branch": "p3/wso-i030",
+      "closed_at": null,
+      "files": [
+        "src/CProjectile.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x579B10",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileConePulseVisual::~CProjectileConePulseVisual",
+          "our_len": 0,
+          "their_len": 2
+        },
+        {
+          "address": "0xFA",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileCorrosiveFog::CProjectileCorrosiveFog",
+          "our_len": 0,
+          "their_len": 504
+        },
+        {
+          "address": "0x96",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileAcidFog::CProjectileAcidFog",
+          "our_len": 0,
+          "their_len": 480
+        },
+        {
+          "address": "0x4B0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSpikeStones::CProjectileSpikeStones",
+          "our_len": 0,
+          "their_len": 315
+        },
+        {
+          "address": "0x8C",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileFlameStrike::CProjectileFlameStrike",
+          "our_len": 0,
+          "their_len": 134
         }
       ],
       "status": "assigned",
