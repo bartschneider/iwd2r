@@ -1,0 +1,7 @@
+{
+  "address": "0x61E9C0",
+  "name": "CUIControlButtonCharGenColorChoice::OnLButtonClick",
+  "file": "src/CScreenCreateChar.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
