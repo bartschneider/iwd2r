@@ -1,0 +1,7 @@
+{
+  "address": "0x691140",
+  "name": "CScreenWorld::StartCommand",
+  "file": "src/CScreenWorld.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
