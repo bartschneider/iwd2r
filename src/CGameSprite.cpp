@@ -22380,6 +22380,114 @@ SHORT CGameSprite::FaceObject(CGameAIBase* pObject)
     return ACTION_DONE;
 }
 
+// 0x74A7C0
+SHORT CGameSprite::Follow()
+{
+    CPoint waypoint = m_curAction.m_dest;
+    LONG savedSpecID2 = m_curAction.m_specificID2;
+    LONG savedSpecID3 = m_curAction.m_specificID3;
+
+    if (m_actionCount == 0) {
+        if (m_pPathTemp.IsEmpty()) {
+            return ACTION_ERROR;
+        }
+
+        LONG* pPath = reinterpret_cast<LONG*>(m_pPathTemp.RemoveHead());
+        SHORT nPath = static_cast<SHORT>(reinterpret_cast<INT_PTR>(m_nPathTemp.RemoveHead()));
+
+        BYTE reachedEnd = 0;
+        CPoint computedWaypoint;
+        ComputeWaypoint(computedWaypoint, &pPath, &nPath, (SHORT)m_curAction.m_specificID, &reachedEnd);
+
+        waypoint = computedWaypoint;
+        m_curAction.m_dest = waypoint;
+
+        LONG distToAction = (m_pos.x - savedSpecID2) * (m_pos.x - savedSpecID2)
+            + (m_pos.y - savedSpecID3) * (m_pos.y - savedSpecID3);
+
+        if (distToAction > 0x40000) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        }
+
+        LONG distToWaypoint = (m_pos.x - waypoint.x) * (m_pos.x - waypoint.x)
+            + (m_pos.y - waypoint.y) * (m_pos.y - waypoint.y);
+
+        if (distToWaypoint < distToAction) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        }
+
+        if (reachedEnd) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        }
+
+        // NOTE: The original calls CGameArea::CheckLOS(m_pos, action target,
+        // GetVisibleTerrainTable(1), TRUE) here and runs the identical
+        // MoveToPoint sequence whichever branch the result takes, so the check
+        // is not reproduced.
+        CPoint ptActionDest(savedSpecID2, savedSpecID3);
+        SHORT moveResult = MoveToPoint(ptActionDest, 0);
+        if (moveResult == ACTION_DONE) {
+            m_curAction.m_internalFlags |= 0x10000000;
+            SetPath(pPath, nPath);
+        } else if (moveResult == ACTION_ERROR) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        } else {
+            m_pPathTemp.AddHead(reinterpret_cast<int*>(pPath));
+            m_nPathTemp.AddHead(reinterpret_cast<int*>(static_cast<INT_PTR>(nPath)));
+            return ACTION_INTERRUPTABLE;
+        }
+    } else {
+        if ((m_curAction.m_internalFlags & 0x10000000) != 0) {
+            goto movementCheck;
+        }
+
+        LONG* pPath = reinterpret_cast<LONG*>(m_pPathTemp.RemoveHead());
+        SHORT nPath = static_cast<SHORT>(reinterpret_cast<INT_PTR>(m_nPathTemp.RemoveHead()));
+
+        CPoint ptActionDest(savedSpecID2, savedSpecID3);
+        SHORT moveResult = MoveToPoint(ptActionDest, 0);
+        if (moveResult == ACTION_DONE) {
+            m_curAction.m_internalFlags |= 0x10000000;
+            SetPath(pPath, nPath);
+        } else if (moveResult == ACTION_ERROR) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        } else {
+            m_pPathTemp.AddHead(reinterpret_cast<int*>(pPath));
+            m_nPathTemp.AddHead(reinterpret_cast<int*>(static_cast<INT_PTR>(nPath)));
+            return ACTION_INTERRUPTABLE;
+        }
+    }
+
+movementCheck:
+    if (waypoint.x / CPathSearch::GRID_SQUARE_SIZEX == m_pos.x / CPathSearch::GRID_SQUARE_SIZEX
+        && waypoint.y / CPathSearch::GRID_SQUARE_SIZEY == m_pos.y / CPathSearch::GRID_SQUARE_SIZEY) {
+        return ACTION_DONE;
+    }
+
+    if (m_pPath == NULL && 0 < m_actionCount) {
+        CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+        AddAction(action);
+        return ACTION_DONE;
+    }
+
+    return ACTION_INTERRUPTABLE;
+}
+
 // 0x751CD0
 SHORT CGameSprite::LeaveParty()
 {
