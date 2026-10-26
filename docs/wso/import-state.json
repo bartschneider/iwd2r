@@ -4344,10 +4344,11 @@
     "i030": {
       "assigned_at": "2026-10-26T00:33:12+00:00",
       "branch": "p3/wso-i030",
-      "closed_at": null,
+      "closed_at": "2026-10-26T01:21:50+00:00",
       "files": [
         "src/CProjectile.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -4391,7 +4392,7 @@
           "their_len": 134
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     }
   }
