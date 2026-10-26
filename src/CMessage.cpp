@@ -16574,7 +16574,7 @@ void CMessageWeaponImmumityUpdate::Run()
 
     BYTE rc;
     do {
-        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(m_targetId,
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_targetId,
             CGameObjectArray::THREAD_ASYNCH,
             &pObject,
             INFINITE);
@@ -16586,7 +16586,7 @@ void CMessageWeaponImmumityUpdate::Run()
             pSprite->GetDerivedStats()->m_cImmunitiesWeapon = m_weaponImmunities;
         }
 
-        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(m_targetId,
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_targetId,
             CGameObjectArray::THREAD_ASYNCH,
             INFINITE);
     }
