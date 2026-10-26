@@ -1,0 +1,7 @@
+{
+  "address": "0x6627C0",
+  "name": "CScreenSinglePlayer::UpdateModifyCharacterPanel",
+  "file": "src/CScreenSinglePlayer.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
