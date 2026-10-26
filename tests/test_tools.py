@@ -19825,6 +19825,52 @@ class DriverTest(unittest.TestCase):
         self.assertEqual((d, err[0]), (None, 2))
         self.assertIn('live import-state file', err[1])
 
+    def test_import_dry_run_size_cuts_n_rows(self):
+        # wave.py run --size N (i047: whole-function only_theirs batches of
+        # 20 time a worker out): the dry run's cut holds N rows, not the
+        # default, and without the flag the default is unchanged.
+        wave = driver._tool('wave')
+        tmp = self._tmpdir()
+        docs = os.path.join(tmp, 'docs', 'wso')
+        os.makedirs(docs)
+        rows = [{'address': '0x%06X' % (0x401000 + i * 0x1000), 'name': 'F%d' % i,
+                 'file': 'src/%s.cpp' % chr(ord('A') + i),
+                 'category': 'theirs_real_ours_stub',
+                 'their_len': 90 - i, 'our_len': 2} for i in range(8)]
+        with open(os.path.join(docs, 'disagreements.json'), 'w') as f:
+            json.dump(rows, f)
+        state = os.path.join(tmp, 'import-state.json')
+        with open(state, 'w') as f:
+            json.dump({'fork_base': 'e8dd16a7', 'batches': {}}, f)
+        argv = ['--queue', 'import', '--dry-run', '--state', state,
+                '--no-base-tests']
+        d, err = driver.driver_from_args(argv, repo=tmp)
+        self.assertIsNone(err)
+        self.assertEqual(d.size, wave.DEFAULT_SIZE)
+        d, err = driver.driver_from_args(argv[:5] + ['--size', '6'] + argv[5:],
+                                         repo=tmp)
+        self.assertIsNone(err)
+        self.assertEqual(d.size, 6)
+        with mock.patch.object(wave, '_cut_worktree',
+                               return_value=('/wt', 'new')):
+            self.assertEqual(d._cut(), ('i001', None))
+        with open(state) as f:
+            batch = json.load(f)['batches']['i001']
+        # ranked biggest first: the six largest bodies, the two smallest wait
+        self.assertEqual([r['address'] for r in batch['rows']],
+                         [r['address'] for r in rows[:6]])
+        self.assertEqual(batch['branch'], 'p3/wso-i001')
+
+    def test_size_below_one_is_refused(self):
+        tmp = self._tmpdir()
+        for n in ('0', '-3'):
+            d, err = driver.driver_from_args(
+                ['--queue', 'import', '--dry-run',
+                 '--state', os.path.join(tmp, 'copy.json'), '--size', n],
+                repo=tmp)
+            self.assertEqual((d, err[0]), (None, 2))
+            self.assertEqual(err[1], 'wave.py run: --size must be at least 1')
+
     def test_import_batch_closes_without_verdict_lines(self):
         d = self._driver(worker=driver.FakeWorker('# report\n\nImported; no verdicts.\n'),
                          queue='import')

@@ -2658,7 +2658,8 @@ class Driver:
                  oracle_run=None, frida_run=None, frida_build=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
                  queue='wave1', runner=None, clock=None, max_batches=None,
-                 frida_cache=True, base_tests=True, base_tests_run=None):
+                 frida_cache=True, base_tests=True, base_tests_run=None,
+                 size=None):
         wave = _tool('wave')
         if queue not in wave.QUEUES:
             raise ValueError('unknown queue %r (one of %s)' % (
@@ -2709,7 +2710,9 @@ class Driver:
         self.max_batches = max_batches
         self.gate = gate
         self.base = base
-        self.size = wave.DEFAULT_SIZE
+        self.size = wave.DEFAULT_SIZE if size is None else size
+        if self.size < 1:
+            raise ValueError('--size must be at least 1')
         self.category = wave.QUEUES[queue]['category']
         docs = os.path.join(repo, 'docs', 'wso')
         self.disagreements_path = os.path.join(docs, 'disagreements.json')
@@ -6946,6 +6949,9 @@ def _parse(argv):
                    help='stop starting batches once N have started in this '
                         'run (adopted, cut or resumed); the ones in flight '
                         'finish, and the run exits 0')
+    p.add_argument('--size', type=int, default=None, metavar='N',
+                   help='rows per batch (default: %d): a smaller batch keeps '
+                        'an import worker inside its timeout' % wave.DEFAULT_SIZE)
     p.add_argument('--worker-timeout', type=float, default=DEFAULT_TIMEOUT,
                    metavar='SECONDS',
                    help='kill a worker or reviewer run (its whole process '
@@ -7048,6 +7054,8 @@ def _build(args, repo):
                          'it at a copy, never at docs/wso/wave-state.json.')
     if args.max_batches is not None and args.max_batches < 1:
         return None, (2, 'wave.py run: --max-batches must be at least 1')
+    if args.size is not None and args.size < 1:
+        return None, (2, 'wave.py run: --size must be at least 1')
     if args.worker_timeout <= 0:
         return None, (2, 'wave.py run: --worker-timeout must be positive')
     live_path = wave.QUEUES[queue]['state']
@@ -7091,7 +7099,7 @@ def _build(args, repo):
                    reviewers_by_pool=reviewers_by_pool,
                    budgets=args.budgets, queue=queue,
                    max_batches=args.max_batches,
-                   base_tests=args.base_tests)
+                   base_tests=args.base_tests, size=args.size)
     except StatusError as e:
         return None, (1, 'wave.py run: the status file cannot be read: %s' % e)
     except ValueError as e:
