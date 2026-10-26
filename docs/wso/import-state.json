@@ -6429,6 +6429,302 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "i042": {
+      "assigned_at": "2026-10-26T12:04:43+00:00",
+      "branch": "p3/wso-i042",
+      "closed_at": "2026-10-26T13:43:34+00:00",
+      "files": [
+        "src/CGameEffect.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CMessage.cpp",
+        "src/CInfGame.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/IcewindMisc.cpp",
+        "src/CResCache.cpp",
+        "src/CUIControlFactory.cpp",
+        "src/CScreenChapter.cpp",
+        "src/CScreenSave.cpp",
+        "src/CScreenKeymaps.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/CRuleTables.cpp",
+        "src/CImm.cpp"
+      ],
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x4BCDC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectCastSpellPoint::ApplyEffect",
+          "our_len": 382,
+          "their_len": 394
+        },
+        {
+          "address": "0x605850",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::ShowSessionTerminatedMessage",
+          "our_len": 353,
+          "their_len": 355
+        },
+        {
+          "address": "0x514CB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage103::Run",
+          "our_len": 330,
+          "their_len": 338
+        },
+        {
+          "address": "0x4B53A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectBlindness::ApplyEffect",
+          "our_len": 326,
+          "their_len": 331
+        },
+        {
+          "address": "0x4BC630",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectCastSpell::ApplyEffect",
+          "our_len": 319,
+          "their_len": 331
+        },
+        {
+          "address": "0x5B8180",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CompressContainer",
+          "our_len": 306,
+          "their_len": 307
+        },
+        {
+          "address": "0x505140",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageScreenShake::Run",
+          "our_len": 306,
+          "their_len": 307
+        },
+        {
+          "address": "0x56B4B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectAlicornLanceGlow::ApplyEffect",
+          "our_len": 297,
+          "their_len": 305
+        },
+        {
+          "address": "0x585DA0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindMisc.cpp",
+          "name": "IcewindMisc::sub_585DA0",
+          "our_len": 286,
+          "their_len": 290
+        },
+        {
+          "address": "0x78BF50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResCache.cpp",
+          "name": "CResCache::CResCache",
+          "our_len": 258,
+          "their_len": 260
+        },
+        {
+          "address": "0x77D870",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlFactory.cpp",
+          "name": "CUIControlButtonGeneralOptionsFromMainMenu::OnLButtonClick",
+          "our_len": 228,
+          "their_len": 274
+        },
+        {
+          "address": "0x602720",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionGameMode::OnLButtonClick",
+          "our_len": 232,
+          "their_len": 234
+        },
+        {
+          "address": "0x5D4CF0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenChapter.cpp",
+          "name": "CUIControlButtonChapterReplay::OnLButtonClick",
+          "our_len": 231,
+          "their_len": 233
+        },
+        {
+          "address": "0x6024A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnLobbyExitButtonClick",
+          "our_len": 226,
+          "their_len": 228
+        },
+        {
+          "address": "0x65F840",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSave.cpp",
+          "name": "CUIControlButtonSaveError::OnLButtonClick",
+          "our_len": 219,
+          "their_len": 221
+        },
+        {
+          "address": "0x639E70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenKeymaps.cpp",
+          "name": "CScreenKeymaps::sub_639E70",
+          "our_len": 218,
+          "their_len": 220
+        },
+        {
+          "address": "0x725CC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteSpellList::sub_725CC0",
+          "our_len": 203,
+          "their_len": 225
+        },
+        {
+          "address": "0x604BE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CUIControlButtonConnectionCreateGameNewGame::OnLButtonClick",
+          "our_len": 212,
+          "their_len": 214
+        },
+        {
+          "address": "0x543770",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::GetMaxDruidShapeshifts",
+          "our_len": 202,
+          "their_len": 202
+        },
+        {
+          "address": "0x7C2640",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CImm.cpp",
+          "name": "CImm::OnComposition",
+          "our_len": 175,
+          "their_len": 198
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i043": {
+      "assigned_at": "2026-10-26T12:56:42+00:00",
+      "branch": "p3/wso-i043",
+      "closed_at": null,
+      "files": [
+        "src/IcewindCVisualEffect.cpp",
+        "src/CUIControlTextDisplay.cpp",
+        "src/CScreenJournal.cpp",
+        "src/CScreenMap.cpp",
+        "src/CInfCursor.cpp",
+        "src/CMultiplayerSettings.cpp",
+        "src/CUIManager.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x586AC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCVisualEffect.cpp",
+          "name": "IcewindCVisualEffect::sub_586AC0",
+          "our_len": 122,
+          "outcome": "kept",
+          "their_len": 136
+        },
+        {
+          "address": "0x4E2870",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlTextDisplay.cpp",
+          "name": "CUIControlTextDisplay::OnScrollUp",
+          "our_len": 124,
+          "outcome": "kept",
+          "their_len": 131
+        },
+        {
+          "address": "0x637B50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenJournal.cpp",
+          "name": "CScreenJournal::OnCancelButtonClick",
+          "our_len": 117,
+          "outcome": "kept",
+          "their_len": 119
+        },
+        {
+          "address": "0x642460",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenMap.cpp",
+          "name": "CScreenMap::OnCancelButtonClick",
+          "our_len": 117,
+          "outcome": "kept",
+          "their_len": 119
+        },
+        {
+          "address": "0x597E20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfCursor.cpp",
+          "name": "CInfToolTip::CInfToolTip",
+          "our_len": 110,
+          "outcome": "kept",
+          "their_len": 113
+        },
+        {
+          "address": "0x518660",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::sub_518660",
+          "our_len": 100,
+          "outcome": "kept",
+          "their_len": 107
+        },
+        {
+          "address": "0x4D46D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIManager.cpp",
+          "name": "CUIManager::ForceToolTip",
+          "our_len": 82,
+          "outcome": "kept",
+          "their_len": 120
+        },
+        {
+          "address": "0x518560",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::sub_518560",
+          "our_len": 91,
+          "outcome": "kept",
+          "their_len": 106
+        },
+        {
+          "address": "0x586A60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCVisualEffect.cpp",
+          "name": "IcewindCVisualEffect::sub_586A60",
+          "our_len": 88,
+          "outcome": "kept",
+          "their_len": 102
+        },
+        {
+          "address": "0x5186A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::sub_5186A0",
+          "our_len": 87,
+          "outcome": "kept",
+          "their_len": 94
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   }
 }
