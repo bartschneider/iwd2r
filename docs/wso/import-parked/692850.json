@@ -1,0 +1,1 @@
+{"address": "0x692850", "name": "CScreenWorld::UnhideInterface", "file": "src/CScreenWorld.cpp", "batch": "i037", "needs": "not exercised; ours reading matches the decompile"}
