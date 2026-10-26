@@ -652,6 +652,20 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
             seen.add(_addr_key(r['address']))
             candidates.append(r)
     eligible = [r for r in candidates if r['file'] not in owned]
+    skip_note = None
+    if importing and category == 'only_theirs' and repo:
+        # An only-theirs row whose address our src labels at the base is
+        # present, not an import: ours already carries the body, and
+        # recompare reclassifies it.  The pool offers the rest.
+        present = {_addr_key(r['address']) for r in eligible
+                   if _labelled_at(repo, base, r['address'])}
+        if present:
+            eligible = [r for r in eligible
+                        if _addr_key(r['address']) not in present]
+            skip_note = ('%d only_theirs row(s) skipped: ours already carries '
+                         'the body (recompare will reclassify)' % len(present))
+            if not eligible:
+                return [], [], None, (2, skip_note + '\n')
     if not eligible:
         if candidates:
             return [], [], None, (2, 'nothing left to assign: %d row%s wait%s on files '
@@ -727,6 +741,9 @@ def _import_pool(rows, category, decided, owned, importing, disagreements_path,
                     return [], [], None, (2, 'nothing left: every remaining import row is '
                                          'exercised by no scenario (--include-uncovered '
                                          'offers them anyway)\n')
+    if skip_note:
+        coverage_note = skip_note if coverage_note is None else (
+            coverage_note + '\n' + skip_note)
     return eligible, no_addr, coverage_note, None
 
 
@@ -1701,11 +1718,26 @@ def close_batch(state_path=STATE_PATH, repo=ROOT, batch_id=None,
                 # Imported means changed: a body left (or put back) as the
                 # stub cannot close on any evidence, and only touched
                 # functions have their trace_source checked by the gate.
+                present = (row.get('category') == 'only_theirs'
+                           and wt is not None
+                           and _labelled_at(wt, mb, row['address']))
+                if present and row.get('outcome') == 'kept' and k in touched:
+                    # Present (Task 40): ours already carries the body, so a
+                    # kept present row must keep it unchanged like any other
+                    # kept row; a change is an import, not a keep.
+                    problems.append(f'{row["address"]}: kept but its body changed against '
+                                    f'{mb[:12] if mb else base}; keep the change and move the '
+                                    f'row to ## Imported (take it off ## Kept), or edit it '
+                                    f'back and park it ({parked_rel(k)})')
+                    continue
                 if (k not in touched and row.get('outcome') == 'kept'
-                        and row.get('category') == 'theirs_changed_ours_base'):
+                        and (row.get('category') == 'theirs_changed_ours_base'
+                             or present)):
                     # Kept (Task 19): ours already matches the original, so the
                     # body is untouched; what the row needs instead is the
-                    # Frida phase's measurement of it, kind: trace.
+                    # Frida phase's measurement of it, kind: trace.  A present
+                    # row (Task 40) closes the same way: ours already has the
+                    # body, so it is kept, never imported.
                     bar = _import_bar(wt, mb, row['address'], row.get('name', ''), rel, text,
                                       batch_id, row.get('measured_body'), row.get('file'))
                     this_batch = frida_trace(text) and _frida_probe(text).startswith(
@@ -1879,6 +1911,40 @@ def _resolve_tip(repo, tip):
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
 
 
+_labelled_cache = {}      # (repo, sha) -> {address key: file} over all src/*.cpp
+
+
+def _labelled_at(repo, ref, address):
+    """True when repo's `ref` carries a `// 0xADDR` header comment (our label
+    convention) for `address` in a src/*.cpp: our tree already has the
+    function, so an only_theirs row for it is present, not an import.  The
+    scan is cached per (repo, sha); False when the ref does not resolve or
+    git cannot read it (no repo, no commits)."""
+    if not ref or not address:
+        return False
+    sha = _resolve_tip(repo, ref) if repo else None
+    if sha is None:
+        return False
+    ce = _check_evidence()
+    key = (repo, sha)
+    if key not in _labelled_cache:
+        r = ce.git(repo, 'ls-tree', '-r', '--name-only', sha, '--', 'src/',
+                   check=False)
+        if r.returncode != 0:
+            return False
+        labels = {}
+        for rel in r.stdout.splitlines():
+            if not rel.endswith('.cpp'):
+                continue
+            text = ce.git(repo, 'show', f'{sha}:{rel}', check=False)
+            if text.returncode != 0:
+                continue
+            for _first, _last, a, _name in ce.spans(text.stdout.splitlines()):
+                labels.setdefault(_addr_key('0x%X' % a), rel)
+        _labelled_cache[key] = labels
+    return _addr_key(address) in _labelled_cache[key]
+
+
 def _xrec_rows(repo, base, theirs, ours):
     """tools/xrec.py's rows for base/theirs/ours, run from repo (it reads
     the trees with git show only)."""
@@ -1930,6 +1996,22 @@ def _labels():
         spec.loader.exec_module(module)
         _labels_module = module
     return _labels_module
+
+
+_xrec_module = None
+
+
+def _xrec():
+    """tools/xrec.py (funcs/stubby for reading a body back), loaded by path."""
+    global _xrec_module
+    if _xrec_module is None:
+        spec = importlib.util.spec_from_file_location(
+            'wave_xrec', os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      'xrec.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _xrec_module = module
+    return _xrec_module
 
 
 def address_from_header(source_text, name):
@@ -2051,6 +2133,21 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
     if source_of is None:
         source_of = lambda f: _git_show(repo, ours, f)
     filled, _ = fill_addresses(theirs, source_of)
+    # Task 40: an only_theirs row our src labels at `ours` is not theirs-only:
+    # xrec matched per-file, so ours may already carry the body.  Read the
+    # fork's body at the tip and say what the pair really is; the import
+    # queue never cuts such a row.
+    reclassified = []
+    for r in theirs:
+        if (r.get('category') == 'only_theirs' and r.get('address')
+                and _labelled_at(repo, ours, r['address'])):
+            body = _func_body(repo, sha, r.get('file'), r['address'])
+            if body is None:
+                continue
+            stub = _xrec().stubby(body)
+            r['category'] = ('ours_real_theirs_stub' if stub
+                             else 'both_changed_differ')
+            reclassified.append((r, stub))
     with _filelock().hold(os.path.join(
             os.path.dirname(os.path.abspath(state_path)), 'claims.json.lock'),
             'wave recompare'):
@@ -2183,6 +2280,10 @@ def recompare(state_path=STATE_PATH, disagreements_path=DISAGREEMENTS_PATH,
     if filled:
         text += (f'address from our header comment: {len(filled)} row(s): '
                  + ', '.join(f'{r["name"]} {r["address"]}' for r in filled) + '\n')
+    for r, stub in reclassified:
+        text += ('reclassified %s %s: ours already carries the body; theirs is '
+                 '%s -> %s\n' % (r['address'], r.get('name', ''),
+                                 'a stub' if stub else 'not a stub', r['category']))
     text += unaddressed_text(listed)
     if added:
         text += (f'coverage: {len(added)} new candidate(s) recorded in '
@@ -2199,6 +2300,26 @@ def _git_show(repo, ref, path):
     r = subprocess.run(['git', '-C', repo, 'show', f'{ref}:{path}'],
                        capture_output=True, text=True, errors='replace')
     return r.stdout if r.returncode == 0 else ''
+
+
+def _func_body(repo, ref, path, address):
+    """The stripped body xrec.funcs() reads for the function `address` labels
+    in repo's `ref` (path first, else every other src/*.cpp), or None when no
+    such function is there."""
+    ce = _check_evidence()
+    r = ce.git(repo, 'ls-tree', '-r', '--name-only', ref, '--', 'src/',
+               check=False)
+    if r.returncode != 0:
+        return None
+    paths = [p for p in r.stdout.splitlines() if p.endswith('.cpp')]
+    if path:
+        paths = [path] + [p for p in paths if p != path]
+    want = _addr_key(address)
+    for rel in paths:
+        for a, body in _xrec().funcs(_git_show(repo, ref, rel)).values():
+            if a is not None and _addr_key(a) == want:
+                return body
+    return None
 
 
 # -- resolve -------------------------------------------------------------
@@ -2471,7 +2592,10 @@ KEPT_REPORT_PARAGRAPH = (
     "per row, never also under `## Imported`:\n"
     "\n"
     "    kept <0xADDR> <one-line reason>\n"
-    "\n")
+    "\n"
+    "An only-theirs row whose address our src already labels (ours carries the\n"
+    "body) is reported there too, as `kept <0xADDR> ours already has the body:\n"
+    "<reason>`; it is never imported, never parked.\n")
 
 
 def _import_tally(state, import_state=None, parked=None):
@@ -2480,9 +2604,10 @@ def _import_tally(state, import_state=None, parked=None):
     i<NNN>) of `state` and `import_state`, split by each row's category
     (none: a stub); a row with a docs/wso/import-parked entry (`parked`,
     address keys) is parked, a row recorded outcome kept (the driver marks it
-    only for a base-body row untouched against the merge base, and close
-    lets it close only with this batch's trace) is kept, any other closed row
-    imported.  None without any."""
+    for a base-body row untouched against the merge base, and for an
+    only-theirs row ours already carries a body for, and close lets it close
+    only on standing evidence or this batch's trace) is kept, any other
+    closed row imported.  None without any."""
     parked = parked or {}
     seen = {}
     for st in (state, import_state):
@@ -2501,9 +2626,11 @@ def _import_tally(state, import_state=None, parked=None):
     text = ('imports: stubs %d imported / %d kept / %d parked; '
             'base-body %d imported / %d kept / %d parked' % (*n['stubs'], *n['base-body']))
     if any(n['only-theirs']):
-        # never kept; the clause appears once such a row has closed, so the
-        # line of a stub / base-body history reads as it always did
-        text += '; only-theirs %d imported / %d parked' % (n['only-theirs'][0], n['only-theirs'][2])
+        # kept appears once a present only-theirs row has closed (ours
+        # already carried the body); a history without one reads as before
+        kept = '; %d kept' % n['only-theirs'][1] if n['only-theirs'][1] else ''
+        text += '; only-theirs %d imported%s / %d parked' % (
+            n['only-theirs'][0], kept, n['only-theirs'][2])
     return text
 
 
