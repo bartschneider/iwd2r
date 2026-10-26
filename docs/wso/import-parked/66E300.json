@@ -1,0 +1,2 @@
+{"address": "0x66E300", "name": "CUIControlScrollBarSpellbookKnownSpells", "file": ":InvalidateItems:src/CScreenSpellbook.cpp", "batch": "i045",
+ "needs": "not exercised; ours reading matches the decompile"}
