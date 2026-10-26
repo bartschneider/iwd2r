@@ -4394,6 +4394,384 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i031": {
+      "assigned_at": "2026-10-26T03:03:45+00:00",
+      "branch": "p3/wso-i031",
+      "closed_at": "2026-10-26T04:11:28+00:00",
+      "files": [
+        "src/CInfGame.cpp",
+        "src/CGameAnimationTypeMonster.cpp",
+        "src/CGameEffect.cpp",
+        "src/CGameAnimationTypeMonsterOld.cpp",
+        "src/IcewindCGameEffects.cpp",
+        "src/CScreenCreateChar.cpp",
+        "src/CVidPalette.cpp",
+        "src/CGameAnimationTypeEffect.cpp",
+        "src/CScreenStore.cpp",
+        "src/CScreenConnection.cpp",
+        "src/CDerivedStats.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CScreenJournal.cpp",
+        "src/CNetwork.cpp",
+        "src/CVidBitmap.cpp"
+      ],
+      "gate": "docs-only",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x5B0020",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::StepAnimation",
+          "our_len": 14069,
+          "their_len": 14089
+        },
+        {
+          "address": "0x6A89A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeMonster.cpp",
+          "name": "CGameAnimationTypeMonster::CGameAnimationTypeMonster",
+          "our_len": 12921,
+          "their_len": 13325
+        },
+        {
+          "address": "0x4BF140",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameEffect.cpp",
+          "name": "CGameEffectImmunitySpell::Evaluate",
+          "our_len": 7579,
+          "their_len": 7577
+        },
+        {
+          "address": "0x6ADA70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeMonsterOld.cpp",
+          "name": "CGameAnimationTypeMonsterOld::CGameAnimationTypeMonsterOld",
+          "our_len": 7120,
+          "their_len": 7508
+        },
+        {
+          "address": "0x569D30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectEntropyShield::ApplyEffect",
+          "our_len": 6100,
+          "their_len": 6105
+        },
+        {
+          "address": "0x605C40",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCreateChar.cpp",
+          "name": "CScreenCreateChar::CScreenCreateChar",
+          "our_len": 6014,
+          "their_len": 6034
+        },
+        {
+          "address": "0x7D6240",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidPalette.cpp",
+          "name": "CVidPalette::RealizeResource3d",
+          "our_len": 5887,
+          "their_len": 6052
+        },
+        {
+          "address": "0x59CC30",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CInfGame",
+          "our_len": 5302,
+          "their_len": 5319
+        },
+        {
+          "address": "0x6A1F50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeEffect.cpp",
+          "name": "CGameAnimationTypeEffect::CGameAnimationTypeEffect",
+          "our_len": 5100,
+          "their_len": 5102
+        },
+        {
+          "address": "0x67D050",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CScreenStore::StartStore",
+          "our_len": 4684,
+          "their_len": 4678
+        },
+        {
+          "address": "0x5F9BB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::CScreenConnection",
+          "our_len": 4479,
+          "their_len": 4534
+        },
+        {
+          "address": "0x447460",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDerivedStats.cpp",
+          "name": "CDerivedStats::Unmarshal",
+          "our_len": 4425,
+          "their_len": 4529
+        },
+        {
+          "address": "0x65FAC0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::CScreenSinglePlayer",
+          "our_len": 3941,
+          "their_len": 3944
+        },
+        {
+          "address": "0x635420",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenJournal.cpp",
+          "name": "CScreenJournal::CScreenJournal",
+          "our_len": 3921,
+          "their_len": 3934
+        },
+        {
+          "address": "0x7A2810",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::ShutDown",
+          "our_len": 3824,
+          "their_len": 3836
+        },
+        {
+          "address": "0x7A2DE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::RemoveFromIncomingQueue",
+          "our_len": 3414,
+          "their_len": 3450
+        },
+        {
+          "address": "0x7A3380",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::RemoveFromIncomingQueueSpecific",
+          "our_len": 3378,
+          "their_len": 3414
+        },
+        {
+          "address": "0x5FCA00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenConnection.cpp",
+          "name": "CScreenConnection::OnLoadGameButtonClick",
+          "our_len": 3159,
+          "their_len": 3163
+        },
+        {
+          "address": "0x6669E0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CUIControlButtonSinglePlayerModifyCharacterDelete::OnLButtonClick",
+          "our_len": 3086,
+          "their_len": 3091
+        },
+        {
+          "address": "0x7C6B80",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidBitmap.cpp",
+          "name": "CVidBitmap::Render3d",
+          "our_len": 3031,
+          "their_len": 3032
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i032": {
+      "assigned_at": "2026-10-26T03:03:45+00:00",
+      "branch": "p3/wso-i032",
+      "closed_at": null,
+      "files": [
+        "src/CScreenKeymaps.cpp",
+        "src/CGameContainer.cpp",
+        "src/CBaldurProjector.cpp",
+        "src/CScreenCharacter.cpp",
+        "src/CGameArea.cpp",
+        "src/CMultiplayerSettings.cpp",
+        "src/CChitin.cpp",
+        "src/CScreenLoad.cpp",
+        "src/CGameJournal.cpp",
+        "src/CGameSprite.cpp",
+        "src/CVideo3d.cpp",
+        "src/CMessage.cpp",
+        "src/CVidPoly.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CScreenMap.cpp",
+        "src/CGameAnimationTypeMonsterLayeredSpell.cpp",
+        "src/CScreenInventory.cpp",
+        "src/CCacheStatus.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x639160",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenKeymaps.cpp",
+          "name": "CScreenKeymaps::HandleKeyDown",
+          "our_len": 2880,
+          "their_len": 2930
+        },
+        {
+          "address": "0x47E040",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::DebugDump",
+          "our_len": 2658,
+          "their_len": 3084
+        },
+        {
+          "address": "0x43E640",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CBaldurProjector.cpp",
+          "name": "CBaldurProjector::CBaldurProjector",
+          "our_len": 2608,
+          "their_len": 2560
+        },
+        {
+          "address": "0x5E7FF0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenCharacter.cpp",
+          "name": "CScreenCharacter::OnErrorButtonClick",
+          "our_len": 2267,
+          "their_len": 2269
+        },
+        {
+          "address": "0x46ABB0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameArea.cpp",
+          "name": "CGameArea::CheckWalkable",
+          "our_len": 2230,
+          "their_len": 2246
+        },
+        {
+          "address": "0x519270",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMultiplayerSettings.cpp",
+          "name": "CMultiplayerSettings::OnDropPlayer",
+          "our_len": 2142,
+          "their_len": 2150
+        },
+        {
+          "address": "0x78E2A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CChitin.cpp",
+          "name": "CChitin::CChitin",
+          "our_len": 1727,
+          "their_len": 1749
+        },
+        {
+          "address": "0x63B6D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CScreenLoad::OnKeyDown",
+          "our_len": 1644,
+          "their_len": 1653
+        },
+        {
+          "address": "0x4C6E20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameJournal.cpp",
+          "name": "CGameJournal::ChangeEntry",
+          "our_len": 1440,
+          "their_len": 1547
+        },
+        {
+          "address": "0x71A550",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71A550",
+          "our_len": 1450,
+          "their_len": 1455
+        },
+        {
+          "address": "0x7BDF90",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVideo3d.cpp",
+          "name": "CVidInf::CreateSurfaces3d",
+          "our_len": 1437,
+          "their_len": 1441
+        },
+        {
+          "address": "0x708D50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RenderSpriteCover",
+          "our_len": 1403,
+          "their_len": 1418
+        },
+        {
+          "address": "0x4F9590",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAnimationChange::Run",
+          "our_len": 1390,
+          "their_len": 1424
+        },
+        {
+          "address": "0x7C15F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CVidPoly.cpp",
+          "name": "CVidPoly::FillConvexPoly3d",
+          "our_len": 1377,
+          "their_len": 1377
+        },
+        {
+          "address": "0x66C0F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::OnErrorButtonClick",
+          "our_len": 1304,
+          "their_len": 1393
+        },
+        {
+          "address": "0x6432F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenMap.cpp",
+          "name": "CUIControlButtonMapAreaMap::OnRButtonClick",
+          "our_len": 1300,
+          "their_len": 1302
+        },
+        {
+          "address": "0x6C15A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameAnimationTypeMonsterLayeredSpell.cpp",
+          "name": "CGameAnimationTypeMonsterLayeredSpell::SetColorEffectAll",
+          "our_len": 837,
+          "their_len": 1742
+        },
+        {
+          "address": "0x639A50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenKeymaps.cpp",
+          "name": "CScreenKeymaps::UpdateMainPanel",
+          "our_len": 1261,
+          "their_len": 1274
+        },
+        {
+          "address": "0x633F10",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CUIControlButtonInventoryHistoryIcon::Render",
+          "our_len": 1235,
+          "their_len": 1239
+        },
+        {
+          "address": "0x440400",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CCacheStatus.cpp",
+          "name": "CCacheStatus::Init",
+          "our_len": 1188,
+          "their_len": 1190
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
     }
   }
 }
