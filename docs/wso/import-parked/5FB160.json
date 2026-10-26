@@ -1,0 +1,7 @@
+{
+  "address": "0x5FB160",
+  "name": "CScreenConnection::OnKeyDown",
+  "file": "src/CScreenConnection.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
