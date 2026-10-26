@@ -1,0 +1,7 @@
+{
+  "address": "0x6014A0",
+  "name": "CScreenConnection::HandleJoinCompletion",
+  "file": "src/CScreenConnection.cpp",
+  "batch": "i033",
+  "needs": "not exercised; ours reading matches the decompile"
+}
