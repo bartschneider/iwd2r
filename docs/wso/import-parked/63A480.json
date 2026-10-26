@@ -1,0 +1,7 @@
+{
+  "address": "0x63A480",
+  "name": "CScreenKeymaps::OnErrorButtonClick",
+  "file": "src/CScreenKeymaps.cpp",
+  "batch": "i034",
+  "needs": "not exercised; ours reading matches the decompile"
+}
