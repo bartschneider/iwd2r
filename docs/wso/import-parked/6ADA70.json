@@ -1,0 +1,7 @@
+{
+  "address": "0x6ADA70",
+  "name": "CGameAnimationTypeMonsterOld::CGameAnimationTypeMonsterOld",
+  "file": "src/CGameAnimationTypeMonsterOld.cpp",
+  "batch": "i031",
+  "needs": "not exercised; ours reading matches the decompile"
+}
