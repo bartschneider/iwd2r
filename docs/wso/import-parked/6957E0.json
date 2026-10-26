@@ -1,1 +1,0 @@
-{"address": "0x6957E0", "name": "CUIControlButtonWorldContainerSlot::OnLButtonClick", "file": "src/CScreenWorld.cpp", "batch": "i003", "needs": "world_entry, first_fight, walk_and_talk: not exercised"}

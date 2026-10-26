@@ -1,0 +1,1 @@
+{"address": "0x665340", "name": "CScreenSinglePlayer::OnPortraitButtonClick", "file": "src/CScreenSinglePlayer.cpp", "batch": "i046", "needs": "not exercised; ours reading matches the decompile"}

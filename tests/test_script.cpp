@@ -142,7 +142,7 @@ TEST_CASE("script parser reports errors with line numbers", "[script]")
     CHECK(ParseError("key\n").rfind("line 1: key", 0) == 0);
     CHECK(ParseError("key VK_ESCAPE\n") == "line 1: unknown key 'VK_ESCAPE'");
     CHECK(ParseError("type\n").rfind("line 1: type", 0) == 0);
-    CHECK(ParseError("type a-b\n").rfind("line 1: type supports", 0) == 0);
+    CHECK(ParseError("type a\xC3\xA9\n").rfind("line 1: type supports", 0) == 0);
     CHECK(ParseError("shot\n").rfind("line 1: shot", 0) == 0);
     CHECK(ParseError("shot ../x\n").rfind("line 1: shot name", 0) == 0);
     CHECK(ParseError("quit now\n").rfind("line 1: quit", 0) == 0);
@@ -327,6 +327,70 @@ TEST_CASE("script type presses shift for capitals", "[script]")
     platform::script::Advance(); // B down
     CHECK(Key('B') == kPressed);
     CHECK(Key(VK_SHIFT) != 0);
+    platform::script::Stop();
+}
+
+TEST_CASE("script key modifiers", "[script]")
+{
+    const std::vector<Command> c = ParseOk("key CTRL+TAB\nkey ctrl+shift+OEM_1\nkey b\n");
+    REQUIRE(c.size() == 3);
+    CHECK(c[0].verb == Verb::Key);
+    CHECK(c[0].vk == VK_TAB);
+    CHECK(c[0].mods == std::vector<int> { VK_CONTROL });
+    CHECK(c[1].vk == VK_OEM_1);
+    CHECK(c[1].mods == std::vector<int> { VK_CONTROL, VK_SHIFT });
+    CHECK(c[2].vk == 'B');
+    CHECK(c[2].mods.empty());
+    CHECK(ParseError("key ctrl+nope+X\n") == "line 1: unknown modifier 'nope' (CTRL, SHIFT, ALT)");
+    CHECK(ParseError("key ALT+F4\n") == "line 1: alt+f4 closes the game window; the scenarios cannot");
+    CHECK(ParseError("key CTRL+\n") == "line 1: key needs a key name after its modifiers");
+    CHECK(ParseOk("type :(\"_.\n").size() == 1);
+
+    // The modifiers come down in written order around the key, up in
+    // reverse, with the same frame phases SHIFT uses for a capital.
+    platform::script::Start(ParseOk("key CTRL+SHIFT+X\n"));
+    platform::script::Advance(); // CTRL down
+    CHECK(Key(VK_CONTROL) == kPressed);
+    CHECK(Key(VK_SHIFT) == 0);
+    platform::script::Advance(); // SHIFT down
+    CHECK(Key(VK_CONTROL) != 0);
+    CHECK(Key(VK_SHIFT) == kPressed);
+    platform::script::Advance(); // X down
+    CHECK(Key('X') == kPressed);
+    CHECK(Key(VK_CONTROL) != 0);
+    CHECK(Key(VK_SHIFT) != 0);
+    platform::script::Advance(); // X frame 2
+    platform::script::Advance(); // X up
+    CHECK(Key('X') == 0);
+    platform::script::Advance(); // X release frame 2
+    platform::script::Advance(); // SHIFT up, CTRL still down
+    CHECK(Key(VK_SHIFT) == 0);
+    CHECK(Key(VK_CONTROL) != 0);
+    platform::script::Advance(); // CTRL up
+    CHECK(Key(VK_CONTROL) == 0);
+    platform::script::Advance(); // done
+    CHECK_FALSE(platform::script::Running());
+    platform::script::Stop();
+}
+
+TEST_CASE("script type presses punctuation through the US layout", "[script]")
+{
+    platform::script::Start(ParseOk("type :_\n"));
+    platform::script::Advance(); // shift down for ':'
+    CHECK(Key(VK_SHIFT) != 0);
+    platform::script::Advance(); // ':' down
+    CHECK(Key(VK_OEM_1) == kPressed);
+    CHECK(Key(VK_SHIFT) != 0);
+    platform::script::Advance(); // ':' frame 2
+    platform::script::Advance(); // ':' up
+    CHECK(Key(VK_OEM_1) == 0);
+    platform::script::Advance(); // ':' release frame 2
+    platform::script::Advance(); // shift up
+    CHECK(Key(VK_SHIFT) == 0);
+    platform::script::Advance(); // shift down again for '_'
+    CHECK(Key(VK_SHIFT) != 0);
+    platform::script::Advance(); // '_' down
+    CHECK(Key(VK_OEM_MINUS) == kPressed);
     platform::script::Stop();
 }
 

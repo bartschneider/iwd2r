@@ -71,6 +71,13 @@ QUIT_RETRY = 10.0
 DEFAULT_TIMEOUT = 180
 # The header line that sets a scenario's timeout: "# timeout: SECONDS".
 TIMEOUT_LINE = re.compile(r'#\s*timeout\s*:(.*)$', re.IGNORECASE)
+# The header line that opts a scenario into the original's cheats for one
+# run: "# cheats: 1" sets Game Options/Cheats=1 in the game copy's
+# icewind2.ini (its cheat console gate, CInfGame's m_bCheatsEnabled);
+# "# cheats: 0" and no line at all leave the ini as the run prepared it.
+# The whole tail is captured, like TIMEOUT_LINE, so header_cheats refuses
+# junk ("# cheats: 1 (note)") instead of silently reading cheats off.
+CHEATS_LINE = re.compile(r'#\s*cheats\s*:(.*)$', re.IGNORECASE)
 
 # The virtual-key names platform/script_core.cpp accepts (kNamedKeys), with
 # their Win32 VK codes. Letters and digits are handled in vk_for_name.
@@ -129,6 +136,116 @@ EXTENDED_KEYS = frozenset((
     'PRIOR', 'NEXT', 'END', 'HOME', 'LEFT', 'UP', 'RIGHT', 'DOWN',
     'INSERT', 'DELETE', 'DIVIDE', 'NUMLOCK', 'RCONTROL', 'RMENU',
     'SNAPSHOT'))
+
+# The modifiers `key` accepts before the key name (`key CTRL+SHIFT+X`),
+# with their Win32 VK codes and X keysyms; the scenario parser refuses
+# ALT+F4 outright (it would close the game window, not feed the engine).
+MODIFIER_VK = {'CTRL': 0x11, 'SHIFT': 0x10, 'ALT': 0x12}
+MODIFIER_KEYSYM = {'CTRL': 'Control_L', 'SHIFT': 'Shift_L', 'ALT': 'Alt_L'}
+
+# `type` maps each character to one key press on a US layout: the
+# key's name (vk_for_name / keysym_for_name) and whether SHIFT is
+# held around the press. Every printable ASCII character (0x20-0x7e)
+# is in the table; the original's edit boxes translate the same
+# main-row keys with their own US-layout tables, so what lands in
+# the game is what the scenario says on that one layout.
+TYPE_KEYS = {
+    ' ': ('SPACE', False),
+    'a': ('A', False),
+    'A': ('A', True),
+    'b': ('B', False),
+    'B': ('B', True),
+    'c': ('C', False),
+    'C': ('C', True),
+    'd': ('D', False),
+    'D': ('D', True),
+    'e': ('E', False),
+    'E': ('E', True),
+    'f': ('F', False),
+    'F': ('F', True),
+    'g': ('G', False),
+    'G': ('G', True),
+    'h': ('H', False),
+    'H': ('H', True),
+    'i': ('I', False),
+    'I': ('I', True),
+    'j': ('J', False),
+    'J': ('J', True),
+    'k': ('K', False),
+    'K': ('K', True),
+    'l': ('L', False),
+    'L': ('L', True),
+    'm': ('M', False),
+    'M': ('M', True),
+    'n': ('N', False),
+    'N': ('N', True),
+    'o': ('O', False),
+    'O': ('O', True),
+    'p': ('P', False),
+    'P': ('P', True),
+    'q': ('Q', False),
+    'Q': ('Q', True),
+    'r': ('R', False),
+    'R': ('R', True),
+    's': ('S', False),
+    'S': ('S', True),
+    't': ('T', False),
+    'T': ('T', True),
+    'u': ('U', False),
+    'U': ('U', True),
+    'v': ('V', False),
+    'V': ('V', True),
+    'w': ('W', False),
+    'W': ('W', True),
+    'x': ('X', False),
+    'X': ('X', True),
+    'y': ('Y', False),
+    'Y': ('Y', True),
+    'z': ('Z', False),
+    'Z': ('Z', True),
+    '0': ('0', False),
+    '1': ('1', False),
+    '2': ('2', False),
+    '3': ('3', False),
+    '4': ('4', False),
+    '5': ('5', False),
+    '6': ('6', False),
+    '7': ('7', False),
+    '8': ('8', False),
+    '9': ('9', False),
+    ')': ('0', True),
+    '!': ('1', True),
+    '@': ('2', True),
+    '#': ('3', True),
+    '$': ('4', True),
+    '%': ('5', True),
+    '^': ('6', True),
+    '&': ('7', True),
+    '*': ('8', True),
+    '(': ('9', True),
+    ';': ('OEM_1', False),
+    ':': ('OEM_1', True),
+    '=': ('OEM_PLUS', False),
+    '+': ('OEM_PLUS', True),
+    ',': ('OEM_COMMA', False),
+    '<': ('OEM_COMMA', True),
+    '-': ('OEM_MINUS', False),
+    '_': ('OEM_MINUS', True),
+    '.': ('OEM_PERIOD', False),
+    '>': ('OEM_PERIOD', True),
+    '/': ('OEM_2', False),
+    '?': ('OEM_2', True),
+    '`': ('OEM_3', False),
+    '~': ('OEM_3', True),
+    '[': ('OEM_4', False),
+    '{': ('OEM_4', True),
+    '\\': ('OEM_5', False),
+    '|': ('OEM_5', True),
+    ']': ('OEM_6', False),
+    '}': ('OEM_6', True),
+    "'": ('OEM_7', False),
+    "\"": ('OEM_7', True),
+}
 
 
 class ScenarioError(ValueError):
@@ -209,18 +326,33 @@ def parse_scenario(text):
         elif v == 'KEY':
             if len(args) != 1:
                 fail('key needs one key name')
-            if vk_for_name(args[0]) == 0:
-                fail("unknown key '%s'" % args[0])
-            actions.append({'op': 'key', 'key': args[0].upper(),
-                            'line': number})
+            # `key CTRL+SHIFT+X`: modifiers before the key, joined with '+'
+            # (no key name is itself '+', so the split is unambiguous).
+            parts = args[0].split('+')
+            mods = [p.upper() for p in parts[:-1]]
+            name = parts[-1]
+            for mod in mods:
+                if mod not in MODIFIER_VK:
+                    fail("unknown modifier '%s' (CTRL, SHIFT, ALT)"
+                         % mod.lower())
+            if not name:
+                fail('key needs a key name after its modifiers')
+            if vk_for_name(name) == 0:
+                fail("unknown key '%s'" % name)
+            if 'ALT' in mods and name.upper() == 'F4':
+                fail('alt+f4 closes the game window; the scenarios cannot')
+            action = {'op': 'key', 'key': name.upper(), 'line': number}
+            if mods:
+                action['mods'] = mods
+            actions.append(action)
         elif v == 'TYPE':
             body = raw.lstrip(' \t')[len(verb):].lstrip(' \t').rstrip()
             if not body:
                 fail('type needs text')
             for ch in body:
-                if not (ch.isascii() and ch.isalnum()) and ch != ' ':
-                    fail("type supports letters, digits and spaces, not '%s'"
-                         % ch)
+                if ch not in TYPE_KEYS:
+                    fail("type supports printable ASCII characters, not "
+                         "'%s'" % ch)
             actions.append({'op': 'type', 'text': body, 'line': number})
         elif v == 'SHOT':
             if len(args) != 1:
@@ -297,6 +429,41 @@ def load_header_timeout(path):
         text = f.read()
     try:
         return header_timeout(text)
+    except ScenarioError as e:
+        raise ScenarioError('%s: %s' % (path, e)) from None
+
+
+def header_cheats(text):
+    """Whether a scenario's header opts the run into the original's cheats
+    with a line "# cheats: 1" ("# cheats: 0" is False, no line False too).
+    Read like header_timeout: only the header's comment lines. Raises
+    ScenarioError for a value that is not 0 or 1, or a second such line."""
+    found = None
+    for number, raw in enumerate(text.split('\n'), 1):
+        line = raw.rstrip('\r').strip()
+        if not line:
+            continue
+        if not line.startswith('#'):
+            break
+        m = CHEATS_LINE.match(line)
+        if not m:
+            continue
+        if found is not None:
+            raise ScenarioError('line %d: duplicate cheats (first on line '
+                                '%d)' % (number, found[1]))
+        value = m.group(1).strip()
+        if value not in ('0', '1'):
+            raise ScenarioError('line %d: cheats needs 0 or 1' % number)
+        found = (value == '1', number)
+    return found[0] if found else False
+
+
+def load_header_cheats(path):
+    """header_cheats of the scenario file at path."""
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    try:
+        return header_cheats(text)
     except ScenarioError as e:
         raise ScenarioError('%s: %s' % (path, e)) from None
 
@@ -478,16 +645,19 @@ def windows_actions(actions, geometry=None):
             out.append({'op': a['op'], 'x': x, 'y': y, 'line': a['line']})
             continue
         if a['op'] == 'key':
-            out.append({'op': 'key', 'line': a['line'], 'key': a['key'],
-                        'vk': vk_for_name(a['key']),
-                        'extended': a['key'] in EXTENDED_KEYS,
-                        'shift': False})
+            item = {'op': 'key', 'line': a['line'], 'key': a['key'],
+                    'vk': vk_for_name(a['key']),
+                    'extended': a['key'] in EXTENDED_KEYS,
+                    'shift': False}
+            if a.get('mods'):
+                item['mods'] = [MODIFIER_VK[m] for m in a['mods']]
+            out.append(item)
         elif a['op'] == 'type':
             for ch in a['text']:
-                name = 'SPACE' if ch == ' ' else ch.upper()
+                name, shift = TYPE_KEYS[ch]
                 out.append({'op': 'key', 'line': a['line'], 'key': name,
                             'vk': vk_for_name(name), 'extended': False,
-                            'shift': ch.isupper()})
+                            'shift': shift})
         else:
             out.append(dict(a))
     return out
@@ -501,6 +671,8 @@ def describe(action):
     if op in ('move', 'click', 'rclick'):
         return '%s %d %d' % (op, action['x'], action['y'])
     if op == 'key':
+        if action.get('mods'):
+            return 'key %s+%s' % ('+'.join(action['mods']), action['key'])
         return 'key %s' % action['key']
     if op == 'type':
         return 'type %s' % action['text']
@@ -1034,18 +1206,20 @@ class XDriver:
         self.xdo('mouseup', button)
         self.hold(SETTLE_FRAMES)
 
-    def key(self, keysym, shift=False):
+    def key(self, keysym, shift=False, mods=()):
         """A key press; with shift, Shift_L is held around it, as
-        driver.ps1's Press-Key does for a capital."""
-        if shift:
-            self.xdo('keydown', 'Shift_L')
+        driver.ps1's Press-Key does for a capital. The mods keysyms are
+        held around it the same way, in order, and released in reverse."""
+        downs = list(mods) + (['Shift_L'] if shift else [])
+        for mod in downs:
+            self.xdo('keydown', mod)
             self.hold(1)
         self.xdo('keydown', keysym)
         self.hold(HOLD_FRAMES)
         self.xdo('keyup', keysym)
-        if shift:
+        for mod in reversed(downs):
             self.hold(1)
-            self.xdo('keyup', 'Shift_L')
+            self.xdo('keyup', mod)
         self.hold(SETTLE_FRAMES)
 
     def screen_shot(self, name):
@@ -1109,13 +1283,15 @@ class XDriver:
             if op != 'move':
                 self.button(1 if op == 'click' else 3)
         elif op == 'key':
-            self.key(keysym_for_name(action['key']))
+            self.key(keysym_for_name(action['key']),
+                     mods=[MODIFIER_KEYSYM[m] for m in action.get('mods',
+                                                                  ())])
         elif op == 'type':
             # One key press per character (windows_actions' expansion), so
             # each waits for the engine's input reads like any key.
             for ch in action['text']:
-                name = 'SPACE' if ch == ' ' else ch.upper()
-                self.key(keysym_for_name(name), shift=ch.isupper())
+                name, shift = TYPE_KEYS[ch]
+                self.key(keysym_for_name(name), shift=shift)
         elif op == 'shot':
             self.screen_shot(action['name'])
             self.engine_shot(action['name'])

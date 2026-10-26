@@ -492,6 +492,24 @@ class ScenarioParseTest(unittest.TestCase):
             {'op': 'quit', 'line': 12},
         ])
 
+    def test_key_modifiers(self):
+        # CTRL/SHIFT/ALT (any combination) before the key, joined with '+';
+        # a bare key keeps its exact old shape (no 'mods').
+        actions = realinput.parse_scenario(
+            'key CTRL+SPACE\n'
+            'key SHIFT+OEM_1\n'
+            'key ctrl+shift+X\n'
+            'key alt+shift+ctrl+TAB\n'
+            'key b\n')
+        self.assertEqual(actions, [
+            {'op': 'key', 'key': 'SPACE', 'mods': ['CTRL'], 'line': 1},
+            {'op': 'key', 'key': 'OEM_1', 'mods': ['SHIFT'], 'line': 2},
+            {'op': 'key', 'key': 'X', 'mods': ['CTRL', 'SHIFT'], 'line': 3},
+            {'op': 'key', 'key': 'TAB',
+             'mods': ['ALT', 'SHIFT', 'CTRL'], 'line': 4},
+            {'op': 'key', 'key': 'B', 'line': 5},
+        ])
+
     def test_errors_name_the_line(self):
         cases = [
             ('wait\n', 'line 1: wait needs one frame count'),
@@ -503,8 +521,16 @@ class ScenarioParseTest(unittest.TestCase):
             ('key\n', 'line 1: key needs one key name'),
             ('key NOPE\n', "line 1: unknown key 'NOPE'"),
             ('key !\n', "line 1: unknown key '!'"),
+            ('key ctrl+nope+X\n',
+             "line 1: unknown modifier 'nope' (CTRL, SHIFT, ALT)"),
+            ('key ALT+F4\n',
+             'line 1: alt+f4 closes the game window; the scenarios cannot'),
+            ('key CTRL+\n',
+             'line 1: key needs a key name after its modifiers'),
             ('type\n', 'line 1: type needs text'),
-            ('type a-b\n', "line 1: type supports letters, digits and spaces, not '-'"),
+            ('type aé\n',
+             "line 1: type supports printable ASCII characters, not "
+             "'é'"),
             ('shot\n', 'line 1: shot needs one name'),
             ('shot a/b\n', 'line 1: shot name must not contain a path'),
             ('shot c:x\n', 'line 1: shot name must not contain a path'),
@@ -529,6 +555,32 @@ class ScenarioParseTest(unittest.TestCase):
             with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
                 realinput.parse_scenario(text)
             self.assertEqual(str(cm.exception), message)
+
+    def test_header_cheats(self):
+        c = realinput.header_cheats
+        self.assertTrue(c('# cheats: 1\nwait 1\n'))
+        self.assertTrue(c('# About it.\n\n#  Cheats:  1 \r\nwait 1\n'))
+        self.assertFalse(c('# cheats: 0\nwait 1\n'))
+        self.assertFalse(c('# About it.\nwait 1\n'))
+        # Only the header (the comment lines before the first command).
+        self.assertFalse(c('wait 1\n# cheats: 1\n'))
+        for text, message in (
+                ('# x\n# cheats: 2\n',
+                 'line 2: cheats needs 0 or 1'),
+                ('# cheats: on\n',
+                 'line 1: cheats needs 0 or 1'),
+                ('# cheats: 1 (note)\n',
+                 'line 1: cheats needs 0 or 1'),
+                ('# cheats:\n',
+                 'line 1: cheats needs 0 or 1'),
+                ('# cheats: 1\n# cheats: 0\n',
+                 'line 2: duplicate cheats (first on line 1)')):
+            with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
+                c(text)
+            self.assertEqual(str(cm.exception), message)
+        # The scenario parsers take the header for a comment.
+        self.assertEqual(realinput.parse_scenario('# cheats: 1\nquit\n'),
+                         [{'op': 'quit', 'line': 2}])
 
     def test_header_timeout(self):
         t = realinput.header_timeout
@@ -560,6 +612,8 @@ class ScenarioParseTest(unittest.TestCase):
             self.assertTrue(realinput.load_scenario(path), path)
             # A header line that reads like "# timeout: S" must be one.
             realinput.load_header_timeout(path)
+            # And one that reads like "# cheats: 0|1" must be one.
+            realinput.load_header_cheats(path)
 
     def test_world_entry_checkpoints(self):
         actions = realinput.load_scenario(os.path.join(
@@ -589,6 +643,22 @@ class ScenarioParseTest(unittest.TestCase):
                          ['dialog', 'door_open'])
         self.assertEqual(actions[-1]['op'], 'quit')
 
+    def test_type_keys_cover_printable_ascii(self):
+        # Exactly the printable ASCII characters, each on a key both input
+        # paths know, with shift exactly where the original's own US-layout
+        # tables put it (CInfGame.cpp's byte_8ABA24/8ABA3C).
+        self.assertEqual(set(realinput.TYPE_KEYS),
+                         set(map(chr, range(0x20, 0x7f))))
+        for ch, (name, shift) in realinput.TYPE_KEYS.items():
+            self.assertTrue(realinput.vk_for_name(name), name)
+            self.assertTrue(realinput.keysym_for_name(name), name)
+        self.assertEqual(realinput.TYPE_KEYS[':'], ('OEM_1', True))
+        self.assertEqual(realinput.TYPE_KEYS['('], ('9', True))
+        self.assertEqual(realinput.TYPE_KEYS['"'], ('OEM_7', True))
+        self.assertEqual(realinput.TYPE_KEYS['_'], ('OEM_MINUS', True))
+        self.assertEqual(realinput.TYPE_KEYS['.'], ('OEM_PERIOD', False))
+        self.assertEqual(realinput.TYPE_KEYS[';'], ('OEM_1', False))
+
     def test_keysym_table_covers_every_key_name(self):
         self.assertEqual(set(realinput.X_KEYSYM), set(realinput.KEY_VK))
         used = set()
@@ -608,11 +678,32 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertIsNone(realinput.keysym_for_name('?'))
 
     def test_vk_names_match_script_core_cpp(self):
-        # Every name in platform/script_core.cpp's kNamedKeys, and no other.
+        # Every name in platform/script_core.cpp's kNamedKeys, and no other
+        # (kModifiers holds the CTRL/SHIFT/ALT `key` prefixes and mirrors
+        # realinput's MODIFIER_VK, a table of its own), and kTypeKeys mirrors
+        # TYPE_KEYS's punctuation rows (letters, digits and space are inline
+        # in Expand).
         with open(os.path.join(ROOT, 'platform', 'script_core.cpp')) as f:
             text = f.read()
-        names = set(re.findall(r'\{ "([A-Z0-9_]+)", VK_', text))
+        names = set(re.findall(
+            r'\{ "([A-Z0-9_]+)", VK_',
+            text.split('kNamedKeys[] = {', 1)[1].split('};', 1)[0]))
         self.assertEqual(names, set(realinput.KEY_VK))
+        mods = set(re.findall(
+            r'\{ "([A-Z0-9_]+)", VK_',
+            text.split('kModifiers[] = {', 1)[1].split('};', 1)[0]))
+        self.assertEqual(mods, set(realinput.MODIFIER_VK))
+        types = {}
+        for ch, vk, digit, shift in re.findall(
+                r"\{ '(.+?)', (VK_[A-Z0-9_]+|'(.+?)'), (true|false) \}",
+                text.split('kTypeKeys[] = {', 1)[1].split('};', 1)[0]):
+            ch = {'\\\\': '\\', "\\'": "'"}.get(ch, ch)
+            name = digit if digit else vk[len('VK_'):]
+            self.assertTrue(realinput.vk_for_name(name), name)
+            types[ch] = (name, shift == 'true')
+        punct = {ch: row for ch, row in realinput.TYPE_KEYS.items()
+                 if ch != ' ' and not ch.isalnum()}
+        self.assertEqual(types, punct)
         self.assertEqual(realinput.vk_for_name('escape'), 0x1B)
         self.assertEqual(realinput.vk_for_name('z'), ord('Z'))
         self.assertEqual(realinput.vk_for_name('NOPE'), 0)
@@ -623,11 +714,31 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(out[0], {'op': 'key', 'line': 1, 'key': 'LEFT',
                                   'vk': 0x25, 'extended': True,
                                   'shift': False})
+        self.assertNotIn('mods', out[0])  # a bare key keeps its old shape
         self.assertEqual([(a['vk'], a['shift']) for a in out[1:5]],
                          [(0x41, False), (0x42, True), (0x20, False),
                           (0x31, False)])
         self.assertEqual(out[5], {'op': 'click', 'x': 5, 'y': 6, 'line': 3})
         json.dumps(out)  # serialisable
+        # Modifiers travel as VK codes; the shift field stays for the old
+        # action files.
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'key CTRL+SPACE\nkey CTRL+SHIFT+OEM_1\n'))
+        self.assertEqual(out, [
+            {'op': 'key', 'line': 1, 'key': 'SPACE', 'vk': 0x20,
+             'extended': False, 'shift': False, 'mods': [0x11]},
+            {'op': 'key', 'line': 2, 'key': 'OEM_1', 'vk': 0xBA,
+             'extended': False, 'shift': False, 'mods': [0x11, 0x10]}])
+        # type: every punctuation class expands through TYPE_KEYS.
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'type :("_.\n'))
+        self.assertEqual([(a['key'], a['vk'], a['shift']) for a in out],
+                         [('OEM_1', 0xBA, True), ('9', 0x39, True),
+                          ('OEM_7', 0xDE, True), ('OEM_MINUS', 0xBD, True),
+                          ('OEM_PERIOD', 0xBE, False)])
+        self.assertEqual(realinput.describe(
+            {'op': 'key', 'key': 'X', 'mods': ['CTRL', 'SHIFT']}),
+            'key CTRL+SHIFT+X')
         # Window pixels: the centred UI, times the scale; origin dropped.
         g = realinput.resolve_screen(2560, 1440, 2, (2560, 1440))
         out = realinput.windows_actions(realinput.parse_scenario(
@@ -911,6 +1022,24 @@ class XDriverTest(unittest.TestCase):
             ['keydown', 'r'], ['keyup', 'r'],
             ['keydown', 'space'], ['keyup', 'space'],
             ['keydown', '1'], ['keyup', '1']])
+
+    def test_type_presses_punctuation_through_the_us_layout(self):
+        self.driver.do({'op': 'type', 'text': ':_', 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Shift_L'], ['keydown', 'semicolon'],
+            ['keyup', 'semicolon'], ['keyup', 'Shift_L'],
+            ['keydown', 'Shift_L'], ['keydown', 'minus'], ['keyup', 'minus'],
+            ['keyup', 'Shift_L']])
+
+    def test_key_with_modifiers(self):
+        # As driver.ps1 does: modifiers down in order, the key, then
+        # release in reverse, each phase waiting for the engine's reads.
+        self.driver.do({'op': 'key', 'key': 'X',
+                        'mods': ['CTRL', 'SHIFT'], 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Control_L'], ['keydown', 'Shift_L'],
+            ['keydown', 'x'], ['keyup', 'x'],
+            ['keyup', 'Shift_L'], ['keyup', 'Control_L']])
 
     def test_game_exit_ends_the_run(self):
         self.game.code = 0
@@ -4955,6 +5084,163 @@ class OracleReplayTest(unittest.TestCase):
                 self.assertEqual(f.read(),
                                  b'Full Screen=1\r\nResolution=800\r\n')
 
+    def test_cheats_ini(self):
+        text = ('[Program Options]\r\nResolution=800\r\n'
+                '[Game Options]\r\nCheats=0\r\nDifficulty=0\r\n'
+                '[Characters]\r\n')
+        # A run that does not opt in leaves the ini byte-identical.
+        self.assertEqual(oracle.cheats_ini(text, False), text)
+        self.assertEqual(oracle.cheats_ini(text, True),
+                         '[Program Options]\r\nResolution=800\r\n'
+                         '[Game Options]\r\nCheats=1\r\nDifficulty=0\r\n'
+                         '[Characters]\r\n')
+        # A copy without the key gains it at the top of the section.
+        bare = text.replace('Cheats=0\r\n', '')
+        self.assertEqual(oracle.cheats_ini(bare, True),
+                         '[Program Options]\r\nResolution=800\r\n'
+                         '[Game Options]\r\nCheats=1\r\nDifficulty=0\r\n'
+                         '[Characters]\r\n')
+        self.assertEqual(oracle.cheats_ini_value(text), '0')
+        self.assertEqual(oracle.cheats_ini_value(
+            text.replace('Cheats=0', 'Cheats=1')), '1')
+        self.assertIsNone(oracle.cheats_ini_value(bare))
+        for broken in ('Cheats=1\r\n', '[Program Options]\r\nCheats=1\r\n'):
+            with self.assertRaises(ValueError):
+                oracle.cheats_ini(broken, True)
+
+    def test_prepare_and_restore_cheats_ini(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            game = os.path.join(tmp, 'game')
+            os.makedirs(game)
+            ini = os.path.join(game, 'Icewind2.ini')
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            calls = []
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: calls.append((g, i))), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(
+                    oracle.prepare_cheats_ini(game, True, '/install'), '0')
+                # The original writes its console history back at exit.
+                with open(ini, 'ab') as f:
+                    f.write(b'[Lua Edit]\r\nHistory=SETCURRENTXP(4000)\r\n')
+                oracle.restore_cheats_ini(game, '0', '/install')
+            self.assertEqual(calls, [(game, '/install')] * 2)
+            self.assertIn('set Cheats=1', out.getvalue())
+            # Only the Cheats key went back; the write-back survived.
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n'
+                                 b'[Lua Edit]\r\n'
+                                 b'History=SETCURRENTXP(4000)\r\n')
+            # An opt-in on a copy without the key removes it again on
+            # restore (the original then defaults the cheats to 0).
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nSound=1\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(
+                    oracle.prepare_cheats_ini(game, True, '/install'))
+                oracle.restore_cheats_ini(game, None, '/install')
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nSound=1\r\n')
+            # No opt-in writes nothing at all.
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertIsNone(
+                    oracle.prepare_cheats_ini(game, False, '/install'))
+            self.assertNotIn('set Cheats', out.getvalue())
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n')
+            # An ini without the section is refused, not guessed at.
+            with open(ini, 'wb') as f:
+                f.write(b'[Program Options]\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None):
+                with self.assertRaises(SystemExit):
+                    oracle.prepare_cheats_ini(game, True, '/install')
+
+    def test_console_ini_block(self):
+        # A middle section's block ends at the newline before the next
+        # header; the section's own last newline is part of the block.
+        text = ('[Game Options]\r\nCheats=0\r\n[Lua Edit]\r\n'
+                'String0=ADDGOLD(500)\r\nString1=\r\n[Characters]\r\n')
+        self.assertEqual(oracle.console_ini_block(text),
+                         '[Lua Edit]\r\nString0=ADDGOLD(500)\r\n'
+                         'String1=\r\n')
+        # A last section runs to the end of the file, newline or not.
+        self.assertEqual(oracle.console_ini_block('[Lua Edit]\r\nString0=X'),
+                         '[Lua Edit]\r\nString0=X')
+        self.assertEqual(
+            oracle.console_ini_block('[Lua Edit]\r\nString0=X\r\n'),
+            '[Lua Edit]\r\nString0=X\r\n')
+        # No section, or a mention inside another section's value, is None.
+        self.assertIsNone(oracle.console_ini_block('[Game Options]\r\n'))
+        self.assertIsNone(oracle.console_ini_block(
+            '[Game Options]\r\nLast=[Lua Edit]\r\n'))
+
+    def test_prepare_and_restore_console_ini(self):
+        from unittest import mock
+        block = ('[Lua Edit]\r\nString0=SETCURRENTXP(4000)\r\n'
+                 'String1=ADDGOLD(500)\r\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            game = os.path.join(tmp, 'game')
+            os.makedirs(game)
+            ini = os.path.join(game, 'Icewind2.ini')
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n' + block.encode()
+                        + b'[Characters]\r\n')
+            calls = []
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: calls.append((g, i))), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                # The strip removes exactly the section; the box then opens
+                # empty instead of preloading String0.
+                self.assertEqual(
+                    oracle.prepare_console_ini(game, '/install'), block)
+                self.assertIn('stripped [Lua Edit]', out.getvalue())
+                with open(ini, 'rb') as f:
+                    self.assertEqual(f.read(),
+                                     b'[Game Options]\r\nCheats=0\r\n'
+                                     b'[Characters]\r\n')
+                # The run submits lines and the game writes them back.
+                with open(ini, 'wb') as f:
+                    f.write(b'[Game Options]\r\nCheats=0\r\n[Lua Edit]\r\n'
+                            b'String0=CTRLALTDELETE:ADDGOLD(500)\r\n'
+                            b'String5=NEW\r\n[Characters]\r\n')
+                oracle.restore_console_ini(game, block, '/install')
+            self.assertEqual(calls, [(game, '/install')] * 2)
+            # The prior block is back in place; the write-back is gone.
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(),
+                                 b'[Game Options]\r\nCheats=0\r\n'
+                                 + block.encode() + b'[Characters]\r\n')
+            # A copy without the section: prepare writes nothing, and a
+            # restore of None removes whatever the run left behind.
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertIsNone(
+                    oracle.prepare_console_ini(game, '/install'))
+            self.assertNotIn('stripped', out.getvalue())
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n')
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n'
+                        b'[Lua Edit]\r\nString0=X\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                oracle.restore_console_ini(game, None, '/install')
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n')
+
     def test_parse_status(self):
         self.assertEqual(oracle.parse_status(
             'frame=21046\nscript_line=5\nstate=running\n'),
@@ -7022,6 +7308,8 @@ class ProbePlanTest(unittest.TestCase):
             post_load=None, target='original', build_checkout=None, out='t.jsonl',
             seed=1, dump_every=0, clicks=0)
         script = os.path.join(tmp, 's.txt')
+        with open(script, 'w') as f:
+            f.write('# cheats: 1\n')
 
         def run_side(*a, **kw):
             events.append(('run_side',))
@@ -7035,6 +7323,18 @@ class ProbePlanTest(unittest.TestCase):
             mock.patch.object(probe.winsandbox, 'available', return_value=True),
             mock.patch.object(probe.oracle, 'ensure_vanilla', return_value=game),
             mock.patch.object(probe.oracle, 'prepare_replay_ini'),
+            mock.patch.object(probe.oracle, 'prepare_cheats_ini',
+                              side_effect=lambda g, on:
+                              events.append(('cheats-on', g)) or '0'),
+            mock.patch.object(probe.oracle, 'restore_cheats_ini',
+                              side_effect=lambda g, prior:
+                              events.append(('cheats-off', g))),
+            mock.patch.object(probe.oracle, 'prepare_console_ini',
+                              side_effect=lambda g:
+                              events.append(('console-on', g)) or None),
+            mock.patch.object(probe.oracle, 'restore_console_ini',
+                              side_effect=lambda g, prior:
+                              events.append(('console-off', g))),
             mock.patch.object(probe, 'ours_build', return_value=builddir),
             mock.patch.object(probe.winsandbox, 'deploy_runtime'),
             mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
@@ -7057,9 +7357,11 @@ class ProbePlanTest(unittest.TestCase):
             rc = probe.run(ns)
         self.assertEqual(rc, 0)
         self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
+            ('cheats-on', game), ('console-on', game),
             ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
             ('run_side',),
-            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay')])
+            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay'),
+            ('cheats-off', game), ('console-off', game)])
         saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
         self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
                                     {'mode': 'empty', 'load': None},
@@ -13413,6 +13715,101 @@ class DriverTest(unittest.TestCase):
         self.assertIn('b011: frida: skipped, coverage says no scenario exercises any row',
                       self.logs)
 
+    def test_import_outcome_imports_an_unexercised_rule_1_row_unmeasured(self):
+        d, batch = self._import_phase_driver()
+        d._frida_ran = (['world_entry'], ['first_fight'])
+        with open(os.path.join(self.wt, 'docs', 'evidence', '405000.md'), 'w') as f:
+            f.write('---\naddress: 0x405000\nname: Rules::Zed\nkind: read-only\n'
+                    'exemption: "his body, read against the disassembly"\n---\nprose\n')
+        with open(os.path.join(self.wt, 'docs', 'evidence', '406000.md'), 'w') as f:
+            f.write('---\naddress: 0x406000\nname: Rules::Yed\nkind: read-only\n---\nprose\n')
+        rows = [{'address': '0x405000', 'name': 'Rules::Zed', 'category': 'only_theirs'},
+                {'address': '0x406000', 'name': 'Rules::Yed', 'category': 'theirs_real_ours_stub'}]
+        for row in rows:
+            self.assertIsNone(d._import_outcome('b011', self.wt, row, 'not-exercised',
+                                                'no scenario hit it: world_entry', {}, 'abc', None))
+        self.assertEqual(d._unmeasured_marked,
+                         {'0x405000': 'docs/evidence/405000.md',
+                          '0x406000': 'docs/evidence/406000.md'})
+        wave = driver._tool('wave')
+        want = ('exemption: %s: world_entry: not exercised; not hit per coverage: first_fight'
+                % wave.UNMEASURED_WSO)
+        for stem in ('405000', '406000'):
+            with open(os.path.join(self.wt, 'docs', 'evidence', stem + '.md')) as f:
+                text = f.read()
+            self.assertIn(want, text)
+            self.assertIn('kind: read-only', text)
+            self.assertTrue(wave.unmeasured_wso(text))
+        with open(os.path.join(self.wt, 'docs', 'evidence', '405000.md')) as f:
+            self.assertNotIn('his body, read against', f.read())  # replaced, not duplicated
+        self.assertIn('b011: frida 0x405000 not-exercised: rule 1, imports unmeasured '
+                      '(evidence marked unmeasured WSO import)', self.logs)
+
+    def test_import_outcome_still_parks_an_unexercised_kept_or_base_row(self):
+        d, batch = self._import_phase_driver()
+        d._frida_ran = (['world_entry'], [])
+        base = {'address': '0x403000', 'name': 'Rules::Tick',
+                'category': 'theirs_changed_ours_base'}
+        kept = {'address': '0x403000', 'name': 'Rules::Tick',
+                'category': 'only_theirs', 'kept': True}
+        for row in (base, kept):
+            text = d._import_outcome('b011', self.wt, row, 'not-exercised',
+                                     'no scenario hit it: world_entry', {}, 'abc', None)
+            self.assertIn('exercised by no scenario', text)
+            self.assertIn('park it', text)
+        self.assertEqual(d._unmeasured_marked, {})
+
+    def test_import_outcome_parks_a_rule_1_row_whose_evidence_cannot_be_marked(self):
+        d, batch = self._import_phase_driver()
+        d._frida_ran = (['world_entry'], [])
+        row = {'address': '0x407000', 'name': 'Rules::NoFile', 'category': 'only_theirs'}
+        text = d._import_outcome('b011', self.wt, row, 'not-exercised',
+                                 'no scenario hit it: world_entry', {}, 'abc', None)
+        self.assertIn('park it', text)
+        self.assertEqual(d._unmeasured_marked, {})
+        self.assertTrue(any(l.startswith(
+            'b011: frida 0x407000 not-exercised: marking its evidence failed')
+            for l in self.logs), self.logs)
+
+    def test_write_unmeasured_evidence_rewrites_only_the_exemption(self):
+        self._import_phase_driver()
+        p = os.path.join(self.wt, 'docs', 'evidence', '408000.md')
+        with open(p, 'w', newline='') as f:
+            f.write('---\r\naddress: 0x408000\r\nname: Rules::Cr\r\nkind: read-only\r\n'
+                    'exemption: "thin"\r\n---\r\nprose stays\r\n')
+        driver._write_unmeasured_evidence(p, 'world_entry: not exercised')
+        with open(p, newline='') as f:
+            self.assertEqual(f.read(),
+                             '---\r\naddress: 0x408000\r\nname: Rules::Cr\r\nkind: read-only\r\n'
+                             'exemption: %s: world_entry: not exercised\r\n---\r\nprose stays\r\n'
+                             % driver._tool('wave').UNMEASURED_WSO)
+        with open(p, 'w') as f:
+            f.write('no front matter\n')
+        with self.assertRaises(ValueError):
+            driver._write_unmeasured_evidence(p, 'needs')
+
+    def test_driver_frida_phase_imports_unexercised_rule_1_rows_unmeasured(self):
+        d, batch = self._import_phase_driver()
+        batch['rows'] = [
+            {'address': '0x401000', 'name': 'Rules::Render', 'category': 'only_theirs'},
+            {'address': '0x403000', 'name': 'Rules::Tick', 'category': 'theirs_real_ours_stub'}]
+        self._coverage_map({'world_entry': {'0x999000': 4}})
+        d.frida_build = lambda *a, **kw: self.fail('no build when coverage says nothing is hit')
+        d.frida_run = lambda *a, **kw: self.fail('no launch when coverage says nothing is hit')
+        findings = d._frida_phase('b011', batch, self.wt, {})
+        self.assertEqual(findings, [])
+        self.assertEqual(d._unmeasured_marked, {'0x401000': 'docs/evidence/401000.md',
+                                                '0x403000': 'docs/evidence/403000.md'})
+        for stem in ('401000', '403000'):
+            r = self.git('show', 'HEAD:docs/evidence/%s.md' % stem, cwd=self.wt)
+            self.assertIn('%s: not-exercised (coverage: no scenario hits it'
+                          % driver._tool('wave').UNMEASURED_WSO, r.stdout)
+        r = self.git('log', '-1', '--format=%s', cwd=self.wt)
+        self.assertEqual(r.stdout,
+                         'frida: unmeasured WSO import marking for 2 row(s) of b011\n')
+        self.assertIn('b011: frida 0x401000 not-exercised: rule 1, imports unmeasured '
+                      '(evidence marked unmeasured WSO import)', self.logs)
+
     def test_driver_frida_phase_runs_only_the_covering_scenario_and_keeps_uncovered_rows_in_the_table(self):
         d, batch = self._import_phase_driver()
         self._coverage_map({'first_fight': {'0x402000': 4}})
@@ -14188,14 +14585,13 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(driver._tool('check_evidence').front_matter(_slurp(os.path.join(
             self.wt, 'docs', 'evidence', '401000.md')))['kind'], 'trace')
         self.assertEqual(set(self._outcomes().values()), {None})
-        # unexercised: parked by REMOVING the function, never edit back
+        # unexercised: rule 1 of the 2026-10-26 ruling -- an only-theirs row
+        # imports unmeasured, no parking; only a marking that fails would park
         idle = [f for f in findings if f.startswith('0x403000:')]
-        self.assertEqual(len(idle), 1, findings)
-        self.assertIn('remove the function you added (and its declaration) so the file is back '
-                      "to the merge base's text for it", idle[0])
-        self.assertNotIn('edit that function back', idle[0])
-        self.assertIn('docs/wso/import-parked/403000.json', idle[0])
-        self.assertIn('needs "', idle[0])
+        self.assertEqual(idle, [], findings)
+        self.assertIn('exemption: unmeasured WSO import', _slurp(os.path.join(
+            self.wt, 'docs', 'evidence', '403000.md')))
+        self.assertEqual(d._unmeasured_marked, {'0x403000': 'docs/evidence/403000.md'})
         diff = [f for f in findings if f.startswith('0x402000:')]
         self.assertIn('remove the function you added', diff[0])
         # a stub row's text is unchanged
@@ -15854,8 +16250,8 @@ class DriverTest(unittest.TestCase):
         self._write_status(d, {'current': {'batch': 'b011', 'stage': 'worker',
                                            'at': '2026-10-24T01:00:00+00:00'}})
         verdict, ran, cuts = threading.Event(), [], []
-        run24 = (2, 'nothing left: every remaining import row is exercised by no '
-                   'scenario (--include-uncovered offers them anyway)\n')
+        run24 = (2, 'nothing left: every remaining theirs_changed_ours_base row '
+                   'is kept by default (1 recorded: no scenario exercises them)\n')
 
         def run_batch(bid, resume=None):
             ran.append((bid, resume is not None))
@@ -19536,6 +19932,141 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('i001 closed p3/wso-i001 1 rows', out)
 
+    # -- re-queueing parked rule-1 rows (rule 3 of the 2026-10-26 ruling) ------
+
+    def _requeue_fixture(self):
+        """_unpark_fixture plus the categories rule 3 reads: the rule-1 rows
+        0x403000 (stub category) and the appended only_theirs 0x406000 re-enter
+        the queue; the base 0x401000 (rule 2 keeps it), the assigned-batch
+        0x404000, the in-no-batch 0x405000 and the dependency-parked 0x407000
+        stay parked whatever their needs says."""
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        with open(imp) as f:
+            state = json.load(f)
+        cats = {'0x401000': 'theirs_changed_ours_base',
+                '0x403000': 'theirs_real_ours_stub',
+                '0x404000': 'only_theirs'}
+        for b in state['batches'].values():
+            for r in b['rows']:
+                r['category'] = cats[r['address']]
+        state['batches']['i001']['rows'].append(
+            {'address': '0x406000', 'name': 'N', 'file': 'src/F.cpp',
+             'their_len': 70, 'our_len': 2, 'category': 'only_theirs'})
+        with open(imp, 'w') as f:
+            json.dump(state, f)
+        parked = (('401000', 'F', 'world_entry: not exercised'),
+                  ('406000', 'N', 'world_entry: not exercised'),
+                  ('407000', 'P', 'dependency outside the batch files: 0x900000 not imported'))
+        for a, n, needs in parked:
+            with open(os.path.join(folder, a + '.json'), 'w') as f:
+                json.dump({'address': '0x' + a, 'name': n, 'file': 'src/x.cpp',
+                           'batch': 'i001', 'needs': needs}, f)
+        return tmp, dp, ip, imp, folder, wave
+
+    def test_requeue_dry_run_lists_the_rule_1_rows_and_moves_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._requeue_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        rc, out = wave.requeue(state_path=imp, repo=self.root, dry_run=True)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out,
+                         'requeue: 2 parked rule-1 row(s) whose needs ends in "not exercised" '
+                         'would re-enter the queue\n'
+                         '  0x403000 H from i001\n'
+                         '  0x406000 N from i001\n')
+        self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_requeue_unparks_exactly_those_rows_and_keeps_the_rest_parked(self):
+        tmp, dp, ip, imp, folder, wave = self._requeue_fixture()
+        rc, out = wave.requeue(state_path=imp, repo=self.root)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out.splitlines()[0],
+                         'requeue: 2 parked rule-1 row(s) whose needs ends in "not exercised" '
+                         're-enter the queue')
+        self.assertIn('unparked 0x403000 H', out)
+        with open(imp) as f:
+            b = json.load(f)['batches']['i001']
+        self.assertEqual([r['address'] for r in b['rows']], ['0x401000'])
+        moved = {u['address']: u for u in b['unparked']}
+        self.assertEqual(sorted(moved), ['0x403000', '0x406000'])
+        self.assertEqual(moved['0x403000']['reason'],
+                         'rule 1: no coverage requirement (2026-10-26 ruling)')
+        self.assertEqual(sorted(os.listdir(folder)),
+                         ['401000.json', '404000.json', '405000.json', '407000.json'])
+
+    def test_requeue_without_a_matching_row_moves_nothing(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        before = self._unpark_snapshot(imp, folder)
+        # the fixture's rows carry no rule-1 category
+        rc, out = wave.requeue(state_path=imp, repo=self.root)
+        self.assertEqual((rc, out.rstrip()),
+                         (0, 'requeue: no parked rule-1 row ends its needs in "not exercised"'))
+        self.assertEqual(self._unpark_snapshot(imp, folder), before)
+
+    def test_requeue_rejects_addresses(self):
+        wave = driver._tool('wave')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = wave.main(['requeue', '0x403000'])
+        self.assertEqual(rc, 2)
+        self.assertEqual(err.getvalue(), 'usage: wave.py requeue [--dry-run] [--reason TEXT]\n')
+
+    # -- unmeasured WSO imports (rule 1 of the 2026-10-26 ruling) ----------------
+
+    def _marked_evidence(self):
+        """docs/evidence under self.root: 401000 carries the driver's
+        unmeasured-WSO marking, 402000 a plain read-only reading, 403000 a
+        file with no exemption, 404000 no front matter at all."""
+        folder = os.path.join(self.root, 'docs', 'evidence')
+        os.makedirs(folder, exist_ok=True)
+        texts = {
+            '401000': ('---\naddress: 0x401000\nname: Rules::Roll\n'
+                       'kind: read-only\nexemption: unmeasured WSO import: '
+                       'world_entry: not exercised; reading follows the decompile\n'
+                       '---\n\n# 0x401000\n\nreading.\n'),
+            '402000': ('---\naddress: 0x402000\nname: IcewindMisc::Roll\n'
+                       'kind: read-only\nexemption: checked against the disassembly\n'
+                       '---\n\n# 0x402000\n\nreading.\n'),
+            '403000': ('---\naddress: 0x403000\nname: Rules::Tick\n'
+                       'kind: read-only\n---\n\n# 0x403000\n\nreading.\n'),
+            '404000': 'no front matter at all\n'}
+        for stem, text in texts.items():
+            with open(os.path.join(folder, stem + '.md'), 'w') as f:
+                f.write(text)
+        return texts
+
+    def test_unmeasured_imports_lists_exactly_the_marked_rows(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self._marked_evidence()
+        rc, lines = wave.unmeasured_imports(repo=self.root)
+        self.assertEqual(rc, 0)
+        self.assertEqual(lines, ['0x401000 Rules::Roll', '1 unmeasured WSO import(s)'])
+        # the same one command through the CLI
+        self.assertEqual(wave.main(['unmeasured-imports', '--repo', self.root]), 0)
+
+    def test_check_evidence_accepts_the_unmeasured_marking(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        self._marked_evidence()
+        self.git('add', '-A')
+        self.git('commit', '-qm', 'evidence')
+        ce = wave._check_evidence()
+        # the marking is a non-empty exemption: the checker accepts it
+        self.assertIsNone(ce.problem(self.root, 0x401000, 'Rules::Roll')[0])
+        # a read-only file with no exemption is still refused
+        why = ce.problem(self.root, 0x403000, 'Rules::Tick')[0]
+        self.assertIn('neither oracle_case nor exemption', why)
+        self.assertIsNone(ce.problem(self.root, 0x402000, 'IcewindMisc::Roll')[0])
+
+    def test_import_bar_accepts_the_unmeasured_marking(self):
+        tmp, dp, ip, imp, folder, wave = self._unpark_fixture()
+        texts = self._marked_evidence()
+        self.assertIsNone(wave._import_bar(
+            self.root, 'first', '0x401000', 'Rules::Roll',
+            'docs/evidence/401000.md', texts['401000']))
+        why = wave._import_bar(
+            self.root, 'first', '0x402000', 'IcewindMisc::Roll',
+            'docs/evidence/402000.md', texts['402000'])
+        self.assertIn('kind read-only is not trace or better', why)
+
     def test_queue_import_driver_wiring(self):
         tmp, dp, ip = self._import_repo()
         d, err = driver.driver_from_args(
@@ -19595,6 +20126,52 @@ class DriverTest(unittest.TestCase):
                                          repo=tmp)
         self.assertEqual((d, err[0]), (None, 2))
         self.assertIn('live import-state file', err[1])
+
+    def test_import_dry_run_size_cuts_n_rows(self):
+        # wave.py run --size N (i047: whole-function only_theirs batches of
+        # 20 time a worker out): the dry run's cut holds N rows, not the
+        # default, and without the flag the default is unchanged.
+        wave = driver._tool('wave')
+        tmp = self._tmpdir()
+        docs = os.path.join(tmp, 'docs', 'wso')
+        os.makedirs(docs)
+        rows = [{'address': '0x%06X' % (0x401000 + i * 0x1000), 'name': 'F%d' % i,
+                 'file': 'src/%s.cpp' % chr(ord('A') + i),
+                 'category': 'theirs_real_ours_stub',
+                 'their_len': 90 - i, 'our_len': 2} for i in range(8)]
+        with open(os.path.join(docs, 'disagreements.json'), 'w') as f:
+            json.dump(rows, f)
+        state = os.path.join(tmp, 'import-state.json')
+        with open(state, 'w') as f:
+            json.dump({'fork_base': 'e8dd16a7', 'batches': {}}, f)
+        argv = ['--queue', 'import', '--dry-run', '--state', state,
+                '--no-base-tests']
+        d, err = driver.driver_from_args(argv, repo=tmp)
+        self.assertIsNone(err)
+        self.assertEqual(d.size, wave.DEFAULT_SIZE)
+        d, err = driver.driver_from_args(argv[:5] + ['--size', '6'] + argv[5:],
+                                         repo=tmp)
+        self.assertIsNone(err)
+        self.assertEqual(d.size, 6)
+        with mock.patch.object(wave, '_cut_worktree',
+                               return_value=('/wt', 'new')):
+            self.assertEqual(d._cut(), ('i001', None))
+        with open(state) as f:
+            batch = json.load(f)['batches']['i001']
+        # ranked biggest first: the six largest bodies, the two smallest wait
+        self.assertEqual([r['address'] for r in batch['rows']],
+                         [r['address'] for r in rows[:6]])
+        self.assertEqual(batch['branch'], 'p3/wso-i001')
+
+    def test_size_below_one_is_refused(self):
+        tmp = self._tmpdir()
+        for n in ('0', '-3'):
+            d, err = driver.driver_from_args(
+                ['--queue', 'import', '--dry-run',
+                 '--state', os.path.join(tmp, 'copy.json'), '--size', n],
+                repo=tmp)
+            self.assertEqual((d, err[0]), (None, 2))
+            self.assertEqual(err[1], 'wave.py run: --size must be at least 1')
 
     def test_import_batch_closes_without_verdict_lines(self):
         d = self._driver(worker=driver.FakeWorker('# report\n\nImported; no verdicts.\n'),
@@ -24004,7 +24581,9 @@ class CoverageTest(unittest.TestCase):
         _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
         rc, out = self.next_import()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.rows_of(out), ['0x407000'])
+        # the screen row the UI scenario hits leads the pool; the dead
+        # stub rows follow it (rule 1 imports them unmeasured)
+        self.assertEqual(self.rows_of(out), ['0x407000', '0x401000'])
 
     def test_cli_dry_prints_the_launches_and_writes_nothing(self):
         import io
@@ -24035,29 +24614,33 @@ class CoverageTest(unittest.TestCase):
     def rows_of(self, out):
         return re.findall(r'^\s*\d+\. (0x\w+)', out, re.M)
 
-    def test_next_import_offers_covered_rows_first_and_leaves_the_rest_out(self):
+    def test_next_import_offers_covered_rows_first_and_rule1_rows_unmeasured(self):
+        # rule 1 (2026-10-26 ruling): a row we lack the body for is offered
+        # with the covered rows even when no scenario exercises it -- the
+        # note says so instead of leaving it out -- so no flag is needed
         self.cov({'world_entry': {'0x403000': 3, '0x401000': 1},
                   'first_fight': {'0x403000': 2}, 'walk_and_talk': {}})
         rc, out = self.next_import()
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
-        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
-        os.unlink(os.path.join(self.tmp, 'import-state.json'))
-        rc, out = self.next_import(include_uncovered=True)
-        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertIn('coverage: 2 scenario-covered row(s), 0 oracle-backed', out)
         self.assertNotIn('left out', out)
         os.unlink(os.path.join(self.tmp, 'import-state.json'))
         self.cov({'world_entry': {'0x403000': 3}})
-        rc, out = self.next_import(include_uncovered=True)
+        rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
+        self.assertIn('coverage: 2 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
 
-    def test_next_import_keeps_rows_nobody_measured(self):
+    def test_next_import_offers_rows_nobody_measured(self):
+        # a dead row (hooked, never hit) and an unknown one (never hooked)
+        # are both offered behind the covered rows, unknown first
         cands = [a for a in coverage.candidates(self.dp) if a != '0x407000']
         self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
-        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
-        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 2 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
         os.unlink(os.path.join(self.tmp, 'import-state.json'))
         self.cov({'world_entry': {'0x403000': 3}}, hooked=['0x403000'])
         with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
@@ -24067,10 +24650,12 @@ class CoverageTest(unittest.TestCase):
                 base='first', coverage_root=self.tmp,
                 claims_path=os.path.join(self.tmp, 'claims.json'))
         self.assertEqual(self.rows_of(out), ['0x403000', '0x401000', '0x407000'])
-        self.assertIn('coverage: 0 candidate row(s) left out as exercised by no scenario', out)
-        self.assertIn('coverage: 2 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 2 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
 
-    def test_next_import_keeps_a_row_refused_in_some_scenarios_and_dead_in_the_rest(self):
+    def test_next_import_offers_a_row_refused_in_some_scenarios_and_dead_in_the_rest(self):
+        # the refused+dead row reads unknown, so it is offered like one;
+        # the next cut reaches it after the dead rows ahead of it
         cands = coverage.candidates(self.dp)
         data = self.cov({'world_entry': {'0x403000': 3}}, hooked=cands)
         data['scenarios']['world_entry']['refused'] = ['fn_407000']
@@ -24078,13 +24663,60 @@ class CoverageTest(unittest.TestCase):
         _write(os.path.join(self.tmp, 'docs', 'wso', 'coverage.json'), json.dumps(data))
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
-        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        rc, out = self.next_import()
+        self.assertEqual(self.rows_of(out), ['0x401000'])
 
     def test_next_include_uncovered_needs_the_import_queue(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             self.assertEqual(self.wave.main(['next', '--include-uncovered']), 2)
         self.assertIn('--include-uncovered only applies to --queue import', err.getvalue())
+
+    def test_next_import_records_an_unexercised_base_body_row_kept_by_default(self):
+        # rule 2 (2026-10-26 ruling): a base-body row no scenario exercises
+        # is ours by default -- recorded in the import state, never cut --
+        # while a covered base-body row is cut as before
+        dp = os.path.join(self.tmp, 'docs', 'wso', 'disag-base.json')
+        _write(dp, json.dumps([
+            {'address': '0x405000', 'category': 'theirs_changed_ours_base',
+             'file': 'src/E.cpp', 'name': 'E', 'their_len': 5, 'our_len': 5},
+            {'address': '0x405001', 'category': 'theirs_changed_ours_base',
+             'file': 'src/E2.cpp', 'name': 'E2', 'their_len': 5, 'our_len': 5}]))
+        imp = os.path.join(self.tmp, 'import-base-state.json')
+        self.cov({'world_entry': {'0x405000': 3}})
+        kw = dict(queue='import', repo=self.tmp, base='first', coverage_root=self.tmp,
+                  import_path=os.path.join(self.tmp, 'import-list.json'),
+                  claims_path=os.path.join(self.tmp, 'claims.json'))
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(dp, imp, 2, **kw)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rows_of(out), ['0x405000'])
+        self.assertIn('category: theirs_changed_ours_base', out)
+        self.assertIn('coverage: 1 base-body row(s) kept by default: '
+                      'no scenario exercises them', out)
+        self.assertIn('kept by default: 1 base-body row(s) no scenario exercises '
+                      '(rule 2); recorded in the import state', out)
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual(list(st['batches']), ['i001'])       # one row cut, not two
+        self.assertEqual(list(st['kept_default']), ['405001'])
+        self.assertEqual(st['kept_default']['405001']['name'], 'E2')
+        # not cut again: the recording repeats, no batch is cut
+        with mock.patch.object(self.wave, '_cut_worktree', return_value=('/wt', 'new')):
+            rc, out = self.wave.next_batch(dp, imp, 2, **kw)
+        self.assertEqual(rc, 2, out)
+        self.assertTrue(out.startswith('nothing left'), out)
+        self.assertIn('kept by default: 1 base-body row(s) no scenario exercises', out)
+        with open(imp) as f:
+            st = json.load(f)
+        self.assertEqual(list(st['batches']), ['i001'])
+        self.assertEqual(list(st['kept_default']), ['405001'])
+        # status and the tally both see the outcome
+        rc, out = self.wave.status(imp)
+        self.assertIn('kept by default: 1 row(s) no scenario exercises', out)
+        st['batches']['i001']['status'] = 'closed'
+        self.assertIn('; 1 kept by default',
+                      self.wave._import_tally({'batches': {}}, st))
 
     def test_next_import_without_a_fresh_map_is_unchanged(self):
         rc, out = self.next_import()
@@ -24130,10 +24762,10 @@ class CoverageTest(unittest.TestCase):
                 coverage_root=self.tmp,
                 claims_path=os.path.join(self.tmp, 'claims.json'), **kw)
 
-    def test_next_import_cuts_an_oracle_backed_row_and_skips_an_uncovered_one(self):
+    def test_next_import_cuts_an_oracle_backed_row_and_offers_the_uncovered_one(self):
         # Task 39: a registered oracle case measures a row on its own, so
-        # the cut offers it without --include-uncovered; a row with neither
-        # a scenario nor a case still waits for one
+        # it sorts with the covered rows; a row with neither a scenario nor
+        # a case is offered too now (rule 1), behind them
         repo = self._oracle_repo(
             (('407000', '---\naddress: 0x407000\nname: G\nkind: oracle\n'
                         'oracle_case: rules/g\n---\n'),), ['rules/g'])
@@ -24141,11 +24773,12 @@ class CoverageTest(unittest.TestCase):
         rc, out = self.next_from(repo)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000'])
-        self.assertIn('coverage: 1 candidate row(s) left out as exercised by no scenario', out)
+        self.assertIn('coverage: 1 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
         self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
         os.unlink(os.path.join(self.tmp, 'import-state.json'))
         rc, out = self.next_from(self.tmp)     # without a repo nothing is oracle-backed
-        self.assertEqual(self.rows_of(out), ['0x403000'])
+        self.assertEqual(self.rows_of(out), ['0x403000', '0x401000'])
         self.assertIn('coverage: 1 scenario-covered row(s), 0 oracle-backed', out)
 
     def test_next_import_sorts_an_oracle_backed_row_with_the_covered_rows(self):
@@ -24165,7 +24798,8 @@ class CoverageTest(unittest.TestCase):
         rc, out = self.next_from(repo, size=3)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rows_of(out), ['0x403000', '0x407000', '0x401000'])
-        self.assertIn('coverage: 1 row(s) kept that no scenario measured (unknown)', out)
+        self.assertIn('coverage: 1 row(s) exercised by no scenario: rule 1 '
+                      'imports them unmeasured', out)
         self.assertIn('coverage: 1 scenario-covered row(s), 1 oracle-backed', out)
 
     def test_scorecard_carries_the_coverage_line(self):
@@ -24419,16 +25053,22 @@ class ImportSecondSourceTest(unittest.TestCase):
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x405000'])
 
-    def test_uncovered_base_rows_are_left_out_without_the_flag(self):
+    def test_uncovered_base_rows_are_kept_by_default_without_a_batch(self):
+        # rule 2: a base-body row no scenario exercises is ours by default --
+        # recorded in the import state, never cut again, and no flag rescues it
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
         self.next_import()
         rc, out = self.next_import()
         self.assertEqual(self.rows_of(out), ['0x406000'])
+        self.assertIn('kept by default: 2 base-body row(s) no scenario exercises', out)
         rc, out = self.next_import()
         self.assertEqual(rc, 2, out)
+        self.assertIn('kept by default: 2 base-body row(s) no scenario exercises', out)
+        self.assertEqual(list(self.state()['kept_default']), ['405000', '407000'])
+        self.assertEqual(list(self.state()['batches']), ['i001', 'i002'])
         rc, out = self.next_import(include_uncovered=True)
-        self.assertEqual(rc, 0, out)
-        self.assertEqual(sorted(self.rows_of(out)), ['0x405000', '0x407000'])
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(list(self.state()['batches']), ['i001', 'i002'])
 
     def test_brief_names_the_category_and_the_park_sentence(self):
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x406000': 1}})
@@ -24619,9 +25259,10 @@ class ImportSecondSourceTest(unittest.TestCase):
         self.with_only()
         self.cov({'world_entry': {'0x401000': 1, '0x403000': 1, '0x409000': 1}})
         self.next_import()
-        # base rows are uncovered here, so the next batch is the only-theirs one
+        # base rows are kept by default here (rule 2), so the next batch is
+        # the only-theirs one, the unmeasured 0x40A000 included (rule 1)
         rc, out = self.next_import()
-        self.assertEqual(self.rows_of(out), ['0x409000'], out)
+        self.assertEqual(self.rows_of(out), ['0x409000', '0x40A000'], out)
         texts = {}
         for bid in ('i001', 'i002'):
             rc, texts[bid] = self.wave.render_brief(

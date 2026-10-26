@@ -100,6 +100,84 @@ std::string Lower(std::string s)
     return s;
 }
 
+// The modifiers `key` accepts before the key name (`key CTRL+SHIFT+X`); the
+// parser refuses ALT+F4 outright (it would close the game window, not feed
+// the engine).
+const NamedKey kModifiers[] = {
+    { "CTRL", VK_CONTROL },
+    { "SHIFT", VK_SHIFT },
+    { "ALT", VK_MENU },
+};
+
+int ModifierForName(const std::string& name)
+{
+    const std::string upper = Upper(name);
+    for (const NamedKey& mod : kModifiers) {
+        if (upper == mod.name)
+            return mod.vk;
+    }
+    return 0;
+}
+
+// `type` maps each punctuation and symbol to one key press on a US layout:
+// the key and whether SHIFT is held around the press (letters, digits and
+// space are handled inline in Expand; the original's edit boxes translate
+// the same main-row keys with their own US-layout tables, so what lands in
+// the game is what the scenario says on that one layout).
+struct TypeKey {
+    char ch;
+    int vk;
+    bool shift;
+};
+
+const TypeKey kTypeKeys[] = {
+    { ')', '0', true },
+    { '!', '1', true },
+    { '@', '2', true },
+    { '#', '3', true },
+    { '$', '4', true },
+    { '%', '5', true },
+    { '^', '6', true },
+    { '&', '7', true },
+    { '*', '8', true },
+    { '(', '9', true },
+    { ';', VK_OEM_1, false },
+    { ':', VK_OEM_1, true },
+    { '=', VK_OEM_PLUS, false },
+    { '+', VK_OEM_PLUS, true },
+    { ',', VK_OEM_COMMA, false },
+    { '<', VK_OEM_COMMA, true },
+    { '-', VK_OEM_MINUS, false },
+    { '_', VK_OEM_MINUS, true },
+    { '.', VK_OEM_PERIOD, false },
+    { '>', VK_OEM_PERIOD, true },
+    { '/', VK_OEM_2, false },
+    { '?', VK_OEM_2, true },
+    { '`', VK_OEM_3, false },
+    { '~', VK_OEM_3, true },
+    { '[', VK_OEM_4, false },
+    { '{', VK_OEM_4, true },
+    { '\\', VK_OEM_5, false },
+    { '|', VK_OEM_5, true },
+    { ']', VK_OEM_6, false },
+    { '}', VK_OEM_6, true },
+    { '\'', VK_OEM_7, false },
+    { '"', VK_OEM_7, true },
+};
+
+std::vector<std::string> SplitOn(const std::string& s, char sep)
+{
+    std::vector<std::string> out;
+    size_t start = 0;
+    for (size_t i = s.find(sep); i != std::string::npos;
+         i = s.find(sep, start)) {
+        out.push_back(s.substr(start, i - start));
+        start = i + 1;
+    }
+    out.push_back(s.substr(start));
+    return out;
+}
+
 bool ParseInt(const std::string& token, int& value)
 {
     if (token.empty())
@@ -190,9 +268,25 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
             if (args.size() != 1)
                 return fail("key needs one key name");
             c.verb = Verb::Key;
-            c.vk = VKForName(args[0]);
+            // `key CTRL+SHIFT+X`: modifiers before the key, joined with '+'
+            // (no key name is itself '+', so the split is unambiguous).
+            const std::vector<std::string> parts = SplitOn(args[0], '+');
+            const std::string& name = parts.back();
+            bool alt = false;
+            for (size_t i = 0; i + 1 < parts.size(); ++i) {
+                const int mod = ModifierForName(parts[i]);
+                if (mod == 0)
+                    return fail("unknown modifier '" + Lower(parts[i]) + "' (CTRL, SHIFT, ALT)");
+                alt = alt || mod == VK_MENU;
+                c.mods.push_back(mod);
+            }
+            if (name.empty())
+                return fail("key needs a key name after its modifiers");
+            c.vk = VKForName(name);
             if (c.vk == 0)
-                return fail("unknown key '" + args[0] + "'");
+                return fail("unknown key '" + name + "'");
+            if (alt && Upper(name) == "F4")
+                return fail("alt+f4 closes the game window; the scenarios cannot");
         } else if (v == "TYPE") {
             c.verb = Verb::Type;
             // The text after the verb, single spaces kept.
@@ -204,8 +298,9 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
             if (c.text.empty())
                 return fail("type needs text");
             for (char ch : c.text) {
-                if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != ' ')
-                    return fail(std::string("type supports letters, digits and spaces, not '") + ch + "'");
+                const unsigned char u = static_cast<unsigned char>(ch);
+                if (u < 0x20 || u > 0x7e)
+                    return fail(std::string("type supports printable ASCII characters, not '") + ch + "'");
             }
         } else if (v == "SHOT") {
             c.verb = Verb::Shot;
@@ -248,10 +343,17 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
     return true;
 }
 
-void Player::AddKey(std::vector<Step>& steps, int vk, int line, bool shift)
+void Player::AddKey(std::vector<Step>& steps, int vk, int line, bool shift,
+    const std::vector<int>& mods)
 {
     Step s;
     s.line = line;
+    for (int mod : mods) {
+        s.action = Action::Press;
+        s.vk = mod;
+        s.frames = 1;
+        steps.push_back(s);
+    }
     if (shift) {
         s.action = Action::Press;
         s.vk = VK_SHIFT;
@@ -268,6 +370,14 @@ void Player::AddKey(std::vector<Step>& steps, int vk, int line, bool shift)
     if (shift) {
         s.action = Action::Release;
         s.vk = VK_SHIFT;
+        s.frames = 1;
+        s.observe = false;
+        steps.push_back(s);
+    }
+    // The modifiers come up in reverse order, the last one first.
+    for (auto it = mods.rbegin(); it != mods.rend(); ++it) {
+        s.action = Action::Release;
+        s.vk = *it;
         s.frames = 1;
         s.observe = false;
         steps.push_back(s);
@@ -311,15 +421,28 @@ std::vector<Player::Step> Player::Expand(const std::vector<Command>& commands, i
             }
             break;
         case Verb::Key:
-            AddKey(steps, c.vk, c.line, false);
+            AddKey(steps, c.vk, c.line, false, c.mods);
             break;
         case Verb::Type:
             for (char ch : c.text) {
                 const unsigned char u = static_cast<unsigned char>(ch);
                 if (ch == ' ')
                     AddKey(steps, VK_SPACE, c.line, false);
-                else
+                else if (std::isalnum(u))
                     AddKey(steps, std::toupper(u), c.line, std::isupper(u) != 0);
+                else {
+                    const TypeKey* key = nullptr;
+                    for (const TypeKey& k : kTypeKeys) {
+                        if (k.ch == ch)
+                            key = &k;
+                    }
+                    // Unreachable: Parse range-checks 0x20-0x7e and the
+                    // parity test pins kTypeKeys to TYPE_KEYS. A dropped row
+                    // must skip its character, not dereference null.
+                    if (key == nullptr)
+                        continue;
+                    AddKey(steps, key->vk, c.line, key->shift);
+                }
             }
             break;
         case Verb::Shot:

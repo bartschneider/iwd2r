@@ -1,0 +1,1 @@
+{"address": "0x6662D0", "name": "CUIControlEditSinglePlayerChat::OnEditReturn", "file": "src/CScreenSinglePlayer.cpp", "batch": "i046", "needs": "not exercised; ours reading matches the decompile"}

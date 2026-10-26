@@ -18,22 +18,6 @@
       "pool": "claude",
       "rows": [
         {
-          "address": "0x696140",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CScreenWorld.cpp",
-          "name": "CUIControlButtonWorldContainerSlot::Render",
-          "our_len": 14,
-          "their_len": 2907
-        },
-        {
-          "address": "0x433950",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CMessage.cpp",
-          "name": "CBaldurMessage::WaitForSignal",
-          "our_len": 14,
-          "their_len": 2004
-        },
-        {
           "address": "0x5A0950",
           "category": "theirs_real_ours_stub",
           "file": "src/CInfGame.cpp",
@@ -80,38 +64,6 @@
           "name": "CNetwork::JoinSelectedSession",
           "our_len": 14,
           "their_len": 1240
-        },
-        {
-          "address": "0x4337D0",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CMessage.cpp",
-          "name": "CBaldurMessage::KickOutWaitingForSignal",
-          "our_len": 14,
-          "their_len": 1184
-        },
-        {
-          "address": "0x480480",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CGameContainer.cpp",
-          "name": "CGameContainer::sub_480480",
-          "our_len": 2,
-          "their_len": 844
-        },
-        {
-          "address": "0x691B50",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CScreenWorld.cpp",
-          "name": "CScreenWorld::StopStore",
-          "our_len": 2,
-          "their_len": 781
-        },
-        {
-          "address": "0x71BC60",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CGameSprite.cpp",
-          "name": "CGameSprite::RemoveSpecialAbility",
-          "our_len": 2,
-          "their_len": 752
         }
       ],
       "status": "closed",
@@ -203,6 +155,72 @@
           "our_len": 2,
           "reason": "tooling fixed 2026-10-23: export-signature fallback (6), no-status retry (2), destructor map names (1)",
           "their_len": 614
+        },
+        {
+          "address": "0x4337D0",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::KickOutWaitingForSignal",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 14,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 1184
+        },
+        {
+          "address": "0x433950",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::WaitForSignal",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 14,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 2004
+        },
+        {
+          "address": "0x480480",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::sub_480480",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 2,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 844
+        },
+        {
+          "address": "0x691B50",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StopStore",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 2,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 781
+        },
+        {
+          "address": "0x696140",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::Render",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 14,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 2907
+        },
+        {
+          "address": "0x71BC60",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RemoveSpecialAbility",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 2,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 752
         }
       ],
       "verdicts": {}
@@ -326,44 +344,12 @@
       "pool": "glm",
       "rows": [
         {
-          "address": "0x407280",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CAIGroup.cpp",
-          "name": "CAIGroup::GroupProtectPoint",
-          "our_len": 2,
-          "their_len": 5488
-        },
-        {
           "address": "0x407FC0",
           "category": "theirs_real_ours_stub",
           "file": "src/CAIGroup.cpp",
           "name": "CAIGroup::GroupDrawMove",
           "our_len": 2,
           "their_len": 4975
-        },
-        {
-          "address": "0x6957E0",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CScreenWorld.cpp",
-          "name": "CUIControlButtonWorldContainerSlot::OnLButtonClick",
-          "our_len": 2,
-          "their_len": 4560
-        },
-        {
-          "address": "0x6913C0",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CScreenWorld.cpp",
-          "name": "CScreenWorld::StartStore",
-          "our_len": 2,
-          "their_len": 4359
-        },
-        {
-          "address": "0x45F6D0",
-          "category": "theirs_real_ours_stub",
-          "file": "src/CGameAIBase.cpp",
-          "name": "CGameAIBase::MoveCursor",
-          "our_len": 20,
-          "their_len": 1273
         },
         {
           "address": "0x5A0160",
@@ -399,6 +385,52 @@
         }
       ],
       "status": "closed",
+      "unparked": [
+        {
+          "address": "0x407280",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupProtectPoint",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 2,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 5488
+        },
+        {
+          "address": "0x45F6D0",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::MoveCursor",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 20,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 1273
+        },
+        {
+          "address": "0x6913C0",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartStore",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 2,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 4359
+        },
+        {
+          "address": "0x6957E0",
+          "at": "2026-10-26T21:40:23+00:00",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::OnLButtonClick",
+          "needs": "world_entry, first_fight, walk_and_talk: not exercised",
+          "our_len": 2,
+          "reason": "2026-10-26 ruling: where we lack the body, the import needs no coverage (Task 46)",
+          "their_len": 4560
+        }
+      ],
       "verdicts": {}
     },
     "i004": {
@@ -7011,7 +7043,7 @@
     "i046": {
       "assigned_at": "2026-10-26T15:28:25+00:00",
       "branch": "p3/wso-i046",
-      "closed_at": null,
+      "closed_at": "2026-10-26T16:26:08+00:00",
       "files": [
         "src/CScreenStart.cpp",
         "src/CGameSprite.cpp",
@@ -7020,6 +7052,7 @@
         "src/CScreenLoad.cpp",
         "src/CBaldurChitin.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -7117,6 +7150,364 @@
           "name": "CBaldurChitin::UnloadFonts",
           "our_len": 49,
           "their_len": 54
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i047": {
+      "assigned_at": "2026-10-26T15:50:20+00:00",
+      "branch": "p3/wso-i047",
+      "closed_at": null,
+      "files": [
+        "src/CMessage.cpp",
+        "src/CGameDoor.cpp",
+        "src/CProjectile.cpp",
+        "src/CAIGroup.cpp",
+        "src/CGameAIBase.cpp",
+        "src/IcewindCGameEffects.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x511D00",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileTrailingVFX::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1523
+        },
+        {
+          "address": "0x511F40",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileTrailingVFX::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 1112
+        },
+        {
+          "address": "0x50A6C0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetVariable::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 867
+        },
+        {
+          "address": "0x515180",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileImmumityUpdate::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 564
+        },
+        {
+          "address": "0x4FDD30",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageContinueDialog::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 39
+        },
+        {
+          "address": "0x502D60",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageLoadDialog::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 39
+        },
+        {
+          "address": "0x486860",
+          "category": "only_theirs",
+          "file": "src/CGameDoor.cpp",
+          "name": "CGameDoor::AddEffect",
+          "our_len": 0,
+          "their_len": 3832
+        },
+        {
+          "address": "0x532F00",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSPBRNHND::Fire",
+          "our_len": 0,
+          "their_len": 3475
+        },
+        {
+          "address": "0x57D9F0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileReboundingBolt::AIUpdate",
+          "our_len": 0,
+          "their_len": 3262
+        },
+        {
+          "address": "0x405A10",
+          "category": "only_theirs",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GetFormationFaces",
+          "our_len": 0,
+          "their_len": 3225
+        },
+        {
+          "address": "0x57B210",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::AIUpdate",
+          "our_len": 0,
+          "their_len": 3064
+        },
+        {
+          "address": "0x4F8470",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddEffect::MarshalMessage",
+          "our_len": 0,
+          "their_len": 2832
+        },
+        {
+          "address": "0x534140",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileFollowUp::AIUpdate",
+          "our_len": 0,
+          "their_len": 2724
+        },
+        {
+          "address": "0x52EC80",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExplodingFlame::AIUpdate",
+          "our_len": 0,
+          "their_len": 2709
+        },
+        {
+          "address": "0x52CF80",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExploding::Render",
+          "our_len": 0,
+          "their_len": 2633
+        },
+        {
+          "address": "0x463B30",
+          "category": "only_theirs",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::TakePartyItem",
+          "our_len": 0,
+          "their_len": 2591
+        },
+        {
+          "address": "0x4F8880",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddEffect::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 2357
+        },
+        {
+          "address": "0x57B780",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::Render",
+          "our_len": 0,
+          "their_len": 2351
+        },
+        {
+          "address": "0x55FAD0",
+          "category": "only_theirs",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectSummon::SpawnFromResRef",
+          "our_len": 0,
+          "their_len": 2234
+        },
+        {
+          "address": "0x52E4D0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExplodingWeapon::AIUpdate",
+          "our_len": 0,
+          "their_len": 2171
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "i048": {
+      "assigned_at": "2026-10-26T16:27:07+00:00",
+      "branch": "p3/wso-i048",
+      "closed_at": null,
+      "files": [
+        "src/CGameSprite.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameContainer.cpp",
+        "src/CScreenWorld.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x71C0C0",
+          "address_source": "sub-name",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71C0C0",
+          "our_len": 0,
+          "their_len": 4254
+        },
+        {
+          "address": "0x737990",
+          "address_source": "sub-name",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_737990",
+          "our_len": 0,
+          "their_len": 3252
+        },
+        {
+          "address": "0x71CC90",
+          "address_source": "sub-name",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71CC90",
+          "our_len": 0,
+          "their_len": 1695
+        },
+        {
+          "address": "0x71CEA0",
+          "address_source": "sub-name",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_71CEA0",
+          "our_len": 0,
+          "their_len": 915
+        },
+        {
+          "address": "0x759240",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RemoveTraps",
+          "our_len": 0,
+          "their_len": 5361
+        },
+        {
+          "address": "0x757B40",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_757B40",
+          "our_len": 0,
+          "their_len": 4683
+        },
+        {
+          "address": "0x744C00",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RunAwayFrom",
+          "our_len": 0,
+          "their_len": 3348
+        },
+        {
+          "address": "0x748CA0",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RandomWalk",
+          "our_len": 0,
+          "their_len": 3333
+        },
+        {
+          "address": "0x74A7C0",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Follow",
+          "our_len": 0,
+          "their_len": 2728
+        },
+        {
+          "address": "0x7A38B0",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::SendCall",
+          "our_len": 0,
+          "their_len": 2106
+        },
+        {
+          "address": "0x745450",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Formation",
+          "our_len": 0,
+          "their_len": 2075
+        },
+        {
+          "address": "0x71F860",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ApplyWeaponEffects",
+          "our_len": 0,
+          "their_len": 2065
+        },
+        {
+          "address": "0x47E970",
+          "category": "only_theirs",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::OnActionButton",
+          "our_len": 0,
+          "their_len": 1977
+        },
+        {
+          "address": "0x7A3B50",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::ReceiveCall",
+          "our_len": 0,
+          "their_len": 1954
+        },
+        {
+          "address": "0x734720",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::ComputeWaypoint",
+          "our_len": 0,
+          "their_len": 1834
+        },
+        {
+          "address": "0x690820",
+          "category": "only_theirs",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::ConfigureContainer",
+          "our_len": 0,
+          "their_len": 1787
+        },
+        {
+          "address": "0x7555F0",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::UseContainer",
+          "our_len": 0,
+          "their_len": 1654
+        },
+        {
+          "address": "0x47CBE0",
+          "category": "only_theirs",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::AddEffect",
+          "our_len": 0,
+          "their_len": 1534
+        },
+        {
+          "address": "0x7A7980",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::HandleSystemMessage",
+          "our_len": 0,
+          "their_len": 1499
+        },
+        {
+          "address": "0x7A7BF0",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::AddMessageToWindow",
+          "our_len": 0,
+          "their_len": 1478
         }
       ],
       "status": "assigned",
