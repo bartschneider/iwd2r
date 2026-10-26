@@ -1,0 +1,7 @@
+{
+  "address": "0x655A70",
+  "name": "CScreenOptions::OnRestButtonClick",
+  "file": "src/CScreenOptions.cpp",
+  "batch": "i039",
+  "needs": "not exercised; ours reading matches the decompile"
+}
