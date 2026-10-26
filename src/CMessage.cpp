@@ -5815,10 +5815,7 @@ void CMessageAnimationChange::Run()
         if (pSprite->GetObjectType() == CGameObject::TYPE_SPRITE) {
             pSprite->UnequipAll(TRUE);
             if (pSprite->GetArea() != NULL) {
-                // The guard reads the animation's intrinsic list type
-                // (CGameAnimationType vtable +0x3C), not the object's current
-                // m_listType.
-                if (pSprite->GetAnimation()->GetListType() != CGameObject::LIST_FLIGHT) {
+                if (pSprite->GetVertListType() != CGameObject::LIST_FLIGHT) {
                     pSprite->GetArea()->m_search.RemoveObject(CPoint(pSprite->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
                                                                   pSprite->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY),
                         pSprite->GetAIType().m_nEnemyAlly,
@@ -5831,10 +5828,7 @@ void CMessageAnimationChange::Run()
                 pSprite->GetBaseStats()->m_colors,
                 pSprite->GetDirection());
             if (pSprite->GetArea() != NULL) {
-                // 0x4F964B / 0x4F9748: the guard reads the animation's intrinsic
-                // list type (CGameAnimationType vtable +0x3C), not the object's
-                // current m_listType.
-                if (pSprite->GetAnimation()->GetListType() != CGameObject::LIST_FLIGHT) {
+                if (pSprite->GetVertListType() != CGameObject::LIST_FLIGHT) {
                     pSprite->GetArea()->m_search.AddObject(CPoint(pSprite->GetPos().x / CPathSearch::GRID_SQUARE_SIZEX,
                                                                pSprite->GetPos().y / CPathSearch::GRID_SQUARE_SIZEY),
                         pSprite->GetAIType().m_nEnemyAlly,
