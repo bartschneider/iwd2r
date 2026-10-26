@@ -1,0 +1,7 @@
+{
+  "address": "0x567500",
+  "name": "IcewindCGameEffectProtectionFromEvil::ApplyEffect",
+  "file": "src/IcewindCGameEffects.cpp",
+  "batch": "i038",
+  "needs": "not exercised; ours reading matches the decompile"
+}
