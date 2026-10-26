@@ -674,11 +674,19 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertIsNone(realinput.keysym_for_name('?'))
 
     def test_vk_names_match_script_core_cpp(self):
-        # Every name in platform/script_core.cpp's kNamedKeys, and no other.
+        # Every name in platform/script_core.cpp's kNamedKeys, and no other
+        # (kModifiers holds the CTRL/SHIFT/ALT `key` prefixes and mirrors
+        # realinput's MODIFIER_VK, a table of its own).
         with open(os.path.join(ROOT, 'platform', 'script_core.cpp')) as f:
             text = f.read()
-        names = set(re.findall(r'\{ "([A-Z0-9_]+)", VK_', text))
+        names = set(re.findall(
+            r'\{ "([A-Z0-9_]+)", VK_',
+            text.split('kNamedKeys[] = {', 1)[1].split('};', 1)[0]))
         self.assertEqual(names, set(realinput.KEY_VK))
+        mods = set(re.findall(
+            r'\{ "([A-Z0-9_]+)", VK_',
+            text.split('kModifiers[] = {', 1)[1].split('};', 1)[0]))
+        self.assertEqual(mods, set(realinput.MODIFIER_VK))
         self.assertEqual(realinput.vk_for_name('escape'), 0x1B)
         self.assertEqual(realinput.vk_for_name('z'), ord('Z'))
         self.assertEqual(realinput.vk_for_name('NOPE'), 0)

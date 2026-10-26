@@ -106,7 +106,7 @@ private:
     };
 
     static void AddKey(std::vector<Step>& steps, int vk, int line, bool shift,
-                       const std::vector<int>& mods = {});
+        const std::vector<int>& mods = {});
     static std::vector<Step> Expand(const std::vector<Command>& commands, int screenWidth, int screenHeight);
     bool Begin(const Step& step, Effects& effects);
 

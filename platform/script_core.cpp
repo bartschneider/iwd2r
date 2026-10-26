@@ -131,21 +131,38 @@ struct TypeKey {
 };
 
 const TypeKey kTypeKeys[] = {
-    { ')', '0', true }, { '!', '1', true }, { '@', '2', true },
-    { '#', '3', true }, { '$', '4', true }, { '%', '5', true },
-    { '^', '6', true }, { '&', '7', true }, { '*', '8', true },
+    { ')', '0', true },
+    { '!', '1', true },
+    { '@', '2', true },
+    { '#', '3', true },
+    { '$', '4', true },
+    { '%', '5', true },
+    { '^', '6', true },
+    { '&', '7', true },
+    { '*', '8', true },
     { '(', '9', true },
-    { ';', VK_OEM_1, false }, { ':', VK_OEM_1, true },
-    { '=', VK_OEM_PLUS, false }, { '+', VK_OEM_PLUS, true },
-    { ',', VK_OEM_COMMA, false }, { '<', VK_OEM_COMMA, true },
-    { '-', VK_OEM_MINUS, false }, { '_', VK_OEM_MINUS, true },
-    { '.', VK_OEM_PERIOD, false }, { '>', VK_OEM_PERIOD, true },
-    { '/', VK_OEM_2, false }, { '?', VK_OEM_2, true },
-    { '`', VK_OEM_3, false }, { '~', VK_OEM_3, true },
-    { '[', VK_OEM_4, false }, { '{', VK_OEM_4, true },
-    { '\\', VK_OEM_5, false }, { '|', VK_OEM_5, true },
-    { ']', VK_OEM_6, false }, { '}', VK_OEM_6, true },
-    { '\'', VK_OEM_7, false }, { '"', VK_OEM_7, true },
+    { ';', VK_OEM_1, false },
+    { ':', VK_OEM_1, true },
+    { '=', VK_OEM_PLUS, false },
+    { '+', VK_OEM_PLUS, true },
+    { ',', VK_OEM_COMMA, false },
+    { '<', VK_OEM_COMMA, true },
+    { '-', VK_OEM_MINUS, false },
+    { '_', VK_OEM_MINUS, true },
+    { '.', VK_OEM_PERIOD, false },
+    { '>', VK_OEM_PERIOD, true },
+    { '/', VK_OEM_2, false },
+    { '?', VK_OEM_2, true },
+    { '`', VK_OEM_3, false },
+    { '~', VK_OEM_3, true },
+    { '[', VK_OEM_4, false },
+    { '{', VK_OEM_4, true },
+    { '\\', VK_OEM_5, false },
+    { '|', VK_OEM_5, true },
+    { ']', VK_OEM_6, false },
+    { '}', VK_OEM_6, true },
+    { '\'', VK_OEM_7, false },
+    { '"', VK_OEM_7, true },
 };
 
 std::vector<std::string> SplitOn(const std::string& s, char sep)
@@ -327,7 +344,7 @@ bool Parse(const std::string& text, std::vector<Command>& commands, std::string&
 }
 
 void Player::AddKey(std::vector<Step>& steps, int vk, int line, bool shift,
-                    const std::vector<int>& mods)
+    const std::vector<int>& mods)
 {
     Step s;
     s.line = line;
