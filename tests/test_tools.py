@@ -13715,6 +13715,31 @@ class DriverTest(unittest.TestCase):
             self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
                 os.path.join(ev, addr[2:] + '.md'))), addr)
 
+    def test_kept_evidence_accepts_a_pending_case_registration(self):
+        """Task 41: an `oracle_case: pending/...` names a registration the
+        family's other spellings write too (a pending case stands as
+        written, docs/evidence/README.md), so kept_evidence keeps it."""
+        d, batch = self._import_phase_driver()
+        ev = os.path.join(self.wt, 'docs', 'evidence')
+        _write(os.path.join(self.wt, 'oracle', 'cases', 'rules.cpp'),
+               'ORACLE_CASE("rules/render", Render);\n'
+               'ORACLE_CASE_EXPECT("rules/expect", Expect, OracleExpect::Fail);\n'
+               'ORACLE_CASE_PENDING("pending/hit", nullptr,\n'
+               '                     "needs engine state");\n')
+        _write(os.path.join(self.wt, 'oracle', 'CMakeLists.txt'),
+               'add_executable(oracle_runner\n        cases/rules.cpp\n)\n')
+        _write(os.path.join(ev, '401000.md'), '---\naddress: 0x401000\nname: Rules::Render\n'
+               'kind: oracle\noracle_case: pending/hit\n---\n')
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'pending case', cwd=self.wt)
+        wave = driver._tool('wave')
+        self.assertEqual(wave._oracle_case_names(self.wt),
+                         {'rules/render', 'rules/expect', 'pending/hit'})
+        mb = wave.merge_base_sha(self.wt, 'first')
+        self.assertEqual(wave.kept_evidence(self.wt, mb, '0x401000', 'Rules::Render',
+                                            _slurp(os.path.join(ev, '401000.md'))),
+                         'oracle case pending/hit')
+
     BASE_CAT = 'theirs_changed_ours_base'
 
     def _kept_phase_driver(self, kept=('0x401000', '0x402000', '0x403000'), category=None):
@@ -15572,6 +15597,39 @@ class DriverTest(unittest.TestCase):
         d.next_batch = lambda *a, **kw: self.NOTHING
         self.assertEqual(d.run(), 0)
         self.assertEqual([b for b, _r in ran], ['b011'])
+
+    def test_a_resume_finishing_after_exhaustion_earns_one_more_cut(self):
+        # run 24 (2026-10-25): the cut's 'nothing left' verdict formed while
+        # the retried batch still ran and owned its files, the run exited on
+        # it, and run 25 cut two batches at once; a resumed or retried batch
+        # that finishes after the verdict earns one more cut before the exit
+        d = self._driver(worker=driver.FakeWorker(self.REPORT), workers=2)
+        self._write_status(d, {'current': {'batch': 'b011', 'stage': 'worker',
+                                           'at': '2026-10-24T01:00:00+00:00'}})
+        verdict, ran, cuts = threading.Event(), [], []
+        run24 = (2, 'nothing left: every remaining import row is exercised by no '
+                   'scenario (--include-uncovered offers them anyway)\n')
+
+        def run_batch(bid, resume=None):
+            ran.append((bid, resume is not None))
+            if bid == 'b011':
+                self.assertTrue(verdict.wait(10))  # the verdict forms while it runs
+            return 'closed'
+
+        def next_batch(*a, **kw):
+            cuts.append(1)
+            if len(cuts) == 1:
+                verdict.set()
+                return run24
+            return (0, self.CUT.replace('b011', 'b012')) if len(cuts) == 2 \
+                else self.NOTHING
+
+        d.run_batch, d.next_batch = run_batch, next_batch
+        self.assertEqual(d.run(), 0)
+        self.assertEqual(ran, [('b011', True), ('b012', False)])
+        self.assertEqual(len(cuts), 3)
+        self.assertIn('b011 finished after the pool was judged exhausted; '
+                      'trying one more cut', '\n'.join(self.logs))
 
     def test_run_retries_a_cleared_exception_first(self):
         d = self._driver(worker=driver.FakeWorker(self.REPORT))
