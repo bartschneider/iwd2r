@@ -1,0 +1,1 @@
+{"address": "0x4B3D00", "name": "CGameEffectDispelEffects::ApplyEffect", "file": "src/CGameEffect.cpp", "batch": "i035", "needs": "not exercised; ours reading matches the decompile"}
