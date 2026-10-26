@@ -1,0 +1,1 @@
+{"address": "0x5FE930", "name": "CScreenConnection::OnCancelButtonClick", "file": "src/CScreenConnection.cpp", "batch": "i040", "needs": "not exercised; ours reading matches the decompile"}
