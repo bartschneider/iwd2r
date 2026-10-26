@@ -1,0 +1,1 @@
+{"address": "0x637B50", "name": "CScreenJournal::OnCancelButtonClick", "file": "src/CScreenJournal.cpp", "batch": "i043", "needs": "not exercised; ours reading matches the decompile"}

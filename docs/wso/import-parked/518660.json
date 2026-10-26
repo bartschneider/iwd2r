@@ -1,0 +1,1 @@
+{"address": "0x518660", "name": "CMultiplayerSettings::sub_518660", "file": "src/CMultiplayerSettings.cpp", "batch": "i043", "needs": "not exercised; ours reading matches the decompile"}

@@ -1,0 +1,1 @@
+{"address": "0x4E2870", "name": "CUIControlTextDisplay::OnScrollUp", "file": "src/CUIControlTextDisplay.cpp", "batch": "i043", "needs": "not exercised; ours reading matches the decompile"}

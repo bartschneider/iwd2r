@@ -1,0 +1,1 @@
+{"address": "0x725CC0", "name": "CGameSpriteSpellList::sub_725CC0", "file": "src/CGameSpriteSpells.cpp", "batch": "i042", "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not measured (called on one side only in first_fight); ours reading matches the decompile"}

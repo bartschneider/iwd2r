@@ -1,0 +1,1 @@
+{"address": "0x56B4B0", "name": "IcewindCGameEffectAlicornLanceGlow::ApplyEffect", "file": "src/IcewindCGameEffects.cpp", "batch": "i042", "needs": "not exercised; ours reading matches the decompile"}

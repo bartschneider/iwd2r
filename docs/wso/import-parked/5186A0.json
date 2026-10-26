@@ -1,0 +1,1 @@
+{"address": "0x5186A0", "name": "CMultiplayerSettings::sub_5186A0", "file": "src/CMultiplayerSettings.cpp", "batch": "i043", "needs": "not exercised; ours reading matches the decompile"}
