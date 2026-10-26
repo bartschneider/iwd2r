@@ -492,6 +492,24 @@ class ScenarioParseTest(unittest.TestCase):
             {'op': 'quit', 'line': 12},
         ])
 
+    def test_key_modifiers(self):
+        # CTRL/SHIFT/ALT (any combination) before the key, joined with '+';
+        # a bare key keeps its exact old shape (no 'mods').
+        actions = realinput.parse_scenario(
+            'key CTRL+SPACE\n'
+            'key SHIFT+OEM_1\n'
+            'key ctrl+shift+X\n'
+            'key alt+shift+ctrl+TAB\n'
+            'key b\n')
+        self.assertEqual(actions, [
+            {'op': 'key', 'key': 'SPACE', 'mods': ['CTRL'], 'line': 1},
+            {'op': 'key', 'key': 'OEM_1', 'mods': ['SHIFT'], 'line': 2},
+            {'op': 'key', 'key': 'X', 'mods': ['CTRL', 'SHIFT'], 'line': 3},
+            {'op': 'key', 'key': 'TAB',
+             'mods': ['ALT', 'SHIFT', 'CTRL'], 'line': 4},
+            {'op': 'key', 'key': 'B', 'line': 5},
+        ])
+
     def test_errors_name_the_line(self):
         cases = [
             ('wait\n', 'line 1: wait needs one frame count'),
@@ -503,8 +521,16 @@ class ScenarioParseTest(unittest.TestCase):
             ('key\n', 'line 1: key needs one key name'),
             ('key NOPE\n', "line 1: unknown key 'NOPE'"),
             ('key !\n', "line 1: unknown key '!'"),
+            ('key ctrl+nope+X\n',
+             "line 1: unknown modifier 'nope' (CTRL, SHIFT, ALT)"),
+            ('key ALT+F4\n',
+             'line 1: alt+f4 closes the game window; the scenarios cannot'),
+            ('key CTRL+\n',
+             'line 1: key needs a key name after its modifiers'),
             ('type\n', 'line 1: type needs text'),
-            ('type a-b\n', "line 1: type supports letters, digits and spaces, not '-'"),
+            ('type aé\n',
+             "line 1: type supports printable ASCII characters, not "
+             "'é'"),
             ('shot\n', 'line 1: shot needs one name'),
             ('shot a/b\n', 'line 1: shot name must not contain a path'),
             ('shot c:x\n', 'line 1: shot name must not contain a path'),
@@ -529,6 +555,28 @@ class ScenarioParseTest(unittest.TestCase):
             with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
                 realinput.parse_scenario(text)
             self.assertEqual(str(cm.exception), message)
+
+    def test_header_cheats(self):
+        c = realinput.header_cheats
+        self.assertTrue(c('# cheats: 1\nwait 1\n'))
+        self.assertTrue(c('# About it.\n\n#  Cheats:  1 \r\nwait 1\n'))
+        self.assertFalse(c('# cheats: 0\nwait 1\n'))
+        self.assertFalse(c('# About it.\nwait 1\n'))
+        # Only the header (the comment lines before the first command).
+        self.assertFalse(c('wait 1\n# cheats: 1\n'))
+        for text, message in (
+                ('# x\n# cheats: 2\n',
+                 'line 2: cheats needs 0 or 1'),
+                ('# cheats: on\n',
+                 'line 1: cheats needs 0 or 1'),
+                ('# cheats: 1\n# cheats: 0\n',
+                 'line 2: duplicate cheats (first on line 1)')):
+            with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
+                c(text)
+            self.assertEqual(str(cm.exception), message)
+        # The scenario parsers take the header for a comment.
+        self.assertEqual(realinput.parse_scenario('# cheats: 1\nquit\n'),
+                         [{'op': 'quit', 'line': 2}])
 
     def test_header_timeout(self):
         t = realinput.header_timeout
@@ -560,6 +608,8 @@ class ScenarioParseTest(unittest.TestCase):
             self.assertTrue(realinput.load_scenario(path), path)
             # A header line that reads like "# timeout: S" must be one.
             realinput.load_header_timeout(path)
+            # And one that reads like "# cheats: 0|1" must be one.
+            realinput.load_header_cheats(path)
 
     def test_world_entry_checkpoints(self):
         actions = realinput.load_scenario(os.path.join(
@@ -589,6 +639,22 @@ class ScenarioParseTest(unittest.TestCase):
                          ['dialog', 'door_open'])
         self.assertEqual(actions[-1]['op'], 'quit')
 
+    def test_type_keys_cover_printable_ascii(self):
+        # Exactly the printable ASCII characters, each on a key both input
+        # paths know, with shift exactly where the original's own US-layout
+        # tables put it (CInfGame.cpp's byte_8ABA24/8ABA3C).
+        self.assertEqual(set(realinput.TYPE_KEYS),
+                         set(map(chr, range(0x20, 0x7f))))
+        for ch, (name, shift) in realinput.TYPE_KEYS.items():
+            self.assertTrue(realinput.vk_for_name(name), name)
+            self.assertTrue(realinput.keysym_for_name(name), name)
+        self.assertEqual(realinput.TYPE_KEYS[':'], ('OEM_1', True))
+        self.assertEqual(realinput.TYPE_KEYS['('], ('9', True))
+        self.assertEqual(realinput.TYPE_KEYS['"'], ('OEM_7', True))
+        self.assertEqual(realinput.TYPE_KEYS['_'], ('OEM_MINUS', True))
+        self.assertEqual(realinput.TYPE_KEYS['.'], ('OEM_PERIOD', False))
+        self.assertEqual(realinput.TYPE_KEYS[';'], ('OEM_1', False))
+
     def test_keysym_table_covers_every_key_name(self):
         self.assertEqual(set(realinput.X_KEYSYM), set(realinput.KEY_VK))
         used = set()
@@ -608,11 +674,19 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertIsNone(realinput.keysym_for_name('?'))
 
     def test_vk_names_match_script_core_cpp(self):
-        # Every name in platform/script_core.cpp's kNamedKeys, and no other.
+        # Every name in platform/script_core.cpp's kNamedKeys, and no other
+        # (kModifiers holds the CTRL/SHIFT/ALT `key` prefixes and mirrors
+        # realinput's MODIFIER_VK, a table of its own).
         with open(os.path.join(ROOT, 'platform', 'script_core.cpp')) as f:
             text = f.read()
-        names = set(re.findall(r'\{ "([A-Z0-9_]+)", VK_', text))
+        names = set(re.findall(
+            r'\{ "([A-Z0-9_]+)", VK_',
+            text.split('kNamedKeys[] = {', 1)[1].split('};', 1)[0]))
         self.assertEqual(names, set(realinput.KEY_VK))
+        mods = set(re.findall(
+            r'\{ "([A-Z0-9_]+)", VK_',
+            text.split('kModifiers[] = {', 1)[1].split('};', 1)[0]))
+        self.assertEqual(mods, set(realinput.MODIFIER_VK))
         self.assertEqual(realinput.vk_for_name('escape'), 0x1B)
         self.assertEqual(realinput.vk_for_name('z'), ord('Z'))
         self.assertEqual(realinput.vk_for_name('NOPE'), 0)
@@ -623,11 +697,31 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(out[0], {'op': 'key', 'line': 1, 'key': 'LEFT',
                                   'vk': 0x25, 'extended': True,
                                   'shift': False})
+        self.assertNotIn('mods', out[0])  # a bare key keeps its old shape
         self.assertEqual([(a['vk'], a['shift']) for a in out[1:5]],
                          [(0x41, False), (0x42, True), (0x20, False),
                           (0x31, False)])
         self.assertEqual(out[5], {'op': 'click', 'x': 5, 'y': 6, 'line': 3})
         json.dumps(out)  # serialisable
+        # Modifiers travel as VK codes; the shift field stays for the old
+        # action files.
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'key CTRL+SPACE\nkey CTRL+SHIFT+OEM_1\n'))
+        self.assertEqual(out, [
+            {'op': 'key', 'line': 1, 'key': 'SPACE', 'vk': 0x20,
+             'extended': False, 'shift': False, 'mods': [0x11]},
+            {'op': 'key', 'line': 2, 'key': 'OEM_1', 'vk': 0xBA,
+             'extended': False, 'shift': False, 'mods': [0x11, 0x10]}])
+        # type: every punctuation class expands through TYPE_KEYS.
+        out = realinput.windows_actions(realinput.parse_scenario(
+            'type :("_.\n'))
+        self.assertEqual([(a['key'], a['vk'], a['shift']) for a in out],
+                         [('OEM_1', 0xBA, True), ('9', 0x39, True),
+                          ('OEM_7', 0xDE, True), ('OEM_MINUS', 0xBD, True),
+                          ('OEM_PERIOD', 0xBE, False)])
+        self.assertEqual(realinput.describe(
+            {'op': 'key', 'key': 'X', 'mods': ['CTRL', 'SHIFT']}),
+            'key CTRL+SHIFT+X')
         # Window pixels: the centred UI, times the scale; origin dropped.
         g = realinput.resolve_screen(2560, 1440, 2, (2560, 1440))
         out = realinput.windows_actions(realinput.parse_scenario(
@@ -911,6 +1005,24 @@ class XDriverTest(unittest.TestCase):
             ['keydown', 'r'], ['keyup', 'r'],
             ['keydown', 'space'], ['keyup', 'space'],
             ['keydown', '1'], ['keyup', '1']])
+
+    def test_type_presses_punctuation_through_the_us_layout(self):
+        self.driver.do({'op': 'type', 'text': ':_', 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Shift_L'], ['keydown', 'semicolon'],
+            ['keyup', 'semicolon'], ['keyup', 'Shift_L'],
+            ['keydown', 'Shift_L'], ['keydown', 'minus'], ['keyup', 'minus'],
+            ['keyup', 'Shift_L']])
+
+    def test_key_with_modifiers(self):
+        # As driver.ps1 does: modifiers down in order, the key, then
+        # release in reverse, each phase waiting for the engine's reads.
+        self.driver.do({'op': 'key', 'key': 'X',
+                        'mods': ['CTRL', 'SHIFT'], 'line': 1})
+        self.assertEqual(self.xdo(), [
+            ['keydown', 'Control_L'], ['keydown', 'Shift_L'],
+            ['keydown', 'x'], ['keyup', 'x'],
+            ['keyup', 'Shift_L'], ['keyup', 'Control_L']])
 
     def test_game_exit_ends_the_run(self):
         self.game.code = 0
@@ -4955,6 +5067,86 @@ class OracleReplayTest(unittest.TestCase):
                 self.assertEqual(f.read(),
                                  b'Full Screen=1\r\nResolution=800\r\n')
 
+    def test_cheats_ini(self):
+        text = ('[Program Options]\r\nResolution=800\r\n'
+                '[Game Options]\r\nCheats=0\r\nDifficulty=0\r\n'
+                '[Characters]\r\n')
+        # A run that does not opt in leaves the ini byte-identical.
+        self.assertEqual(oracle.cheats_ini(text, False), text)
+        self.assertEqual(oracle.cheats_ini(text, True),
+                         '[Program Options]\r\nResolution=800\r\n'
+                         '[Game Options]\r\nCheats=1\r\nDifficulty=0\r\n'
+                         '[Characters]\r\n')
+        # A copy without the key gains it at the top of the section.
+        bare = text.replace('Cheats=0\r\n', '')
+        self.assertEqual(oracle.cheats_ini(bare, True),
+                         '[Program Options]\r\nResolution=800\r\n'
+                         '[Game Options]\r\nCheats=1\r\nDifficulty=0\r\n'
+                         '[Characters]\r\n')
+        self.assertEqual(oracle.cheats_ini_value(text), '0')
+        self.assertEqual(oracle.cheats_ini_value(
+            text.replace('Cheats=0', 'Cheats=1')), '1')
+        self.assertIsNone(oracle.cheats_ini_value(bare))
+        for broken in ('Cheats=1\r\n', '[Program Options]\r\nCheats=1\r\n'):
+            with self.assertRaises(ValueError):
+                oracle.cheats_ini(broken, True)
+
+    def test_prepare_and_restore_cheats_ini(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            game = os.path.join(tmp, 'game')
+            os.makedirs(game)
+            ini = os.path.join(game, 'Icewind2.ini')
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            calls = []
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: calls.append((g, i))), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(
+                    oracle.prepare_cheats_ini(game, True, '/install'), '0')
+                # The original writes its console history back at exit.
+                with open(ini, 'ab') as f:
+                    f.write(b'[Lua Edit]\r\nHistory=SETCURRENTXP(4000)\r\n')
+                oracle.restore_cheats_ini(game, '0', '/install')
+            self.assertEqual(calls, [(game, '/install')] * 2)
+            self.assertIn('set Cheats=1', out.getvalue())
+            # Only the Cheats key went back; the write-back survived.
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n'
+                                 b'[Lua Edit]\r\n'
+                                 b'History=SETCURRENTXP(4000)\r\n')
+            # An opt-in on a copy without the key removes it again on
+            # restore (the original then defaults the cheats to 0).
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nSound=1\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertIsNone(
+                    oracle.prepare_cheats_ini(game, True, '/install'))
+                oracle.restore_cheats_ini(game, None, '/install')
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nSound=1\r\n')
+            # No opt-in writes nothing at all.
+            with open(ini, 'wb') as f:
+                f.write(b'[Game Options]\r\nCheats=0\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertIsNone(
+                    oracle.prepare_cheats_ini(game, False, '/install'))
+            self.assertNotIn('set Cheats', out.getvalue())
+            with open(ini, 'rb') as f:
+                self.assertEqual(f.read(), b'[Game Options]\r\nCheats=0\r\n')
+            # An ini without the section is refused, not guessed at.
+            with open(ini, 'wb') as f:
+                f.write(b'[Program Options]\r\n')
+            with mock.patch.object(oracle, 'assert_safe_target',
+                                   lambda g, i: None):
+                with self.assertRaises(SystemExit):
+                    oracle.prepare_cheats_ini(game, True, '/install')
+
     def test_parse_status(self):
         self.assertEqual(oracle.parse_status(
             'frame=21046\nscript_line=5\nstate=running\n'),
@@ -7022,6 +7214,8 @@ class ProbePlanTest(unittest.TestCase):
             post_load=None, target='original', build_checkout=None, out='t.jsonl',
             seed=1, dump_every=0, clicks=0)
         script = os.path.join(tmp, 's.txt')
+        with open(script, 'w') as f:
+            f.write('# cheats: 1\n')
 
         def run_side(*a, **kw):
             events.append(('run_side',))
@@ -7035,6 +7229,12 @@ class ProbePlanTest(unittest.TestCase):
             mock.patch.object(probe.winsandbox, 'available', return_value=True),
             mock.patch.object(probe.oracle, 'ensure_vanilla', return_value=game),
             mock.patch.object(probe.oracle, 'prepare_replay_ini'),
+            mock.patch.object(probe.oracle, 'prepare_cheats_ini',
+                              side_effect=lambda g, on:
+                              events.append(('cheats-on', g)) or '0'),
+            mock.patch.object(probe.oracle, 'restore_cheats_ini',
+                              side_effect=lambda g, prior:
+                              events.append(('cheats-off', g))),
             mock.patch.object(probe, 'ours_build', return_value=builddir),
             mock.patch.object(probe.winsandbox, 'deploy_runtime'),
             mock.patch.object(probe.play, 'make_run_folder', return_value=run_dir),
@@ -7057,9 +7257,11 @@ class ProbePlanTest(unittest.TestCase):
             rc = probe.run(ns)
         self.assertEqual(rc, 0)
         self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
+            ('cheats-on', game),
             ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
             ('run_side',),
-            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay')])
+            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay'),
+            ('cheats-off', game)])
         saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
         self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
                                     {'mode': 'empty', 'load': None},
