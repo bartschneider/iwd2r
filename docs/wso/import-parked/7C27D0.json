@@ -1,0 +1,7 @@
+{
+  "address": "0x7C27D0",
+  "name": "CImm::sub_7C27D0",
+  "file": "src/CImm.cpp",
+  "batch": "i034",
+  "needs": "not exercised; ours reading matches the decompile"
+}

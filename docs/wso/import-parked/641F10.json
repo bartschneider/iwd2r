@@ -1,0 +1,7 @@
+{
+  "address": "0x641F10",
+  "name": "CScreenMap::ResetAreaNotePanel",
+  "file": "src/CScreenMap.cpp",
+  "batch": "i034",
+  "needs": "not exercised; ours reading matches the decompile"
+}
