@@ -1,0 +1,7 @@
+{
+  "address": "0x4E5950",
+  "name": "CUIControlEditScrollBar::OnLButtonUp",
+  "file": "src/CUIControlScrollBar.cpp",
+  "batch": "i041",
+  "needs": "not exercised; ours reading matches the decompile"
+}
