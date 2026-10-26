@@ -5698,7 +5698,7 @@
     "i038": {
       "assigned_at": "2026-10-26T08:50:30+00:00",
       "branch": "p3/wso-i038",
-      "closed_at": null,
+      "closed_at": "2026-10-26T10:18:06+00:00",
       "files": [
         "src/IcewindCGameEffects.cpp",
         "src/CGameEffect.cpp",
@@ -5708,6 +5708,7 @@
         "src/CScreenCharacter.cpp",
         "src/CImm.cpp"
       ],
+      "gate": "docs-only",
       "pool": "glm",
       "rows": [
         {
@@ -5869,6 +5870,194 @@
           "name": "CImm::sub_7C2E10",
           "our_len": 594,
           "their_len": 611
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i039": {
+      "assigned_at": "2026-10-26T09:05:21+00:00",
+      "branch": "p3/wso-i039",
+      "closed_at": null,
+      "files": [
+        "src/CResWave.cpp",
+        "src/CScreenWorldMap.cpp",
+        "src/CScreenSinglePlayer.cpp",
+        "src/CScreenKeymaps.cpp",
+        "src/CScreenWorld.cpp",
+        "src/CScreenStore.cpp",
+        "src/CScreenLoad.cpp",
+        "src/CGameSprite.cpp",
+        "src/CDimm.cpp",
+        "src/CGameSpriteSpells.cpp",
+        "src/CScreenJournal.cpp",
+        "src/CScreenMap.cpp",
+        "src/CScreenSpellbook.cpp",
+        "src/CScreenOptions.cpp",
+        "src/CUIControlSlider.cpp",
+        "src/CScreenInventory.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x77EA60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CResWave.cpp",
+          "name": "CResWave::CopyWaveData",
+          "our_len": 582,
+          "their_len": 611
+        },
+        {
+          "address": "0x69CE20",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorldMap.cpp",
+          "name": "CScreenWorldMap::FindAreaHit",
+          "our_len": 523,
+          "their_len": 539
+        },
+        {
+          "address": "0x6636D0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSinglePlayer.cpp",
+          "name": "CScreenSinglePlayer::OnModifyButtonClick",
+          "our_len": 523,
+          "their_len": 525
+        },
+        {
+          "address": "0x63A910",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenKeymaps.cpp",
+          "name": "CScreenKeymaps::SetKeymap",
+          "our_len": 516,
+          "their_len": 528
+        },
+        {
+          "address": "0x63ACA0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenKeymaps.cpp",
+          "name": "CUIControlButtonKeymap::OnLButtonClick",
+          "our_len": 519,
+          "their_len": 521
+        },
+        {
+          "address": "0x692E80",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StopDeath",
+          "our_len": 515,
+          "their_len": 519
+        },
+        {
+          "address": "0x682C00",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenStore.cpp",
+          "name": "CUIControlButtonStoreStoreSpell::OnRButtonClick",
+          "our_len": 502,
+          "their_len": 504
+        },
+        {
+          "address": "0x63F7C0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenLoad.cpp",
+          "name": "CUIControlButtonLoadError::OnLButtonClick",
+          "our_len": 500,
+          "their_len": 504
+        },
+        {
+          "address": "0x6912A0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StopCommand",
+          "our_len": 500,
+          "their_len": 504
+        },
+        {
+          "address": "0x75A3F0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Turn",
+          "our_len": 498,
+          "their_len": 498
+        },
+        {
+          "address": "0x757A80",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::FindTraps",
+          "our_len": 494,
+          "their_len": 494
+        },
+        {
+          "address": "0x781E60",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CDimm.cpp",
+          "name": "CDimm::CDimm",
+          "our_len": 484,
+          "their_len": 499
+        },
+        {
+          "address": "0x725B50",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CGameSpriteSpells.cpp",
+          "name": "CGameSpriteSpellList::Remove",
+          "our_len": 481,
+          "their_len": 499
+        },
+        {
+          "address": "0x6378B0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenJournal.cpp",
+          "name": "CScreenJournal::OnRestButtonClick",
+          "our_len": 469,
+          "their_len": 471
+        },
+        {
+          "address": "0x642130",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenMap.cpp",
+          "name": "CScreenMap::OnRestButtonClick",
+          "our_len": 467,
+          "their_len": 469
+        },
+        {
+          "address": "0x66BBE0",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::OnRestButtonClick",
+          "our_len": 467,
+          "their_len": 469
+        },
+        {
+          "address": "0x655A70",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenOptions.cpp",
+          "name": "CScreenOptions::OnRestButtonClick",
+          "our_len": 466,
+          "their_len": 468
+        },
+        {
+          "address": "0x4D6010",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CUIControlSlider.cpp",
+          "name": "CUIControlSlider::OnMouseMove",
+          "our_len": 463,
+          "their_len": 471
+        },
+        {
+          "address": "0x629120",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenInventory.cpp",
+          "name": "CScreenInventory::OnRestButtonClick",
+          "our_len": 465,
+          "their_len": 467
+        },
+        {
+          "address": "0x66B960",
+          "category": "theirs_changed_ours_base",
+          "file": "src/CScreenSpellbook.cpp",
+          "name": "CScreenSpellbook::OnDoneButtonClick",
+          "our_len": 457,
+          "their_len": 459
         }
       ],
       "status": "assigned",
