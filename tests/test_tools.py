@@ -3017,6 +3017,39 @@ INI = ('[Alias]\r\n'
        'Last Resolution=1366x768\r\n')
 
 
+class OracleVanillaExeHomeTest(unittest.TestCase):
+    """tools/oracle.py: the vanilla exe and the Linux mirror follow
+    IWD2R_HOME like the rest of the tools."""
+
+    def environ_without_home(self):
+        return {k: v for k, v in os.environ.items() if k != 'IWD2R_HOME'}
+
+    def load(self):
+        """oracle.py loaded again, so its paths come from this environment."""
+        return load_tool('oracle')
+
+    def test_iwd2r_home_moves_the_exe_and_the_mirror(self):
+        home = os.path.join(tempfile.gettempdir(), 'iwd2r-home')
+        environ = self.environ_without_home()
+        environ['IWD2R_HOME'] = home
+        with mock.patch.dict(os.environ, environ, clear=True):
+            loaded = self.load()
+        self.assertEqual(loaded.VANILLA_EXE,
+                         os.path.join(home, 'vanilla', 'iwd2.exe'))
+        self.assertEqual(loaded.MIRROR_DIR,
+                         os.path.join(home, 'vanilla-mirror'))
+
+    def test_the_default_is_the_documented_home(self):
+        default = os.path.expanduser('~/.local/share/iwd2r')
+        with mock.patch.dict(os.environ, self.environ_without_home(),
+                             clear=True):
+            loaded = self.load()
+        self.assertEqual(loaded.VANILLA_EXE,
+                         os.path.join(default, 'vanilla', 'iwd2.exe'))
+        self.assertEqual(loaded.MIRROR_DIR,
+                         os.path.join(default, 'vanilla-mirror'))
+
+
 class OracleVanillaTest(unittest.TestCase):
     """tools/oracle.py vanilla: the checks on the vanilla copy."""
 

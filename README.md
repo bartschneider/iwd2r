@@ -226,7 +226,7 @@ The batch driver described under [Run](#run) runs on one Windows host driven fro
 - **A Windows 11 Pro host with Windows Sandbox enabled, and WSL2 (Ubuntu).** The repository and the tools live on the WSL side; the sandbox, the oracle runner and the game run on the Windows side. One-time sandbox setup, in an admin PowerShell, then reboot: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`.
 - The original needs DirectPlay; the sandbox ships only stub files, so the host must have DirectPlay enabled, as it is for the original game.
   The driver copies the host's 32-bit files over the sandbox's stubs at logon, inside the sandbox only.
-- **A legal copy of Icewind Dale II.** The tools expect the original `iwd2.exe` at `~/.local/share/iwd2r/vanilla/iwd2.exe` — `VANILLA_EXE` in `tools/oracle.py`, overridable on `run` with `--vanilla`. Its MD5 is checked against `oracle/loader/vanilla.json`, so a modified exe never becomes the oracle's truth.
+- **A legal copy of Icewind Dale II.** The tools expect the original `iwd2.exe` at `${IWD2R_HOME:-~/.local/share/iwd2r}/vanilla/iwd2.exe` (`IWD2R_HOME` moves the whole user-local home) — `VANILLA_EXE` in `tools/oracle.py`, overridable on `run` with `--vanilla`. Its MD5 is checked against `oracle/loader/vanilla.json`, so a modified exe never becomes the oracle's truth.
 - **A second copy of the game for the oracle.** `python3 tools/oracle.py vanilla` builds that copy at `%USERPROFILE%\iwd2r-oracle\game` from your install:
   - IWD2EE's uninstaller runs there, the vanilla `iwd2.exe` MD5 is verified, and the marker `game/vanilla.ok` records success — your install is never changed;
   - `--rebuild` starts the copy over;
