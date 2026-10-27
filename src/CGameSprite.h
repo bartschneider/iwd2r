@@ -558,7 +558,6 @@ public:
     BOOL sub_727720(const CResRef& resRef, BYTE& nClass, DWORD& nSpecialization, BYTE& nLevel);
     BOOL sub_71CFF0();
     int sub_75E930(int a1);
-    void sub_71CEA0(CItem* pItem, int a2);
     SHORT Formation(CGameSprite* pTarget);
     SHORT Follow();
     SHORT UseContainer();
