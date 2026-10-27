@@ -8,11 +8,7 @@ public:
     CResBinary();
     ~CResBinary();
 
-    void* Demand();
-    int Release();
-
-    /* 0050 */ char* m_resVersion;
-    /* 0054 */ BOOL m_bParsed;
+    /* 0054 */ int field_54;
 };
 
 #endif /* CRESBINARY_H_ */
