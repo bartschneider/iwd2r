@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
 #include "CGameSound.h"
@@ -11,6 +12,7 @@
 #include "CItem.h"
 #include "CMemINI.h"
 #include "CMessage.h"
+#include "CMoveList.h"
 #include "CScreenCreateChar.h"
 #include "CSpawn.h"
 #include "CUtil.h"
@@ -579,6 +581,75 @@ TEST_CASE("gam: SaveGame packs AR1000 into ICEWIND2.SAV and LoadGame brings back
         if (after.count(type) == 1)
             CHECK(after.at(type) == count);
     }
+}
+
+// CGameArea::Marshal (0x471630): for the master area the original empties
+// field_AAA and then fills it again from the game's move and limbo lists, so
+// a save carries a creature that is between areas, in no area's list.
+TEST_CASE("gam: SaveGame carries a creature that is in the move list", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        if (pGame->m_gameAreas[n] != NULL)
+            pGame->m_gameAreas[n]->SortLists();
+    }
+    const std::map<int, int> before = ObjectTypesIn(pGame->m_pGameAreaMaster);
+
+    // A creature of no area, as one in transit: it is in the object array and
+    // a pending move names it, but no area list holds it.
+    CCreatureFile creatureData;
+    creatureData.SetResRef(CResRef("10GOB"), TRUE, TRUE);
+    REQUIRE(creatureData.GetDataSize() > 0);
+    CGameSprite* pTraveller = new CGameSprite(creatureData.GetData(),
+        creatureData.GetDataSize(),
+        0,
+        0,
+        -1,
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+    creatureData.ReleaseData();
+    REQUIRE_FALSE(pTraveller->m_bGlobal);
+    CMoveListEntry* pEntry = new CMoveListEntry();
+    pEntry->m_nSpriteId = pTraveller->GetId();
+    pEntry->m_areaResRef = "AR1001";
+    pEntry->m_ptDestination = CPoint(1000, 1000);
+    pGame->m_cMoveList.AddTail(pEntry);
+
+    REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
+    const fs::path dir = Child(Child(g_view, "mpsave"), "default");
+    const std::map<std::string, std::string> packed = UnpackSav(ReadFile(Child(dir, "ICEWIND2.SAV")));
+    REQUIRE(packed.count("AR1000.ARE") == 1);
+    // AR1000's own 35 creatures and the one the move list hands the area.
+    CHECK(CheckAreaCreatures(packed.at("AR1000.ARE")) == 36);
+
+    // The reloaded area holds it, so it came back with the save. The pending
+    // move is dropped first, so nothing in it outlives the game it names.
+    pGame->m_cMoveList.RemoveAll();
+    delete pEntry;
+    pGame->DestroyGame(FALSE, FALSE);
+    pGame->LoadGame(FALSE, FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    const std::map<int, int> after = ObjectTypesIn(pGame->m_pGameAreaMaster);
+    CHECK(after.at(CGameObject::TYPE_SPRITE) == before.at(CGameObject::TYPE_SPRITE) + 1);
 }
 
 // The ids on the area's front list, head to tail.
