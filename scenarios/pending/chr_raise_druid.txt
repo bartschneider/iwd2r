@@ -30,12 +30,28 @@
 # line, so every command after the first clears exactly its 28 + digit
 # count characters before typing (32 for 4-digit XP, 33 for 5-digit);
 # surplus BACKSPACEs would reach the world.  Each command is followed by
-# one walk: class popup 54 (the 210x330 list at (164,82) is eleven 30px
-# rows; druid = row 4, center y 187), abilities popup 7 at every 4th
-# level (+ STR (477,93)), skills popup 55 every level (Done only; Task 48
-# proved Done works unspent), feats popup 56 at every 3rd level (nine +
+# one walk: class popup 54 (druid = row 4, center y 187), popup 7 at
+# level 4 only (+ STR (477,93)), popup 55 every level with its points
+# spent on rows 1-2 before Done (no popup 56 for a druid; the nine +
 # rows at (477,93..394) clicked until one registers); every Done is
-# (722,394).  Export from the character record: Export (314,373), popup
+# (722,394).  [launch 2 rewrite: that skills-Done and feats picture
+# was wrong.]
+#
+# The real chain (src/CScreenCharacter.cpp, read-only): popup 54 Done
+# grants the levels and the points, then 7 (only when crossing a
+# multiple of 4: level 4 here - CheckSummonPopup case 7), then 55
+# always (>= 2 skill points per level), and the commit is automatic
+# when the chain runs out.  Popup 55 Done is gated (IsDoneButtonClickable
+# case 55 `m_nExtraSkillPoints < 2`), so the walk MUST spend its skill
+# points first: + rows 1-2 at (477,93) and (477,130) - GUIREC panels
+# 7/55/56 share the +/- column pair at (477,y)/(496,y), and launch 2
+# proved (477,93) spends.  A druid never sees popup 56 (FEATCLAS druid
+# all 0; FEATLVL gains do not feed m_nLevelUpFeats) nor any spell
+# popup, so with one level per walk the chain is always
+# 54 -> [7 at L4] -> 55 -> commit.  ESC then closes the record, and a
+# _world checkpoint verifies screen==world before the next console
+# phase (the console only opens on the world screen).  Export from the
+# character record: Export (314,373), popup
 # 13 name edit (397,283), Done (467,465); writes Rysdrd7.CHR into the
 # game copy's Characters\ directory (CInfGame::CharacterExport,
 # src/CInfGame.cpp:3049).
@@ -225,8 +241,8 @@ type CTRLALTDELETE:SETCURRENTXP(1000)
 key RETURN
 wait 60
 checkpoint dr_l2_xp
-# Level-up walk: class popup 54, abilities 7 (every 4th level),
-# skills 55, feats 56 (every 3rd); no spell popups for a druid.
+# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
+# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
 key CTRL+TAB
 wait 10
 key R
@@ -238,14 +254,18 @@ click 369 187
 wait 10
 click 722 394
 wait 30
+click 477 93
+wait 15
+click 477 130
+wait 15
 click 722 394
 wait 30
-checkpoint dr_l2_skills
 wait 60
 checkpoint dr_l2_leveled
 shot dr_l2_leveled
 key ESCAPE
-wait 60
+wait 90
+checkpoint dr_l2_world
 # Reopen the console and clear the kept line: exactly its
 # 28 + digit-count characters.
 key CTRL+TAB
@@ -286,8 +306,8 @@ type CTRLALTDELETE:SETCURRENTXP(3000)
 key RETURN
 wait 60
 checkpoint dr_l3_xp
-# Level-up walk: class popup 54, abilities 7 (every 4th level),
-# skills 55, feats 56 (every 3rd); no spell popups for a druid.
+# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
+# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
 key CTRL+TAB
 wait 10
 key R
@@ -299,35 +319,18 @@ click 369 187
 wait 10
 click 722 394
 wait 30
-click 722 394
-wait 30
-checkpoint dr_l3_skills
 click 477 93
-wait 5
+wait 15
 click 477 130
-wait 5
-click 477 167
-wait 5
-click 477 206
-wait 5
-click 477 243
-wait 5
-click 477 280
-wait 5
-click 477 320
-wait 5
-click 477 357
-wait 5
-click 477 394
-wait 5
+wait 15
 click 722 394
 wait 30
-checkpoint dr_l3_feats
 wait 60
 checkpoint dr_l3_leveled
 shot dr_l3_leveled
 key ESCAPE
-wait 60
+wait 90
+checkpoint dr_l3_world
 # Reopen the console and clear the kept line: exactly its
 # 28 + digit-count characters.
 key CTRL+TAB
@@ -368,8 +371,8 @@ type CTRLALTDELETE:SETCURRENTXP(6000)
 key RETURN
 wait 60
 checkpoint dr_l4_xp
-# Level-up walk: class popup 54, abilities 7 (every 4th level),
-# skills 55, feats 56 (every 3rd); no spell popups for a druid.
+# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
+# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
 key CTRL+TAB
 wait 10
 key R
@@ -386,14 +389,18 @@ wait 15
 click 722 394
 wait 30
 checkpoint dr_l4_abilities
+click 477 93
+wait 15
+click 477 130
+wait 15
 click 722 394
 wait 30
-checkpoint dr_l4_skills
 wait 60
 checkpoint dr_l4_leveled
 shot dr_l4_leveled
 key ESCAPE
-wait 60
+wait 90
+checkpoint dr_l4_world
 # Reopen the console and clear the kept line: exactly its
 # 28 + digit-count characters.
 key CTRL+TAB
@@ -435,8 +442,8 @@ type CTRLALTDELETE:SETCURRENTXP(10000)
 key RETURN
 wait 60
 checkpoint dr_l5_xp
-# Level-up walk: class popup 54, abilities 7 (every 4th level),
-# skills 55, feats 56 (every 3rd); no spell popups for a druid.
+# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
+# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
 key CTRL+TAB
 wait 10
 key R
@@ -448,14 +455,18 @@ click 369 187
 wait 10
 click 722 394
 wait 30
+click 477 93
+wait 15
+click 477 130
+wait 15
 click 722 394
 wait 30
-checkpoint dr_l5_skills
 wait 60
 checkpoint dr_l5_leveled
 shot dr_l5_leveled
 key ESCAPE
-wait 60
+wait 90
+checkpoint dr_l5_world
 # Reopen the console and clear the kept line: exactly its
 # 28 + digit-count characters.
 key CTRL+TAB
@@ -497,8 +508,8 @@ type CTRLALTDELETE:SETCURRENTXP(15000)
 key RETURN
 wait 60
 checkpoint dr_l6_xp
-# Level-up walk: class popup 54, abilities 7 (every 4th level),
-# skills 55, feats 56 (every 3rd); no spell popups for a druid.
+# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
+# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
 key CTRL+TAB
 wait 10
 key R
@@ -510,35 +521,18 @@ click 369 187
 wait 10
 click 722 394
 wait 30
-click 722 394
-wait 30
-checkpoint dr_l6_skills
 click 477 93
-wait 5
+wait 15
 click 477 130
-wait 5
-click 477 167
-wait 5
-click 477 206
-wait 5
-click 477 243
-wait 5
-click 477 280
-wait 5
-click 477 320
-wait 5
-click 477 357
-wait 5
-click 477 394
-wait 5
+wait 15
 click 722 394
 wait 30
-checkpoint dr_l6_feats
 wait 60
 checkpoint dr_l6_leveled
 shot dr_l6_leveled
 key ESCAPE
-wait 60
+wait 90
+checkpoint dr_l6_world
 # Reopen the console and clear the kept line: exactly its
 # 28 + digit-count characters.
 key CTRL+TAB
@@ -580,8 +574,8 @@ type CTRLALTDELETE:SETCURRENTXP(21000)
 key RETURN
 wait 60
 checkpoint dr_l7_xp
-# Level-up walk: class popup 54, abilities 7 (every 4th level),
-# skills 55, feats 56 (every 3rd); no spell popups for a druid.
+# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
+# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
 key CTRL+TAB
 wait 10
 key R
@@ -593,14 +587,18 @@ click 369 187
 wait 10
 click 722 394
 wait 30
+click 477 93
+wait 15
+click 477 130
+wait 15
 click 722 394
 wait 30
-checkpoint dr_l7_skills
 wait 60
 checkpoint dr_l7_leveled
 shot dr_l7_leveled
 key ESCAPE
-wait 60
+wait 90
+checkpoint dr_l7_world
 # Export from the record: Export (314,373), popup 13 name edit (397,283),
 # Done (467,465); writes Rysdrd7.CHR into Characters\.
 key R
