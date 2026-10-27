@@ -26,6 +26,7 @@ public:
 
     CScreenWorld();
     /* 0004 */ ~CScreenWorld() override;
+    /* 0010 */ void NormalizePanelRect(DWORD nID, CRect& rect) override;
     /* 0014 */ void EngineActivated() override;
     /* 0018 */ void EngineDeactivated() override;
     /* 0024 */ void EngineGameInit() override;
@@ -78,6 +79,7 @@ public:
     void SetCurrentXP(DWORD dwCurrentXP);
     void AddGold(DWORD dwGold);
     void StopContainer();
+    void ConfigureContainer();
     void CancelPopup();
     void StartCommand();
     void StopCommand();

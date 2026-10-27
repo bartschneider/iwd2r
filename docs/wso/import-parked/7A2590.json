@@ -1,0 +1,7 @@
+{
+  "address": "0x7A2590",
+  "name": "CNetworkWindow::FrameSend",
+  "file": "src/CNetwork.cpp",
+  "batch": "i048",
+  "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"
+}

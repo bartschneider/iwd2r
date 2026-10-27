@@ -1865,6 +1865,164 @@ INT CNetwork::ThreadLoop()
     return nDelta;
 }
 
+// 0x7A7980
+BOOLEAN CNetwork::HandleSystemMessage(BYTE* pData, DWORD dwSize)
+{
+    switch (*reinterpret_cast<DWORD*>(pData)) {
+    case 3: /* DPSYS_CREATEPLAYERORGROUP */
+        if (1) {
+            CString sText;
+            CString sPlayerName;
+
+            PLAYER_ID dpId = *reinterpret_cast<PLAYER_ID*>(pData + 8);
+
+            // NOTE: the exe reads the DPNAME long-name pointer (at +0x20 in the
+            // create message), not the short-name slot the stock SDK structs
+            // would suggest.
+            sPlayerName = *reinterpret_cast<char**>(pData + 0x20);
+            if (AddPlayerToList(dpId, sPlayerName, FALSE, FALSE) == TRUE) {
+                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sJoinedGame);  // re-lint: disable RE001 RE003 (exe is ANSI; Ghidra recovers the narrow bytes)
+                sText.SetAt(0, sText.GetLength() - 1);
+
+                BYTE* pMessage = CreateCopyMessage(sText,
+                    sText.GetLength(),
+                    0,
+                    0,
+                    1);
+                if (pMessage != NULL) {
+                    m_SystemWindow.AddToIncomingQueue(0,
+                        m_idLocalPlayer,
+                        pMessage,
+                        sText.GetLength() + 12);
+                }
+            }
+        }
+        return TRUE;
+    case 5: /* DPSYS_DESTROYPLAYERORGROUP */
+        if (1) {
+            CString sText;
+            CString sPlayerName;
+
+            PLAYER_ID dpId = *reinterpret_cast<PLAYER_ID*>(pData + 8);
+
+            // NOTE: the exe reads the DPNAME long-name pointer (at +0x24 in the
+            // destroy message), not the short-name slot the stock SDK structs
+            // would suggest.
+            sPlayerName = *reinterpret_cast<char**>(pData + 0x24);
+            if (RemovePlayerFromList(dpId, FALSE) == TRUE) {
+                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sDroppedGame);  // re-lint: disable RE001 RE003 (exe is ANSI; Ghidra recovers the narrow bytes)
+                sText.SetAt(0, sText.GetLength() - 1);
+
+                BYTE* pMessage = CreateCopyMessage(sText,
+                    sText.GetLength(),
+                    0,
+                    0,
+                    1);
+                if (pMessage != NULL) {
+                    m_SystemWindow.AddToIncomingQueue(0,
+                        m_idLocalPlayer,
+                        pMessage,
+                        sText.GetLength() + 12);
+                }
+            } else {
+                for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+                    if (field_772[nPlayer] == dpId) {
+                        field_772[nPlayer] = 0;
+                    }
+                }
+            }
+        }
+        return TRUE;
+    case 0x31: /* DPSYS_SESSIONLOST */
+        g_pChitin->OnMultiplayerSessionToClose();
+        SleepEx(1000, FALSE);
+        if (m_bConnectionEstablished == TRUE) {
+            OnCloseSession();
+        }
+        return TRUE;
+    case 0x101: /* DPSYS_HOST */
+    case 0x103: /* DPSYS_SETPLAYERORGROUPNAME */
+    case 0x104: /* DPSYS_SETSESSIONDESC */
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+// 0x7A7BF0
+void CNetwork::AddMessageToWindow(PLAYER_ID idTo, DWORD dwFlags, BYTE* pData, DWORD dwSize)
+{
+    // NOTE: Uninline.
+    INT nPlayer = FindPlayerLocationByID(idTo, TRUE);
+
+    if (nPlayer == -1) {
+        // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
+        // __LINE__: 8339
+        UTIL_ASSERT_MSG(FALSE, "CNetwork::AddMessageToWindow: Invalid SendTo ID.");
+        return;
+    }
+
+    BOOLEAN bRaw = (dwFlags & SEND_RAW) != 0;
+
+    INT nPackets;
+    if (dwSize + 16 >= MAXIMAL_PACKET_SIZE) {
+        nPackets = dwSize / MAXIMAL_PACKET_SIZE + 1;
+        while (nPackets >= 2 && dwSize - (nPackets - 1) * MAXIMAL_PACKET_SIZE < MINIMAL_PACKET_SIZE) {
+            nPackets--;
+        }
+    } else {
+        nPackets = 1;
+    }
+
+    DWORD dwOffset = 0;
+    DWORD dwRemainingSize = dwSize;
+    for (INT nPacket = 0; nPacket < nPackets; nPacket++) {
+        DWORD dwChunkSize = MAXIMAL_PACKET_SIZE;
+        if (nPacket == nPackets - 1) {
+            dwChunkSize = dwRemainingSize;
+        }
+
+        if (nPacket != 0) {
+            BYTE* pMessage = CreateCopyMessage(pData + dwOffset,
+                dwChunkSize,
+                bRaw,
+                TRUE,
+                0);
+
+            EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
+
+            CNETWORKWINDOW_QUEUEENTRY* pEntry = new CNETWORKWINDOW_QUEUEENTRY();
+            pEntry->idFrom = m_idLocalPlayer;
+            pEntry->idTo = idTo;
+            pEntry->pData = pMessage;
+            pEntry->dwSize = dwChunkSize + 12;
+            m_pSlidingWindow[nPlayer].m_lQueueOutgoingMessages.AddTail(pEntry);
+
+            LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
+        } else {
+            BYTE* pMessage = CreateCopyMessage(pData + dwOffset,
+                dwChunkSize,
+                bRaw,
+                TRUE,
+                nPackets);
+
+            EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
+
+            CNETWORKWINDOW_QUEUEENTRY* pEntry = new CNETWORKWINDOW_QUEUEENTRY();
+            pEntry->idFrom = m_idLocalPlayer;
+            pEntry->idTo = idTo;
+            pEntry->pData = pMessage;
+            pEntry->dwSize = dwChunkSize + 16;
+            m_pSlidingWindow[nPlayer].m_lQueueOutgoingMessages.AddTail(pEntry);
+
+            LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
+        }
+
+        dwOffset += dwChunkSize;
+        dwRemainingSize -= dwChunkSize;
+    }
+}
+
 // 0x7A7DF0
 BYTE* CNetwork::CreateCopyMessage(const void* lpData, DWORD dwDataSize, BOOLEAN bCompressed, unsigned char a4, INT nFrame)
 {

@@ -1,0 +1,7 @@
+{
+  "address": "0x71F860",
+  "name": "CGameSprite::ApplyWeaponEffects",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i048",
+  "needs": "CGameArea::ApplyEffect (0x46E130, the 5-arg ApplyEffect(CGameEffect*, BOOL, BOOL, specific, target) form) is not ported: src/CGameArea.h and src/CGameArea.cpp have no such method, and our tree's own target-type switches in CGameAIBase.cpp and CGameSprite.cpp stub exactly those cases with '// TODO: ... through CGameArea 0x46E130 (not ported)'. The rest of the body is importable as-is once that callee lands: CGameObject::m_pArea (0x0012) exists for the area pointer, CItem::Demand/Release/GetAbility/GetAbilityEffect, CGameSprite::GetLauncher, CGameAIBase::ApplyEffectToParty, CProjectile::AddEffect, CMessageAddEffect and CMessageHandler::AddMessage all exist; the fork's IcewindMisc::ApplyDamageModifiers call must be renamed to our IcewindMisc::sub_5860F0"
+}

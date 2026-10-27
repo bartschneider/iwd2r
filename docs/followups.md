@@ -201,6 +201,7 @@ The crisp-text requirement is met by `Program Options/Text Renderer=scalable` (s
 These block TODOs in the combat stream's ports; each is in a file or function the stream was not granted.
 
 - `CGameSprite` 0x71F860, the ammunition's and launcher's effects on a missile's projectile, is not ported: Swing's missile branch fires without them.
+- **spell_showcase friendly-fire residual.** Party hp at cast_done reads Aria 1/4, Bram 3/4 vs the original's 0/0, with enemy hp and positions identical value for value; most plausibly the last Magic Missile still in flight at cast_done (fight_done follows 150 frames later). Details in the Task 44 report (first/.superpowers/sdd/2026-10-23-frida-imports/task-44-report.md).
 - `CGameArea` 0x46E130, which gives an effect to the area's creatures (target types 4-8), is not ported: FireSpell, FireSpellPoint, ForceSpell, ForceSpellPoint, Spell, Swing's melee effects and 0x755A70 drop those effects (TODOs).
 - The projectile class DecodeProjectile builds for type 304 is not ported, so it has no member at +0x356: the five spell and missile paths draw the type-304 `rand() % 1000000` for the fire message but do not store it in the projectile (TODOs).
 - The first_fight scenario ends at its `fight_done` checkpoint, so nothing after the fight is covered: loot pickup, corpse fade and the area's next spawn. A later scenario that runs past the fight (M4/M5) should pin them.

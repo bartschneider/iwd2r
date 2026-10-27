@@ -162,6 +162,8 @@ public:
     INT FindPlayerLocationByName(const CString& sPlayerName, BOOLEAN bInvisible);
     void sub_7A73D0(CString& a1);
     INT ThreadLoop();
+    BOOLEAN HandleSystemMessage(BYTE* pData, DWORD dwSize);
+    void AddMessageToWindow(PLAYER_ID idTo, DWORD dwFlags, BYTE* pData, DWORD dwSize);
     BYTE* CreateCopyMessage(const void* lpData, DWORD dwDataSize, BOOLEAN bCompressed, unsigned char a4, INT nFrame);
     BYTE* FetchMessage(INT& nMsgFrom, INT& nMsgTo, DWORD& dwSize);
     BYTE* FetchSpecificMessage(const CString& sPlayerName, BYTE nSpecMsgType, BYTE nSpecMsgSubType, DWORD& dwSize);

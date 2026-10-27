@@ -450,6 +450,7 @@ public:
     void RemoveReplacementFromArea();
     void AIUpdateWalk();
     void SetPath(LONG* pPath, SHORT nPath);
+    void ComputeWaypoint(CPoint& result, LONG** ppPath, SHORT* pnPath, SHORT delay, BYTE* pReachedEnd);
     BOOL ClearBumpPath(const CPoint& start, const CPoint& goal);
     BOOL IsVisibleToCaller(BOOL bSeeInvisible);
     BOOL sub_6FB440();
@@ -556,6 +557,11 @@ public:
     BOOL sub_7202E0();
     BOOL sub_727720(const CResRef& resRef, BYTE& nClass, DWORD& nSpecialization, BYTE& nLevel);
     BOOL sub_71CFF0();
+    int sub_75E930(int a1);
+    SHORT Formation(CGameSprite* pTarget);
+    SHORT Follow();
+    SHORT UseContainer();
+    SHORT RemoveTraps(CGameAIBase* pTarget);
     void sub_71D0B0();
     void sub_72FBF0();
     void CheckSequence(BYTE& sequence);

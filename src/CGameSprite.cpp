@@ -16481,6 +16481,82 @@ void CGameSprite::SetCurrAction(const CAIAction& action)
     }
 }
 
+// 0x734720
+void CGameSprite::ComputeWaypoint(CPoint& result, LONG** ppPath, SHORT* pnPath, SHORT delay, BYTE* pReachedEnd)
+{
+    LONG* pPath = *ppPath;
+    SHORT nPath = *pnPath;
+
+    LONG lastPos = pPath[nPath - 1];
+    LONG targetSquares = delay * 3;
+
+    LONG lastX = lastPos % CPathSearch::GRID_ACTUALX;
+    LONG lastY = CPathSearch::GRID_ACTUALY - lastPos / CPathSearch::GRID_ACTUALX - 1;
+
+    LONG prevPos = pPath[nPath - 2];
+    LONG prevX = prevPos % CPathSearch::GRID_ACTUALX;
+    LONG prevY = CPathSearch::GRID_ACTUALY - prevPos / CPathSearch::GRID_ACTUALX - 1;
+
+    *pReachedEnd = 0;
+
+    CPoint ptLast(lastX, lastY);
+    CPoint ptPrev(prevX, prevY);
+    LONG segSquares = CAIUtil::CountSquares(ptLast, ptPrev);
+
+    BOOL exact = (segSquares == targetSquares);
+
+    while (segSquares < targetSquares) {
+        SHORT newN = nPath - 1;
+        *pnPath = newN;
+
+        if (newN < 3) {
+            *pnPath = nPath;
+            LONG dx = lastX - prevX;
+            LONG dy = lastY - prevY;
+            LONG segLen = CAIUtil::CountSquares(ptLast, ptPrev);
+            LONG steps = targetSquares / segLen + 1;
+            *pReachedEnd = 1;
+            result.x = CPathSearch::GRID_SQUARE_SIZEX * (lastX - steps * dx);
+            result.y = CPathSearch::GRID_SQUARE_SIZEY * (lastY - steps * dy);
+            return;
+        }
+
+        nPath = newN;
+        targetSquares -= segSquares;
+
+        lastPos = pPath[nPath - 1];
+        lastX = lastPos % CPathSearch::GRID_ACTUALX;
+        lastY = CPathSearch::GRID_ACTUALY - lastPos / CPathSearch::GRID_ACTUALX - 1;
+
+        prevPos = pPath[nPath - 2];
+        prevX = prevPos % CPathSearch::GRID_ACTUALX;
+        prevY = CPathSearch::GRID_ACTUALY - prevPos / CPathSearch::GRID_ACTUALX - 1;
+
+        ptLast = CPoint(lastX, lastY);
+        ptPrev = CPoint(prevX, prevY);
+        segSquares = CAIUtil::CountSquares(ptLast, ptPrev);
+    }
+
+    exact = (segSquares == targetSquares);
+
+    if (exact) {
+        if (*pnPath > 3) {
+            *pnPath = *pnPath - 1;
+        }
+    } else {
+        LONG dx = lastX - prevX;
+        LONG dy = lastY - prevY;
+        double dist = sqrt((double)(dx * dx + dy * dy));
+        LONG iDist = (LONG)dist;
+        lastX = lastX + (((prevX - lastX) * 0x400 * targetSquares) / iDist >> 10);
+        lastY = lastY + (((prevY - lastY) * 0x400 * targetSquares) / iDist >> 10);
+        pPath[nPath - 1] = (CPathSearch::GRID_ACTUALY - lastY - 1) * CPathSearch::GRID_ACTUALX + lastX;
+    }
+
+    result.x = CPathSearch::GRID_SQUARE_SIZEX * lastX;
+    result.y = CPathSearch::GRID_SQUARE_SIZEY * lastY;
+}
+
 // 0x734550
 BOOL CGameSprite::HandleEffects()
 {
@@ -21627,6 +21703,79 @@ SHORT CGameSprite::PlayDead()
     return ACTION_DONE;
 }
 
+// 0x745450
+SHORT CGameSprite::Formation(CGameSprite* pTarget)
+{
+    CPoint offset = m_curAction.m_dest;
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+    CPoint targetDest = pTarget->m_curDest;
+    if (targetDest.x == -1 || targetDest.y == -1) {
+        targetDest = pTarget->GetPos();
+    }
+    CPoint dest(targetDest.x + CPathSearch::GRID_SQUARE_SIZEX * offset.x,
+        targetDest.y + CPathSearch::GRID_SQUARE_SIZEY * offset.y);
+    if (dest == m_curDest && field_5618 != 0) {
+        field_5616 = 0;
+        return ACTION_INTERRUPTABLE;
+    }
+
+    CPoint self = GetPos();
+    CPoint selfCell(self.x / CPathSearch::GRID_SQUARE_SIZEX,
+        self.y / CPathSearch::GRID_SQUARE_SIZEY);
+    CPoint destCell(dest.x / CPathSearch::GRID_SQUARE_SIZEX,
+        dest.y / CPathSearch::GRID_SQUARE_SIZEY);
+    LONG distance = CAIUtil::CountSquares(selfCell, destCell);
+    BYTE range = m_animation.GetPersonalSpace();
+    BYTE targetSpace = pTarget->m_animation.GetPersonalSpace();
+    range = static_cast<BYTE>(((targetSpace - 1) >> 1) + ((range - 1) >> 1) - 1);
+    if (distance * distance <= (range + 1) * (range + 1)) {
+        field_5616 = 0;
+        field_5618 = 0;
+        return ACTION_INTERRUPTABLE;
+    }
+
+    m_curDest = dest;
+    field_5618 = 0;
+    self = GetPos();
+    CPoint targetPos = pTarget->GetPos();
+    LONG dx = targetPos.x / CPathSearch::GRID_SQUARE_SIZEX - self.x / CPathSearch::GRID_SQUARE_SIZEX;
+    LONG dy = targetPos.y / CPathSearch::GRID_SQUARE_SIZEY - self.y / CPathSearch::GRID_SQUARE_SIZEY;
+    BOOL withinRange = dx * dx + dy * dy < 16 * 16;
+    if (field_5616 % 8 == 0) {
+        CSearchRequest* pRequest = new CSearchRequest();
+        if (pRequest == NULL) {
+            return ACTION_ERROR;
+        }
+        pRequest->m_searchBitmap = &(m_pArea->m_search);
+        memcpy(pRequest->m_terrainTable, m_terrainTable, sizeof(m_terrainTable));
+        pRequest->m_pathSmooth = m_animation.GetPathSmooth();
+        pRequest->m_sourceId = m_id;
+        pRequest->m_nTargetPoints = 2;
+        pRequest->m_exclusiveTargetPoints = TRUE;
+        pRequest->m_targetPoints = new POINT[2];
+        if (pRequest->m_targetPoints == NULL) {
+            delete pRequest;
+            return ACTION_ERROR;
+        }
+        pRequest->m_nPartyIds = m_pArea->m_pGame->GetGroup()->GetCount();
+        pRequest->m_partyIds = m_pArea->m_pGame->GetGroup()->GetGroupList();
+        pRequest->m_targetPoints[0] = m_curDest;
+        pRequest->m_targetPoints[1] = targetDest;
+        pRequest->m_sourceSide = m_typeAI.GetEnemyAlly();
+        if (!withinRange) {
+            field_5618 = 1;
+        }
+        SetTarget(pRequest, FALSE, CSearchRequest::LIST_FRONT);
+        if (withinRange) {
+            field_5618 = 1;
+        }
+    }
+    field_5616++;
+    return ACTION_INTERRUPTABLE;
+}
+
 // 0x745950
 SHORT CGameSprite::JumpToPoint(CPoint dest, BOOL spriteUpdate)
 {
@@ -21831,6 +21980,114 @@ SHORT CGameSprite::FaceObject(CGameAIBase* pObject)
     }
 
     return ACTION_DONE;
+}
+
+// 0x74A7C0
+SHORT CGameSprite::Follow()
+{
+    CPoint waypoint = m_curAction.m_dest;
+    LONG savedSpecID2 = m_curAction.m_specificID2;
+    LONG savedSpecID3 = m_curAction.m_specificID3;
+
+    if (m_actionCount == 0) {
+        if (m_pPathTemp.IsEmpty()) {
+            return ACTION_ERROR;
+        }
+
+        LONG* pPath = reinterpret_cast<LONG*>(m_pPathTemp.RemoveHead());
+        SHORT nPath = static_cast<SHORT>(reinterpret_cast<INT_PTR>(m_nPathTemp.RemoveHead()));
+
+        BYTE reachedEnd = 0;
+        CPoint computedWaypoint;
+        ComputeWaypoint(computedWaypoint, &pPath, &nPath, (SHORT)m_curAction.m_specificID, &reachedEnd);
+
+        waypoint = computedWaypoint;
+        m_curAction.m_dest = waypoint;
+
+        LONG distToAction = (m_pos.x - savedSpecID2) * (m_pos.x - savedSpecID2)
+            + (m_pos.y - savedSpecID3) * (m_pos.y - savedSpecID3);
+
+        if (distToAction > 0x40000) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        }
+
+        LONG distToWaypoint = (m_pos.x - waypoint.x) * (m_pos.x - waypoint.x)
+            + (m_pos.y - waypoint.y) * (m_pos.y - waypoint.y);
+
+        if (distToWaypoint < distToAction) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        }
+
+        if (reachedEnd) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        }
+
+        // NOTE: The original calls CGameArea::CheckLOS(m_pos, action target,
+        // GetVisibleTerrainTable(1), TRUE) here and runs the identical
+        // MoveToPoint sequence whichever branch the result takes, so the check
+        // is not reproduced.
+        CPoint ptActionDest(savedSpecID2, savedSpecID3);
+        SHORT moveResult = MoveToPoint(ptActionDest, 0);
+        if (moveResult == ACTION_DONE) {
+            m_curAction.m_internalFlags |= 0x10000000;
+            SetPath(pPath, nPath);
+        } else if (moveResult == ACTION_ERROR) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        } else {
+            m_pPathTemp.AddHead(reinterpret_cast<int*>(pPath));
+            m_nPathTemp.AddHead(reinterpret_cast<int*>(static_cast<INT_PTR>(nPath)));
+            return ACTION_INTERRUPTABLE;
+        }
+    } else {
+        if ((m_curAction.m_internalFlags & 0x10000000) != 0) {
+            goto movementCheck;
+        }
+
+        LONG* pPath = reinterpret_cast<LONG*>(m_pPathTemp.RemoveHead());
+        SHORT nPath = static_cast<SHORT>(reinterpret_cast<INT_PTR>(m_nPathTemp.RemoveHead()));
+
+        CPoint ptActionDest(savedSpecID2, savedSpecID3);
+        SHORT moveResult = MoveToPoint(ptActionDest, 0);
+        if (moveResult == ACTION_DONE) {
+            m_curAction.m_internalFlags |= 0x10000000;
+            SetPath(pPath, nPath);
+        } else if (moveResult == ACTION_ERROR) {
+            delete[] pPath;
+            CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+            AddAction(action);
+            return ACTION_DONE;
+        } else {
+            m_pPathTemp.AddHead(reinterpret_cast<int*>(pPath));
+            m_nPathTemp.AddHead(reinterpret_cast<int*>(static_cast<INT_PTR>(nPath)));
+            return ACTION_INTERRUPTABLE;
+        }
+    }
+
+movementCheck:
+    if (waypoint.x / CPathSearch::GRID_SQUARE_SIZEX == m_pos.x / CPathSearch::GRID_SQUARE_SIZEX
+        && waypoint.y / CPathSearch::GRID_SQUARE_SIZEY == m_pos.y / CPathSearch::GRID_SQUARE_SIZEY) {
+        return ACTION_DONE;
+    }
+
+    if (m_pPath == NULL && 0 < m_actionCount) {
+        CAIAction action(CAIAction::MOVETOPOINTNORECTICLE, waypoint, 0, -1);
+        AddAction(action);
+        return ACTION_DONE;
+    }
+
+    return ACTION_INTERRUPTABLE;
 }
 
 // 0x751CD0
@@ -23370,6 +23627,93 @@ void CGameSprite::SelectWeaponAbility(unsigned char buttonNum, unsigned char abi
     }
 }
 
+// 0x7555F0
+SHORT CGameSprite::UseContainer()
+{
+    if (m_actionCount >= 1) {
+        return ACTION_INTERRUPTABLE;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    LONG nContainerId = m_curAction.m_specificID;
+
+    if ((pGame->GetCharacterPortraitNum(m_id) == -1
+            && pGame->m_familiars.Find(reinterpret_cast<int*>(m_id), NULL) == NULL)
+        || !Orderable(FALSE)
+        || !m_bSelected) {
+        return ACTION_DONE;
+    }
+
+    CGameObject* pContainer;
+    if (pGame->GetObjectArray()->GetShare(nContainerId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pContainer,
+            INFINITE)
+        != CGameObjectArray::SUCCESS) {
+        return ACTION_ERROR;
+    }
+
+    CAITrigger trigger(CAITRIGGER_CLICKED, m_typeAI, 0);
+    CMessage* message = new CMessageSetTrigger(trigger, m_id, nContainerId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    message = new CMessageSetForceActionPick(TRUE, m_id, nContainerId);
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    CPoint posContainer = pContainer->GetPos();
+
+    LONG dy = posContainer.y - m_pos.y;
+    LONG dx = posContainer.x - m_pos.x;
+    if (dy * dy * 16 / 9 + dx * dx > CGameTrigger::RANGE_TRIGGER) {
+        // Not next to the container yet.
+        pGame->GetObjectArray()->ReleaseShare(nContainerId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+        return ACTION_DONE;
+    }
+
+    // Touching a container cancels the actor's invisibility.
+    if (!IsVisibleToCaller(FALSE)) {
+        ITEM_EFFECT effect;
+        CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_FORCEVISIBLE);
+        effect.durationType = 1;
+
+        CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, m_pos, m_id, CPoint(-1, -1));
+        message = new CMessageAddEffect(pEffect, m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    if (pContainer->GetObjectType() == CGameObject::TYPE_CONTAINER) {
+        CGameContainer* pCont = static_cast<CGameContainer*>(pContainer);
+        if ((pCont->m_dwFlags & 0x1) != 0
+            && (pCont->m_keyType == "" || !PartyHasItem(pCont->m_keyType))) {
+            // Locked, and the party is not carrying its key.
+            DisplayTextRef(-1, 19862, 0, RGB(0xD7, 0xD7, 0xBE));
+            pGame->GetObjectArray()->ReleaseShare(nContainerId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            return ACTION_DONE;
+        }
+        pCont->OpenContainer(m_typeAI);
+    }
+
+    pGame->GetObjectArray()->ReleaseShare(nContainerId,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    if (pGame->GetCharacterPortraitNum(m_id) == -1) {
+        DisplayTextRef(-1, 7546, 255, 255);
+    } else {
+        pGame->m_iContainer = nContainerId;
+        pGame->m_iContainerSprite = m_id;
+        g_pBaldurChitin->GetScreenWorld()->ConfigureContainer();
+    }
+
+    ClearActions(FALSE);
+
+    return ACTION_INTERRUPTABLE;
+}
+
 // 0x755A70
 void CGameSprite::sub_755A70(CSpell* pSpell, const SPELL_ABILITY* pAbility, const CPoint& ptTarget)
 {
@@ -24018,6 +24362,193 @@ SHORT CGameSprite::Panic()
     return ACTION_DONE;
 }
 
+// 0x759240
+SHORT CGameSprite::RemoveTraps(CGameAIBase* pTarget)
+{
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+
+    if (pTarget->GetObjectType() != TYPE_DOOR
+        && pTarget->GetObjectType() != TYPE_CONTAINER
+        && pTarget->GetObjectType() != TYPE_TRIGGER) {
+        return ACTION_ERROR;
+    }
+
+    CMessage* message = new CMessageSetForceActionPick(TRUE, m_id, pTarget->GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+    // A multiplayer client (session established, not hosting) searches twice
+    // as far; the host and single player use the tighter range.
+    int searchRange = 0x20;
+    if (g_pChitin->cNetwork.m_bConnectionEstablished != 1
+        || g_pChitin->cNetwork.m_bIsHost != 0) {
+        searchRange = 0x10;
+    }
+
+    CPoint targetPos = pTarget->GetPos();
+    int dx = targetPos.x / CPathSearch::GRID_SQUARE_SIZEX
+        - m_pos.x / CPathSearch::GRID_SQUARE_SIZEX;
+    int dy = targetPos.y / CPathSearch::GRID_SQUARE_SIZEY
+        - m_pos.y / CPathSearch::GRID_SQUARE_SIZEY;
+
+    SHORT result = ACTION_DONE;
+    if (searchRange < dx * dx + dy * dy) {
+        m_curAction.m_dest = pTarget->GetPos();
+        result = MoveToPoint(pTarget->GetPos(), 0);
+    }
+
+    if (result != ACTION_DONE) {
+        return result;
+    }
+
+    if (m_pPath != NULL) {
+        message = new CMessageDropPath(m_id, m_id);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    int skill = static_cast<char>(m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_DISABLE_DEVICE]);
+    int roll = rand() % 20 + 1;
+    int skillModifier = sub_763E40(CGAMESPRITE_SKILL_DISABLE_DEVICE);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+    int check = roll + skill;
+
+    if (pTarget->GetObjectType() == TYPE_DOOR
+        && static_cast<CGameDoor*>(pTarget)->m_trapActivated != 0) {
+        CGameDoor* pDoor = static_cast<CGameDoor*>(pTarget);
+        BOOL bDisarmed = FALSE;
+        int dc = pDoor->m_trapDisarmingDifficulty / 7 + 10;
+
+        if (dc < check && pDoor->m_trapDisarmingDifficulty != 100) {
+            bDisarmed = TRUE;
+
+            CAITrigger trigger(CAITRIGGER_DISARMED, m_typeAI, 0);
+            message = new CMessageSetTrigger(trigger, m_id, pDoor->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            pDoor->m_trapActivated = 0;
+            pDoor->SetDrawPoly(0);
+            FeedBack(FEEDBACK_ROLL, roll, skill - skillModifier, skillModifier, 0x9962, dc, 0);
+            FeedBack(FEEDBACK_TRAPDISARMED, 0, 0, 0, -1, 0, 0);
+        } else {
+            FeedBack(FEEDBACK_ROLL, roll, skill - skillModifier, skillModifier, 0x9963, dc, 0);
+
+            if (25 < pDoor->m_trapDisarmingDifficulty - dc) {
+                CAITrigger trigger(CAITRIGGER_OPENED, m_typeAI, 0);
+                message = new CMessageSetTrigger(trigger, m_id, pDoor->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                if ((pDoor->m_dwFlags & 4) == 0) {
+                    pDoor->m_trapActivated = 0;
+                }
+            }
+
+            CAITrigger trigger(CAITRIGGER_DISARMFAILED, m_typeAI, 0);
+            message = new CMessageSetTrigger(trigger, m_id, pDoor->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            FeedBack(FEEDBACK_TRAPDISARMEDFAILED, 0, 0, 0, -1, 0, 0);
+        }
+
+        if (bDisarmed) {
+            message = new CMessageDoorStatus(pDoor, m_id, pDoor->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    if (pTarget->GetObjectType() == TYPE_TRIGGER
+        && static_cast<CGameTrigger*>(pTarget)->m_trapActivated != 0
+        && (static_cast<CGameTrigger*>(pTarget)->m_dwFlags & 0x100) == 0) {
+        CGameTrigger* pTrigger = static_cast<CGameTrigger*>(pTarget);
+        int dc = pTrigger->m_trapDisarmingDifficulty / 7 + 10;
+
+        if (dc < check && pTrigger->m_trapDisarmingDifficulty != 100) {
+            CAITrigger trigger(CAITRIGGER_DISARMED, m_typeAI, 0);
+            message = new CMessageSetTrigger(trigger, m_id, pTrigger->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            pTrigger->m_trapActivated = 0;
+            pTrigger->SetDrawPoly(0);
+            FeedBack(FEEDBACK_ROLL, roll, skill - skillModifier, skillModifier, 0x9962, dc, 0);
+            FeedBack(FEEDBACK_TRAPDISARMED, 0, 0, 0, -1, 0, 0);
+
+            message = new CMessageTriggerStatus(pTrigger->m_dwFlags,
+                pTrigger->m_trapActivated,
+                pTrigger->m_trapDetected,
+                m_id,
+                pTrigger->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        } else {
+            FeedBack(FEEDBACK_ROLL, roll, skill - skillModifier, skillModifier, 0x9963, dc, 0);
+
+            if (25 < pTrigger->m_trapDisarmingDifficulty - dc) {
+                CAITrigger trigger(CAITRIGGER_ENTERED, m_typeAI, 0);
+                message = new CMessageSetTrigger(trigger, m_id, pTrigger->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                if ((pTrigger->m_dwFlags & 2) == 0) {
+                    pTrigger->m_trapActivated = 0;
+                }
+            }
+
+            CAITrigger trigger(CAITRIGGER_DISARMFAILED, m_typeAI, 0);
+            message = new CMessageSetTrigger(trigger, m_id, pTrigger->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            FeedBack(FEEDBACK_TRAPDISARMEDFAILED, 0, 0, 0, -1, 0, 0);
+        }
+    }
+
+    if (pTarget->GetObjectType() == TYPE_CONTAINER
+        && static_cast<CGameContainer*>(pTarget)->m_trapActivated != 0) {
+        CGameContainer* pContainer = static_cast<CGameContainer*>(pTarget);
+        BOOL bDisarmed = FALSE;
+        int dc = pContainer->m_trapRemovalDifficulty / 7 + 10;
+
+        if (dc < check && pContainer->m_trapRemovalDifficulty != 100) {
+            bDisarmed = TRUE;
+
+            CAITrigger trigger(CAITRIGGER_DISARMED, m_typeAI, 0);
+            message = new CMessageSetTrigger(trigger, m_id, pContainer->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            pContainer->SetDrawPoly(0);
+            pContainer->SetTrapActivated(0);
+            pContainer->SetTrapDetected(0);
+            FeedBack(FEEDBACK_ROLL, roll, skill - skillModifier, skillModifier, 0x9962, dc, 0);
+            FeedBack(FEEDBACK_TRAPDISARMED, 0, 0, 0, -1, 0, 0);
+        } else {
+            FeedBack(FEEDBACK_ROLL, roll, skill - skillModifier, skillModifier, 0x9963, dc, 0);
+
+            if (25 < pContainer->m_trapRemovalDifficulty - dc) {
+                CAITrigger trigger(CAITRIGGER_OPENED, m_typeAI, 0);
+                message = new CMessageSetTrigger(trigger, m_id, pContainer->GetId());
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+                if ((pContainer->m_dwFlags & 8) == 0) {
+                    pContainer->SetTrapActivated(0);
+                }
+            }
+
+            CAITrigger trigger(CAITRIGGER_DISARMFAILED, m_typeAI, 0);
+            message = new CMessageSetTrigger(trigger, m_id, pContainer->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            FeedBack(FEEDBACK_TRAPDISARMEDFAILED, 0, 0, 0, -1, 0, 0);
+        }
+
+        if (bDisarmed) {
+            message = new CMessageContainerStatus(pContainer->m_dwFlags,
+                pContainer->m_trapActivated,
+                pContainer->m_trapDetected,
+                m_id,
+                pContainer->GetId());
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    return ACTION_DONE;
+}
+
 // 0x75A3F0
 SHORT CGameSprite::Turn()
 {
@@ -24578,6 +25109,14 @@ BOOLEAN CGameSprite::CanSaveGame(STRREF& strError)
 
     strError = 16502; // "You cannot save at this time."
     return FALSE;
+}
+
+// 0x75E930
+int CGameSprite::sub_75E930(int a1)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+{
+    // The shipped binary stubs this fighting-style feat query to zero
+    // (xor eax, eax; ret 4), which disables the style-bonus branches above.
+    return 0;
 }
 
 // 0x75E940

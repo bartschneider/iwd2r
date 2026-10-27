@@ -1,0 +1,7 @@
+{
+  "address": "0x71CC90",
+  "name": "CGameSprite::sub_71CC90",
+  "file": "src/CGameSprite.cpp",
+  "batch": "i048",
+  "needs": "not measured: called on one side only in world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography"
+}
