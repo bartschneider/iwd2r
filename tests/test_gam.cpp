@@ -11,8 +11,18 @@
 #include "CItem.h"
 #include "CMemINI.h"
 #include "CMessage.h"
+#include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
+#include "CScreenInventory.h"
+#include "CScreenJournal.h"
+#include "CScreenMap.h"
+#include "CScreenOptions.h"
+#include "CScreenSpellbook.h"
+#include "CScreenStore.h"
+#include "CScreenWorld.h"
 #include "CSpawn.h"
+#include "CUIControlBase.h"
+#include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVisibility.h"
 #include "ScreenLayout.h"
@@ -205,10 +215,10 @@ private:
     std::thread m_thread;
 };
 
-// The CRE of a finished character: the first "CHR V2.2" file in the view's
-// Characters folder (the install ships premade characters). Empty when
-// there is none.
-std::vector<BYTE> FinishedCharacter()
+// The CRE of a finished character: the `nIndex`-th "CHR V2.2" file in the
+// view's Characters folder, in file order (the install ships 30 premade
+// characters). Empty when there is none at that index.
+std::vector<BYTE> FinishedCharacter(size_t nIndex = 0)
 {
     std::vector<fs::path> files;
     std::error_code ec;
@@ -217,25 +227,25 @@ std::vector<BYTE> FinishedCharacter()
             files.push_back(entry.path());
     }
     std::sort(files.begin(), files.end());
+    size_t seen = 0;
     for (const fs::path& file : files) {
         const std::string chr = ReadFile(file);
         if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
             const uint32_t offset = Le32(chr, 0x28);
             const uint32_t size = Le32(chr, 0x2C);
-            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
-                return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
+            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0) {
+                if (seen++ == nIndex)
+                    return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
+            }
         }
     }
     return std::vector<BYTE>();
 }
 
-// A new game with one party member made from a finished character, the way
-// character creation's Accept leaves it before Party Formation's Done.
-CGameSprite* NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
+// A party sprite from a finished character's CRE, the way character creation's
+// Accept leaves it (a global sprite, not yet in a slot).
+CGameSprite* MakePartySprite(std::vector<BYTE>& bytes, const char* name)
 {
-    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
-    pGame->NewGame(FALSE, FALSE);
-
     CGameSprite* pSprite = new CGameSprite(bytes.data(),
         static_cast<LONG>(bytes.size()),
         0,
@@ -248,6 +258,17 @@ CGameSprite* NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
         0);
     pSprite->m_sName = name;
     pSprite->m_bGlobal = TRUE;
+    return pSprite;
+}
+
+// A new game with one party member made from a finished character, the way
+// character creation's Accept leaves it before Party Formation's Done.
+CGameSprite* NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->NewGame(FALSE, FALSE);
+
+    CGameSprite* pSprite = MakePartySprite(bytes, name);
     pGame->SetCharacterSlot(0, pSprite->GetId());
     return pSprite;
 }
@@ -260,6 +281,28 @@ int LoadedAreas(CInfGame* pGame)
             count++;
     }
     return count;
+}
+
+// Drops every message waiting in the global handler, so a test can count the
+// ones its own call adds.
+void ClearMessages()
+{
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    while (!handler.m_messageList.IsEmpty()) {
+        delete handler.m_messageList.RemoveHead();
+    }
+}
+
+// The tooltip strref of the party portrait of slot `nPortrait` on a screen
+// that carries the portraits (CInfGame::UpdatePortraitToolTip 0x5AFE90 writes
+// panel 1's control nPortrait of each).
+STRREF PortraitToolTip(CBaldurEngine* pEngine, DWORD nPortrait)
+{
+    CUIPanel* pPanel = pEngine->GetManager()->GetPanel(1);
+    REQUIRE(pPanel != nullptr);
+    CUIControlBase* pControl = pPanel->GetControl(nPortrait);
+    REQUIRE(pControl != nullptr);
+    return pControl->GetToolTipStrRef();
 }
 
 // How many times `id` is on the area's object lists, counting the lists of
@@ -918,6 +961,127 @@ TEST_CASE("gam: SetupCharacters twice adds the party once", "[gam][data]")
     CHECK(TimesInArea(pSprite->GetArea(), id) == 1);
     CHECK(pSprite->GetPos().x == placed.x);
     CHECK(pSprite->GetPos().y == placed.y);
+}
+
+// 0x5AF160, reached by the world screen's portrait drag
+// (CUIControlPortraitWorld::OnLButtonUp 0x77B160): the two slots' ids of
+// m_characterPortraits change places, the tooltip of the slot each character
+// moved into is rewritten on every screen that shows the portraits, and when
+// one of the two slots is 0 the new leader says its "selected" line (sound 2,
+// CMessagePlaySound 0x43E170's vtable).
+TEST_CASE("gam: SwapCharacters exchanges two portrait slots and the new leader speaks", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+
+    // Two different premade characters, so the tooltips can tell the slots apart.
+    std::vector<BYTE> first = FinishedCharacter(0);
+    std::vector<BYTE> second = FinishedCharacter(1);
+    if (first.empty() || second.empty()) {
+        SKIP("[iwd2r-skip] fewer than two CHR V2.2 files in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pFirst = NewGameWithOneCharacter(first, "Probe");
+    pGame->UpdateCharacterSlots();
+    CGameSprite* pSecond = MakePartySprite(second, "Probe2");
+    pGame->SetCharacterSlot(1, pSecond->GetId());
+    pGame->UpdateCharacterSlots();
+    REQUIRE(pGame->GetNumCharacters() == 2);
+
+    // The premade characters leave m_name at -1, so GetNameRef would answer
+    // the slot-derived -2 - slot for both and the tooltip would read the same
+    // before and after a swap. Real strrefs make the two characters tell
+    // apart in the tooltips, which is what the swapped slots carry.
+    pFirst->m_baseStats.m_name = 16484;
+    pSecond->m_baseStats.m_name = 16485;
+    pGame->UpdateCharacterSlots();
+
+    const LONG nFirstId = pFirst->GetId();
+    const LONG nSecondId = pSecond->GetId();
+    REQUIRE(pGame->GetCharacterId(0) == nFirstId);
+    REQUIRE(pGame->GetCharacterId(1) == nSecondId);
+    const STRREF nFirstName = pFirst->GetNameRef();
+    const STRREF nSecondName = pSecond->GetNameRef();
+    REQUIRE(nFirstName != nSecondName);
+
+    // The eight screens whose panel 1 carries the party portraits.
+    CBaldurEngine* const engines[] = {
+        g_pBaldurChitin->m_pEngineCharacter,
+        g_pBaldurChitin->m_pEngineInventory,
+        g_pBaldurChitin->m_pEngineJournal,
+        g_pBaldurChitin->m_pEngineMap,
+        g_pBaldurChitin->m_pEngineOptions,
+        g_pBaldurChitin->m_pEngineSpellbook,
+        g_pBaldurChitin->m_pEngineStore,
+        g_pBaldurChitin->m_pEngineWorld,
+    };
+
+    ClearMessages();
+
+    // Before the swap the tooltips follow the slots.
+    REQUIRE(PortraitToolTip(engines[0], 0) == nFirstName);
+    REQUIRE(PortraitToolTip(engines[0], 1) == nSecondName);
+
+    pGame->SwapCharacters(0, 1);
+
+    CHECK(pGame->GetCharacterId(0) == nSecondId);
+    CHECK(pGame->GetCharacterId(1) == nFirstId);
+    CHECK(pGame->GetNumCharacters() == 2);
+    for (CBaldurEngine* pEngine : engines) {
+        CHECK(PortraitToolTip(pEngine, 0) == nSecondName);
+        CHECK(PortraitToolTip(pEngine, 1) == nFirstName);
+    }
+
+    // The new leader's selection voice: sound 2, its text, no circle, and the
+    // leader's id on both ends (the original sets source and target to it).
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    auto* pMessage = dynamic_cast<CMessagePlaySound*>(handler.m_messageList.GetHead());
+    REQUIRE(pMessage != nullptr);
+    CHECK(pMessage->m_soundId == 2);
+    CHECK(pMessage->m_showText == TRUE);
+    CHECK(pMessage->m_showCircle == FALSE);
+    CHECK(pMessage->m_sourceId == nSecondId);
+    CHECK(pMessage->m_targetId == nSecondId);
+
+    // Swapping back moves both again and has the other leader speak.
+    ClearMessages();
+    pGame->SwapCharacters(1, 0);
+
+    CHECK(pGame->GetCharacterId(0) == nFirstId);
+    CHECK(pGame->GetCharacterId(1) == nSecondId);
+    CHECK(PortraitToolTip(engines[0], 0) == nFirstName);
+    CHECK(PortraitToolTip(engines[0], 1) == nSecondName);
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    pMessage = dynamic_cast<CMessagePlaySound*>(handler.m_messageList.GetHead());
+    REQUIRE(pMessage != nullptr);
+    CHECK(pMessage->m_sourceId == nFirstId);
+    CHECK(pMessage->m_targetId == nFirstId);
+
+    // A third member, and a swap that leaves slot 0 alone: the two ids change
+    // places and nothing is sent.
+    CGameSprite* pThird = MakePartySprite(first, "Probe3");
+    pGame->SetCharacterSlot(2, pThird->GetId());
+    pGame->UpdateCharacterSlots();
+    REQUIRE(pGame->GetNumCharacters() == 3);
+    const LONG nThirdId = pThird->GetId();
+    REQUIRE(pGame->GetCharacterId(2) == nThirdId);
+
+    ClearMessages();
+    pGame->SwapCharacters(1, 2);
+
+    CHECK(pGame->GetCharacterId(1) == nThirdId);
+    CHECK(pGame->GetCharacterId(2) == nSecondId);
+    CHECK(pGame->GetCharacterId(0) == nFirstId);
+    CHECK(handler.m_messageList.IsEmpty());
+
+    ClearMessages();
 }
 
 TEST_CASE("gam: character export overwrites a junk PROBE.CHR and numbers past a valid one", "[gam][data]")
