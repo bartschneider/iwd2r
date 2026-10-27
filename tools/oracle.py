@@ -231,7 +231,11 @@ import winhome  # noqa: E402
 EVIDENCE_DIR = os.path.join(ROOT, 'docs', 'evidence')
 VERSIONS = os.path.join(HERE, 'ghidra', 'versions.json')
 VANILLA_JSON = os.path.join(ROOT, 'oracle', 'loader', 'vanilla.json')
-VANILLA_EXE = os.path.expanduser('~/.local/share/iwd2r/vanilla/iwd2.exe')
+# The user-local home, as tools/gates.sh, play.py and tools/parity read it:
+# $IWD2R_HOME, else ~/.local/share/iwd2r.
+IWD2R_HOME = os.environ.get('IWD2R_HOME') or os.path.expanduser(
+    '~/.local/share/iwd2r')
+VANILLA_EXE = os.path.join(IWD2R_HOME, 'vanilla', 'iwd2.exe')
 ORACLE_DIR = winhome.WIN_HOME + '/iwd2r-oracle'
 INSTALL = '/mnt/c/Games/Icewind Dale II'
 INSTALL_WIN = 'C:\\Games\\Icewind Dale II'
@@ -2199,8 +2203,7 @@ def our_outcome(code, status, timeout):
 
 
 # Our side's copy of the vanilla install on the Linux disk (linux_mirror).
-MIRROR_DIR = os.path.join(os.path.expanduser('~'), '.local', 'share',
-                          'iwd2r', 'vanilla-mirror')
+MIRROR_DIR = os.path.join(IWD2R_HOME, 'vanilla-mirror')
 
 
 def linux_mirror(game, mirror=MIRROR_DIR, force=False):
