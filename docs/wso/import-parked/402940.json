@@ -1,0 +1,1 @@
+{"address": "0x402940", "name": "CResBinary::Demand", "file": "src/CResBinary.cpp", "batch": "i049", "needs": "dependency 0x4028F0 CResBinary::CResBinary exercised by no scenario (world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map): parked with it"}

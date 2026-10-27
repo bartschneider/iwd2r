@@ -944,7 +944,10 @@ def transcript_checks(transcript_path, covered_files, tracked=None):
 # (but for the import parked rows, one file per row, that the worker writes).
 ALLOWED_PATHS = ('src/', 'compat/', 'docs/evidence/', 'docs/MAP.md',
                  'oracle/cases/', 'oracle/CMakeLists.txt',
-                 'docs/wso/import-parked/')
+                 'docs/wso/import-parked/',
+                 # an imported function's placeholder label goes with the
+                 # import (import template, rule 2): src/ now defines it
+                 'tools/ghidra/extra_labels.txt')
 
 # The driver's files in a batch worktree (Task 33): a dirty one is restored
 # before the checks (a selfcheck that could not find the live state used to

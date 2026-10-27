@@ -7521,7 +7521,7 @@
     "i049": {
       "assigned_at": "2026-10-27T01:14:01+00:00",
       "branch": "p3/wso-i049",
-      "closed_at": null,
+      "closed_at": "2026-10-27T05:27:15+00:00",
       "files": [
         "src/CGameTrigger.cpp",
         "src/CInfGame.cpp",
@@ -7529,6 +7529,7 @@
         "src/CItem.cpp",
         "src/CResBinary.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -7580,7 +7581,7 @@
           "their_len": 84
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     }
   }
