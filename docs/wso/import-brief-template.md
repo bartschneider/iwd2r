@@ -48,7 +48,11 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
        Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-17)
 
    The sha is the full 40 characters of {{fork_base}}. A commit with none of
-   his code has no trailer.
+   his code has no trailer. When the function you import (a row or a
+   dependency) has a line in `tools/ghidra/extra_labels.txt` (names for exe
+   functions src/ does not define yet), delete that line and its comment in
+   the same commit: once src/ defines the function the label must go, or
+   `test_committed_extra_labels_parse_and_are_not_ours` fails.
 3. **The body must compile under the platform's toolchain.** Adopt his logic,
    not his build assumptions; fix what does not compile on our side and say
    so in the commit message.
