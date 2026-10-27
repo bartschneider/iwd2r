@@ -993,7 +993,7 @@ void CGameTrigger::AddEffect(CGameEffect* pEffect, BYTE list, BOOL noSave, BOOL 
                 g_pBaldurChitin->GetMessageHandler()->AddMessage(
                     new CMessageTriggerStatus(m_dwFlags, m_trapDetected,
                         m_trapActivated != 0 && (m_dwFlags & 0x100) == 0, m_id, m_id), FALSE);
-                CGameObject* pObject = m_typeAI.sub_40CCA0(reinterpret_cast<CGameAIBase*>(m_id), FALSE);
+                CGameObject* pObject = m_typeAI.sub_40CCA0(reinterpret_cast<CGameAIBase*>(m_id), FALSE); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
                 if (pObject != NULL) {
                     CAIObjectType spriteType(CGameObject::TYPE_SPRITE, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
                     if (pObject->GetAIType().Equal(spriteType)) {

@@ -4152,7 +4152,7 @@ BOOL CRuleTables::CheckUseMagicDevice(CGameSprite* pSprite, CItem* pItem)
         bSuccess = true;
     }
 
-    pSprite->sub_763E40(CGAMESPRITE_SKILL_USE_MAGIC_DEVICE);
+    pSprite->sub_763E40(CGAMESPRITE_SKILL_USE_MAGIC_DEVICE); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
     pSprite->FeedBack(CGameSprite::FEEDBACK_ROLL, roll, nLevel + 20, nLevel, 0x9988, 0, 0);
 
     return bSuccess;
