@@ -3,10 +3,11 @@
 # generation, Party Formation, the chapter screen, the opening dialog),
 # then the console: cheats on for this run only, CTRL+TAB opens it (the
 # binding is CTRL+TAB, not the brief's CTRL+SPACE: CScreenWorld checks
-# m_bCheatsEnabled && m_bCtrlKeyDown on VK_TAB), one command in the
-# grammar the dispatcher 0x5838A0 actually accepts, RETURN applies it,
-# and the checkpoint dumps carry game.party_gold before and after (a
-# new party starts with 8).
+# m_bCheatsEnabled && m_bCtrlKeyDown on VK_TAB), two commands in the
+# grammar the dispatcher 0x5838A0 actually accepts, RETURN applies each,
+# and the checkpoint dumps carry game.party_gold and the sorcerer's xp,
+# level and class levels through one level-up (a new party starts with 8
+# gold and 0 xp).
 # Coordinates as in first_fight.txt (Resolution=800).
 # timeout: 300
 # cheats: 1
@@ -185,76 +186,134 @@ origin screen
 click 400 216
 wait 30
 checkpoint selected
-# The proof: commands with an unconditional, checkpointed effect, in the
-# grammar the dispatcher accepts. 0x5838A0 splits the submitted line at
-# the first ':' and requires position >= 1; the text before the colon is
-# obfuscated ((c+8)*2 per char, 0x5844E0) and strcmp'd against
-# 0x8AF630 = obf("CTRLALTDELETE") — anything else, or no colon, prints
-# "Nice try cheater!" (0x8AF700) and does nothing. Past the colon the
-# command name before '(' is matched by the strcmp chain 0x583E60
-# (ADDGOLD at 0x8AF660, index 0x10) and the args after '(' go to
-# 0x5840E0; 0x584420 takes ADDGOLD and SETCURRENTXP as one numeric arg.
-# Every char of CTRLALTDELETE:ADDGOLD(500) is typable in the box
-# (letters, digits, shift+9 '(' and shift+0 ')', and shift+VK 0xBA ':'
-# via the box's OEM key table at 0x8ABA3C) — the dump at 0x5838A0 proved
-# the typed text arrives. What failed before was the box's preload: the
+# The proof: two commands with an unconditional, checkpointed effect, in
+# the grammar the dispatcher accepts, then one level-up on the record
+# screen. 0x5838A0 splits the submitted line at the first ':' and
+# requires position >= 1; the text before the colon is obfuscated
+# ((c+8)*2 per char, 0x5844E0) and strcmp'd against 0x8AF630 =
+# obf("CTRLALTDELETE") — anything else, or no colon, prints "Nice try
+# cheater!" (0x8AF700) and does nothing. Past the colon the command name
+# before '(' is matched by the strcmp chain 0x583E60 (ADDGOLD at
+# 0x8AF660, index 0x10) and the args after '(' go to 0x5840E0; 0x584420
+# takes ADDGOLD and SETCURRENTXP as one numeric arg. Every char of
+# CTRLALTDELETE:ADDGOLD(500) is typable in the box (letters, digits,
+# shift+9 '(' and shift+0 ')', and shift+VK 0xBA ':' via the box's OEM
+# key table at 0x8ABA3C). What failed before was the box's preload: the
 # ini's [Lua Edit] String0 (the last submitted line, any session's) is
 # preloaded at open, the typed command appended to it and the dispatcher
 # rejected the concatenation. probe.py strips that section around the
-# run, so the box opens empty. RETURN submits the line and closes the
-# console; the second command reopens it (the box then preloads this
-# run's first line) and clears it with BACKSPACEs before typing.
+# run, so the box opens empty.
+# RETURN submits the line but does NOT close the console: the dispatch
+# path (0x77C350 -> 0x77C3F7 call 0x5838A0 -> destructors -> 0x77C473)
+# never touches the console-open flag at [screen+0xf37]; only the
+# [box+0x8a6]!=0 branch at 0x77C0B6 writes it to 0, and that branch
+# never dispatches. The box also keeps its text after the submit — and
+# BACKSPACE past the end of the text is NOT harmless: launch 1
+# (runs/20261026-195352) showed the surplus keys reaching the world
+# screen, which summoned the Party Formation engine (frame 3150, the
+# single_player screen, back to the world by 3330), and the second
+# RETURN went to that screen instead of the console. So the second
+# command goes through a close and reopen (one CTRL+TAB, wait, another
+# CTRL+TAB), and its BACKSPACE run must match the kept line exactly:
+# 32 for CTRLALTDELETE:SETCURRENTXP(2000).
+# SETCURRENTXP goes first, on the fresh open whose empty box the
+# ADDGOLD run of Task 45 already proved. XPLEVEL.2DA is identical for
+# every class — level 2 at 1000, level 3 at 3000 — so 2000 gives the
+# level-1 sorcerer exactly one level-up (the previous 4000 would grant
+# two).
 checkpoint before
 key CTRL+TAB
 wait 10
+type CTRLALTDELETE:SETCURRENTXP(2000)
+key RETURN
+wait 60
+checkpoint xp
+# Close the console, reopen it (the box holds the 32 characters of the
+# submitted SETCURRENTXP line), clear exactly those, then ADDGOLD.
+key CTRL+TAB
+wait 30
+key CTRL+TAB
+wait 30
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
 type CTRLALTDELETE:ADDGOLD(500)
 key RETURN
 wait 60
 checkpoint gold
+# One level-up through the record screen (GUIREC.CHU, Resolution=800). The
+# console is still open: one CTRL+TAB closes it, R opens the record.
 key CTRL+TAB
 wait 10
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-type CTRLALTDELETE:SETCURRENTXP(4000)
-key RETURN
+key R
 wait 60
-checkpoint after
+checkpoint record
+shot record
+# Level Up: panel 2 control 37 at (655,379) 117x25.
+click 713 391
+wait 30
+shot class_panel
+# The class-selection popup (GUIRLVL6, panel 54): rows are controls 2-12
+# (Barbarian..Wizard in order), sorcerer is control 11, the last-but-one
+# row, 232x28 at panel (8,347) i.e. absolute (253,347). IWD2 allows
+# multiclassing at level-up, so the row must be the sorcerer's own.
+# IsDoneButtonClickable(54) needs the class click first (m_nClass != 0).
+click 369 361
+wait 10
+# Done: panel 54 control 0 at absolute (664,382) 117x25.
+click 722 394
+wait 30
+shot skills_panel
+# The skills popup (GUIRLVL3, panel 55) for the one point the level gives
+# (2 base - 1 for INT 8): rows at y 79/116/153/192/229/266/306/343/380,
+# plus 18x35 at absolute x 487. Disabled rows ignore clicks: in run
+# 20261026-200430 none of the three registered (world.party skills
+# unchanged), and Done completed the level-up without the point.
+click 496 96
+wait 10
+click 496 133
+wait 10
+click 496 170
+wait 10
+shot skills_clicked
+# Done (panel 55 control 0, same absolute spot). No feat popup at
+# level 2 (GetExtraFeats 0), no new-spell popup (SPLSRCKN.2DA rows 1 and
+# 2 both give 2 known spells), so the chain wraps to the record and
+# LevelUp applies the level.
+click 722 394
+wait 60
+checkpoint leveled
+shot record_leveled
+key ESCAPE
+wait 60
+checkpoint world_end
 quit
