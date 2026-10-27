@@ -11,6 +11,7 @@ so both tools agree on what a labelled function is.
 
 import os
 import re
+import sys
 
 ADDRESS = re.compile(r'^// 0x([0-9A-Fa-f]+)\s*$')
 OPERATOR = re.compile(r'((?:[\w~]+::)*operator\s*(?:\(\)|[^\s(]+))\s*\(')
@@ -75,10 +76,19 @@ def ours(src_dir):
 
 
 def ieex(db_path):
-    """(address, name) from IEex's `0xADDR NAME` lines, without FUN_ names."""
+    """(address, name) from IEex's `0xADDR NAME` lines, without FUN_ names.
+
+    IEex is optional: a missing database means no IEex names, said once on
+    stderr with the path it looked at, not an error."""
     result = []
-    with open(db_path, encoding='utf-8', errors='replace') as f:
-        for line in f:
+    try:
+        db = open(db_path, encoding='utf-8', errors='replace')
+    except FileNotFoundError:
+        print(f'labels: no IEex database at {db_path}; '
+              'continuing without IEex names', file=sys.stderr)
+        return result
+    with db:
+        for line in db:
             parts = line.split()
             if len(parts) != 2 or parts[1].startswith('FUN_'):
                 continue

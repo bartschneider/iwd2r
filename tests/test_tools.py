@@ -1815,6 +1815,17 @@ class LabelsTest(unittest.TestCase):
                           '0x401090 CResWED_Construct\r\n')
         self.assertEqual(labels.ieex(path), [(0x401090, 'CResWED_Construct')])
 
+    def test_ieex_missing_file_is_no_names_and_says_where(self):
+        # IEex is optional: no database is no IEex names, not a crash. One
+        # stderr line names the path so the summary's `ieex 0 of 0` is honest.
+        path = os.path.join(self.dir, 'function_names.db')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(labels.ieex(path), [])
+        lines = err.getvalue().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn(path, lines[0])
+
     def test_extra_reads_names_and_skips_comments(self):
         path = self.write('extra_labels.txt',
                           '# how 0x547020 was identified\n'
@@ -7160,6 +7171,49 @@ class GhidraCloneTest(unittest.TestCase):
         os.remove(os.path.join(clone, 'iwd2.gpr'))
         self.mp.worktree_clone('/w/p3-a')
         self.assertEqual(self.read(clone, 'iwd2.gpr'), 'gpr')
+
+
+class GhidraJdkTest(unittest.TestCase):
+    """make_project.jdk_path: JAVA_HOME, the Debian path, then java on PATH."""
+
+    def setUp(self):
+        self.mp = load_ghidra_tool('make_project')
+
+    def jdk_from(self, java_home, dirs, which):
+        env = {k: v for k, v in os.environ.items() if k != 'JAVA_HOME'}
+        if java_home is not None:
+            env['JAVA_HOME'] = java_home
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(self.mp.os.path, 'isdir',
+                                  lambda p: p in dirs), \
+                mock.patch.object(self.mp.shutil, 'which', lambda name: which):
+            return self.mp.jdk_path()
+
+    def test_java_home_wins(self):
+        self.assertEqual(self.jdk_from('/opt/jdk-21',
+                                       {'/opt/jdk-21',
+                                        self.mp.DEBIAN_JDK},
+                                       '/usr/lib/jvm/java-21-openjdk/bin/java'),
+                         '/opt/jdk-21')
+
+    def test_the_debian_path_is_next(self):
+        self.assertEqual(self.jdk_from(None, {self.mp.DEBIAN_JDK},
+                                       '/usr/bin/java'),
+                         self.mp.DEBIAN_JDK)
+
+    def test_java_on_path_is_the_last_resort(self):
+        self.assertEqual(self.jdk_from(
+            None, set(), '/usr/lib/jvm/java-21-openjdk/bin/java'),
+            '/usr/lib/jvm/java-21-openjdk')
+
+    def test_a_java_home_that_is_not_a_directory_is_skipped(self):
+        self.assertEqual(self.jdk_from(
+            '/opt/gone', set(), '/usr/lib/jvm/java-21-openjdk/bin/java'),
+            '/usr/lib/jvm/java-21-openjdk')
+
+    def test_no_java_anywhere_keeps_the_debian_path(self):
+        self.assertEqual(self.jdk_from(None, set(), None),
+                         self.mp.DEBIAN_JDK)
 
 
 class MakeDllProjectTest(unittest.TestCase):
