@@ -4162,14 +4162,6 @@
           "their_len": 22
         },
         {
-          "address": "0x75E930",
-          "category": "only_theirs",
-          "file": "src/CGameSprite.cpp",
-          "name": "CGameSprite::sub_75E930",
-          "our_len": 0,
-          "their_len": 10
-        },
-        {
           "address": "0x4B2340",
           "category": "only_theirs",
           "file": "src/CMessage.cpp",
@@ -4283,6 +4275,19 @@
         }
       ],
       "status": "closed",
+      "unparked": [
+        {
+          "address": "0x75E930",
+          "at": "2026-10-27T01:14:42+00:00",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::sub_75E930",
+          "needs": "not measured: called on one side only in first_fight",
+          "our_len": 0,
+          "reason": "imported as i048 dependency of 0x71CC90: the exe body is xor eax, eax; ret 4 (evidence 75E930.md); the i026 park was a one-sided Frida call",
+          "their_len": 10
+        }
+      ],
       "verdicts": {}
     },
     "i027": {
@@ -7508,6 +7513,71 @@
           "name": "CNetwork::AddMessageToWindow",
           "our_len": 0,
           "their_len": 1478
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "i049": {
+      "assigned_at": "2026-10-27T01:14:01+00:00",
+      "branch": "p3/wso-i049",
+      "closed_at": null,
+      "files": [
+        "src/CGameTrigger.cpp",
+        "src/CInfGame.cpp",
+        "src/CRuleTables.cpp",
+        "src/CItem.cpp",
+        "src/CResBinary.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x4CD650",
+          "category": "only_theirs",
+          "file": "src/CGameTrigger.cpp",
+          "name": "CGameTrigger::AddEffect",
+          "our_len": 0,
+          "their_len": 1456
+        },
+        {
+          "address": "0x5B7730",
+          "category": "only_theirs",
+          "file": "src/CInfGame.cpp",
+          "name": "CInfGame::CanTakeContainerItem",
+          "our_len": 0,
+          "their_len": 734
+        },
+        {
+          "address": "0x5468B0",
+          "category": "only_theirs",
+          "file": "src/CRuleTables.cpp",
+          "name": "CRuleTables::CheckUseMagicDevice",
+          "our_len": 0,
+          "their_len": 718
+        },
+        {
+          "address": "0x4EA3F0",
+          "category": "only_theirs",
+          "file": "src/CItem.cpp",
+          "name": "CItem::GetMaxEffectSpellLevel",
+          "our_len": 0,
+          "their_len": 384
+        },
+        {
+          "address": "0x402940",
+          "category": "only_theirs",
+          "file": "src/CResBinary.cpp",
+          "name": "CResBinary::Demand",
+          "our_len": 0,
+          "their_len": 172
+        },
+        {
+          "address": "0x402980",
+          "category": "only_theirs",
+          "file": "src/CResBinary.cpp",
+          "name": "CResBinary::Release",
+          "our_len": 0,
+          "their_len": 84
         }
       ],
       "status": "assigned",
