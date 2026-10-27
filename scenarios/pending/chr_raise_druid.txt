@@ -4,57 +4,42 @@
 # timeout: 900
 # cheats: 1
 #
+# Launch-4 simplification: ONE xp grant, then repeated level-up walks.
+# A single SETCURRENTXP(21000) at level 1 makes the first walk's popup-54
+# Done grant all six levels at once; the walk then drains every pending
+# popup with repeated [+ row1, + row2, Done] rounds before ESC.  Later
+# walks start from the world screen and no-op their Level Up click if
+# nothing is pending (the button is disabled); each walk ends with ESC +
+# a _world checkpoint, so the console/record state is verified between
+# walks (launch 3 lost two commands to a record open at console time).
+# Export uses a fresh name, Rysdrd7B, so the engine's collision rename
+# (RYSDRD7 -> RYSDRD00 in launch 3) cannot interfere.
+#
 # The druid covers two of the unreachable projectile families on its own:
 # SPPR503 Flame Strike (family 67) and SPPR512 Spike Stones (213), both
 # DRD 4 rows in LISTSPLL.2DA and auto-known (divine casters get every row
-# for their class; MXSPLDRD row 7 casts 4th level), so no level-up walk
-# ever summons popup 8.  Chargen does: OnDoneButtonClick case 55 sends
-# CLERIC/DRUID to SummonPopup(17), Memorize Divine Spells, whose Done is
-# gated on m_nExtraSpells == 0 (IsDoneButtonClickable case 17).  The pick
-# count is MXSPLDRD[1][1] = 1 plus the WIS bonus MXSPLBON[12][1] = 1 (WIS
-# 12 after two raises): two spell buttons, then the shared Done (536,562).
+# for their class; MXSPLDRD row 7 casts 4th level).  Chargen still needs
+# the divine-memorize screen: OnDoneButtonClick case 55 sends CLERIC/DRUID
+# to SummonPopup(17), two picks = MXSPLDRD[1][1] + MXSPLBON[12][1] (WIS 12
+# after two raises), shared Done (536,562).
 #
-# Chargen: the console_cheats.txt geometry with class = Druid (list row 4
-# at (400,233)) and alignment = True Neutral (row 5 at (400,269); the
-# alignment buttons are fixed-position and invalid choices are only
-# disabled, and True Neutral is the druid own alignment).  The skill pool
-# is (2 + INT 10 mod 0) x 4 = 8 points (launch 1 proved sp 8 -> 0 on the
-# first 8 clicks), spent exactly over two rows; Done needs them all spent
-# (CScreenCreateChar.cpp:5286).  The feat budget is FEATLVL[1] = 1 +
-# FEATCLAS druid L1 = 0 (no human bonus) = 1 point; all ten + rows are
-# clicked once - a spend on a rank-type feat flips no owned bit, so the
-# checkpoint may legitimately show no change in the feats array.
+# Chargen geometry is unchanged from launch 3 (proven): class = Druid
+# (list row 4 at (400,233)), alignment = True Neutral (row 5 at (400,269)),
+# 8 skill points over two rows, all ten feat + rows, then panel 17.
 #
-# Raise: one SETCURRENTXP per level (XPLEVEL.2DA is identical for every
-# class) on the selected member.  The console box keeps the submitted
-# line, so every command after the first clears exactly its 28 + digit
-# count characters before typing (32 for 4-digit XP, 33 for 5-digit);
-# surplus BACKSPACEs would reach the world.  Each command is followed by
-# one walk: class popup 54 (druid = row 4, center y 187), popup 7 at
-# level 4 only (+ STR (477,93)), popup 55 every level with its points
-# spent on rows 1-2 before Done (no popup 56 for a druid; the nine +
-# rows at (477,93..394) clicked until one registers); every Done is
-# (722,394).  [launch 2 rewrite: that skills-Done and feats picture
-# was wrong.]
-#
-# The real chain (src/CScreenCharacter.cpp, read-only): popup 54 Done
-# grants the levels and the points, then 7 (only when crossing a
-# multiple of 4: level 4 here - CheckSummonPopup case 7), then 55
-# always (>= 2 skill points per level), and the commit is automatic
-# when the chain runs out.  Popup 55 Done is gated (IsDoneButtonClickable
-# case 55 `m_nExtraSkillPoints < 2`), so the walk MUST spend its skill
-# points first: + rows 1-2 at (477,93) and (477,130) - GUIREC panels
-# 7/55/56 share the +/- column pair at (477,y)/(496,y), and launch 2
-# proved (477,93) spends.  A druid never sees popup 56 (FEATCLAS druid
-# all 0; FEATLVL gains do not feed m_nLevelUpFeats) nor any spell
-# popup, so with one level per walk the chain is always
-# 54 -> [7 at L4] -> 55 -> commit.  ESC then closes the record, and a
-# _world checkpoint verifies screen==world before the next console
-# phase (the console only opens on the world screen).  Export from the
-# character record: Export (314,373), popup
-# 13 name edit (397,283), Done (467,465); writes Rysdrd7.CHR into the
-# game copy's Characters\ directory (CInfGame::CharacterExport,
-# src/CInfGame.cpp:3049).
+# Level-up walk mechanics (src/CScreenCharacter.cpp, read-only): popup 54
+# Done grants the levels, then the chain runs 7 (only when a multiple of
+# 4 is crossed) -> 55 (>= 2 skill points per granted level) and commits
+# itself when it cycles back (LevelUp, :6233).  Popup 55 Done is gated
+# (IsDoneButtonClickable case 55 `m_nExtraSkillPoints < 2`, :5137), so the
+# rounds must drain the points first: six levels = up to 12 points (cost
+# 1-2 per + click), plus popup 7's single ability point, all covered by 8
+# rounds of [+ (477,93), + (477,130), Done (722,394)].  Extra rounds when
+# the chain is already closed click empty record space / a disabled
+# control and no-op.  A druid never sees popup 56 (FEATCLAS all 0) or any
+# spell popup.  Export from the record: Export (314,373), popup 13 name
+# edit (397,283), Done (467,465); writes into Characters\
+# (CInfGame::CharacterExport, src/CInfGame.cpp:3049).
 
 wait 60
 checkpoint menu
@@ -234,353 +219,23 @@ origin screen
 key 1
 wait 10
 checkpoint selected
-# Fresh box: nothing to clear.
+# ONE xp grant: fresh console box (nothing to clear), 21000 = the level-7
+# threshold in XPLEVEL.2DA.
 key CTRL+TAB
 wait 10
-type CTRLALTDELETE:SETCURRENTXP(1000)
-key RETURN
-wait 60
-checkpoint dr_l2_xp
-# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
-# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
-key CTRL+TAB
-wait 10
-key R
-wait 60
-checkpoint dr_l2_record
-click 713 391
-wait 30
-click 369 187
-wait 10
-click 722 394
-wait 30
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 30
-wait 60
-checkpoint dr_l2_leveled
-shot dr_l2_leveled
-key ESCAPE
-wait 90
-checkpoint dr_l2_world
-# Reopen the console and clear the kept line: exactly its
-# 28 + digit-count characters.
-key CTRL+TAB
-wait 30
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-type CTRLALTDELETE:SETCURRENTXP(3000)
-key RETURN
-wait 60
-checkpoint dr_l3_xp
-# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
-# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
-key CTRL+TAB
-wait 10
-key R
-wait 60
-checkpoint dr_l3_record
-click 713 391
-wait 30
-click 369 187
-wait 10
-click 722 394
-wait 30
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 30
-wait 60
-checkpoint dr_l3_leveled
-shot dr_l3_leveled
-key ESCAPE
-wait 90
-checkpoint dr_l3_world
-# Reopen the console and clear the kept line: exactly its
-# 28 + digit-count characters.
-key CTRL+TAB
-wait 30
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-type CTRLALTDELETE:SETCURRENTXP(6000)
-key RETURN
-wait 60
-checkpoint dr_l4_xp
-# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
-# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
-key CTRL+TAB
-wait 10
-key R
-wait 60
-checkpoint dr_l4_record
-click 713 391
-wait 30
-click 369 187
-wait 10
-click 722 394
-wait 30
-click 477 93
-wait 15
-click 722 394
-wait 30
-checkpoint dr_l4_abilities
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 30
-wait 60
-checkpoint dr_l4_leveled
-shot dr_l4_leveled
-key ESCAPE
-wait 90
-checkpoint dr_l4_world
-# Reopen the console and clear the kept line: exactly its
-# 28 + digit-count characters.
-key CTRL+TAB
-wait 30
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-type CTRLALTDELETE:SETCURRENTXP(10000)
-key RETURN
-wait 60
-checkpoint dr_l5_xp
-# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
-# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
-key CTRL+TAB
-wait 10
-key R
-wait 60
-checkpoint dr_l5_record
-click 713 391
-wait 30
-click 369 187
-wait 10
-click 722 394
-wait 30
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 30
-wait 60
-checkpoint dr_l5_leveled
-shot dr_l5_leveled
-key ESCAPE
-wait 90
-checkpoint dr_l5_world
-# Reopen the console and clear the kept line: exactly its
-# 28 + digit-count characters.
-key CTRL+TAB
-wait 30
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-type CTRLALTDELETE:SETCURRENTXP(15000)
-key RETURN
-wait 60
-checkpoint dr_l6_xp
-# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
-# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
-key CTRL+TAB
-wait 10
-key R
-wait 60
-checkpoint dr_l6_record
-click 713 391
-wait 30
-click 369 187
-wait 10
-click 722 394
-wait 30
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 30
-wait 60
-checkpoint dr_l6_leveled
-shot dr_l6_leveled
-key ESCAPE
-wait 90
-checkpoint dr_l6_world
-# Reopen the console and clear the kept line: exactly its
-# 28 + digit-count characters.
-key CTRL+TAB
-wait 30
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
 type CTRLALTDELETE:SETCURRENTXP(21000)
 key RETURN
 wait 60
-checkpoint dr_l7_xp
-# Level-up walk: 54 -> [7 only at level 4] -> 55 (points spent) ->
-# automatic commit.  No popup 56 (druid FEATCLAS all 0) or 8/16.
+checkpoint dr_xp
+# Level-up walk: Level Up -> druid row -> 54 Done (grants every level
+# the xp buys) -> 8 rounds of [+ row1, + row2, Done] to drain popup 7
+# (the one 4th-level ability point) and popup 55 (up to 12 points) ->
+# automatic commit -> ESC -> verify world.
 key CTRL+TAB
 wait 10
 key R
 wait 60
-checkpoint dr_l7_record
+checkpoint dr_w1_record
 click 713 391
 wait 30
 click 369 187
@@ -592,15 +247,205 @@ wait 15
 click 477 130
 wait 15
 click 722 394
-wait 30
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
 wait 60
-checkpoint dr_l7_leveled
-shot dr_l7_leveled
+checkpoint dr_w1_leveled
+shot dr_w1_leveled
 key ESCAPE
 wait 90
-checkpoint dr_l7_world
+checkpoint dr_w1_world
+# Level-up walk: Level Up -> druid row -> 54 Done (grants every level
+# the xp buys) -> 8 rounds of [+ row1, + row2, Done] to drain popup 7
+# (the one 4th-level ability point) and popup 55 (up to 12 points) ->
+# automatic commit -> ESC -> verify world.
+key CTRL+TAB
+wait 10
+key R
+wait 60
+checkpoint dr_w2_record
+click 713 391
+wait 30
+click 369 187
+wait 10
+click 722 394
+wait 30
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+wait 60
+checkpoint dr_w2_leveled
+shot dr_w2_leveled
+key ESCAPE
+wait 90
+checkpoint dr_w2_world
+# Level-up walk: Level Up -> druid row -> 54 Done (grants every level
+# the xp buys) -> 8 rounds of [+ row1, + row2, Done] to drain popup 7
+# (the one 4th-level ability point) and popup 55 (up to 12 points) ->
+# automatic commit -> ESC -> verify world.
+key CTRL+TAB
+wait 10
+key R
+wait 60
+checkpoint dr_w3_record
+click 713 391
+wait 30
+click 369 187
+wait 10
+click 722 394
+wait 30
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+click 477 93
+wait 15
+click 477 130
+wait 15
+click 722 394
+wait 20
+wait 60
+checkpoint dr_w3_leveled
+shot dr_w3_leveled
+key ESCAPE
+wait 90
+checkpoint dr_w3_world
+# Verify the level on a fresh record open before exporting.
+key CTRL+TAB
+wait 10
+key R
+wait 60
+checkpoint dr_level_check
+key ESCAPE
+wait 90
+checkpoint dr_world_final
 # Export from the record: Export (314,373), popup 13 name edit (397,283),
-# Done (467,465); writes Rysdrd7.CHR into Characters\.
+# type the FRESH name, Done (467,465); writes RYSDRD7B.CHR into
+# Characters\ (no existing file, so no collision rename).
 key R
 wait 60
 click 314 373
@@ -608,7 +453,7 @@ wait 30
 checkpoint export_popup
 click 397 283
 wait 30
-type Rysdrd7
+type Rysdrd7B
 wait 15
 click 467 465
 wait 90
