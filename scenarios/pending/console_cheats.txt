@@ -207,66 +207,69 @@ checkpoint selected
 # path (0x77C350 -> 0x77C3F7 call 0x5838A0 -> destructors -> 0x77C473)
 # never touches the console-open flag at [screen+0xf37]; only the
 # [box+0x8a6]!=0 branch at 0x77C0B6 writes it to 0, and that branch
-# never dispatches. The box also keeps its text after the submit, so the
-# second command stays in the still-open box: 30 BACKSPACEs clear the
-# 26 characters of the first line (the box takes one character per
-# BACKSPACE, and more BACKSPACEs than characters are harmless), then the
-# typed line and RETURN. Only after that does one CTRL+TAB close the
-# console for the record screen.
-# SETCURRENTXP(2000): XPLEVEL.2DA is identical for every class — level
-# 2 at 1000, level 3 at 3000 — so 2000 gives the level-1 sorcerer
-# exactly one level-up (the previous 4000 would grant two).
+# never dispatches. The box also keeps its text after the submit — and
+# BACKSPACE past the end of the text is NOT harmless: launch 1
+# (runs/20261026-195352) showed the surplus keys reaching the world
+# screen, which summoned the Party Formation engine (frame 3150, the
+# single_player screen, back to the world by 3330), and the second
+# RETURN went to that screen instead of the console. So the second
+# command goes through a close and reopen (one CTRL+TAB, wait, another
+# CTRL+TAB), and its BACKSPACE run must match the kept line exactly:
+# 32 for CTRLALTDELETE:SETCURRENTXP(2000).
+# SETCURRENTXP goes first, on the fresh open whose empty box the
+# ADDGOLD run of Task 45 already proved. XPLEVEL.2DA is identical for
+# every class — level 2 at 1000, level 3 at 3000 — so 2000 gives the
+# level-1 sorcerer exactly one level-up (the previous 4000 would grant
+# two).
 checkpoint before
 key CTRL+TAB
 wait 10
-type CTRLALTDELETE:ADDGOLD(500)
-key RETURN
-wait 60
-checkpoint gold
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
-key BACK
 type CTRLALTDELETE:SETCURRENTXP(2000)
 key RETURN
 wait 60
 checkpoint xp
+# Close the console, reopen it (the box holds the 32 characters of the
+# submitted SETCURRENTXP line), clear exactly those, then ADDGOLD.
+key CTRL+TAB
+wait 30
+key CTRL+TAB
+wait 30
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+key BACK
+type CTRLALTDELETE:ADDGOLD(500)
+key RETURN
+wait 60
+checkpoint gold
 # One level-up through the record screen (GUIREC.CHU, Resolution=800). The
 # console is still open: one CTRL+TAB closes it, R opens the record.
 key CTRL+TAB
