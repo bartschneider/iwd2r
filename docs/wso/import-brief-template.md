@@ -138,6 +138,16 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    out as a function. Confirm each asm red against the decompile or
    disassembly before keeping the body, or waive it in the evidence file with
    `parity_waiver: "<reason>"`.
+   **Offsets reds** read `binary calls, source never does: <member>.<method>
+   (member 0xNN ...)`: the exe calls a method on that member and your body
+   never does. Read the decompile at that call. If the body performs the
+   same work inline (a CPoint, CString or CResRef copy, an inlined accessor),
+   waive the column by naming it first, `parity_waiver: "offsets: <member>.
+   <method> is <what>, done inline at <file:line>"` (`offsets asm: ...`
+   waives both). If the exe makes a real game call the body lacks, add the
+   call as the decompile has it. If neither fits your budget, park the row
+   with `needs` `"parity offsets red: <member>.<method>"`. Never leave an
+   offsets red for the fix round to find.
 8. **Never push, never write through a remote.** From a batch worktree,
    `git push` is wrong, and so is any `git fetch <remote>` with a refspec that
    writes a branch. The coordinator merges and pushes.
