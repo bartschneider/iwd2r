@@ -21,6 +21,7 @@ import importlib.util
 import io
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -41,6 +42,31 @@ import zlib
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN_MAP = os.path.join(ROOT, 'tools', 'gen_map.py')
 SHADERS_TOOL = os.path.join(ROOT, 'tools', 'shaders.py')
+
+# macOS's $TMPDIR is /var/folders/..., a symlink to /private/var/...: git and
+# os.path.realpath report the resolved form while tempfile hands out the
+# other, so a test's own path never equals the one a tool prints back.  Build
+# every temp tree under the resolved root instead (on Linux the temp root
+# already resolves to itself).
+tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
+
+
+def temp_is_case_sensitive():
+    """True when the temp directory tells `a.md` from `A.md`: APFS and NTFS
+    fold the case, so the two are one file there."""
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, 'a.md'), 'w').close()
+        return not os.path.exists(os.path.join(d, 'A.md'))
+
+
+CASE_SENSITIVE_TEMP = temp_is_case_sensitive()
+
+NO_CASE_SENSITIVE_TEMP = ('the temp directory folds file-name case (APFS, '
+                          'NTFS); this test needs a case-sensitive one')
+NO_WSLPATH = ('no WSL: wslpath is missing, so host paths cannot be mapped '
+              'into the sandbox')
+NO_FLOCK = ('needs util-linux flock; tools/gates.sh refuses to run without '
+            'the gate lock')
 
 
 class GenMapTest(unittest.TestCase):
@@ -131,6 +157,7 @@ truth = load_tool('truth')
 triage = load_tool('triage')
 driver = load_tool('driver')
 coverage = load_tool('coverage')
+shaders = load_tool('shaders')
 
 
 def load_ghidra_tool(name):
@@ -273,7 +300,21 @@ class ShadersTest(unittest.TestCase):
         return subprocess.run([sys.executable, '-I', SHADERS_TOOL, '--check', *args],
                               capture_output=True, text=True)
 
+    def require_pinned_glslang(self):
+        """The pinned glslangValidator ships for linux-x86_64 and
+        windows-x86_64 only; anything else needs one on PATH at that
+        version, as tools/shaders.py itself demands."""
+        pin = shaders.pinned()
+        on_path = shutil.which('glslangValidator')
+        if (on_path and shaders.reports_version(on_path, pin['version'])) \
+                or shaders.host_key() in pin:
+            return
+        self.skipTest('no pinned glslang for %s %s; install glslang %s as '
+                      'glslangValidator on PATH'
+                      % (sys.platform, platform.machine(), pin['version']))
+
     def test_shaders_check_detects_stale_blob(self):
+        self.require_pinned_glslang()
         real = self.run_check()
         self.assertEqual(real.returncode, 0, real.stdout + real.stderr)
         src = os.path.join(ROOT, 'platform', 'shaders')
@@ -298,6 +339,7 @@ class ShadersTest(unittest.TestCase):
             self.assertIn('sharp.frag.spv is missing', missing.stdout)
 
     def test_shaders_check_covers_new_blobs(self):
+        self.require_pinned_glslang()
         src = os.path.join(ROOT, 'platform', 'shaders')
         new = ('fsr_easu.frag', 'fsr_rcas.frag', 'nis.frag')
         for name in new:
@@ -7224,6 +7266,8 @@ class ProbePlanTest(unittest.TestCase):
             'C:\\Users\\thier\\iwd2r-vm\\replays\\s\\tools')
 
     def test_mapped_host_paths_are_windows_paths(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         for target in ('original', 'ours'):
             for host, box, _ro in self.plan(target):
                 self.assertFalse(host.startswith('/'), (target, host, box))
@@ -7490,6 +7534,8 @@ class FridaProbeTest(unittest.TestCase):
                                   out, probe_json, 1, 0, dry)
 
     def test_original_driver_shutdown_is_off(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         with tempfile.TemporaryDirectory() as d:
             host_run = os.path.join(d, 'run')
             self.stage(host_run)
@@ -7536,6 +7582,8 @@ class FridaProbeTest(unittest.TestCase):
         return calls
 
     def test_original_host_waits_for_result_before_close(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         calls = self.run_live('original')
         self.assertEqual([c if isinstance(c, str) else c[0] for c in calls],
                          ['start', 'wait_done', 'host_wait', 'close'])
@@ -7796,6 +7844,9 @@ class ParityTest(unittest.TestCase):
                        + '---\n\n## Notes\n')
 
         parity_run = load_parity_tool('run')
+        if not os.path.isfile(parity_run.oracle.VANILLA_EXE):
+            self.skipTest('no vanilla exe at %s: structural parity skips the '
+                          'asm check' % parity_run.oracle.VANILLA_EXE)
         evidence(None)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -14696,6 +14747,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._head_subject(), tip)
 
     def test_driver_check_renames_lower_case_and_mixed_case_in_one_commit(self):
+        if not CASE_SENSITIVE_TEMP:
+            self.skipTest(NO_CASE_SENSITIVE_TEMP)
         d, batch = self._kept_without_evidence_at_the_merge_base()
         self.git('mv', 'docs/evidence/404000.md', 'docs/evidence/0X404000.MD', cwd=self.wt)
         self._add_kept_row(d, '0x40ABCD', '0x40abcd.md')
@@ -14776,6 +14829,8 @@ class DriverTest(unittest.TestCase):
         self.assertIn('?? docs/stray.txt', st)
 
     def test_driver_check_three_evidence_files_wording(self):
+        if not CASE_SENSITIVE_TEMP:
+            self.skipTest(NO_CASE_SENSITIVE_TEMP)
         d, batch = self._kept_without_evidence_at_the_merge_base()
         _write(os.path.join(self.wt, 'docs', 'evidence', '0x404000.md'), self.T_EVIDENCE)
         _write(os.path.join(self.wt, 'docs', 'evidence', '0X404000.md'), self.T_EVIDENCE)
@@ -23901,6 +23956,8 @@ class ClaimsTest(unittest.TestCase):
         self.assert_full(self.run_gate(root, '--base', 'no-such-rev'), 'no-such-rev')
 
     def test_gate_lock_serializes(self):
+        if not shutil.which('flock'):
+            self.skipTest(NO_FLOCK)
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
         fd = self.hold_lock(root)
@@ -23926,6 +23983,8 @@ class ClaimsTest(unittest.TestCase):
         self.assertEqual(b.returncode, 0, err)
 
     def test_gate_lock_not_inherited_by_children(self):
+        if not shutil.which('flock'):
+            self.skipTest(NO_FLOCK)
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
         holder = subprocess.Popen(['bash', gates, '--dry-lock', '30'],
