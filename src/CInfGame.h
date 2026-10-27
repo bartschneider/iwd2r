@@ -211,6 +211,7 @@ public:
     BOOL CheckIfSpriteCanUseItem(CGameSprite* pSprite, CItem* pItem, STRREF* pError, BOOL bAsynch);
     BOOL CanEquipInSlot(CGameSprite* pSprite, SHORT nSlot, CItem** ppItem, STRREF* pError);
     BOOL CanPortraitEquipInSlot(SHORT nPortrait, SHORT nSlot, CItem** ppItem, STRREF* pError);
+    BOOL CanTakeContainerItem(LONG nContainerId, SHORT nSlotNum, CGameSprite* pLooter, SHORT nPortrait);
     void InventoryInfoPersonal(SHORT nPortraitNum, SHORT nSlotNum, CItem*& pItem, STRREF& description, CResRef& cResIcon, CResRef& cResItem, WORD& wCount, BOOL a8);
     BOOL Is3DSound(int nSoundChannel);
     float GetSoundReverbMix(int nSoundChannel, int nReverb);
