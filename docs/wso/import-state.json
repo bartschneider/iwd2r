@@ -7163,7 +7163,7 @@
     "i047": {
       "assigned_at": "2026-10-26T15:50:20+00:00",
       "branch": "p3/wso-i047",
-      "closed_at": null,
+      "closed_at": "2026-10-27T06:15:03+00:00",
       "files": [
         "src/CMessage.cpp",
         "src/CGameDoor.cpp",
@@ -7172,6 +7172,7 @@
         "src/CGameAIBase.cpp",
         "src/IcewindCGameEffects.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -7335,7 +7336,7 @@
           "their_len": 2171
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i048": {
@@ -7583,6 +7584,69 @@
         }
       ],
       "status": "closed",
+      "verdicts": {}
+    },
+    "i050": {
+      "assigned_at": "2026-10-27T05:44:47+00:00",
+      "branch": "p3/wso-i050",
+      "closed_at": null,
+      "files": [
+        "src/CScreenWorld.cpp",
+        "src/CGameContainer.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x6957E0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::OnLButtonClick",
+          "our_len": 2,
+          "their_len": 4560
+        },
+        {
+          "address": "0x6913C0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StartStore",
+          "our_len": 2,
+          "their_len": 4359
+        },
+        {
+          "address": "0x696140",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CUIControlButtonWorldContainerSlot::Render",
+          "our_len": 14,
+          "their_len": 2907
+        },
+        {
+          "address": "0x480480",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameContainer.cpp",
+          "name": "CGameContainer::sub_480480",
+          "our_len": 2,
+          "their_len": 844
+        },
+        {
+          "address": "0x691B50",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CScreenWorld.cpp",
+          "name": "CScreenWorld::StopStore",
+          "our_len": 2,
+          "their_len": 781
+        },
+        {
+          "address": "0x71BC60",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::RemoveSpecialAbility",
+          "our_len": 2,
+          "their_len": 752
+        }
+      ],
+      "status": "assigned",
       "verdicts": {}
     }
   }
