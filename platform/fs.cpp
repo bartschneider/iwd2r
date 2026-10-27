@@ -2,6 +2,7 @@
 #include "platform/fs.h"
 
 #include "compat/path_hook.h"
+#include "platform/gpu_probe.h"
 #include "platform/handles.h"
 #include "platform/win32_api.h"
 
@@ -676,6 +677,8 @@ DWORD GetModuleFileNameA(HMODULE, LPSTR buffer, DWORD size)
     const stdfs::path target = stdfs::read_symlink("/proc/self/exe", ec);
     if (!ec)
         exe = target.generic_string();
+#elif defined(__APPLE__)
+    exe = platform::gpu_probe::SelfExe();
 #endif
     return platform::fs::CopyOut(exe, buffer, size);
 }
