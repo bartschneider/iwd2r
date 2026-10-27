@@ -7279,10 +7279,11 @@ class ProbePlanTest(unittest.TestCase):
         self.assertFalse(hasattr(winsandbox, 'SAVE_RESET_GLOBS'))
 
 
-    def test_probe_run_takes_the_locks_then_the_empty_saves_then_runs_the_side(self):
-        # probe.run itself, with its collaborators mocked: the order of entry
-        # (replay lock, sandbox lock, prepared_saves empty, run_side) and the
-        # reverse order of exit
+    def probe_run(self, target):
+        """probe.run itself, with its collaborators mocked: returns
+        (rc, events, game); the order of entry (replay lock, sandbox lock,
+        prepared_saves empty, run_side) and the reverse order of exit are in
+        events, with the ini pairs' prepare/restore around the locks."""
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, True)
         game = os.path.join(tmp, 'game')
@@ -7302,10 +7303,11 @@ class ProbePlanTest(unittest.TestCase):
             return cm
         builddir = os.path.join(tmp, 'build')
         os.makedirs(builddir)
-        open(os.path.join(builddir, probe.oracle.INJECTOR), 'w').close()
+        exe_name = probe.oracle.INJECTOR if target == 'original' else 'iwd2r.exe'
+        open(os.path.join(builddir, exe_name), 'w').close()
         ns = argparse.Namespace(
             dry=False, command='run', probe='hooks.json', scenario='s', timeout=1000,
-            post_load=None, target='original', build_checkout=None, out='t.jsonl',
+            post_load=None, target=target, build_checkout=None, out='t.jsonl',
             seed=1, dump_every=0, clicks=0)
         script = os.path.join(tmp, 's.txt')
         with open(script, 'w') as f:
@@ -7342,6 +7344,7 @@ class ProbePlanTest(unittest.TestCase):
             mock.patch.object(probe.oracle, 'load_actions', return_value=[]),
             mock.patch.object(probe, 'sidecar_args', return_value=[]),
             mock.patch.object(probe, 'original_logon', return_value='cmd'),
+            mock.patch.object(probe, 'ours_logon', return_value='cmd'),
             mock.patch.object(probe.winsandbox, 'wslpath_w', side_effect=lambda x: x),
             mock.patch.object(probe, 'report', return_value=0),
             mock.patch.object(probe, 'run_side', run_side),
@@ -7355,8 +7358,15 @@ class ProbePlanTest(unittest.TestCase):
             self.addCleanup(pt.stop)
         with contextlib.redirect_stdout(io.StringIO()):
             rc = probe.run(ns)
+        return rc, events, game
+
+    def probe_run_event_names(self, events):
+        return [e[:2] if e[0] != 'run_side' else e for e in events]
+
+    def test_probe_run_takes_the_locks_then_the_empty_saves_then_runs_the_side(self):
+        rc, events, game = self.probe_run('original')
         self.assertEqual(rc, 0)
-        self.assertEqual([e[:2] if e[0] != 'run_side' else e for e in events], [
+        self.assertEqual(self.probe_run_event_names(events), [
             ('cheats-on', game), ('console-on', game),
             ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
             ('run_side',),
@@ -7365,8 +7375,24 @@ class ProbePlanTest(unittest.TestCase):
         saves = [e for e in events if e[:2] == ('enter', 'saves')][0]
         self.assertEqual(saves[2], (probe.oracle.mpsave_dir(game),
                                     {'mode': 'empty', 'load': None},
-                                    os.path.join(run_dir, 'replay'),
+                                    os.path.join(os.path.dirname(game), 'runs',
+                                                 'stamp', 'replay'),
                                     probe.oracle.save_aside(game)))
+
+    def test_probe_run_ours_never_touches_the_console_ini_pair(self):
+        # the [Lua Edit] strip/restore pair guards the original's console
+        # preload only: an ours run (cheats on, same as the original above)
+        # must never rewrite the copy's ini for it
+        rc, events, game = self.probe_run('ours')
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.probe_run_event_names(events), [
+            ('cheats-on', game),
+            ('enter', 'replay'), ('enter', 'sandbox'), ('enter', 'saves'),
+            ('run_side',),
+            ('exit', 'saves'), ('exit', 'sandbox'), ('exit', 'replay'),
+            ('cheats-off', game)])
+        self.assertNotIn(('console-on', game), events)
+        self.assertNotIn(('console-off', game), events)
 
 
 class FridaProbeTest(unittest.TestCase):
