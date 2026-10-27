@@ -295,15 +295,16 @@ wait 30
 shot skills_panel
 # The skills popup (GUIRLVL3, panel 55) for the one point the level gives
 # (2 base - 1 for INT 8): rows at y 79/116/153/192/229/266/306/343/380,
-# plus 18x35 at absolute x 487. Disabled rows ignore clicks, so three
-# plus-clicks register at most one point.
+# plus 18x35 at absolute x 487. Disabled rows ignore clicks: in run
+# 20261026-200430 none of the three registered (world.party skills
+# unchanged), and Done completed the level-up without the point.
 click 496 96
 wait 10
 click 496 133
 wait 10
 click 496 170
 wait 10
-shot skills_spent
+shot skills_clicked
 # Done (panel 55 control 0, same absolute spot). No feat popup at
 # level 2 (GetExtraFeats 0), no new-spell popup (SPLSRCKN.2DA rows 1 and
 # 2 both give 2 known spells), so the chain wraps to the record and
