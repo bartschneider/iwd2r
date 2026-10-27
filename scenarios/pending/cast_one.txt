@@ -11,7 +11,7 @@
 #
 # Grease lands as action 95 on the original (task-43 report); on ours
 # the open question is whether the cast list opens at all.
-timeout: 420
+# timeout: 420
 
 wait 150
 checkpoint menu
@@ -141,6 +141,22 @@ wait 150
 # The world screen with the single sorcerer on the ship deck.
 checkpoint world
 shot world
+# The opening dialog (Hedron, entry 0) blocks the cast chain; click it
+# away as spell_showcase does.
+checkpoint opening_dialog
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
 # The cast chain under test. F5 is the action bar's fifth button (the
 # cast button), F1 the cast list's first row (Grease), the click north
 # of the deck the cast-at-point target.

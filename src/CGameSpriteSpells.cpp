@@ -194,8 +194,10 @@ BOOLEAN CGameSpriteSpellList::sub_725DB0(const unsigned int& a1, const BOOLEAN& 
     field_18 = v1;
 
     for (UINT nIndex = 0; nIndex < m_List.size(); nIndex++) {
-        // NOTE: Uninline.
-        sub_725CC0(m_List[nIndex].m_nID, v1 - m_List[nIndex].field_8, FALSE);
+        // NOTE: Uninline. The original passes the count to remove as
+        // field_8 - v1, i.e. each entry's castable count drops to v1
+        // (the level's remaining slots).
+        sub_725CC0(m_List[nIndex].m_nID, m_List[nIndex].field_8 - v1, FALSE);
     }
 
     return TRUE;
