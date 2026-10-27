@@ -448,6 +448,7 @@ public:
     BOOLEAN IsHatedRace(BYTE& nRace, const CCreatureFileHeader& BStats) const;
     INT GetHatedRaceBonus(BYTE& nRace, const CCreatureFileHeader& BStats) const;
     INT GetEncumbranceMod(CGameSprite* pSprite) const;
+    BOOL CheckUseMagicDevice(CGameSprite* pSprite, CItem* pItem);
     void sub_546B60(CGameSprite* pSprite, int& a2, int& a3, int& a4, BOOL a5) const;
     void sub_542EC0(BYTE nClass, BYTE nCON, INT& nBonus, INT& nRolls) const;
     INT GetIterativeAttackBonus(INT nBonus, INT nStep, INT nAttack) const;

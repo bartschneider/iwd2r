@@ -6,6 +6,7 @@
 #include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CItem.h"
+#include "CSpell.h"
 #include "CTimerWorld.h"
 #include "CUtil.h"
 #include "msvc_atol.h"
@@ -4108,4 +4109,51 @@ INT CRuleTables::sub_547620(INT nType, CGameSprite* pSprite, LONG nSaveMod, DWOR
     }
 
     return nAdjustment;
+}
+
+// 0x5468B0
+BOOL CRuleTables::CheckUseMagicDevice(CGameSprite* pSprite, CItem* pItem)
+{
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 6656
+    UTIL_ASSERT(pSprite != NULL);
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CRuleTables.cpp
+    // __LINE__: 6657
+    UTIL_ASSERT(pItem != NULL);
+
+    bool bSuccess = false;
+
+    INT nLevel = pItem->GetMaxEffectSpellLevel();
+
+    if (pItem->GetItemType() == 0xB) {
+        BYTE resRef[8];
+        pItem->cResRef.GetResRef(resRef);
+        for (DWORD i = 0; i < 8; i++) {
+            if (resRef[i] == 'Z' || resRef[i] == 'z') {
+                resRef[i] = '\0';
+                break;
+            }
+        }
+
+        CResRef spellRef(resRef);
+        CSpell spell(spellRef);
+        if (spell.pRes != NULL) {
+            SHORT nSpellLevel = spell.GetLevel();
+            if (nSpellLevel != 0) {
+                nLevel = nSpellLevel;
+            }
+        }
+    }
+
+    INT skill = (char)pSprite->m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_USE_MAGIC_DEVICE];
+    INT roll = skill + (rand() % 20 + 1);
+    if (roll >= nLevel + 20) {
+        bSuccess = true;
+    }
+
+    pSprite->sub_763E40(CGAMESPRITE_SKILL_USE_MAGIC_DEVICE);
+    pSprite->FeedBack(CGameSprite::FEEDBACK_ROLL, roll, nLevel + 20, nLevel, 0x9988, 0, 0);
+
+    return bSuccess;
 }
