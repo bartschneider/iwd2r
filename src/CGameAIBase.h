@@ -103,8 +103,6 @@ public:
     void PutItemGround(CItem* pItem);
     SHORT ClearActions(CGameObject* target);
     SHORT GiveItemCreate(CGameObject* pTarget);
-    SHORT TakePartyItem();
-    BOOL PlaceItem(CItem* item, BOOL deny, BOOL drop, DWORD count, BOOL feedback);
     SHORT TakePartyGold();
     SHORT GivePartyGold();
     SHORT GiveOrder(CGameAIBase* sprite);

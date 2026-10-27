@@ -67,7 +67,6 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_PARTY_GOLD;
     static const BYTE MSG_SUBTYPE_CMESSAGE_PLAY_SOUND;
     static const BYTE MSG_SUBTYPE_CMESSAGE_PLAY_SOUND_REF;
-    static const BYTE MSG_SUBTYPE_CMESSAGE_REMOVE_ITEM;
     static const BYTE MSG_SUBTYPE_CMESSAGE_REMOVE_REPLIES;
     static const BYTE MSG_SUBTYPE_CMESSAGE_REPUTATION_CHANGE;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_ACTIVE;
@@ -2043,21 +2042,6 @@ public:
     void Run() override;
 
     /* 000C */ std::list<CMessage*> m_messages;
-};
-
-// TakePartyItem's notice to the sprite the item is taken from (vtable
-// 0x848C04): the sprite removes the item from the slot and refreshes its
-// quick buttons.
-class CMessageRemoveItem : public CMessage {
-public:
-    CMessageRemoveItem(SHORT slot, LONG caller, LONG target);
-    ~CMessageRemoveItem() override;
-    SHORT GetCommType() override;
-    BYTE GetMsgType() override;
-    BYTE GetMsgSubType() override;
-    void Run() override;
-
-    /* 000C */ SHORT m_slot;
 };
 
 #endif /* CMESSAGE_H_ */
