@@ -25378,16 +25378,14 @@ class ImportSecondSourceTest(unittest.TestCase):
 class ChrFixtureTest(unittest.TestCase):
     """scenarios/chr/RYSDRD7C.CHR — the Task 49 console-raised druid 7 export.
 
-    Run 20261027-010318 raised the chargen druid with one
-    CTRLALTDELETE:SETCURRENTXP(21000) and one level-up walk; its `exported`
-    checkpoint shows the character live at level 7 in the frame the export
-    ran, but `world_end` (one ESC later) reads level 1 again: the raise
-    never committed to m_baseStats, which is what CGameSprite::Marshal
-    memcpy's into the CRE.  The fixture therefore pins chargen content, and
-    the test asserts exactly that, so a future fixture that does carry the
-    raised level updates it deliberately (scenarios/chr/README.md has the
-    findings).  Offsets: CHR = 0x224-byte header + CRE, baseStats at CRE+8
-    (src/CInfGame.cpp:3049, src/CGameSprite.cpp:7928).
+    Run 20261027-012948 raised the chargen druid with one
+    CTRLALTDELETE:SETCURRENTXP(21000) and one level-up walk committed with
+    the record's Done (an earlier run that left with ESC exported level 1:
+    the raise lived only in the uncommitted level-up session, and
+    CGameSprite::Marshal memcpy's m_baseStats into the CRE).  Its world_end
+    checkpoint reads level 7 back in the world.  Offsets: CHR = 0x224-byte
+    header + CRE, baseStats at CRE+8 (src/CInfGame.cpp:3049,
+    src/CGameSprite.cpp:7928).
     """
 
     def test_raised_druid_export(self):
