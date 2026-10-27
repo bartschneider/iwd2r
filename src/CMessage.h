@@ -114,7 +114,6 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_STOP_ESCAPE_AREA;
     static const BYTE MSG_SUBTYPE_CMESSAGE_SET_TIME_STOP;
     static const BYTE MSG_SUBTYPE_CMESSAGE_STORE_RELEASE;
-    static const BYTE MSG_SUBTYPE_CMESSAGE_88;
     static const BYTE MSG_SUBTYPE_CMESSAGE_89;
     static const BYTE MSG_SUBTYPE_CMESSAGE_90;
     static const BYTE MSG_SUBTYPE_CMESSAGE_FLOAT_TEXT;
@@ -1458,25 +1457,6 @@ public:
     void Run() override;
 
     /* 000C */ STRREF m_strRef;
-};
-
-// The summon link registration (vtable 0x84D360, 0x14 bytes;
-// IcewindCGameEffectSummon::SpawnFromResRef (0x55FAD0) sends it with the
-// spawned sprite as caller, target and m_summonedId and the summoner as
-// m_masterId): the summon limit table records the pair. In a single player
-// game nothing but the denies are taken. Marshal and Unmarshal
-// (0x512310/0x5124D0) are the network path and are omitted (single player
-// only, docs/adr/0002-single-player-only.md).
-class CMessage88 : public CMessage {
-public:
-    CMessage88(LONG summonedId, LONG masterId, LONG caller, LONG target);
-    SHORT GetCommType() override;
-    BYTE GetMsgType() override;
-    BYTE GetMsgSubType() override;
-    void Run() override;
-
-    /* 000C */ LONG m_summonedId;
-    /* 0010 */ LONG m_masterId;
 };
 
 // A summoned creature's death on a machine that does not own it (vtables
