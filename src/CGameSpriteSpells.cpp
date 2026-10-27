@@ -206,14 +206,19 @@ BOOLEAN CGameSpriteSpellList::sub_725DB0(const unsigned int& a1, const BOOLEAN& 
 // 0x725E70
 BOOLEAN CGameSpriteSpellList::Find(const UINT& nID, UINT& nIndex)
 {
+    // NOTE: The index is 0-based: the original increments it only on a
+    // mismatch (0x725e93 `incl (%esi)`; the match branch returns without
+    // incrementing). Our earlier `nIndex++` on the match made every
+    // Find-based update (sub_725C50, sub_725CC0) write one entry to the
+    // right and read past the end on the last entry.
     nIndex = 0;
 
     std::vector<CGameSpriteSpellListEntry>::iterator it = m_List.begin();
     while (it != m_List.end()) {
         if (it->m_nID == nID) {
-            nIndex++;
             return TRUE;
         }
+        nIndex++;
         it++;
     }
 
