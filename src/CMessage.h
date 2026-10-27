@@ -51,7 +51,6 @@ public:
     static const BYTE MSG_SUBTYPE_CMESSAGE_CUT_SCENE_MODE_STATUS;
     static const BYTE MSG_SUBTYPE_CMESSAGE_DISPLAY_TEXT;
     static const BYTE MSG_SUBTYPE_CMESSAGE_DISPLAY_TEXTREF;
-    static const BYTE MSG_SUBTYPE_CMESSAGE_DOOR_OPEN;
     static const BYTE MSG_SUBTYPE_CMESSAGE_DOOR_STATUS;
     static const BYTE MSG_SUBTYPE_CMESSAGE_DROP_PATH;
     static const BYTE MSG_SUBTYPE_CMESSAGE_ENTER_DIALOG;
@@ -709,22 +708,6 @@ public:
     /* 0018 */ COLORREF m_textColor;
     /* 001C */ LONG m_marker;
     /* 0020 */ BOOLEAN m_moveToTop;
-};
-
-// The exe packs this class to 14 bytes (pack(2)); our member offsets are
-// unaffected. Instantiated by CGameDoor::AddEffect (0x486860) on the KNOCK path.
-class CMessageDoorOpen : public CMessage {
-public:
-    CMessageDoorOpen(BOOLEAN open, LONG caller, LONG target)
-        : CMessage(caller, target), m_bOpenDoor(open) {}
-    SHORT GetCommType() override;
-    BYTE GetMsgType() override;
-    BYTE GetMsgSubType() override;
-    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
-    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
-    void Run() override;
-
-    /* 000C */ BOOLEAN m_bOpenDoor;
 };
 
 class CMessageDoorStatus : public CMessage {
