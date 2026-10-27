@@ -391,6 +391,16 @@ int CScreenWorld::GetSelectedCharacter()
     return m_nSelectedCharacter;
 }
 
+// 0x71E750
+//
+// NOTE: the exe's CScreenWorld vtable overrides CWarp slot 0x0010 with the
+// ICF-folded empty body at this address (one shared no-op; see
+// docs/wso/import-parked/71E750.json and CBaldurEngine::SetChatEditBoxStatus
+// for the same pattern). Recovered as this empty override.
+void CScreenWorld::NormalizePanelRect(DWORD nID, CRect& rect)
+{
+}
+
 // 0x6869C0
 void CScreenWorld::EngineActivated()
 {

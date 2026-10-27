@@ -26,6 +26,7 @@ public:
 
     CScreenWorld();
     /* 0004 */ ~CScreenWorld() override;
+    /* 0010 */ void NormalizePanelRect(DWORD nID, CRect& rect) override;
     /* 0014 */ void EngineActivated() override;
     /* 0018 */ void EngineDeactivated() override;
     /* 0024 */ void EngineGameInit() override;
