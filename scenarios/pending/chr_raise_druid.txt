@@ -7,20 +7,23 @@
 # The druid covers two of the unreachable projectile families on its own:
 # SPPR503 Flame Strike (family 67) and SPPR512 Spike Stones (213), both
 # DRD 4 rows in LISTSPLL.2DA and auto-known (divine casters get every row
-# for their class; MXSPLDRD row 7 casts 4th level), so chargen needs no
-# spell picks and no level-up walk ever summons popup 8.
+# for their class; MXSPLDRD row 7 casts 4th level), so no level-up walk
+# ever summons popup 8.  Chargen does: OnDoneButtonClick case 55 sends
+# CLERIC/DRUID to SummonPopup(17), Memorize Divine Spells, whose Done is
+# gated on m_nExtraSpells == 0 (IsDoneButtonClickable case 17).  The pick
+# count is MXSPLDRD[1][1] = 1 plus the WIS bonus MXSPLBON[12][1] = 1 (WIS
+# 12 after two raises): two spell buttons, then the shared Done (536,562).
 #
 # Chargen: the console_cheats.txt geometry with class = Druid (list row 4
 # at (400,233)) and alignment = True Neutral (row 5 at (400,269); the
 # alignment buttons are fixed-position and invalid choices are only
-# disabled, and True Neutral is the druid own alignment).  16 skill
-# points go over five + rows (Concentration (499,276) then four
-# neighbours): capped or unaffordable clicks no-op and five rows always
-# hold >= 16 points, so Done activates (CScreenCreateChar.cpp:5286
-# requires every point spent).  The feat point goes to whichever + row is
-# first enabled for a druid - Combat Casting at (499,384) is arcane-only
-# (sub_763200 checks CLASSMASK_WIZARD|SORCERER|BARD) - so every row is
-# clicked once and the first that registers takes it.
+# disabled, and True Neutral is the druid own alignment).  The skill pool
+# is (2 + INT 10 mod 0) x 4 = 8 points (launch 1 proved sp 8 -> 0 on the
+# first 8 clicks), spent exactly over two rows; Done needs them all spent
+# (CScreenCreateChar.cpp:5286).  The feat budget is FEATLVL[1] = 1 +
+# FEATCLAS druid L1 = 0 (no human bonus) = 1 point; all ten + rows are
+# clicked once - a spend on a rank-type feat flips no owned bit, so the
+# checkpoint may legitimately show no change in the feats array.
 #
 # Raise: one SETCURRENTXP per level (XPLEVEL.2DA is identical for every
 # class) on the selected member.  The console box keeps the submitted
@@ -103,7 +106,8 @@ checkpoint points_prompt
 click 338 331
 wait 30
 checkpoint abilities_done
-# Skills (400,303): 16 points over five rows; Done needs them all spent.
+# Skills (400,303): 8 points = two rows x 4 ranks; Done needs them all
+# spent.
 click 400 303
 wait 30
 checkpoint skills
@@ -123,34 +127,11 @@ click 499 204
 wait 15
 click 499 204
 wait 15
-click 499 240
-wait 15
-click 499 240
-wait 15
-click 499 240
-wait 15
-click 499 240
-wait 15
-click 499 312
-wait 15
-click 499 312
-wait 15
-click 499 312
-wait 15
-click 499 312
-wait 15
-click 499 348
-wait 15
-click 499 348
-wait 15
-click 499 348
-wait 15
-click 499 348
-wait 15
 click 536 562
 wait 30
 checkpoint skills_done
-# Feats: every + row once; the single point takes the first enabled row.
+# Feats (panel 55): all ten + rows once; the single point takes the first
+# enabled row (rank feats spend without flipping a bits entry).
 click 499 168
 wait 15
 click 499 204
@@ -167,11 +148,28 @@ click 499 384
 wait 15
 click 499 420
 wait 15
+click 499 456
+wait 15
+click 499 492
+wait 15
+shot feats_panel
 click 536 562
 wait 30
 checkpoint feats_done
-# Divine casters get no spell screen: Appearance (400,338), Sound, Name
-# (400,373): Rysdrd7, Done (458,268), Next back to Party Formation.
+# Panel 17, Memorize Divine Spells (druid after feats): buttons 2..13 are
+# the first twelve known level-1 druid spells at (293,179)...(508,223);
+# two picks spend m_nExtraSpells 1+1(WIS 12) -> 0, unlocking Done.
+click 293 179
+wait 15
+click 336 179
+wait 15
+checkpoint divine_picks
+click 536 562
+wait 30
+checkpoint divine_done
+shot divine_done
+# Chargen finishes: Appearance (400,338), Sound, Name (400,373): Rysdrd7,
+# Done (458,268), Next back to Party Formation.
 click 400 338
 wait 30
 click 536 562
