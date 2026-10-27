@@ -1,0 +1,175 @@
+# cast_one: the first cast with the shortest possible route.
+#
+# Task 44's probe: one sorcerer through chargen (Grease as the first
+# spell pick, so it is the cast list's F1), Start into the world, then
+# F5 (open the cast list), F1 (arm Grease), one ground click north of
+# the party (Grease's proven delivery is a cast-at-point) and a wait.
+# The full spell_showcase casts nothing on our engine; this scenario
+# reaches the same F5/F1/click chain in a third of the frames so the
+# divergence can be bisected run by run. A point spell needs no second
+# party member and no enemy, so the ship deck is enough stage.
+#
+# Grease lands as action 95 on the original (task-43 report); on ours
+# the open question is whether the cast list opens at all.
+# timeout: 420
+
+wait 150
+checkpoint menu
+# New Game (645,262), Done (537,562) with New Party selected, then the
+# first slot's Create Character (530,100). Waits as in spell_showcase.
+click 645 262
+wait 180
+click 537 562
+wait 150
+click 530 100
+wait 150
+checkpoint chargen
+# Gender Male, Next through Appearance.
+click 400 128
+wait 30
+click 400 286
+wait 20
+click 536 562
+wait 30
+click 536 562
+wait 30
+# Race: Elf; Class: Sorcerer; Alignment: Chaotic Good.
+click 400 163
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+click 400 198
+wait 30
+click 400 443
+wait 20
+click 536 562
+wait 30
+click 400 233
+wait 30
+click 400 198
+wait 20
+click 536 562
+wait 30
+checkpoint chosen
+# Abilities: CHA 10 to 16, STR 10 to 12, CON 8 to 10, then Yes keeps
+# the rest - the same sequence spell_showcase gives Aria.
+click 400 268
+wait 30
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 350
+wait 15
+click 499 170
+wait 15
+click 499 170
+wait 15
+click 499 242
+wait 15
+click 499 242
+wait 15
+click 536 562
+wait 30
+click 338 331
+wait 30
+# Skills: Concentration x4.
+click 400 303
+wait 30
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 499 276
+wait 15
+click 536 562
+wait 30
+# Feats: Combat Casting, Next reaches the spell grid.
+click 499 384
+wait 15
+click 536 562
+wait 30
+checkpoint spells_grid
+# Pick order = the cast list's F1..F4: Grease first (a point spell),
+# then Ray of Enfeeblement, Burning Hands, Sleep as spares. Grid cells
+# per spell_showcase's TLK-order map.
+click 508 179
+wait 15
+click 508 222
+wait 15
+click 293 179
+wait 15
+click 508 265
+wait 15
+checkpoint spells_chosen
+click 536 562
+wait 30
+# Appearance Nexts, then the name.
+click 400 338
+wait 30
+click 536 562
+wait 30
+click 536 562
+wait 30
+click 400 373
+wait 30
+type Cade
+wait 15
+click 458 268
+wait 30
+checkpoint named
+# Next to Party Formation, Done starts the game; the chapter screen's
+# Done loads the world.
+click 536 562
+wait 60
+checkpoint party_formation
+click 634 507
+wait 150
+checkpoint chapter
+click 514 549
+wait 150
+# The world screen with the single sorcerer on the ship deck.
+checkpoint world
+shot world
+# The opening dialog (Hedron, entry 0) blocks the cast chain; click it
+# away as spell_showcase does.
+checkpoint opening_dialog
+click 300 399
+wait 60
+click 340 437
+wait 60
+click 250 386
+wait 60
+click 280 437
+wait 60
+click 398 583
+wait 60
+click 250 399
+wait 120
+checkpoint opening_done
+# The cast chain under test. F5 is the action bar's fifth button (the
+# cast button), F1 the cast list's first row (Grease), the click north
+# of the deck the cast-at-point target.
+key F5
+wait 30
+shot list_open
+checkpoint list_open
+key F1
+wait 30
+shot armed
+checkpoint armed
+click 386 165
+wait 90
+shot cast
+checkpoint cast
+quit
