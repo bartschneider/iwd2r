@@ -1,0 +1,7 @@
+{
+  "address": "0x7A38B0",
+  "name": "CNetworkWindow::SendCall",
+  "file": "src/CNetwork.cpp",
+  "batch": "i048",
+  "needs": "parked with its dependency CNetworkWindow::FrameSend @ 0x7A2590 (not exercised by world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography); SendCall is FrameSend's only caller in our tree"
+}
