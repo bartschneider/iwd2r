@@ -3,6 +3,7 @@
 #include "CBaldurChitin.h"
 #include "CGameContainer.h"
 #include "CGameObject.h"
+#include "CGameSprite.h"
 #include "CInfGame.h"
 #include "CUtil.h"
 
@@ -611,4 +612,43 @@ LONG CGameObjectArray::FindObjectId(SHORT id)
 
     lock.Unlock();
     return -1;
+}
+
+// 0x5C9300
+BOOLEAN CGameObjectArray::AnySpriteIsDiseased()
+{
+    CSingleLock lock(&m_cs, FALSE);
+
+    lock.Lock(INFINITE);
+
+    // NOTE: The original stops before m_nMaxArrayIndex, so the object in the
+    // last used slot is not tested (0x5C933A, 0x5C9379). Kept as it is.
+    for (SHORT arrayIndex = 0; arrayIndex < m_nMaxArrayIndex; arrayIndex++) {
+        CGameObjectArrayEntry& entry = m_pArray[arrayIndex];
+
+        if (entry.m_objectId == -1 || entry.m_objectIntPtr == -1) {
+            continue;
+        }
+
+        CGameObject* pObject = entry.m_objectPtr;
+
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            continue;
+        }
+
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+
+        // 0x5C9361 reads the m_spellStates dword at +0xA10 (states 32 to 63)
+        // and tests its bits 14 and 15: SPLSTATE_MOLD_TOUCH and
+        // SPLSTATE_SHROUD_OF_FLAME.
+        if (pSprite->m_derivedStats.m_spellStates.test(SPLSTATE_MOLD_TOUCH)
+            || pSprite->m_derivedStats.m_spellStates.test(SPLSTATE_SHROUD_OF_FLAME)) {
+            lock.Unlock();
+            return FALSE;
+        }
+    }
+
+    lock.Unlock();
+
+    return TRUE;
 }
