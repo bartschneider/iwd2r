@@ -3246,15 +3246,11 @@ class OracleVanillaGogTest(unittest.TestCase):
         self.game = os.path.join(self.base, 'game')
 
     def write(self, root, rel, data):
-        path = os.path.join(root, rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'wb') as f:
-            f.write(data)
+        _write(os.path.join(root, rel), data, 'wb')
 
     def installer(self, name, magic):
         path = os.path.join(self.base, name)
-        with open(path, 'wb') as f:
-            f.write(magic + b' installer')
+        _write(path, magic + b' installer', 'wb')
         return path
 
     def make_pkg(self, exe=VANILLA_BYTES):
@@ -3331,8 +3327,7 @@ class OracleVanillaGogTest(unittest.TestCase):
                                     md5=VANILLA_TEST_MD5)
 
     def read(self, rel):
-        with open(os.path.join(self.game, rel), 'rb') as f:
-            return f.read()
+        return _slurp(os.path.join(self.game, rel), 'rb')
 
     def ini_lines(self):
         return self.read('icewind2.ini').decode().split('\r\n')
@@ -3344,9 +3339,8 @@ class OracleVanillaGogTest(unittest.TestCase):
         marker = json.loads(self.read(oracle.MARKER))
         self.assertEqual(marker['md5'], VANILLA_TEST_MD5)
         self.assertEqual(marker['installer'], os.path.basename(installer))
-        with open(installer, 'rb') as f:
-            self.assertEqual(marker['sha256'],
-                             hashlib.sha256(f.read()).hexdigest())
+        self.assertEqual(marker['sha256'],
+                         hashlib.sha256(_slurp(installer, 'rb')).hexdigest())
         self.assertIn('built', marker)
         lines = self.ini_lines()
         start = lines.index('[Alias]') + 1
@@ -3421,17 +3415,13 @@ class OracleVanillaGogTest(unittest.TestCase):
                                expected)
         xar = os.path.join(self.base, 'b', expected)
         for game in (pkgutil, xar):
-            os.makedirs(game, exist_ok=True)
-            with open(os.path.join(game, 'CHITIN.KEY'), 'wb') as f:
-                f.write(b'KEY')
+            _write(os.path.join(game, 'CHITIN.KEY'), b'KEY', 'wb')
         self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'a')),
                          pkgutil)
         self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'b')), xar)
         # A .pkg that unpacks somewhere else still finds its game folder.
         other = os.path.join(self.base, 'c', 'Wineskin', 'game')
-        os.makedirs(other)
-        with open(os.path.join(other, 'CHITIN.KEY'), 'wb') as f:
-            f.write(b'KEY')
+        _write(os.path.join(other, 'CHITIN.KEY'), b'KEY', 'wb')
         self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'c')), other)
         self.assertIsNone(oracle.pkg_game(os.path.join(self.base, 'd')))
 
@@ -3470,9 +3460,7 @@ class OracleVanillaGogTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.game))
 
     def test_refuses_to_replace_a_folder_that_is_not_a_game(self):
-        os.makedirs(self.game)
-        with open(os.path.join(self.game, 'notes.txt'), 'w') as f:
-            f.write('mine')
+        _write(os.path.join(self.game, 'notes.txt'), 'mine')
         with self.assertRaises(SystemExit) as e:
             oracle.build_gog(self.game, self.installer('gog.pkg', b'xar!'),
                              md5=VANILLA_TEST_MD5)
@@ -8221,9 +8209,9 @@ _DECOMP = '''int CGameSprite::Render(int nFrame)
 '''
 
 
-def _write(path, text):
+def _write(path, text, mode='w'):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, mode) as f:
         f.write(text)
 
 
