@@ -4,16 +4,19 @@
 # timeout: 900
 # cheats: 1
 #
-# Launch-4 simplification: ONE xp grant, then repeated level-up walks.
-# A single SETCURRENTXP(21000) at level 1 makes the first walk's popup-54
-# Done grant all six levels at once; the walk then drains every pending
-# popup with repeated [+ row1, + row2, Done] rounds before ESC.  Later
-# walks start from the world screen and no-op their Level Up click if
-# nothing is pending (the button is disabled); each walk ends with ESC +
-# a _world checkpoint, so the console/record state is verified between
-# walks (launch 3 lost two commands to a record open at console time).
-# Export uses a fresh name, Rysdrd7B, so the engine's collision rename
-# (RYSDRD7 -> RYSDRD00 in launch 3) cannot interfere.
+# Attempt 3 (coordinator-sanctioned): the walk must COMMIT, not cancel.
+# One SETCURRENTXP(21000) after chargen grants 6 levels into the level-up
+# session (m_pTempBaseStats); they only reach m_baseStats when the popup
+# chain wraps, which needs popup 55's Done gate open (points < 2).  Task
+# 48's sorcerer had 1 point, so its Done wrapped and committed; launch
+# 4's druid had 12 and its two-row drain never opened the gate, so the
+# closing ESC cancelled the session and reverted the level (exported = 7
+# live, world_end = 1, file = chargen bytes).  Each walk now sprays every
+# panel-55 row (8 rows at x=477, the + column; disabled/capped rows
+# no-op) between Done presses until the wrap commits, and ESCs only
+# afterwards; a world checkpoint that must read level 7 gates the export.
+# Export clears the pre-filled name edit (launch 4 typed after the fill
+# and still exported RYSDRD7 -> collision rename) and types Rysdrd7C.
 #
 # The druid covers two of the unreachable projectile families on its own:
 # SPPR503 Flame Strike (family 67) and SPPR512 Spike Stones (213), both
@@ -23,22 +26,24 @@
 # to SummonPopup(17), two picks = MXSPLDRD[1][1] + MXSPLBON[12][1] (WIS 12
 # after two raises), shared Done (536,562).
 #
-# Chargen geometry is unchanged from launch 3 (proven): class = Druid
+# Chargen geometry is unchanged from launches 3/4 (proven): class = Druid
 # (list row 4 at (400,233)), alignment = True Neutral (row 5 at (400,269)),
 # 8 skill points over two rows, all ten feat + rows, then panel 17.
 #
 # Level-up walk mechanics (src/CScreenCharacter.cpp, read-only): popup 54
 # Done grants the levels, then the chain runs 7 (only when a multiple of
-# 4 is crossed) -> 55 (>= 2 skill points per granted level) and commits
-# itself when it cycles back (LevelUp, :6233).  Popup 55 Done is gated
-# (IsDoneButtonClickable case 55 `m_nExtraSkillPoints < 2`, :5137), so the
-# rounds must drain the points first: six levels = up to 12 points (cost
-# 1-2 per + click), plus popup 7's single ability point, all covered by 8
-# rounds of [+ (477,93), + (477,130), Done (722,394)].  Extra rounds when
-# the chain is already closed click empty record space / a disabled
-# control and no-op.  A druid never sees popup 56 (FEATCLAS all 0) or any
-# spell popup.  Export from the record: Export (314,373), popup 13 name
-# edit (397,283), Done (467,465); writes into Characters\
+# 4 is crossed) -> 55 (>= 2 skill points per granted level = up to 12)
+# and commits itself when it cycles back (LevelUp, :6233).  Popup 55 Done
+# is gated (IsDoneButtonClickable case 55 `m_nExtraSkillPoints < 2`,
+# :5137): 6 levels x 2 points need up to 12 + clicks at cost 1-2 before
+# the gate opens, so each round sprays all eight + rows ((477,y),
+# y=93..352 — GUIREC 55 shares the 18x35 +/- pair with 7/56) and presses
+# Done; the Done that finds the gate open wraps and commits.  Rounds
+# after the wrap click record list text (no-op), and their Done lands on
+# the disabled Level Up button (xp 21000 < 28000, no-op).  A druid never
+# sees popup 56 (FEATCLAS all 0) or any spell popup.  Export from the
+# record: Export (314,373), popup 13 name edit (397,283, pre-filled ->
+# 8x BACK clears it), Done (467,465); writes into Characters\
 # (CInfGame::CharacterExport, src/CInfGame.cpp:3049).
 
 wait 60
@@ -220,19 +225,21 @@ key 1
 wait 10
 checkpoint selected
 # ONE xp grant: fresh console box (nothing to clear), 21000 = the level-7
-# threshold in XPLEVEL.2DA.
+# threshold in XPLEVEL.2DA.  The console stays open after RETURN, so close
+# it before the walk (key R must reach the world screen, not the box).
 key CTRL+TAB
 wait 10
 type CTRLALTDELETE:SETCURRENTXP(21000)
 key RETURN
 wait 60
 checkpoint dr_xp
-# Level-up walk: Level Up -> druid row -> 54 Done (grants every level
-# the xp buys) -> 8 rounds of [+ row1, + row2, Done] to drain popup 7
-# (the one 4th-level ability point) and popup 55 (up to 12 points) ->
-# automatic commit -> ESC -> verify world.
 key CTRL+TAB
 wait 10
+# Committing walk: Level Up -> druid row -> 54 Done (grants all six
+# levels) -> popup 7's ability point -> three spray rounds over popup
+# 55 (all eight + rows, Done each round) so the gate opens and the
+# chain WRAPS (commit) -> ESC only after the wrap -> world checkpoint
+# that must read level 7.
 key R
 wait 60
 checkpoint dr_w1_record
@@ -247,10 +254,22 @@ wait 15
 click 477 130
 wait 15
 click 722 394
-wait 20
+wait 30
 click 477 93
 wait 15
 click 477 130
+wait 15
+click 477 167
+wait 15
+click 477 204
+wait 15
+click 477 241
+wait 15
+click 477 278
+wait 15
+click 477 315
+wait 15
+click 477 352
 wait 15
 click 722 394
 wait 20
@@ -258,23 +277,17 @@ click 477 93
 wait 15
 click 477 130
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 167
 wait 15
-click 477 130
+click 477 204
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 241
 wait 15
-click 477 130
+click 477 278
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 315
 wait 15
-click 477 130
+click 477 352
 wait 15
 click 722 394
 wait 20
@@ -282,11 +295,17 @@ click 477 93
 wait 15
 click 477 130
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 167
 wait 15
-click 477 130
+click 477 204
+wait 15
+click 477 241
+wait 15
+click 477 278
+wait 15
+click 477 315
+wait 15
+click 477 352
 wait 15
 click 722 394
 wait 20
@@ -296,12 +315,11 @@ shot dr_w1_leveled
 key ESCAPE
 wait 90
 checkpoint dr_w1_world
-# Level-up walk: Level Up -> druid row -> 54 Done (grants every level
-# the xp buys) -> 8 rounds of [+ row1, + row2, Done] to drain popup 7
-# (the one 4th-level ability point) and popup 55 (up to 12 points) ->
-# automatic commit -> ESC -> verify world.
-key CTRL+TAB
-wait 10
+# Committing walk: Level Up -> druid row -> 54 Done (grants all six
+# levels) -> popup 7's ability point -> three spray rounds over popup
+# 55 (all eight + rows, Done each round) so the gate opens and the
+# chain WRAPS (commit) -> ESC only after the wrap -> world checkpoint
+# that must read level 7.
 key R
 wait 60
 checkpoint dr_w2_record
@@ -316,10 +334,22 @@ wait 15
 click 477 130
 wait 15
 click 722 394
-wait 20
+wait 30
 click 477 93
 wait 15
 click 477 130
+wait 15
+click 477 167
+wait 15
+click 477 204
+wait 15
+click 477 241
+wait 15
+click 477 278
+wait 15
+click 477 315
+wait 15
+click 477 352
 wait 15
 click 722 394
 wait 20
@@ -327,23 +357,17 @@ click 477 93
 wait 15
 click 477 130
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 167
 wait 15
-click 477 130
+click 477 204
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 241
 wait 15
-click 477 130
+click 477 278
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 315
 wait 15
-click 477 130
+click 477 352
 wait 15
 click 722 394
 wait 20
@@ -351,11 +375,17 @@ click 477 93
 wait 15
 click 477 130
 wait 15
-click 722 394
-wait 20
-click 477 93
+click 477 167
 wait 15
-click 477 130
+click 477 204
+wait 15
+click 477 241
+wait 15
+click 477 278
+wait 15
+click 477 315
+wait 15
+click 477 352
 wait 15
 click 722 394
 wait 20
@@ -365,95 +395,38 @@ shot dr_w2_leveled
 key ESCAPE
 wait 90
 checkpoint dr_w2_world
-# Level-up walk: Level Up -> druid row -> 54 Done (grants every level
-# the xp buys) -> 8 rounds of [+ row1, + row2, Done] to drain popup 7
-# (the one 4th-level ability point) and popup 55 (up to 12 points) ->
-# automatic commit -> ESC -> verify world.
-key CTRL+TAB
-wait 10
-key R
-wait 60
-checkpoint dr_w3_record
-click 713 391
-wait 30
-click 369 187
-wait 10
-click 722 394
-wait 30
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-click 477 93
-wait 15
-click 477 130
-wait 15
-click 722 394
-wait 20
-wait 60
-checkpoint dr_w3_leveled
-shot dr_w3_leveled
-key ESCAPE
-wait 90
-checkpoint dr_w3_world
-# Verify the level on a fresh record open before exporting.
-key CTRL+TAB
-wait 10
+# Verify on a fresh record open, then export.
 key R
 wait 60
 checkpoint dr_level_check
-key ESCAPE
-wait 90
-checkpoint dr_world_final
-# Export from the record: Export (314,373), popup 13 name edit (397,283),
-# type the FRESH name, Done (467,465); writes RYSDRD7B.CHR into
-# Characters\ (no existing file, so no collision rename).
-key R
-wait 60
+# Export from the record: Export (314,373) -> popup 13.  The name edit
+# (397,283) PRE-FILLS with the character's name (launch 4 typed after the
+# fill and still exported RYSDRD7, collision-renamed); clear it (8x BACK
+# for the 7-char fill), type Rysdrd7C, Done (467,465).  Writes
+# RYSDRD7C.CHR into Characters\; a lost focus falls back to the fill
+# (RYSDRD7 -> RYSDRD02) — the content, not the name, is the gate.
 click 314 373
 wait 30
 checkpoint export_popup
 click 397 283
 wait 30
-type Rysdrd7B
+key BACK
+wait 3
+key BACK
+wait 3
+key BACK
+wait 3
+key BACK
+wait 3
+key BACK
+wait 3
+key BACK
+wait 3
+key BACK
+wait 3
+key BACK
+wait 3
+type Rysdrd7C
 wait 15
 click 467 465
 wait 90
