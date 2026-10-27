@@ -557,7 +557,6 @@ public:
     BOOL sub_7202E0();
     BOOL sub_727720(const CResRef& resRef, BYTE& nClass, DWORD& nSpecialization, BYTE& nLevel);
     BOOL sub_71CFF0();
-    void sub_737990();
     int sub_75E930(int a1);
     void sub_71CEA0(CItem* pItem, int a2);
     void sub_71CC90();
