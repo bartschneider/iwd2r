@@ -3216,6 +3216,304 @@ class OracleVanillaTest(unittest.TestCase):
         self.assertEqual(self.verify(), [])
 
 
+class OracleVanillaGogTest(unittest.TestCase):
+    """tools/oracle.py vanilla-gog: the vanilla copy from GOG's installers,
+    on macOS or Linux."""
+
+    PKG_INI = ('[Alias]\r\n'
+               'HD0:=C:\\GOG Games\\Icewind Dale II\r\n'
+               'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\r\n'
+               'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\r\n'
+               '[Program Options]\r\n'
+               'Resolution=1366\r\n'
+               'Volume Music=100\r\n'
+               'Path Search Nodes=32000\r\n')
+    EXE_INI = ('[Alias]\r\n'
+               'HD0:=D:\\Program Files\\Black Isle\\Icewind Dale II\r\n'
+               'CD1:=D:\\Program Files\\Black Isle\\Icewind Dale II\\Data\\'
+               '\r\n'
+               'CD2:=D:\\Program Files\\Black Isle\\Icewind Dale II\\CD2\\;'
+               'G:\\CD2\\\r\n'
+               '\r\n'
+               '[Program Options]\r\n'
+               'Resolution=800\r\n'
+               'Path Search Nodes=400000\r\n')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = os.path.realpath(self.tmp.name)
+        self.game = os.path.join(self.base, 'game')
+
+    def write(self, root, rel, data):
+        path = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(data)
+
+    def installer(self, name, magic):
+        path = os.path.join(self.base, name)
+        with open(path, 'wb') as f:
+            f.write(magic + b' installer')
+        return path
+
+    def make_pkg(self, exe=VANILLA_BYTES):
+        """The expanded .pkg tree pkgutil leaves: package.pkg/Scripts/..."""
+        root = os.path.join(self.base, 'pkg-tree', 'package.pkg', 'Scripts')
+        files = {'CHITIN.KEY': b'KEY V1  ',
+                 'IWD2.exe': exe,
+                 'icewind2.ini': self.PKG_INI.encode(),
+                 'Keymap.ini': b'[Keymap]\r\n',
+                 'Party.ini': b'[Party]\r\n',
+                 'binkw32.dll': b'MZ bink',
+                 'dialog.tlk': b'TLK',
+                 'Data/AR1000.bif': b'BIFF',
+                 'CD2/Data/AR2000.bif': b'BIFF',
+                 'Override/a.itm': b'ITM',
+                 'cache/data/AR1000.bif': b'cache',
+                 'temp/default.toh': b'',
+                 'tempsave/x.txt': b'x',
+                 'unins000.dat': b'uninstall',
+                 'goggame.dll': b'dll',
+                 'GameuxInstallHelper.dll': b'dll',
+                 'gog.ico': b'ico',
+                 'gfw_high.ico': b'ico'}
+        for rel, data in files.items():
+            self.write(os.path.join(root, *oracle.PKG_GAME), rel, data)
+        return root
+
+    def make_exe(self):
+        """An innoextract tree: the game at the root, its exe and INIs in
+        __support/app."""
+        root = os.path.join(self.base, 'exe-tree')
+        files = {'CHITIN.KEY': b'KEY V1  ',
+                 'binkw32.dll': b'MZ bink',
+                 'dialog.tlk': b'TLK',
+                 'Config.exe': b'MZ',
+                 'Language.ini': b'[Language]\r\n',
+                 'Patch.txt': b'2.01',
+                 'README.htm': b'<html>',
+                 'manual.pdf': b'%PDF',
+                 'webcache.zip': b'PK',
+                 'Data/AR1000.bif': b'BIFF',
+                 'CD2/Data/AR2000.bif': b'BIFF',
+                 'Override/a.itm': b'ITM',
+                 'goggame-1207658891.hashdb': b'h',
+                 'goggame-1207658891.info': b'i',
+                 'goggame-1207658891.script': b's',
+                 'app/goggame-1207658891.ico': b'ico',
+                 'app/webcache.zip': b'PK',
+                 '__support/app/IWD2.exe': VANILLA_BYTES,
+                 '__support/app/icewind2.ini': self.EXE_INI.encode(),
+                 '__support/app/Keymap.ini': b'[Keymap]\r\n',
+                 '__support/app/Party.ini': b'[Party]\r\n',
+                 '__support/app/setup-ddrawfix.exe': b'MZ',
+                 '__redist/dxsetup.exe': b'MZ',
+                 'commonappdata/GOG.com/uninstall.dll': b'dll',
+                 'tmp/x': b'x',
+                 'temp/default.tot': b''}
+        for rel, data in files.items():
+            self.write(root, rel, data)
+        return root
+
+    def copy_into(self, source):
+        """A stand-in for pkg_expand / inno_extract: workdir gets source."""
+        def run(installer, workdir):
+            shutil.copytree(source, workdir, dirs_exist_ok=True)
+            return workdir
+        return run
+
+    def build(self, installer, extract, pkg):
+        with mock.patch.object(oracle, 'pkg_expand' if pkg else 'inno_extract',
+                               extract), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return oracle.build_gog(self.game, installer,
+                                    md5=VANILLA_TEST_MD5)
+
+    def read(self, rel):
+        with open(os.path.join(self.game, rel), 'rb') as f:
+            return f.read()
+
+    def ini_lines(self):
+        return self.read('icewind2.ini').decode().split('\r\n')
+
+    def assert_vanilla_copy(self, installer):
+        self.assertEqual(oracle.verify_vanilla(self.game,
+                                               VANILLA_TEST_MD5), [])
+        self.assertTrue(oracle.marker_ok(self.game, VANILLA_TEST_MD5))
+        marker = json.loads(self.read(oracle.MARKER))
+        self.assertEqual(marker['md5'], VANILLA_TEST_MD5)
+        self.assertEqual(marker['installer'], os.path.basename(installer))
+        with open(installer, 'rb') as f:
+            self.assertEqual(marker['sha256'],
+                             hashlib.sha256(f.read()).hexdigest())
+        self.assertIn('built', marker)
+        lines = self.ini_lines()
+        start = lines.index('[Alias]') + 1
+        self.assertEqual(lines[start:start + 3], [
+            key + '=' + value for key, value in oracle.GOG_ALIASES])
+        self.assertIn('Resolution=800', lines)
+        # The engine's own folders and the installer's files are gone.
+        for rel in ('cache', 'temp', 'tempsave', 'unins000.dat', 'goggame.dll',
+                    'GameuxInstallHelper.dll', 'gog.ico', 'gfw_high.ico',
+                    '__redist', '__support', 'app', 'commonappdata', 'tmp',
+                    'goggame-1207658891.info', 'manual.pdf', 'webcache.zip'):
+            self.assertFalse(os.path.exists(os.path.join(self.game, rel)), rel)
+
+    def test_pkg_build(self):
+        self.make_pkg()
+        installer = self.installer('gog.pkg', b'xar!')
+        self.assertEqual(self.build(installer, self.copy_into(
+            os.path.join(self.base, 'pkg-tree')), pkg=True), self.game)
+        self.assert_vanilla_copy(installer)
+        self.assertEqual(self.read('iwd2.exe'), VANILLA_BYTES)
+        self.assertNotIn('IWD2.exe', os.listdir(self.game))
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+        self.assertEqual(self.read('CD2/Data/AR2000.bif'), b'BIFF')
+        self.assertEqual(self.read('Override/a.itm'), b'ITM')
+        self.assertEqual(self.read('Keymap.ini'), b'[Keymap]\r\n')
+        # Only the [Alias] paths and Resolution change.
+        self.assertIn('Path Search Nodes=32000', self.ini_lines())
+        self.assertIn('Volume Music=100', self.ini_lines())
+
+    def test_exe_build(self):
+        self.make_exe()
+        installer = self.installer('setup.exe', b'MZ')
+        self.assertEqual(self.build(installer, self.copy_into(
+            os.path.join(self.base, 'exe-tree')), pkg=False), self.game)
+        self.assert_vanilla_copy(installer)
+        self.assertEqual(self.read('iwd2.exe'), VANILLA_BYTES)
+        self.assertNotIn('IWD2.exe', os.listdir(self.game))
+        self.assertEqual(self.read('Keymap.ini'), b'[Keymap]\r\n')
+        self.assertEqual(self.read('Party.ini'), b'[Party]\r\n')
+        self.assertEqual(self.read('Patch.txt'), b'2.01')
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+
+    def test_gog_ini_sets_missing_keys(self):
+        text = ('[Alias]\r\n'
+                'HD0:=D:\\old\r\n'
+                'CD1:=D:\\old\\data\\\r\n'
+                'CD2:=D:\\old\\CD2\\\r\n'
+                '[Program Options]\r\n'
+                'Resolution=1024\r\n')
+        self.assertEqual(oracle.gog_ini(text), (
+            '[Alias]\r\n'
+            'HD0:=C:\\GOG Games\\Icewind Dale II\\\r\n'
+            'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\r\n'
+            'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\r\n'
+            '[Program Options]\r\n'
+            'Resolution=800\r\n'))
+        # Keys that are missing are added below [Alias]; LF text stays LF.
+        text = '[Alias]\nHD0:=x\n[Program Options]\nResolution=1366\n'
+        self.assertEqual(oracle.gog_ini(text), (
+            '[Alias]\n'
+            'HD0:=C:\\GOG Games\\Icewind Dale II\\\n'
+            'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\n'
+            'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\n'
+            '[Program Options]\n'
+            'Resolution=800\n'))
+        with self.assertRaises(ValueError):
+            oracle.gog_ini('[Program Options]\nResolution=800\n')
+
+    def test_pkg_game_finds_both_expansions(self):
+        expected = os.path.join(*oracle.PKG_GAME)
+        pkgutil = os.path.join(self.base, 'a', 'package.pkg', 'Scripts',
+                               expected)
+        xar = os.path.join(self.base, 'b', expected)
+        for game in (pkgutil, xar):
+            os.makedirs(game, exist_ok=True)
+            with open(os.path.join(game, 'CHITIN.KEY'), 'wb') as f:
+                f.write(b'KEY')
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'a')),
+                         pkgutil)
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'b')), xar)
+        # A .pkg that unpacks somewhere else still finds its game folder.
+        other = os.path.join(self.base, 'c', 'Wineskin', 'game')
+        os.makedirs(other)
+        with open(os.path.join(other, 'CHITIN.KEY'), 'wb') as f:
+            f.write(b'KEY')
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'c')), other)
+        self.assertIsNone(oracle.pkg_game(os.path.join(self.base, 'd')))
+
+    def test_wrong_exe_md5_is_refused(self):
+        self.make_pkg(exe=b'MZ patched by IWD2EE')
+        installer = self.installer('gog.pkg', b'xar!')
+        with self.assertRaises(SystemExit) as e:
+            self.build(installer, self.copy_into(
+                os.path.join(self.base, 'pkg-tree')), pkg=True)
+        self.assertIn('not the vanilla', str(e.exception))
+        self.assertFalse(os.path.exists(self.game))
+
+    def test_missing_innoextract_says_how_to_install_it(self):
+        installer = self.installer('setup.exe', b'MZ')
+        with mock.patch.object(oracle.shutil, 'which', lambda name: None):
+            with self.assertRaises(SystemExit) as e:
+                oracle.inno_extract(installer, self.base)
+        self.assertIn('brew install innoextract', str(e.exception))
+        self.assertIn('apt install innoextract', str(e.exception))
+
+    def test_missing_pkg_tool_says_how_to_install_it(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        with mock.patch.object(oracle.shutil, 'which', lambda name: None):
+            with self.assertRaises(SystemExit) as e:
+                oracle.pkg_expand(installer, os.path.join(self.base, 'x'))
+        self.assertIn('brew install xar cpio', str(e.exception))
+        self.assertIn('apt install xar cpio', str(e.exception))
+
+    def test_a_file_that_is_not_an_installer_is_refused(self):
+        installer = self.installer('readme.txt', b'hello')
+        with mock.patch.object(oracle.shutil, 'which',
+                               lambda name: '/usr/bin/' + name):
+            with self.assertRaises(SystemExit) as e:
+                oracle.build_gog(self.game, installer, md5=VANILLA_TEST_MD5)
+        self.assertIn('neither a GOG .pkg', str(e.exception))
+        self.assertFalse(os.path.exists(self.game))
+
+    def test_refuses_to_replace_a_folder_that_is_not_a_game(self):
+        os.makedirs(self.game)
+        with open(os.path.join(self.game, 'notes.txt'), 'w') as f:
+            f.write('mine')
+        with self.assertRaises(SystemExit) as e:
+            oracle.build_gog(self.game, self.installer('gog.pkg', b'xar!'),
+                             md5=VANILLA_TEST_MD5)
+        self.assertIn('not a game copy', str(e.exception))
+        self.assertEqual(os.listdir(self.game), ['notes.txt'])
+
+    def test_default_game_is_the_linux_copy(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        home = os.path.join(self.base, 'home')
+        calls = []
+        with mock.patch.dict(os.environ, {'IWD2R_HOME': home}), \
+                mock.patch.object(oracle, 'build_gog',
+                                  lambda game, inst: calls.append(game)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(oracle.main(['vanilla-gog', installer]), 0)
+        self.assertEqual(calls, [os.path.join(home, 'game')])
+
+    def test_a_marked_copy_is_not_built_again(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        os.makedirs(self.game)
+        oracle.write_marker(self.game, {'md5': oracle.vanilla_md5()})
+        calls = []
+        with mock.patch.object(oracle, 'build_gog',
+                               lambda game, inst: calls.append(game)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                oracle.main(['vanilla-gog', installer, '--game', self.game])
+                oracle.main(['vanilla-gog', installer, '--game', self.game,
+                             '--rebuild'])
+        self.assertEqual(calls, [self.game])
+
+    def test_a_rebuilt_copy_drops_stale_files(self):
+        self.make_pkg()
+        installer = self.installer('gog.pkg', b'xar!')
+        extract = self.copy_into(os.path.join(self.base, 'pkg-tree'))
+        self.build(installer, extract, pkg=True)
+        self.write(self.game, 'stale.txt', b'old')
+        self.build(installer, extract, pkg=True)
+        self.assertFalse(os.path.exists(os.path.join(self.game, 'stale.txt')))
+        self.assert_vanilla_copy(installer)
+
+
 class OracleMirrorTest(unittest.TestCase):
     """tools/oracle.py linux_mirror: our side's copy of the vanilla install
     on the Linux disk."""

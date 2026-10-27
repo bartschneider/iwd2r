@@ -96,6 +96,17 @@ Options are flags, never INI edits: `--windowed` (default) or `--fullscreen`, `-
 
 The game data is a vanilla copy by default, because the project verifies against vanilla first: Linux runs read `${IWD2R_HOME:-~/.local/share/iwd2r}/game` (as `tools/gates.sh` does), and Windows runs (the host build and `--vm windows`) read `%USERPROFILE%\iwd2r-oracle\game` (`$IWD2R_WIN_HOME/iwd2r-oracle/game` from WSL, default `/mnt/c/Users/<your user>`; see `tools/winhome.py`), the verified copy that `python3 tools/oracle.py vanilla` builds and marks with `vanilla.ok`. Make the Linux copy from it with `rsync -a --exclude temp --exclude cache --exclude tempsave --exclude mpsave --exclude ScrnShot /mnt/c/Users/<you>/iwd2r-oracle/game/ ~/.local/share/iwd2r/game/`. When the copy is missing, `play.py` stops and says how to make it. Your own install (for example one with IWD2EE) is never the default: point a run at it with `--data PATH` or `IWD2_DATA`, which take precedence.
 
+#### Building the copy from GOG's installers
+
+Without a Windows install, macOS and Linux build the same copy straight from GOG's installers:
+
+```
+python3 tools/oracle.py vanilla-gog ~/Downloads/icewind_dale_2_complete_en_v2_01_16618.pkg
+python3 tools/oracle.py vanilla-gog "$HOME/Downloads/setup_icewind_dale_2_2.01_fixes_(77030).exe"
+```
+
+The `.pkg` needs macOS's `pkgutil`, or `xar`, `gzip` and `cpio`; the Windows installer needs `innoextract` (`brew install innoextract`, `apt install innoextract`) with its `-1.bin` beside it. It writes `${IWD2R_HOME:-~/.local/share/iwd2r}/game` (`--game DIR` for another folder, `--rebuild` to replace the copy), leaves out the installer's redistributables, support files, caches and GOG extras, names the exe `iwd2.exe`, points `icewind2.ini`'s `[Alias]` paths at GOG's install path (the engine re-roots every drive path into the data root, `platform/fs.cpp`) with `Resolution=800`, and writes `vanilla.ok` only after the checks `oracle.py vanilla` makes pass, naming the installer and its SHA-256.
+
 #### Desktop runs
 
 A run that would open a window on your desktop (`--windowed`, `--fullscreen`, or a Linux run with a display) refuses unless `IWD2R_DESKTOP_OK=1` is set. Automated runs use `--headless`, `--vm linux` or `--vm windows` instead, so an agent's run never steals focus from you. To play yourself:
