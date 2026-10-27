@@ -109,7 +109,7 @@ CGameAnimationTypeMonsterIcewindNew::CGameAnimationTypeMonsterIcewindNew(USHORT 
         m_rEllipse.top = -18;
         m_rEllipse.right = 24;
         m_rEllipse.bottom = 18;
-        m_pSndDeath = "FAL_03B";
+        m_pSndDeath = "FAL_01B";
         m_personalSpace = 3;
         break;
     case 0x300:
@@ -124,7 +124,7 @@ CGameAnimationTypeMonsterIcewindNew::CGameAnimationTypeMonsterIcewindNew(USHORT 
         m_rEllipse.top = -36;
         m_rEllipse.right = 48;
         m_rEllipse.bottom = 36;
-        m_pSndDeath = "FAL_03B";
+        m_pSndDeath = "FAL_01B";
         m_personalSpace = 3;
         m_colorChunks = -1;
         break;
@@ -188,7 +188,7 @@ CGameAnimationTypeMonsterIcewindNew::CGameAnimationTypeMonsterIcewindNew(USHORT 
         m_rEllipse.top = -12;
         m_rEllipse.right = 16;
         m_rEllipse.bottom = 12;
-        m_pSndDeath = "FAL_03B";
+        m_pSndDeath = "FAL_01B";
         m_personalSpace = 3;
         m_colorChunks = -1;
 
