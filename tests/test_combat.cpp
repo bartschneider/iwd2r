@@ -177,24 +177,20 @@ private:
     std::thread m_thread;
 };
 
-std::vector<BYTE> FinishedCharacter()
+// The CRE of the named pregenerated character (Characters/<name>.chr), as
+// tests/test_spellbook_screen.cpp does. The fixture names it because the
+// first file in an install's Characters folder is whatever that install
+// holds (a played one collects exported characters), and these tests pin
+// hit points.
+std::vector<BYTE> NamedCharacter(const std::string& name)
 {
-    std::vector<fs::path> files;
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(Child(g_view, "Characters"), ec)) {
-        if (Lower(entry.path().extension().string()) == ".chr")
-            files.push_back(entry.path());
-    }
-    std::sort(files.begin(), files.end());
-    for (const fs::path& file : files) {
-        std::ifstream in(file, std::ios::binary);
-        const std::string chr((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
-            const uint32_t offset = Le32(chr, 0x28);
-            const uint32_t size = Le32(chr, 0x2C);
-            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
-                return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
-        }
+    std::ifstream in(Child(Child(g_view, "Characters"), name + ".chr"), std::ios::binary);
+    const std::string chr((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
+        const uint32_t offset = Le32(chr, 0x28);
+        const uint32_t size = Le32(chr, 0x2C);
+        if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
+            return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
     }
     return std::vector<BYTE>();
 }
@@ -327,9 +323,9 @@ bool SetUpFight(Fight& fight, std::string& why)
         why = error;
         return false;
     }
-    std::vector<BYTE> cre = FinishedCharacter();
+    std::vector<BYTE> cre = NamedCharacter("wrchar3");
     if (cre.empty()) {
-        why = "no CHR V2.2 file in the Characters folder";
+        why = "Characters/wrchar3.chr not found or not CHR V2.2";
         return false;
     }
     // The engine seeds rand() from the clock (`srand(time)` in
