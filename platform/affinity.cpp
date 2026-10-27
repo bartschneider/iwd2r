@@ -10,7 +10,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#else
+#elif !defined(__APPLE__)
 #include <sched.h>
 #include <sys/types.h>
 
@@ -28,6 +28,10 @@ bool SetNativeProcessAffinity(uint64_t mask)
         return false;
 #ifdef _WIN32
     return ::SetProcessAffinityMask(::GetCurrentProcess(), static_cast<DWORD_PTR>(mask)) != 0;
+#elif defined(__APPLE__)
+    // macOS has no binding affinity API (Apple Silicon ignores even the
+    // THREAD_AFFINITY_POLICY hint), so the mask is accepted and not applied.
+    return true;
 #else
     cpu_set_t set;
     CPU_ZERO(&set);

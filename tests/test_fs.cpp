@@ -28,16 +28,35 @@ bool EndsWith(const std::string& s, const std::string& suffix)
     return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-// Resolved paths keep the on-disk case on case-sensitive filesystems. On
-// Windows the filesystem is case-insensitive and the resolver keeps the
-// spelling it was given, so only the letters are compared there.
+// Whether the temp directory's filesystem tells "A" from "a". Windows and
+// macOS (APFS by default) do not.
+bool TempIsCaseInsensitive()
+{
+    static const bool insensitive = [] {
+        const stdfs::path probe = stdfs::temp_directory_path() / ("iwd2r_fs_case_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::ofstream(probe, std::ios::binary) << "x";
+        std::string upper = probe.filename().string();
+        for (char& c : upper)
+            if (c >= 'a' && c <= 'z')
+                c = static_cast<char>(c - 'a' + 'A');
+        std::error_code ec;
+        const bool result = stdfs::exists(probe.parent_path() / upper, ec);
+        stdfs::remove(probe, ec);
+        return result;
+    }();
+    return insensitive;
+}
+
+// Resolved paths keep the on-disk case on case-sensitive filesystems. On a
+// case-insensitive one the resolver keeps the spelling it was given, so only
+// the letters are compared there.
 std::string CaseKey(std::string s)
 {
-#ifdef _WIN32
-    for (char& c : s)
-        if (c >= 'A' && c <= 'Z')
-            c = static_cast<char>(c - 'A' + 'a');
-#endif
+    if (TempIsCaseInsensitive()) {
+        for (char& c : s)
+            if (c >= 'A' && c <= 'Z')
+                c = static_cast<char>(c - 'A' + 'a');
+    }
     return s;
 }
 
@@ -354,7 +373,7 @@ TEST_CASE("fs drive stubs and module path", "[fs]")
     CHECK(GetVolumeInformationA("C:\\", nullptr, 0, nullptr, nullptr, nullptr, nullptr, 0) == FALSE);
     char buffer[1024];
     const DWORD n = GetModuleFileNameA(nullptr, buffer, sizeof(buffer));
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
     CHECK(n > 0);
     CHECK(n == std::string(buffer).size());
 #else

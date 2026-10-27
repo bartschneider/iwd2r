@@ -20,6 +20,14 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+
+#include <cstdint>
+#include <cstdlib>
+#include <vector>
+#endif
+
 extern char** environ;
 #endif
 
@@ -345,11 +353,23 @@ Result Run(const std::string& exe, int timeoutMs, const std::vector<std::string>
 
 std::string SelfExe()
 {
+#ifdef __APPLE__
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> path(size + 1, '\0');
+    if (size == 0 || _NSGetExecutablePath(path.data(), &size) != 0)
+        return std::string();
+    char resolved[PATH_MAX];
+    if (!realpath(path.data(), resolved))
+        return std::string(path.data());
+    return std::string(resolved);
+#else
     char buffer[4096];
     const ssize_t n = readlink("/proc/self/exe", buffer, sizeof(buffer));
     if (n <= 0 || static_cast<size_t>(n) >= sizeof(buffer))
         return std::string();
     return std::string(buffer, static_cast<size_t>(n));
+#endif
 }
 
 #endif
