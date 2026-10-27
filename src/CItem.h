@@ -40,6 +40,7 @@ public:
     BYTE sub_4E9250(CString& sAnimation, CGameSprite* pSprite);
     ITEM_ABILITY* GetAbility(INT nAbility);
     CGameEffect* GetAbilityEffect(LONG abilityNum, LONG effectNum, CGameObject* pObject);
+    INT GetMaxEffectSpellLevel();
     WORD GetItemType();
     SHORT sub_4E9840(const ITEM_ABILITY* ability);
     DWORD GetCriticalHitMultiplier();
