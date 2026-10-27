@@ -209,7 +209,7 @@ BOOLEAN CGameSpriteSpellList::Find(const UINT& nID, UINT& nIndex)
     // NOTE: The index is 0-based: the original increments it only on a
     // mismatch (0x725e93 `incl (%esi)`; the match branch returns without
     // incrementing). Our earlier `nIndex++` on the match made every
-    // Find-based update (sub_725C50, sub_725CC0) write one entry to the
+    // Find-based update (0x725C50, 0x725CC0) write one entry to the
     // right and read past the end on the last entry.
     nIndex = 0;
 
