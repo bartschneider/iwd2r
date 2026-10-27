@@ -25021,6 +25021,15 @@ class ReStatusTest(unittest.TestCase):
         self.assertLess(gates.index('step "subsystem map"'),
                         gates.index('step "recovery status"'))
 
+    def test_gate_runs_the_shader_check_whether_the_file_is_executable(self):
+        # tools/shaders.py is committed 0644, so an `[ -x ]` guard skipped the
+        # step that CI runs unconditionally; the guard's intent was existence.
+        with open(os.path.join(ROOT, 'tools', 'gates.sh')) as f:
+            gates = f.read()
+        self.assertIn('[ -f tools/shaders.py ] && step "shader blobs" '
+                      'python3 -I tools/shaders.py --check', gates)
+        self.assertNotIn('-x tools/shaders.py', gates)
+
 
 class ImportSecondSourceTest(unittest.TestCase):
     """Task 16: `next --queue import` draws stubs first, then the base-body
