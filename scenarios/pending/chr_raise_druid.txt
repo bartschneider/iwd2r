@@ -315,11 +315,9 @@ shot dr_w1_leveled
 key ESCAPE
 wait 90
 checkpoint dr_w1_world
-# Committing walk: Level Up -> druid row -> 54 Done (grants all six
-# levels) -> popup 7's ability point -> three spray rounds over popup
-# 55 (all eight + rows, Done each round) so the gate opens and the
-# chain WRAPS (commit) -> ESC only after the wrap -> world checkpoint
-# that must read level 7.
+# Second walk block: after walk 1 commits, Level Up is disabled (xp 21000
+# is below level 8's 28000), so every click below no-ops; it stays as a
+# guard. The raise is walk 1's alone (README: "one level-up walk").
 key R
 wait 60
 checkpoint dr_w2_record
