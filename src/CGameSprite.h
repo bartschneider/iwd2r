@@ -561,7 +561,6 @@ public:
     int sub_75E930(int a1);
     void sub_71CEA0(CItem* pItem, int a2);
     void sub_71CC90();
-    void sub_71C0C0();
     SHORT Formation(CGameSprite* pTarget);
     SHORT Follow();
     SHORT UseContainer();
