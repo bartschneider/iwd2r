@@ -28,11 +28,7 @@
 0x5004D0 CMessageFireProjectile::MarshalMessage
 0x504070 CMessageRemoveItem::MarshalMessage
 0x50A4D0 CMessageSetVariable::MarshalMessage
-0x50A6C0 CMessageSetVariable::UnmarshalMessage
-0x511D00 CMessageProjectileTrailingVFX::MarshalMessage
-0x511F40 CMessageProjectileTrailingVFX::UnmarshalMessage
 0x515010 CMessageProjectileImmumityUpdate::MarshalMessage
-0x515180 CMessageProjectileImmumityUpdate::UnmarshalMessage
 0x5154E0 CMessage105::MarshalMessage
 0x515670 CMessage105::UnmarshalMessage
 0x516910 CMessage117::MarshalMessage
