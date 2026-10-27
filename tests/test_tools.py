@@ -25376,7 +25376,7 @@ class ImportSecondSourceTest(unittest.TestCase):
 
 
 class ChrFixtureTest(unittest.TestCase):
-    """scenarios/chr/RYSDRD01.CHR — the Task 49 console-raised druid export.
+    """scenarios/chr/RYSDRD7C.CHR — the Task 49 console-raised druid 7 export.
 
     Run 20261027-010318 raised the chargen druid with one
     CTRLALTDELETE:SETCURRENTXP(21000) and one level-up walk; its `exported`
@@ -25390,23 +25390,22 @@ class ChrFixtureTest(unittest.TestCase):
     (src/CInfGame.cpp:3049, src/CGameSprite.cpp:7928).
     """
 
-    def test_chargen_druid_export(self):
-        with open(os.path.join(ROOT, 'scenarios', 'chr', 'RYSDRD01.CHR'),
+    def test_raised_druid_export(self):
+        with open(os.path.join(ROOT, 'scenarios', 'chr', 'RYSDRD7C.CHR'),
                   'rb') as f:
             d = f.read()
-        self.assertEqual(len(d), 2982)
+        self.assertEqual(len(d), 3606)
         self.assertEqual(d[:8], b'CHR V2.2')
         self.assertEqual(d[8:40].split(b'\0')[0], b'Rysdrd7')
-        self.assertEqual(struct.unpack_from('<I', d, 0x23C)[0], 0)  # xp
-        self.assertEqual(struct.unpack_from('<hh', d, 0x248), (8, 8))  # hp
-        self.assertEqual(d[0x2AE], 1)  # characterLevel
-        self.assertEqual(d[0x2AF + 3], 1)  # classLevels[druid]
-        # STR INT WIS DEX CON CHA — the chargen rolls (WIS raised twice)
+        self.assertEqual(struct.unpack_from('<I', d, 0x23C)[0], 21000)  # xp
+        self.assertEqual(struct.unpack_from('<hh', d, 0x248), (56, 56))  # hp
+        self.assertEqual(d[0x2AE], 7)  # characterLevel
+        self.assertEqual(d[0x2AF + 3], 7)  # classLevels[druid]
+        # STR INT WIS DEX CON CHA: STR raised once at the level-4 abilities step
         self.assertEqual([d[0x48A + i] for i in range(6)],
-                         [10, 10, 12, 12, 8, 10])
-        # the two chargen skill spends: 4 ranks each
+                         [11, 10, 12, 12, 8, 10])
         self.assertEqual({i: v for i, v in enumerate(d[0x43C:0x43C + 64])
-                          if v}, {1: 4, 3: 4})
+                          if v}, {0: 1, 1: 5, 2: 1, 3: 5, 4: 1, 5: 1, 6: 1})
 
 
 if __name__ == '__main__':
