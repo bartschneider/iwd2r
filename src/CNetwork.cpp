@@ -1881,7 +1881,7 @@ BOOLEAN CNetwork::HandleSystemMessage(BYTE* pData, DWORD dwSize)
             // would suggest.
             sPlayerName = *reinterpret_cast<char**>(pData + 0x20);
             if (AddPlayerToList(dpId, sPlayerName, FALSE, FALSE) == TRUE) {
-                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sJoinedGame);
+                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sJoinedGame);  // re-lint: disable RE001 RE003 (exe is ANSI; Ghidra recovers the narrow bytes)
                 sText.SetAt(0, sText.GetLength() - 1);
 
                 BYTE* pMessage = CreateCopyMessage(sText,
@@ -1910,7 +1910,7 @@ BOOLEAN CNetwork::HandleSystemMessage(BYTE* pData, DWORD dwSize)
             // would suggest.
             sPlayerName = *reinterpret_cast<char**>(pData + 0x24);
             if (RemovePlayerFromList(dpId, FALSE) == TRUE) {
-                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sDroppedGame);
+                sText.Format(" %s: %s", (LPCSTR)sPlayerName, (LPCSTR)m_sDroppedGame);  // re-lint: disable RE001 RE003 (exe is ANSI; Ghidra recovers the narrow bytes)
                 sText.SetAt(0, sText.GetLength() - 1);
 
                 BYTE* pMessage = CreateCopyMessage(sText,

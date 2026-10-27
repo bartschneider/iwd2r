@@ -24409,7 +24409,7 @@ SHORT CGameSprite::RemoveTraps(CGameAIBase* pTarget)
 
     int skill = static_cast<char>(m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_DISABLE_DEVICE]);
     int roll = rand() % 20 + 1;
-    int skillModifier = sub_763E40(CGAMESPRITE_SKILL_DISABLE_DEVICE);
+    int skillModifier = sub_763E40(CGAMESPRITE_SKILL_DISABLE_DEVICE);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
     int check = roll + skill;
 
     if (pTarget->GetObjectType() == TYPE_DOOR
@@ -25112,7 +25112,7 @@ BOOLEAN CGameSprite::CanSaveGame(STRREF& strError)
 }
 
 // 0x75E930
-int CGameSprite::sub_75E930(int a1)
+int CGameSprite::sub_75E930(int a1)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     // The shipped binary stubs this fighting-style feat query to zero
     // (xor eax, eax; ret 4), which disables the style-bonus branches above.

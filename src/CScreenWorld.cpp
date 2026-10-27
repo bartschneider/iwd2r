@@ -3254,7 +3254,7 @@ void CScreenWorld::ConfigureContainer()
     // globals and that argument-taking call are unmapped, so the panel swap is
     // left unrecovered.
 
-    sub_695570(FALSE, FALSE);
+    sub_695570(FALSE, FALSE);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
 
