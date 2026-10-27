@@ -48,7 +48,11 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
        Imported-From: WillScarlettOhara/iwd2-re@<40-char sha> (MIT per author, 2026-10-17)
 
    The sha is the full 40 characters of {{fork_base}}. A commit with none of
-   his code has no trailer.
+   his code has no trailer. When the function you import (a row or a
+   dependency) has a line in `tools/ghidra/extra_labels.txt` (names for exe
+   functions src/ does not define yet), delete that line and its comment in
+   the same commit: once src/ defines the function the label must go, or
+   `test_committed_extra_labels_parse_and_are_not_ours` fails.
 3. **The body must compile under the platform's toolchain.** Adopt his logic,
    not his build assumptions; fix what does not compile on our side and say
    so in the commit message.
@@ -134,6 +138,16 @@ Each bundle carries the function's decompile and its callers' decompiles; objdum
    out as a function. Confirm each asm red against the decompile or
    disassembly before keeping the body, or waive it in the evidence file with
    `parity_waiver: "<reason>"`.
+   **Offsets reds** read `binary calls, source never does: <member>.<method>
+   (member 0xNN ...)`: the exe calls a method on that member and your body
+   never does. Read the decompile at that call. If the body performs the
+   same work inline (a CPoint, CString or CResRef copy, an inlined accessor),
+   waive the column by naming it first, `parity_waiver: "offsets: <member>.
+   <method> is <what>, done inline at <file:line>"` (`offsets asm: ...`
+   waives both). If the exe makes a real game call the body lacks, add the
+   call as the decompile has it. If neither fits your budget, park the row
+   with `needs` `"parity offsets red: <member>.<method>"`. Never leave an
+   offsets red for the fix round to find.
 8. **Never push, never write through a remote.** From a batch worktree,
    `git push` is wrong, and so is any `git fetch <remote>` with a refspec that
    writes a branch. The coordinator merges and pushes.
