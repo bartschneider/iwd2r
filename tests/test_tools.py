@@ -25375,5 +25375,39 @@ class ImportSecondSourceTest(unittest.TestCase):
                       _slurp(report))
 
 
+class ChrFixtureTest(unittest.TestCase):
+    """scenarios/chr/RYSDRD01.CHR — the Task 49 console-raised druid export.
+
+    Run 20261027-010318 raised the chargen druid with one
+    CTRLALTDELETE:SETCURRENTXP(21000) and one level-up walk; its `exported`
+    checkpoint shows the character live at level 7 in the frame the export
+    ran, but `world_end` (one ESC later) reads level 1 again: the raise
+    never committed to m_baseStats, which is what CGameSprite::Marshal
+    memcpy's into the CRE.  The fixture therefore pins chargen content, and
+    the test asserts exactly that, so a future fixture that does carry the
+    raised level updates it deliberately (scenarios/chr/README.md has the
+    findings).  Offsets: CHR = 0x224-byte header + CRE, baseStats at CRE+8
+    (src/CInfGame.cpp:3049, src/CGameSprite.cpp:7928).
+    """
+
+    def test_chargen_druid_export(self):
+        with open(os.path.join(ROOT, 'scenarios', 'chr', 'RYSDRD01.CHR'),
+                  'rb') as f:
+            d = f.read()
+        self.assertEqual(len(d), 2982)
+        self.assertEqual(d[:8], b'CHR V2.2')
+        self.assertEqual(d[8:40].split(b'\0')[0], b'Rysdrd7')
+        self.assertEqual(struct.unpack_from('<I', d, 0x23C)[0], 0)  # xp
+        self.assertEqual(struct.unpack_from('<hh', d, 0x248), (8, 8))  # hp
+        self.assertEqual(d[0x2AE], 1)  # characterLevel
+        self.assertEqual(d[0x2AF + 3], 1)  # classLevels[druid]
+        # STR INT WIS DEX CON CHA — the chargen rolls (WIS raised twice)
+        self.assertEqual([d[0x48A + i] for i in range(6)],
+                         [10, 10, 12, 12, 8, 10])
+        # the two chargen skill spends: 4 ranks each
+        self.assertEqual({i: v for i, v in enumerate(d[0x43C:0x43C + 64])
+                          if v}, {1: 4, 3: 4})
+
+
 if __name__ == '__main__':
     unittest.main()
