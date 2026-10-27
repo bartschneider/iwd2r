@@ -1287,9 +1287,10 @@ PKG_GAME = ('payload', 'Contents', 'Resources', 'game', 'Icewind Dale 2.app',
             'Contents', 'Resources', 'drive_c', 'GOG Games',
             'Icewind Dale II')
 # The install path the copy's [Alias] paths name. Any drive path is mapped
-# into the data root (platform/fs.cpp ResolveLocked), and CAlias appends ';'
-# to a value that does not end in a backslash, so each one does. It must not
-# be INSTALL_WIN: verify_vanilla refuses an INI that names the real install.
+# into the data root (platform/fs.cpp ResolveLocked), and each value ends in a
+# backslash as the oracle's copy does (the port's CAlias::ParseRawData needs it
+# until 0x781800's separator is fixed). It must not be INSTALL_WIN:
+# verify_vanilla refuses an INI that names the real install.
 GOG_INSTALL = 'C:\\GOG Games\\Icewind Dale II'
 GOG_ALIASES = (('HD0:', GOG_INSTALL + '\\'),
                ('CD1:', GOG_INSTALL + '\\data\\'),
