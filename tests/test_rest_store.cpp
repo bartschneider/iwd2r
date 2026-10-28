@@ -357,6 +357,55 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     pArea->m_header.m_flags = flags;
 }
 
+TEST_CASE("rest: CanRestParty refuses while a party member has Mold Touch or Shroud of Flame", "[rest][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(2);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = party[0]->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // AR1000's header forbids resting; take that out so that only the spell
+    // states can refuse it.
+    const DWORD flags = pArea->m_header.m_flags;
+    pArea->m_header.m_flags = flags & ~0x2;
+
+    STRREF strError = -1;
+    REQUIRE(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
+    REQUIRE(strError == 15358);
+
+    // CGameObjectArray 0x5C9300: SPLSTATE_MOLD_TOUCH on any sprite refuses
+    // the rest: "You may not rest at this time."
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, true);
+    strError = -1;
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
+    CHECK(strError == 10309);
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, false);
+
+    // The same for SPLSTATE_SHROUD_OF_FLAME.
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, true);
+    strError = -1;
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
+    CHECK(strError == 10309);
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, false);
+
+    // Cleared: the normal answer.
+    strError = -1;
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
+    CHECK(strError == 15358);
+
+    pArea->m_header.m_flags = flags;
+}
+
 TEST_CASE("rest: RestParty passes the rest time and queues the heal, the Rest action and the rest trigger", "[rest][data]")
 {
     if (DataDir() == nullptr) {
