@@ -1165,7 +1165,7 @@ TEST_CASE("rest: a rest encounter interrupts the rest with its rolled delay and 
     CAreaFileRestEncounter& rest = pArea->m_headerRestEncounter;
     INFO("AR1000's own encounter: activated " << rest.m_activated
                                               << ", chance " << rest.m_probDay << "/" << rest.m_probNight);
-    std::memset(&rest, 0, sizeof(rest));
+    rest = CAreaFileRestEncounter();
     rest.m_activated = 1;
     rest.m_probDay = 100;
     rest.m_probNight = 100;
