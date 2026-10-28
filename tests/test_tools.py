@@ -21,6 +21,7 @@ import importlib.util
 import io
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -41,6 +42,31 @@ import zlib
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN_MAP = os.path.join(ROOT, 'tools', 'gen_map.py')
 SHADERS_TOOL = os.path.join(ROOT, 'tools', 'shaders.py')
+
+# macOS's $TMPDIR is /var/folders/..., a symlink to /private/var/...: git and
+# os.path.realpath report the resolved form while tempfile hands out the
+# other, so a test's own path never equals the one a tool prints back.  Build
+# every temp tree under the resolved root instead (on Linux the temp root
+# already resolves to itself).
+tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
+
+
+def temp_is_case_sensitive():
+    """True when the temp directory tells `a.md` from `A.md`: APFS and NTFS
+    fold the case, so the two are one file there."""
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, 'a.md'), 'w').close()
+        return not os.path.exists(os.path.join(d, 'A.md'))
+
+
+CASE_SENSITIVE_TEMP = temp_is_case_sensitive()
+
+NO_CASE_SENSITIVE_TEMP = ('the temp directory folds file-name case (APFS, '
+                          'NTFS); this test needs a case-sensitive one')
+NO_WSLPATH = ('no WSL: wslpath is missing, so host paths cannot be mapped '
+              'into the sandbox')
+NO_FLOCK = ('needs util-linux flock; tools/gates.sh refuses to run without '
+            'the gate lock')
 
 
 class GenMapTest(unittest.TestCase):
@@ -131,6 +157,7 @@ truth = load_tool('truth')
 triage = load_tool('triage')
 driver = load_tool('driver')
 coverage = load_tool('coverage')
+shaders = load_tool('shaders')
 
 
 def load_ghidra_tool(name):
@@ -273,7 +300,21 @@ class ShadersTest(unittest.TestCase):
         return subprocess.run([sys.executable, '-I', SHADERS_TOOL, '--check', *args],
                               capture_output=True, text=True)
 
+    def require_pinned_glslang(self):
+        """The pinned glslangValidator ships for linux-x86_64 and
+        windows-x86_64 only; anything else needs one on PATH at that
+        version, as tools/shaders.py itself demands."""
+        pin = shaders.pinned()
+        on_path = shutil.which('glslangValidator')
+        if (on_path and shaders.reports_version(on_path, pin['version'])) \
+                or shaders.host_key() in pin:
+            return
+        self.skipTest('no pinned glslang for %s %s; install glslang %s as '
+                      'glslangValidator on PATH'
+                      % (sys.platform, platform.machine(), pin['version']))
+
     def test_shaders_check_detects_stale_blob(self):
+        self.require_pinned_glslang()
         real = self.run_check()
         self.assertEqual(real.returncode, 0, real.stdout + real.stderr)
         src = os.path.join(ROOT, 'platform', 'shaders')
@@ -298,6 +339,7 @@ class ShadersTest(unittest.TestCase):
             self.assertIn('sharp.frag.spv is missing', missing.stdout)
 
     def test_shaders_check_covers_new_blobs(self):
+        self.require_pinned_glslang()
         src = os.path.join(ROOT, 'platform', 'shaders')
         new = ('fsr_easu.frag', 'fsr_rcas.frag', 'nis.frag')
         for name in new:
@@ -1773,6 +1815,17 @@ class LabelsTest(unittest.TestCase):
                           '0x401090 CResWED_Construct\r\n')
         self.assertEqual(labels.ieex(path), [(0x401090, 'CResWED_Construct')])
 
+    def test_ieex_missing_file_is_no_names_and_says_where(self):
+        # IEex is optional: no database is no IEex names, not a crash. One
+        # stderr line names the path so the summary's `ieex 0 of 0` is honest.
+        path = os.path.join(self.dir, 'function_names.db')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(labels.ieex(path), [])
+        lines = err.getvalue().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn(path, lines[0])
+
     def test_extra_reads_names_and_skips_comments(self):
         path = self.write('extra_labels.txt',
                           '# how 0x547020 was identified\n'
@@ -2975,6 +3028,39 @@ INI = ('[Alias]\r\n'
        'Last Resolution=1366x768\r\n')
 
 
+class OracleVanillaExeHomeTest(unittest.TestCase):
+    """tools/oracle.py: the vanilla exe and the Linux mirror follow
+    IWD2R_HOME like the rest of the tools."""
+
+    def environ_without_home(self):
+        return {k: v for k, v in os.environ.items() if k != 'IWD2R_HOME'}
+
+    def load(self):
+        """oracle.py loaded again, so its paths come from this environment."""
+        return load_tool('oracle')
+
+    def test_iwd2r_home_moves_the_exe_and_the_mirror(self):
+        home = os.path.join(tempfile.gettempdir(), 'iwd2r-home')
+        environ = self.environ_without_home()
+        environ['IWD2R_HOME'] = home
+        with mock.patch.dict(os.environ, environ, clear=True):
+            loaded = self.load()
+        self.assertEqual(loaded.VANILLA_EXE,
+                         os.path.join(home, 'vanilla', 'iwd2.exe'))
+        self.assertEqual(loaded.MIRROR_DIR,
+                         os.path.join(home, 'vanilla-mirror'))
+
+    def test_the_default_is_the_documented_home(self):
+        default = os.path.expanduser('~/.local/share/iwd2r')
+        with mock.patch.dict(os.environ, self.environ_without_home(),
+                             clear=True):
+            loaded = self.load()
+        self.assertEqual(loaded.VANILLA_EXE,
+                         os.path.join(default, 'vanilla', 'iwd2.exe'))
+        self.assertEqual(loaded.MIRROR_DIR,
+                         os.path.join(default, 'vanilla-mirror'))
+
+
 class OracleVanillaTest(unittest.TestCase):
     """tools/oracle.py vanilla: the checks on the vanilla copy."""
 
@@ -3214,6 +3300,292 @@ class OracleVanillaTest(unittest.TestCase):
         with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
             f.write('{}')
         self.assertEqual(self.verify(), [])
+
+
+class OracleVanillaGogTest(unittest.TestCase):
+    """tools/oracle.py vanilla-gog: the vanilla copy from GOG's installers,
+    on macOS or Linux."""
+
+    PKG_INI = ('[Alias]\r\n'
+               'HD0:=C:\\GOG Games\\Icewind Dale II\r\n'
+               'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\r\n'
+               'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\r\n'
+               '[Program Options]\r\n'
+               'Resolution=1366\r\n'
+               'Volume Music=100\r\n'
+               'Path Search Nodes=32000\r\n')
+    EXE_INI = ('[Alias]\r\n'
+               'HD0:=D:\\Program Files\\Black Isle\\Icewind Dale II\r\n'
+               'CD1:=D:\\Program Files\\Black Isle\\Icewind Dale II\\Data\\'
+               '\r\n'
+               'CD2:=D:\\Program Files\\Black Isle\\Icewind Dale II\\CD2\\;'
+               'G:\\CD2\\\r\n'
+               '\r\n'
+               '[Program Options]\r\n'
+               'Resolution=800\r\n'
+               'Path Search Nodes=400000\r\n')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = os.path.realpath(self.tmp.name)
+        self.game = os.path.join(self.base, 'game')
+
+    def write(self, root, rel, data):
+        _write(os.path.join(root, rel), data, 'wb')
+
+    def installer(self, name, magic):
+        path = os.path.join(self.base, name)
+        _write(path, magic + b' installer', 'wb')
+        return path
+
+    def make_pkg(self, exe=VANILLA_BYTES):
+        """The expanded .pkg tree pkgutil leaves: package.pkg/Scripts/..."""
+        root = os.path.join(self.base, 'pkg-tree', 'package.pkg', 'Scripts')
+        files = {'CHITIN.KEY': b'KEY V1  ',
+                 'IWD2.exe': exe,
+                 'icewind2.ini': self.PKG_INI.encode(),
+                 'Keymap.ini': b'[Keymap]\r\n',
+                 'Party.ini': b'[Party]\r\n',
+                 'binkw32.dll': b'MZ bink',
+                 'dialog.tlk': b'TLK',
+                 'Data/AR1000.bif': b'BIFF',
+                 'CD2/Data/AR2000.bif': b'BIFF',
+                 'Override/a.itm': b'ITM',
+                 'cache/data/AR1000.bif': b'cache',
+                 'temp/default.toh': b'',
+                 'tempsave/x.txt': b'x',
+                 'unins000.dat': b'uninstall',
+                 'goggame.dll': b'dll',
+                 'GameuxInstallHelper.dll': b'dll',
+                 'gog.ico': b'ico',
+                 'gfw_high.ico': b'ico'}
+        for rel, data in files.items():
+            self.write(os.path.join(root, *oracle.PKG_GAME), rel, data)
+        return root
+
+    def make_exe(self):
+        """An innoextract tree: the game at the root, its exe and INIs in
+        __support/app."""
+        root = os.path.join(self.base, 'exe-tree')
+        files = {'CHITIN.KEY': b'KEY V1  ',
+                 'binkw32.dll': b'MZ bink',
+                 'dialog.tlk': b'TLK',
+                 'Config.exe': b'MZ',
+                 'Language.ini': b'[Language]\r\n',
+                 'Patch.txt': b'2.01',
+                 'README.htm': b'<html>',
+                 'manual.pdf': b'%PDF',
+                 'webcache.zip': b'PK',
+                 'Data/AR1000.bif': b'BIFF',
+                 'CD2/Data/AR2000.bif': b'BIFF',
+                 'Override/a.itm': b'ITM',
+                 'goggame-1207658891.hashdb': b'h',
+                 'goggame-1207658891.info': b'i',
+                 'goggame-1207658891.script': b's',
+                 'app/goggame-1207658891.ico': b'ico',
+                 'app/webcache.zip': b'PK',
+                 '__support/app/IWD2.exe': VANILLA_BYTES,
+                 '__support/app/icewind2.ini': self.EXE_INI.encode(),
+                 '__support/app/Keymap.ini': b'[Keymap]\r\n',
+                 '__support/app/Party.ini': b'[Party]\r\n',
+                 '__support/app/setup-ddrawfix.exe': b'MZ',
+                 '__redist/dxsetup.exe': b'MZ',
+                 'commonappdata/GOG.com/uninstall.dll': b'dll',
+                 'tmp/x': b'x',
+                 'temp/default.tot': b''}
+        for rel, data in files.items():
+            self.write(root, rel, data)
+        return root
+
+    def copy_into(self, source):
+        """A stand-in for pkg_expand / inno_extract: workdir gets source."""
+        def run(installer, workdir):
+            shutil.copytree(source, workdir, dirs_exist_ok=True)
+            return workdir
+        return run
+
+    def build(self, installer, extract, pkg):
+        with mock.patch.object(oracle, 'pkg_expand' if pkg else 'inno_extract',
+                               extract), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return oracle.build_gog(self.game, installer,
+                                    md5=VANILLA_TEST_MD5)
+
+    def read(self, rel):
+        return _slurp(os.path.join(self.game, rel), 'rb')
+
+    def ini_lines(self):
+        return self.read('icewind2.ini').decode().split('\r\n')
+
+    def assert_vanilla_copy(self, installer):
+        self.assertEqual(oracle.verify_vanilla(self.game,
+                                               VANILLA_TEST_MD5), [])
+        self.assertTrue(oracle.marker_ok(self.game, VANILLA_TEST_MD5))
+        marker = json.loads(self.read(oracle.MARKER))
+        self.assertEqual(marker['md5'], VANILLA_TEST_MD5)
+        self.assertEqual(marker['installer'], os.path.basename(installer))
+        self.assertEqual(marker['sha256'],
+                         hashlib.sha256(_slurp(installer, 'rb')).hexdigest())
+        self.assertIn('built', marker)
+        lines = self.ini_lines()
+        start = lines.index('[Alias]') + 1
+        self.assertEqual(lines[start:start + 3], [
+            key + '=' + value for key, value in oracle.GOG_ALIASES])
+        self.assertIn('Resolution=800', lines)
+        # The engine's own folders and the installer's files are gone.
+        for rel in ('cache', 'temp', 'tempsave', 'unins000.dat', 'goggame.dll',
+                    'GameuxInstallHelper.dll', 'gog.ico', 'gfw_high.ico',
+                    '__redist', '__support', 'app', 'commonappdata', 'tmp',
+                    'goggame-1207658891.info', 'manual.pdf', 'webcache.zip'):
+            self.assertFalse(os.path.exists(os.path.join(self.game, rel)), rel)
+
+    def test_pkg_build(self):
+        self.make_pkg()
+        installer = self.installer('gog.pkg', b'xar!')
+        self.assertEqual(self.build(installer, self.copy_into(
+            os.path.join(self.base, 'pkg-tree')), pkg=True), self.game)
+        self.assert_vanilla_copy(installer)
+        self.assertEqual(self.read('iwd2.exe'), VANILLA_BYTES)
+        self.assertNotIn('IWD2.exe', os.listdir(self.game))
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+        self.assertEqual(self.read('CD2/Data/AR2000.bif'), b'BIFF')
+        self.assertEqual(self.read('Override/a.itm'), b'ITM')
+        self.assertEqual(self.read('Keymap.ini'), b'[Keymap]\r\n')
+        # Only the [Alias] paths and Resolution change.
+        self.assertIn('Path Search Nodes=32000', self.ini_lines())
+        self.assertIn('Volume Music=100', self.ini_lines())
+
+    def test_exe_build(self):
+        self.make_exe()
+        installer = self.installer('setup.exe', b'MZ')
+        self.assertEqual(self.build(installer, self.copy_into(
+            os.path.join(self.base, 'exe-tree')), pkg=False), self.game)
+        self.assert_vanilla_copy(installer)
+        self.assertEqual(self.read('iwd2.exe'), VANILLA_BYTES)
+        self.assertNotIn('IWD2.exe', os.listdir(self.game))
+        self.assertEqual(self.read('Keymap.ini'), b'[Keymap]\r\n')
+        self.assertEqual(self.read('Party.ini'), b'[Party]\r\n')
+        self.assertEqual(self.read('Patch.txt'), b'2.01')
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+
+    def test_gog_ini_sets_missing_keys(self):
+        text = ('[Alias]\r\n'
+                'HD0:=D:\\old\r\n'
+                'CD1:=D:\\old\\data\\\r\n'
+                'CD2:=D:\\old\\CD2\\\r\n'
+                '[Program Options]\r\n'
+                'Resolution=1024\r\n')
+        self.assertEqual(oracle.gog_ini(text), (
+            '[Alias]\r\n'
+            'HD0:=C:\\GOG Games\\Icewind Dale II\\\r\n'
+            'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\r\n'
+            'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\r\n'
+            '[Program Options]\r\n'
+            'Resolution=800\r\n'))
+        # Keys that are missing are added below [Alias]; LF text stays LF.
+        text = '[Alias]\nHD0:=x\n[Program Options]\nResolution=1366\n'
+        self.assertEqual(oracle.gog_ini(text), (
+            '[Alias]\n'
+            'HD0:=C:\\GOG Games\\Icewind Dale II\\\n'
+            'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\n'
+            'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\n'
+            '[Program Options]\n'
+            'Resolution=800\n'))
+        with self.assertRaises(ValueError):
+            oracle.gog_ini('[Program Options]\nResolution=800\n')
+
+    def test_pkg_game_finds_both_expansions(self):
+        expected = os.path.join(*oracle.PKG_GAME)
+        pkgutil = os.path.join(self.base, 'a', 'package.pkg', 'Scripts',
+                               expected)
+        xar = os.path.join(self.base, 'b', expected)
+        for game in (pkgutil, xar):
+            _write(os.path.join(game, 'CHITIN.KEY'), b'KEY', 'wb')
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'a')),
+                         pkgutil)
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'b')), xar)
+        # A .pkg that unpacks somewhere else still finds its game folder.
+        other = os.path.join(self.base, 'c', 'Wineskin', 'game')
+        _write(os.path.join(other, 'CHITIN.KEY'), b'KEY', 'wb')
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'c')), other)
+        self.assertIsNone(oracle.pkg_game(os.path.join(self.base, 'd')))
+
+    def test_wrong_exe_md5_is_refused(self):
+        self.make_pkg(exe=b'MZ patched by IWD2EE')
+        installer = self.installer('gog.pkg', b'xar!')
+        with self.assertRaises(SystemExit) as e:
+            self.build(installer, self.copy_into(
+                os.path.join(self.base, 'pkg-tree')), pkg=True)
+        self.assertIn('not the vanilla', str(e.exception))
+        self.assertFalse(os.path.exists(self.game))
+
+    def test_missing_innoextract_says_how_to_install_it(self):
+        installer = self.installer('setup.exe', b'MZ')
+        with mock.patch.object(oracle.shutil, 'which', lambda name: None):
+            with self.assertRaises(SystemExit) as e:
+                oracle.inno_extract(installer, self.base)
+        self.assertIn('brew install innoextract', str(e.exception))
+        self.assertIn('apt install innoextract', str(e.exception))
+
+    def test_missing_pkg_tool_says_how_to_install_it(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        with mock.patch.object(oracle.shutil, 'which', lambda name: None):
+            with self.assertRaises(SystemExit) as e:
+                oracle.pkg_expand(installer, os.path.join(self.base, 'x'))
+        self.assertIn('brew install xar cpio', str(e.exception))
+        self.assertIn('apt install xar cpio', str(e.exception))
+
+    def test_a_file_that_is_not_an_installer_is_refused(self):
+        installer = self.installer('readme.txt', b'hello')
+        with mock.patch.object(oracle.shutil, 'which',
+                               lambda name: '/usr/bin/' + name):
+            with self.assertRaises(SystemExit) as e:
+                oracle.build_gog(self.game, installer, md5=VANILLA_TEST_MD5)
+        self.assertIn('neither a GOG .pkg', str(e.exception))
+        self.assertFalse(os.path.exists(self.game))
+
+    def test_refuses_to_replace_a_folder_that_is_not_a_game(self):
+        _write(os.path.join(self.game, 'notes.txt'), 'mine')
+        with self.assertRaises(SystemExit) as e:
+            oracle.build_gog(self.game, self.installer('gog.pkg', b'xar!'),
+                             md5=VANILLA_TEST_MD5)
+        self.assertIn('not a game copy', str(e.exception))
+        self.assertEqual(os.listdir(self.game), ['notes.txt'])
+
+    def test_default_game_is_the_linux_copy(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        home = os.path.join(self.base, 'home')
+        calls = []
+        with mock.patch.dict(os.environ, {'IWD2R_HOME': home}), \
+                mock.patch.object(oracle, 'build_gog',
+                                  lambda game, inst: calls.append(game)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(oracle.main(['vanilla-gog', installer]), 0)
+        self.assertEqual(calls, [os.path.join(home, 'game')])
+
+    def test_a_marked_copy_is_not_built_again(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        os.makedirs(self.game)
+        oracle.write_marker(self.game, {'md5': oracle.vanilla_md5()})
+        calls = []
+        with mock.patch.object(oracle, 'build_gog',
+                               lambda game, inst: calls.append(game)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                oracle.main(['vanilla-gog', installer, '--game', self.game])
+                oracle.main(['vanilla-gog', installer, '--game', self.game,
+                             '--rebuild'])
+        self.assertEqual(calls, [self.game])
+
+    def test_a_rebuilt_copy_drops_stale_files(self):
+        self.make_pkg()
+        installer = self.installer('gog.pkg', b'xar!')
+        extract = self.copy_into(os.path.join(self.base, 'pkg-tree'))
+        self.build(installer, extract, pkg=True)
+        self.write(self.game, 'stale.txt', b'old')
+        self.build(installer, extract, pkg=True)
+        self.assertFalse(os.path.exists(os.path.join(self.game, 'stale.txt')))
+        self.assert_vanilla_copy(installer)
 
 
 class OracleMirrorTest(unittest.TestCase):
@@ -6801,6 +7173,49 @@ class GhidraCloneTest(unittest.TestCase):
         self.assertEqual(self.read(clone, 'iwd2.gpr'), 'gpr')
 
 
+class GhidraJdkTest(unittest.TestCase):
+    """make_project.jdk_path: JAVA_HOME, the Debian path, then java on PATH."""
+
+    def setUp(self):
+        self.mp = load_ghidra_tool('make_project')
+
+    def jdk_from(self, java_home, dirs, which):
+        env = {k: v for k, v in os.environ.items() if k != 'JAVA_HOME'}
+        if java_home is not None:
+            env['JAVA_HOME'] = java_home
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(self.mp.os.path, 'isdir',
+                                  lambda p: p in dirs), \
+                mock.patch.object(self.mp.shutil, 'which', lambda name: which):
+            return self.mp.jdk_path()
+
+    def test_java_home_wins(self):
+        self.assertEqual(self.jdk_from('/opt/jdk-21',
+                                       {'/opt/jdk-21',
+                                        self.mp.DEBIAN_JDK},
+                                       '/usr/lib/jvm/java-21-openjdk/bin/java'),
+                         '/opt/jdk-21')
+
+    def test_the_debian_path_is_next(self):
+        self.assertEqual(self.jdk_from(None, {self.mp.DEBIAN_JDK},
+                                       '/usr/bin/java'),
+                         self.mp.DEBIAN_JDK)
+
+    def test_java_on_path_is_the_last_resort(self):
+        self.assertEqual(self.jdk_from(
+            None, set(), '/usr/lib/jvm/java-21-openjdk/bin/java'),
+            '/usr/lib/jvm/java-21-openjdk')
+
+    def test_a_java_home_that_is_not_a_directory_is_skipped(self):
+        self.assertEqual(self.jdk_from(
+            '/opt/gone', set(), '/usr/lib/jvm/java-21-openjdk/bin/java'),
+            '/usr/lib/jvm/java-21-openjdk')
+
+    def test_no_java_anywhere_keeps_the_debian_path(self):
+        self.assertEqual(self.jdk_from(None, set(), None),
+                         self.mp.DEBIAN_JDK)
+
+
 class MakeDllProjectTest(unittest.TestCase):
     """make_dll_project: one analysed Ghidra project per DLL under
     ghidra-projects/<name>, imported under make_project's lock."""
@@ -7224,6 +7639,8 @@ class ProbePlanTest(unittest.TestCase):
             'C:\\Users\\thier\\iwd2r-vm\\replays\\s\\tools')
 
     def test_mapped_host_paths_are_windows_paths(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         for target in ('original', 'ours'):
             for host, box, _ro in self.plan(target):
                 self.assertFalse(host.startswith('/'), (target, host, box))
@@ -7490,6 +7907,8 @@ class FridaProbeTest(unittest.TestCase):
                                   out, probe_json, 1, 0, dry)
 
     def test_original_driver_shutdown_is_off(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         with tempfile.TemporaryDirectory() as d:
             host_run = os.path.join(d, 'run')
             self.stage(host_run)
@@ -7536,6 +7955,8 @@ class FridaProbeTest(unittest.TestCase):
         return calls
 
     def test_original_host_waits_for_result_before_close(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         calls = self.run_live('original')
         self.assertEqual([c if isinstance(c, str) else c[0] for c in calls],
                          ['start', 'wait_done', 'host_wait', 'close'])
@@ -7796,6 +8217,9 @@ class ParityTest(unittest.TestCase):
                        + '---\n\n## Notes\n')
 
         parity_run = load_parity_tool('run')
+        if not os.path.isfile(parity_run.oracle.VANILLA_EXE):
+            self.skipTest('no vanilla exe at %s: structural parity skips the '
+                          'asm check' % parity_run.oracle.VANILLA_EXE)
         evidence(None)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -7923,9 +8347,9 @@ _DECOMP = '''int CGameSprite::Render(int nFrame)
 '''
 
 
-def _write(path, text):
+def _write(path, text, mode='w'):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, mode) as f:
         f.write(text)
 
 
@@ -14696,6 +15120,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._head_subject(), tip)
 
     def test_driver_check_renames_lower_case_and_mixed_case_in_one_commit(self):
+        if not CASE_SENSITIVE_TEMP:
+            self.skipTest(NO_CASE_SENSITIVE_TEMP)
         d, batch = self._kept_without_evidence_at_the_merge_base()
         self.git('mv', 'docs/evidence/404000.md', 'docs/evidence/0X404000.MD', cwd=self.wt)
         self._add_kept_row(d, '0x40ABCD', '0x40abcd.md')
@@ -14776,6 +15202,8 @@ class DriverTest(unittest.TestCase):
         self.assertIn('?? docs/stray.txt', st)
 
     def test_driver_check_three_evidence_files_wording(self):
+        if not CASE_SENSITIVE_TEMP:
+            self.skipTest(NO_CASE_SENSITIVE_TEMP)
         d, batch = self._kept_without_evidence_at_the_merge_base()
         _write(os.path.join(self.wt, 'docs', 'evidence', '0x404000.md'), self.T_EVIDENCE)
         _write(os.path.join(self.wt, 'docs', 'evidence', '0X404000.md'), self.T_EVIDENCE)
@@ -23901,6 +24329,8 @@ class ClaimsTest(unittest.TestCase):
         self.assert_full(self.run_gate(root, '--base', 'no-such-rev'), 'no-such-rev')
 
     def test_gate_lock_serializes(self):
+        if not shutil.which('flock'):
+            self.skipTest(NO_FLOCK)
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
         fd = self.hold_lock(root)
@@ -23926,6 +24356,8 @@ class ClaimsTest(unittest.TestCase):
         self.assertEqual(b.returncode, 0, err)
 
     def test_gate_lock_not_inherited_by_children(self):
+        if not shutil.which('flock'):
+            self.skipTest(NO_FLOCK)
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
         holder = subprocess.Popen(['bash', gates, '--dry-lock', '30'],
@@ -25020,6 +25452,15 @@ class ReStatusTest(unittest.TestCase):
         self.assertIn('step "recovery status" python3 -I tools/re_status.py --check', gates)
         self.assertLess(gates.index('step "subsystem map"'),
                         gates.index('step "recovery status"'))
+
+    def test_gate_runs_the_shader_check_whether_the_file_is_executable(self):
+        # tools/shaders.py is committed 0644, so an `[ -x ]` guard skipped the
+        # step that CI runs unconditionally; the guard's intent was existence.
+        with open(os.path.join(ROOT, 'tools', 'gates.sh')) as f:
+            gates = f.read()
+        self.assertIn('[ -f tools/shaders.py ] && step "shader blobs" '
+                      'python3 -I tools/shaders.py --check', gates)
+        self.assertNotIn('-x tools/shaders.py', gates)
 
 
 class ImportSecondSourceTest(unittest.TestCase):

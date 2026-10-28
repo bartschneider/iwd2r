@@ -30,6 +30,11 @@ set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 # libXtst is only used for synthetic input; do not require its dev package.
 set(SDL_X11_XTEST OFF CACHE BOOL "" FORCE)
+if(APPLE)
+    # macOS has no EGL: with GLES on, SDL's offscreen driver makes every
+    # window an EGL one and SDL_CreateWindow fails.
+    set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
+endif()
 FetchContent_Declare(SDL3
     GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
     GIT_TAG release-3.4.18

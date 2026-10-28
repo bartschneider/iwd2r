@@ -6,18 +6,30 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="${IWD2R_HOME:-$HOME/.local/share/iwd2r}"
 versions="$here/versions.json"
-jdk=/usr/lib/jvm/java-21-openjdk-amd64
 
 die() { echo "setup.sh: $*" >&2; exit 1; }
 field() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d[sys.argv[2]][sys.argv[3]])' "$versions" "$1" "$2"; }
 
-# Java 21 (installed with apt; this script has no sudo).
+# Java 21 (this script has no sudo).
 if ! java -version 2>&1 | head -1 | grep -q '"21\.'; then
   echo "Java 21 is required. Install it with:" >&2
-  echo "  sudo apt-get install -y openjdk-21-jdk-headless unzip" >&2
+  echo "  install Java 21 and unzip (e.g. apt-get install -y openjdk-21-jdk-headless unzip)" >&2
   exit 1
 fi
-command -v unzip >/dev/null || { echo "unzip missing. Run: sudo apt-get install -y openjdk-21-jdk-headless unzip" >&2; exit 1; }
+command -v unzip >/dev/null || { echo "unzip missing. Install it (e.g. apt-get install -y openjdk-21-jdk-headless unzip)" >&2; exit 1; }
+
+# The JDK a Ghidra run exports as JAVA_HOME: $JAVA_HOME when it is a
+# directory, else the Debian apt path when that exists, else the java on PATH
+# (two levels above bin/java). Distros disagree on the path; only printed here.
+if [ -n "${JAVA_HOME:-}" ] && [ -d "$JAVA_HOME" ]; then
+  jdk=$JAVA_HOME
+elif [ -d /usr/lib/jvm/java-21-openjdk-amd64 ]; then
+  jdk=/usr/lib/jvm/java-21-openjdk-amd64
+else
+  jdk=$(python3 -I -c 'import os, shutil
+p = shutil.which("java")
+print(os.path.dirname(os.path.dirname(os.path.realpath(p))) if p else "")')
+fi
 
 g_url=$(field ghidra url); g_sha=$(field ghidra sha256); g_tag=$(field ghidra tag)
 n_url=$(field node url);   n_sha=$(field node sha256);   n_ver=$(field node version)
