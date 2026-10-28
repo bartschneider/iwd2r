@@ -2954,7 +2954,8 @@ BOOL CGameArea::CheckRestEncounter()
 }
 
 // 0x470960
-void CGameArea::ClearMarshal(){
+void CGameArea::ClearMarshal()
+{
     LONG iObject;
     CGameObject* pObject;
     BYTE rc;
