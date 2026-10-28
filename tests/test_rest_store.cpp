@@ -249,6 +249,29 @@ private:
     BOOL m_saved;
 };
 
+// How many objects the area's lists hold, the waiting-to-be-added ones
+// included (as tests/test_gam.cpp counts them).
+int ObjectsInArea(CGameArea* pArea)
+{
+    int count = 0;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight,
+        &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        count += static_cast<int>(list->GetCount());
+    }
+    return count;
+}
+
+// Drops the messages waiting in the global handler, so a test can count the
+// ones its own call adds (the pattern tests/test_ai.cpp uses).
+void ClearMessages()
+{
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    while (!handler.m_messageList.IsEmpty()) {
+        delete handler.m_messageList.RemoveHead();
+    }
+}
+
 BOOL HasQueuedAction(CGameSprite* pSprite, SHORT actionID)
 {
     if (pSprite->m_curAction.m_actionID == actionID) {
@@ -422,6 +445,10 @@ TEST_CASE("rest: RestParty passes the rest time and queues the heal, the Rest ac
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
 
+    // AR1000's own rest encounter (activated, a 10% chance an hour) would
+    // interrupt the rest this test measures.
+    party[0]->GetArea()->m_headerRestEncounter.m_activated = 0;
+
     HealOnRestGuard guard(FALSE);
 
     for (CGameSprite* pSprite : party) {
@@ -473,6 +500,10 @@ TEST_CASE("rest: with healing on rest the clock runs by the party's wounds and t
     }
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
+
+    // AR1000's own rest encounter (activated, a 10% chance an hour) would
+    // interrupt the rest this test measures.
+    party[0]->GetArea()->m_headerRestEncounter.m_activated = 0;
 
     HealOnRestGuard guard(TRUE);
 
@@ -1106,4 +1137,169 @@ TEST_CASE("store: InvalidateStore cuts the temp copy of a store to an empty STOO
     CStore after(CResRef("11DEIRD"));
     CHECK(std::memcmp(after.m_pVersion, "STOOV9.0", 8) == 0);
     CHECK(after.m_lInventory.GetCount() == 0);
+}
+
+// 0x46FEA0: the area's rest encounter. Two chance rolls (this hour and the
+// next), then the rest's random delay; then a rarity roll, the creature entry
+// and the count jitter. The delay is drawn before the square search, so the
+// clock's jump pins the first two draws against the same libc; the search's
+// tie-breaks and the spawn placement come after and cannot move them.
+TEST_CASE("rest: a rest encounter interrupts the rest with its rolled delay and creatures", "[rest][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(2);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = party[0]->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // An encounter of our own: a goblin, one at a time, always.
+    CAreaFileRestEncounter& rest = pArea->m_headerRestEncounter;
+    INFO("AR1000's own encounter: activated " << rest.m_activated
+                                              << ", chance " << rest.m_probDay << "/" << rest.m_probNight);
+    std::memset(&rest, 0, sizeof(rest));
+    rest.m_activated = 1;
+    rest.m_probDay = 100;
+    rest.m_probNight = 100;
+    rest.m_randomCreatureNum = 1;
+    rest.m_maxTypeNum = 1;
+    std::memcpy(rest.m_randomCreature[0], "00GOB", 6);
+    rest.m_randomCreatureString[0] = 1000;
+
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+
+    // A chance of 100 always hits (the compare is <=), so the seed only has
+    // to give a delay the clock acts on: AddCurrentTime ignores <= 900.
+    int nHitSeed = 0;
+    ULONG nDelay = 0;
+    for (int n = 1; n < 1000 && nHitSeed == 0; n++) {
+        srand(n);
+        rand();
+        const ULONG nDrawn = rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR;
+        if (nDrawn > 900) {
+            nHitSeed = n;
+            nDelay = nDrawn;
+        }
+    }
+    REQUIRE(nHitSeed != 0);
+
+    srand(nHitSeed);
+    ClearMessages();
+    const ULONG nBefore = pGame->m_worldTime.m_gameTime;
+    const int nObjects = ObjectsInArea(pArea);
+
+    // The count is maxTypeNum plus the jitter (rand() % 5 - 2), clamped at
+    // one; the draws before it are the chance, the delay, the rarity
+    // (rand() % 10) and the entry (rand() % 1).
+    srand(nHitSeed);
+    rand();
+    rand();
+    rand();
+    rand();
+    const int nExpected = std::max(1, 1 + rand() % 5 - 2);
+
+    srand(nHitSeed);
+    CHECK(pArea->CheckRestEncounter() == TRUE);
+    CHECK(pGame->m_worldTime.m_gameTime == nBefore + nDelay);
+    CHECK(ObjectsInArea(pArea) == nObjects + nExpected);
+
+    // The encounter's text, last after the creatures' own messages: the
+    // area's string ref, no name, the last party member as both caller and
+    // target (the original's quirk).
+    CMessage* pLast = handler.m_messageList.IsEmpty() ? NULL : handler.m_messageList.GetTail();
+    auto* pText = dynamic_cast<CMessageDisplayTextRef*>(pLast);
+    REQUIRE(pText != nullptr);
+    CHECK(pText->m_name == static_cast<STRREF>(-1));
+    CHECK(pText->m_text == 1000);
+    CHECK(pText->m_sourceId == pGame->GetCharacterId(1));
+    CHECK(pText->m_targetId == pGame->GetCharacterId(1));
+
+    // The same seed draws the chance and then the delay: the order the two
+    // draws are in.
+    srand(nHitSeed);
+    CHECK(rand() % 100 <= 100);
+    CHECK(static_cast<ULONG>(rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR) == nDelay);
+
+    // No chance: both rolls happen and both miss, so nothing changes.
+    rest.m_probDay = 0;
+    rest.m_probNight = 0;
+
+    int nMissSeed = 0;
+    for (int n = 1; n < 1000 && nMissSeed == 0; n++) {
+        srand(n);
+        if (rand() % 100 != 0 && rand() % 100 != 0) {
+            nMissSeed = n;
+        }
+    }
+    REQUIRE(nMissSeed != 0);
+
+    srand(nMissSeed);
+    ClearMessages();
+    const ULONG nBeforeMiss = pGame->m_worldTime.m_gameTime;
+    const int nObjectsMiss = ObjectsInArea(pArea);
+
+    CHECK(pArea->CheckRestEncounter() == FALSE);
+    CHECK(pGame->m_worldTime.m_gameTime == nBeforeMiss);
+    CHECK(ObjectsInArea(pArea) == nObjectsMiss);
+    CHECK(handler.m_messageList.IsEmpty());
+
+    // The count: maxTypeNum plus the jitter (rand() % 5 - 2), clamped at one.
+    // The draws before it are the chance, the delay, the rarity
+    // (rand() % 10) and the entry (rand() % 1).
+    rest.m_probDay = 100;
+    rest.m_maxTypeNum = 3;
+
+    srand(nHitSeed);
+    rand();
+    rand();
+    rand();
+    rand();
+    const int nExpectedCount = std::max(1, 3 + rand() % 5 - 2);
+
+    srand(nHitSeed);
+    ClearMessages();
+    const int nObjectsCount = ObjectsInArea(pArea);
+    CHECK(pArea->CheckRestEncounter() == TRUE);
+    CHECK(ObjectsInArea(pArea) == nObjectsCount + nExpectedCount);
+
+    // Through RestPartyPrivate (the hook): the encounter ends the rest before
+    // the heal, the Rest action and the rest trigger.
+    rest.m_maxTypeNum = 1;
+    srand(nHitSeed);
+    for (CGameSprite* pSprite : party) {
+        pSprite->m_queuedActions.RemoveAll();
+        pSprite->m_pendingTriggers.RemoveAll();
+        pSprite->m_baseStats.m_hitPoints = 1;
+    }
+    g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
+    HealOnRestGuard guard(FALSE);
+
+    CHECK(pGame->RestParty(7, FALSE) == FALSE);
+    for (CGameSprite* pSprite : party) {
+        CHECK(HasQueuedAction(pSprite, 96) == FALSE);
+        CHECK(pSprite->m_baseStats.m_hitPoints == 1);
+    }
+
+    // Without the encounter the same rest heals and queues the Rest action.
+    rest.m_probDay = 0;
+    rest.m_probNight = 0;
+    srand(nMissSeed);
+    for (CGameSprite* pSprite : party) {
+        pSprite->m_queuedActions.RemoveAll();
+        pSprite->m_pendingTriggers.RemoveAll();
+        pSprite->m_baseStats.m_hitPoints = 1;
+    }
+
+    CHECK(pGame->RestParty(7, FALSE) == FALSE);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CHECK(HasQueuedAction(party[0], 96));
+    CHECK(party[0]->m_baseStats.m_hitPoints > 1);
 }
