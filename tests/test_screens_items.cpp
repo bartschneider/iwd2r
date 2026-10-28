@@ -206,7 +206,7 @@ CGameSprite* MakeSprite(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -406,7 +406,7 @@ TEST_CASE("worldmap: GetTravelTime is four hours per unit of distance along the 
 
     CScreenWorldMap* pScreen = g_pBaldurChitin->m_pEngineWorldMap;
     pScreen->m_cResCurrentArea = pWorldMap->GetArea(nMap, nSrc)->m_resCurrentArea;
-    pScreen->m_nCurrentLink = -1;
+    pScreen->m_nCurrentLink = static_cast<DWORD>(-1);
 
     const DWORD nDst = pLink->m_nArea;
     const DWORD nCheapest = CheapestDistance(pWorldMap, nMap, nSrc, nDst);

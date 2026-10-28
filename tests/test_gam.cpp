@@ -240,7 +240,7 @@ CGameSprite* NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -350,7 +350,7 @@ LONG SpriteId(CGameArea* pArea, const char* name)
     CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
     for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex && found == -1; n++) {
         const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (pArray->m_pArray[n].m_objectId == -1
             || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
             continue;
@@ -370,7 +370,7 @@ std::map<int, int> ObjectTypesIn(CGameArea* pArea)
     CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
     for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex; n++) {
         const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (pArray->m_pArray[n].m_objectId == -1
             || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
             continue;
@@ -594,7 +594,7 @@ static std::vector<LONG> FrontIds(CGameArea* pArea)
 // The y of object `id`.
 static LONG YOf(LONG id)
 {
-    CGameObject* pObject;
+    CGameObject* pObject = nullptr;
     REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
     const LONG y = pObject->GetPos().y;
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
@@ -671,7 +671,7 @@ TEST_CASE("gam: SortLists merges a queued object into the front list once and ke
     while (pos != NULL) {
         POSITION here = pos;
         const LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos)));
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         REQUIRE(pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
         CHECK(pObject->GetVertListPos() == here);
         pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
@@ -707,7 +707,7 @@ TEST_CASE("gam: SortLists drops a queued object deleted before the sort", "[gam]
 
     // An object queued for the front list, then deleted from the array.
     CGameObject* pObject = new CGameObject();
-    LONG id;
+    LONG id = 0;
     REQUIRE(pGame->GetObjectArray()->Add(&id, pObject, INFINITE) == CGameObjectArray::SUCCESS);
     pArea->m_lVertSortAdd.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(id)));
     REQUIRE(pGame->GetObjectArray()->Delete(id, CGameObjectArray::THREAD_ASYNCH, NULL, INFINITE) == CGameObjectArray::SUCCESS);
@@ -1297,7 +1297,7 @@ std::vector<std::string> NewSprites(const std::vector<LONG>& before, const std::
     std::set_difference(after.begin(), after.end(), before.begin(), before.end(), std::back_inserter(added));
     std::vector<std::string> names;
     for (LONG id : added) {
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE)
             != CGameObjectArray::SUCCESS) {
             continue;

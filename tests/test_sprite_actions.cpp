@@ -209,7 +209,7 @@ CGameSprite* NewGameInStartArea(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -775,7 +775,7 @@ TEST_CASE("trigger: DoAIUpdate answers whether the trigger has a script while pa
         if (pTrigger->m_triggerType == 0 || (pTrigger->m_dwFlags & 0x100) != 0) {
             continue;
         }
-        const BOOLEAN bScript = CResRef(pTrigger->m_scriptRes) != "";
+        const BOOLEAN bScript = static_cast<BOOLEAN>(CResRef(pTrigger->m_scriptRes) != "");
         CHECK(pTrigger->DoAIUpdate(FALSE, 12345) == bScript);
         CHECK(pTrigger->DoAIUpdate(TRUE, 0) == bScript);
         pTrigger->m_dwFlags |= 0x100;
