@@ -201,7 +201,7 @@ CGameSprite* NewGameInStartArea(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,

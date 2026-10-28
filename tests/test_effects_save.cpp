@@ -206,7 +206,7 @@ CGameSprite* NewGameInStartArea(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -307,7 +307,7 @@ CGameSprite* MakeGoblin()
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -1254,7 +1254,7 @@ TEST_CASE("Hold Person (SPPR208) on a goblin: a made will save refuses the hold,
         CHECK(sent[0].target == pGoblin->GetId());
     }
 
-    pTimer->m_active = active;
+    pTimer->m_active = static_cast<BOOLEAN>(active);
     ClearMessages();
     delete pGoblin;
 }
@@ -1507,7 +1507,7 @@ TEST_CASE("Damage (0x4A51D0 DisplayString): a hit shows only its feedback line",
     }
 
     pOptions->m_nEffectTextLevel = level;
-    pTimer->m_active = active;
+    pTimer->m_active = static_cast<BOOLEAN>(active);
     ClearMessages();
     delete pGoblin;
 }
@@ -1955,7 +1955,7 @@ TEST_CASE("Polymorph (0x4BB110) gives a goblin a wolf's shape", "[effects][check
     ClearMessages();
 
     // A wolf of the same file has the stats the goblin took.
-    CGameSprite* pWolf = new CGameSprite(wolfBytes.data(), static_cast<LONG>(wolfBytes.size()), 0, 0, -1, 0, 0, INT_MAX, CPoint(-1, -1), 0);
+    CGameSprite* pWolf = new CGameSprite(wolfBytes.data(), static_cast<LONG>(wolfBytes.size()), 0, 0, static_cast<DWORD>(-1), 0, 0, INT_MAX, CPoint(-1, -1), 0);
     CHECK(pGoblin->m_derivedStats.m_nNumberOfAttacks == pWolf->m_derivedStats.m_nNumberOfAttacks);
     CHECK(pGoblin->m_derivedStats.m_nSTR == pWolf->m_derivedStats.m_nSTR);
     CHECK(pGoblin->m_derivedStats.m_nResistFire == pWolf->m_derivedStats.m_nResistFire);
