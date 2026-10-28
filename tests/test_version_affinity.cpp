@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#ifndef _WIN32
+#ifdef __linux__
 #include <sched.h>
 #endif
 
@@ -91,7 +91,7 @@ TEST_CASE("SetProcessAffinityMask rejects other processes and empty masks", "[st
     SetLastError(0);
 }
 
-#ifndef _WIN32
+#ifdef __linux__
 TEST_CASE("SetProcessAffinityMask through GetProcAddress pins to CPU 0", "[stubs]")
 {
     cpu_set_t original;

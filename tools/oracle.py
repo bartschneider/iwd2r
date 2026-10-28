@@ -9,6 +9,7 @@ Usage (from WSL, in the repository):
   python3 tools/oracle.py run --selftest
   python3 tools/oracle.py run [--file selftest] [--seed N] [--iterations N]
   python3 tools/oracle.py vanilla [--rebuild]
+  python3 tools/oracle.py vanilla-gog <installer> [--game DIR] [--rebuild]
   python3 tools/oracle.py replay record <scenario> [--seed N] [--timeout S]
                                         [--dump-every N] [--test-steal-focus N]
                                         [--test-no-focus-guard]
@@ -83,6 +84,19 @@ install, the install's WeiDU.log and icewind2.ini unchanged) and only then
 gets the marker game/vanilla.ok. A copy without the marker (an interrupted
 build) or --rebuild is deleted and built from scratch; run without --selftest
 builds it when the marker is missing. The log goes to runs/<stamp>/.
+
+vanilla-gog builds the same copy on macOS or Linux, from GOG's macOS .pkg or
+Windows setup_*.exe (its -1.bin beside it) instead of a Windows install: no
+Windows, no WeiDU. The .pkg needs pkgutil (macOS) or xar, gzip and cpio; the
+.exe needs innoextract. The game folder is copied to
+${IWD2R_HOME:-~/.local/share/iwd2r}/game (--game elsewhere) without the
+installer's redistributables, support files, caches and GOG extras, with the
+exe named iwd2.exe and icewind2.ini's [Alias] paths pointed at GOG's install
+path (platform/fs.cpp re-roots every drive path into the data root) and
+Resolution=800. verify_vanilla must pass and the exe MD5 must be the vanilla
+one before the marker game/vanilla.ok is written, naming the installer and
+its SHA-256. --rebuild replaces a copy; without it a copy whose marker is
+intact is left as it is.
 
 replay record runs the original iwd2.exe of the vanilla copy (built first
 when it has no marker) under a scenario (scenarios/<name>.txt or a path, the
@@ -231,7 +245,11 @@ import winhome  # noqa: E402
 EVIDENCE_DIR = os.path.join(ROOT, 'docs', 'evidence')
 VERSIONS = os.path.join(HERE, 'ghidra', 'versions.json')
 VANILLA_JSON = os.path.join(ROOT, 'oracle', 'loader', 'vanilla.json')
-VANILLA_EXE = os.path.expanduser('~/.local/share/iwd2r/vanilla/iwd2.exe')
+# The user-local home, as tools/gates.sh, play.py and tools/parity read it:
+# $IWD2R_HOME, else ~/.local/share/iwd2r.
+IWD2R_HOME = os.environ.get('IWD2R_HOME') or os.path.expanduser(
+    '~/.local/share/iwd2r')
+VANILLA_EXE = os.path.join(IWD2R_HOME, 'vanilla', 'iwd2.exe')
 ORACLE_DIR = winhome.WIN_HOME + '/iwd2r-oracle'
 INSTALL = '/mnt/c/Games/Icewind Dale II'
 INSTALL_WIN = 'C:\\Games\\Icewind Dale II'
@@ -1266,6 +1284,269 @@ def cmd_vanilla(args):
 
 
 # ---------------------------------------------------------------------------
+# The vanilla copy from GOG's installers (oracle.py vanilla-gog)
+
+# GOG's macOS .pkg wraps the same Windows game in a Wineskin .app.
+PKG_GAME = ('payload', 'Contents', 'Resources', 'game', 'Icewind Dale 2.app',
+            'Contents', 'Resources', 'drive_c', 'GOG Games',
+            'Icewind Dale II')
+# The install path the copy's [Alias] paths name. Any drive path is mapped
+# into the data root (platform/fs.cpp ResolveLocked), and each value ends in a
+# backslash as the oracle's copy does (the port's CAlias::ParseRawData needs it
+# until 0x781800's separator is fixed). It must not be INSTALL_WIN:
+# verify_vanilla refuses an INI that names the real install.
+GOG_INSTALL = 'C:\\GOG Games\\Icewind Dale II'
+GOG_ALIASES = (('HD0:', GOG_INSTALL + '\\'),
+               ('CD1:', GOG_INSTALL + '\\data\\'),
+               ('CD2:', GOG_INSTALL + '\\cd2\\'))
+# What the installers carry that a vanilla copy does not need: GOG's
+# redistributables, support files and uninstall data, the engine's own
+# folders, and the packaging extras only the Windows installer has. Names in
+# the root, matched case-insensitively.
+GOG_LEFTOVERS = ('__redist', '__support', 'app', 'commonappdata', 'tmp',
+                 'cache', 'temp', 'tempsave', 'unins*', 'goggame*', 'gog.ico',
+                 'gfw_high.ico', 'gameuxinstallhelper.dll', 'webcache.zip',
+                 'manual.pdf')
+# The files the Windows installer keeps in __support/app and puts in the game
+# folder when it installs.
+GOG_SUPPORT = ('IWD2.exe', 'icewind2.ini', 'Keymap.ini', 'Party.ini')
+
+
+def gog_kind(installer):
+    """'pkg' for GOG's macOS package, 'exe' for the Windows installer, else
+    None: the format is in the file's magic, not in its name."""
+    with open(installer, 'rb') as f:
+        magic = f.read(4)
+    if magic == b'xar!':
+        return 'pkg'
+    if magic[:2] == b'MZ':
+        return 'exe'
+    return None
+
+
+def _run_or_exit(argv, what):
+    """Run argv; a non-zero exit prints its output and exits with what."""
+    r = subprocess.run(argv, capture_output=True, text=True, errors='replace')
+    if r.returncode != 0:
+        sys.stderr.write(r.stdout[-4000:] + r.stderr[-4000:])
+        sys.exit('oracle: %s failed (%d)' % (what, r.returncode))
+
+
+def pkg_game(expanded):
+    """The game folder inside an expanded GOG .pkg, or None: pkgutil leaves
+    it under package.pkg/Scripts, xar's tar extracts at the root."""
+    for base in (os.path.join(expanded, 'package.pkg', 'Scripts'), expanded):
+        direct = os.path.join(base, *PKG_GAME)
+        if os.path.isdir(direct):
+            return direct
+    for dirpath, _, filenames in os.walk(expanded):
+        if any(n.lower() == 'chitin.key' for n in filenames):
+            return dirpath
+    return None
+
+
+def pkg_expand(installer, workdir):
+    """Unpack a GOG .pkg into workdir, which it creates: pkgutil
+    --expand-full on macOS, else xar and cpio on the gzip'd cpio archive the
+    .app sits in (the package's Scripts, not a tar)."""
+    pkgutil = shutil.which('pkgutil')
+    if pkgutil is not None:
+        _run_or_exit([pkgutil, '--expand-full', installer, workdir],
+                     'pkgutil --expand-full')
+        return
+    xar = shutil.which('xar')
+    cpio = shutil.which('cpio')
+    gzip = shutil.which('gzip')
+    if xar is None or cpio is None or gzip is None:
+        sys.exit('oracle: no pkgutil to unpack %s; otherwise it needs xar, '
+                 'gzip and cpio ("brew install xar cpio" on macOS, "apt '
+                 'install xar cpio" on Debian/Ubuntu)' % installer)
+    os.makedirs(workdir)
+    _run_or_exit([xar, '-xf', installer, '-C', workdir], 'xar -xf')
+    scripts = os.path.join(workdir, 'package.pkg', 'Scripts')
+    if not os.path.isfile(scripts):
+        sys.exit('oracle: %s has no package.pkg/Scripts after xar -xf'
+                 % installer)
+    with subprocess.Popen([gzip, '-dc', scripts],
+                          stdout=subprocess.PIPE) as gunzip:
+        r = subprocess.run([cpio, '-idm', '--quiet'], stdin=gunzip.stdout,
+                           cwd=workdir, capture_output=True, text=True)
+        gunzip.stdout.close()
+        gunzip.wait()
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr[-4000:])
+        sys.exit('oracle: cpio failed (%d) on %s' % (r.returncode, scripts))
+
+
+def inno_extract(installer, workdir):
+    """Extract GOG's Windows installer into workdir; returns workdir."""
+    tool = shutil.which('innoextract')
+    if tool is None:
+        sys.exit('oracle: innoextract is missing; install it with "brew '
+                 'install innoextract" (macOS) or "apt install '
+                 'innoextract" (Debian/Ubuntu)')
+    _run_or_exit([tool, '-e', '-d', workdir, installer], 'innoextract')
+    return workdir
+
+
+def inno_layout(tree):
+    """The game folder in an innoextract tree: the installer's own copies of
+    the exe and the INI files in __support/app go to the root, as they do
+    when it installs."""
+    support = os.path.join(tree, '__support', 'app')
+    for name in GOG_SUPPORT:
+        src = os.path.join(support, name)
+        if os.path.isfile(src):
+            shutil.copyfile(src, os.path.join(tree, name))
+    return tree
+
+
+def gog_tree(installer, workdir):
+    """The game folder installer unpacks to, in the install layout."""
+    kind = gog_kind(installer)
+    if kind == 'pkg':
+        expanded = os.path.join(workdir, 'pkg')
+        pkg_expand(installer, expanded)
+        return pkg_game(expanded)
+    if kind == 'exe':
+        return inno_layout(inno_extract(installer, workdir))
+    sys.exit('oracle: %s is neither a GOG .pkg (xar) nor a Windows setup '
+             '.exe (MZ)' % installer)
+
+
+def gog_ignore(directory, names):
+    """copytree's ignore: the names a vanilla copy does not need."""
+    return [n for n in names if _matches(n, GOG_LEFTOVERS)]
+
+
+def gog_ini(text):
+    """icewind2.ini's text with the [Alias] paths pointed at GOG's install
+    path (see GOG_ALIASES) and Resolution= set to VANILLA_RESOLUTION."""
+    header = re.search(r'^\[Alias\][^\r\n]*(?:\r?\n)', text, re.MULTILINE)
+    if header is None:
+        raise ValueError('icewind2.ini has no [Alias] section')
+    newline = '\r\n' if '\r\n' in text else '\n'
+    wanted = dict(GOG_ALIASES)
+    stop = text.find('\n[', header.end())
+    body, after = (text[header.end():], '') if stop < 0 else \
+        (text[header.end():stop + 1], text[stop + 1:])
+    lines, seen = [], set()
+    for line in body.splitlines(keepends=True):
+        key = line.split('=', 1)[0]
+        if key in wanted:
+            seen.add(key)
+            lines.append(key + '=' + wanted[key] + newline)
+        else:
+            lines.append(line)
+    if lines and not lines[-1].endswith('\n'):
+        lines[-1] += newline
+    for key, value in GOG_ALIASES:
+        if key not in seen:
+            lines.append(key + '=' + value + newline)
+    text = text[:header.end()] + ''.join(lines) + after
+    return re.sub(r'^(Resolution=)[^\r\n]*',
+                  r'\g<1>' + VANILLA_RESOLUTION, text, flags=re.MULTILINE)
+
+
+def normalise_gog(game):
+    """The copy's exe name and icewind2.ini as the repo's vanilla copy needs
+    them; returns what changed."""
+    names = os.listdir(game)
+    exe = next((n for n in names if n.lower() == 'iwd2.exe'), None)
+    if exe is None:
+        sys.exit('oracle: the extracted game has no iwd2.exe')
+    ini = next((n for n in names if n.lower() == 'icewind2.ini'), None)
+    if ini is None:
+        sys.exit('oracle: the extracted game has no icewind2.ini')
+    changed = []
+    if exe != 'iwd2.exe':
+        # A two-step rename: a case-only one is not portable.
+        tmp = os.path.join(game, 'iwd2.exe.tmp')
+        os.replace(os.path.join(game, exe), tmp)
+        os.replace(tmp, os.path.join(game, 'iwd2.exe'))
+        changed.append('%s -> iwd2.exe' % exe)
+    path = os.path.join(game, ini)
+    text = read_text(path)
+    new = gog_ini(text)
+    if new != text:
+        with open(path, 'wb') as f:
+            f.write(new.encode('latin-1'))
+        changed.append(ini)
+    return changed
+
+
+def build_gog(game, installer, md5=None):
+    """Unpack installer, assemble the copy at game, normalise and verify it;
+    write the marker only when the copy is clean. Exits on failure."""
+    import play
+    md5 = (md5 or vanilla_md5()).lower()
+    if os.path.lexists(game) and (not os.path.isdir(game) or (
+            os.listdir(game) and not play.has_key(game))):
+        sys.exit('oracle: refusing to replace %s: it is not a game copy (no '
+                 'CHITIN.KEY)' % game)
+    if gog_kind(installer) is None:
+        sys.exit('oracle: %s is neither a GOG .pkg (xar) nor a Windows setup '
+                 '.exe (MZ)' % installer)
+    print('unpacking %s (about 1.5 GB; a few minutes)' % installer)
+    with tempfile.TemporaryDirectory(prefix='iwd2r-gog-') as work:
+        tree = gog_tree(installer, work)
+        if tree is None:
+            sys.exit('oracle: %s holds no game folder (no CHITIN.KEY)'
+                     % installer)
+        names = {n.lower(): n for n in os.listdir(tree)}
+        exe = names.get('iwd2.exe')
+        if exe is None:
+            sys.exit('oracle: %s holds no iwd2.exe' % installer)
+        got = file_md5(os.path.join(tree, exe))
+        if got != md5:
+            sys.exit('oracle: %s carries iwd2.exe with MD5 %s, not the '
+                     'vanilla %s' % (installer, got, md5))
+        print('iwd2.exe is the vanilla one (MD5 %s)' % md5)
+        if os.path.lexists(game):
+            print('removing the old copy %s' % game)
+            remove_tree(game)
+        print('copying the game files to %s' % game)
+        shutil.copytree(tree, game, ignore=gog_ignore)
+        for change in normalise_gog(game):
+            print('normalised %s' % change)
+        failures = verify_vanilla(game, md5)
+        for failure in failures:
+            print('FAIL %s' % failure)
+        if failures:
+            sys.exit('oracle: the vanilla copy failed verification')
+        print('verified: %s is vanilla (iwd2.exe MD5 %s)' % (game, md5))
+        write_marker(game, {
+            'md5': md5,
+            'installer': os.path.basename(installer),
+            'sha256': file_sha256(installer),
+            'built': datetime.datetime.now().isoformat(timespec='seconds')})
+        print('wrote %s' % os.path.join(game, MARKER))
+    return game
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def cmd_vanilla_gog(args):
+    import play
+    installer = args.installer
+    if not os.path.isfile(installer):
+        sys.exit('oracle: no installer at %s' % installer)
+    game = args.game or play.linux_data(os.environ)
+    if not args.rebuild and marker_ok(game):
+        print('vanilla copy: %s' % game)
+        return 0
+    build_gog(game, installer)
+    print('vanilla copy: %s' % game)
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Replays in the original (oracle.py replay record)
 
 VOLUME_KEYS = ('Volume Movie', 'Volume Music', 'Volume Voices',
@@ -2199,8 +2480,7 @@ def our_outcome(code, status, timeout):
 
 
 # Our side's copy of the vanilla install on the Linux disk (linux_mirror).
-MIRROR_DIR = os.path.join(os.path.expanduser('~'), '.local', 'share',
-                          'iwd2r', 'vanilla-mirror')
+MIRROR_DIR = os.path.join(IWD2R_HOME, 'vanilla-mirror')
 
 
 def linux_mirror(game, mirror=MIRROR_DIR, force=False):
@@ -3038,6 +3318,16 @@ def main(argv=None):
     van.add_argument('--rebuild', action='store_true',
                      help='delete the copy and build it again')
     van.set_defaults(run=cmd_vanilla)
+    gog = sub.add_parser('vanilla-gog', help='build the verified vanilla copy '
+                         'from a GOG installer, on macOS or Linux')
+    gog.add_argument('installer', help="GOG's macOS .pkg, or the Windows "
+                     'setup_*.exe with its -1.bin beside it')
+    gog.add_argument('--game', metavar='DIR', help='where to build the copy '
+                     '(default: ${IWD2R_HOME:-~/.local/share/iwd2r}/game, the '
+                     'copy tools/gates.sh and tools/play.py read)')
+    gog.add_argument('--rebuild', action='store_true',
+                     help='delete the copy and build it again')
+    gog.set_defaults(run=cmd_vanilla_gog)
     replay = sub.add_parser('replay', help='replays in the original')
     replay_sub = replay.add_subparsers(dest='replay_command', required=True)
     record = replay_sub.add_parser('record', help='record a scenario in the '
