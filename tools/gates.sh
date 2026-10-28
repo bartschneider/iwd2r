@@ -249,7 +249,7 @@ step "tool tests" python3 -I tests/test_tools.py
 step "subsystem map" python3 -I tools/gen_map.py --check
 step "recovery status" python3 -I tools/re_status.py --check
 step "replay fields" python3 tools/gen_fields.py --check
-[ -x tools/shaders.py ] && step "shader blobs" python3 tools/shaders.py --check
+[ -f tools/shaders.py ] && step "shader blobs" python3 -I tools/shaders.py --check
 step "decompiler evidence (base $BASE)" python3 -I tools/check_evidence.py --base "$BASE"
 # Structural parity (tools/parity/run.py): the changed functions' call graph,
 # vtables, struct layout, member offsets and address markers against the
