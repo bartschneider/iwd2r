@@ -2360,4 +2360,18 @@ TEST_CASE("vid: DrawLightingEffect24 brightens inside the pool and leaves the re
     std::vector<BYTE> tinted = before;
     mode.DrawLightingEffect24(tinted.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0xFFFFFF, 0x808080);
     CHECK(tinted[static_cast<size_t>(32) * kPitch + 31 * 3] == 0xFF);
+
+    // The white light above is channel-symmetric, so it cannot tell the three
+    // bytes apart. A light and an ambient with distinct channels move each
+    // byte on its own: light RGB(0x00, 0x00, 0x80) on ambient
+    // RGB(0x00, 0x40, 0x00) leaves the ramps' peak at R 240, G 176 and B
+    // 255 (clamped). A port writing the channels in another order - R/B
+    // swapped gives 255/176/240, G/B swapped 240/255/176 - fails here.
+    mode.rgbGlobalTint = RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT);
+    std::vector<BYTE> coloured = before;
+    mode.DrawLightingEffect24(coloured.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0x800000, 0x004000);
+    const auto colouredPixel = [&](int x, int y) { return &coloured[static_cast<size_t>(y) * kPitch + x * 3]; };
+    CHECK(colouredPixel(31, 32)[0] == 240);
+    CHECK(colouredPixel(31, 32)[1] == 176);
+    CHECK(colouredPixel(31, 32)[2] == 0xFF);
 }
