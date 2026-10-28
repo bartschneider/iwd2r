@@ -248,7 +248,7 @@ void NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -1494,7 +1494,7 @@ void PressUnboundKey(TScreen* pScreen)
     pScreen->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
     CHECK(ReturnsInTime([pScreen] { pScreen->OnKeyDown(1); }));
     pScreen->m_pVirtualKeysFlags[0] = savedPressed;
-    pScreen->m_bCtrlKeyDown = savedCtrl;
+    pScreen->m_bCtrlKeyDown = static_cast<BOOLEAN>(savedCtrl);
 }
 
 } // namespace
@@ -2352,7 +2352,7 @@ TEST_CASE("travel: a member leaving unsummons its summons", "[uimisc][travel][da
         static_cast<LONG>(cre.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,

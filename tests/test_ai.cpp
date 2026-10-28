@@ -139,7 +139,7 @@ CGameSprite* MakeSprite()
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -783,7 +783,8 @@ TEST_CASE("ai: the party specifiers decode to the party member the game picks", 
     pGame->m_characterPortraits[0] = pSprite->m_id;
     // WeakestOf, StrongestOf, MostDamagedOf, LeastDamagedOf,
     // StrongestOfMale, WorstAC, BestAC.
-    for (BYTE special : { 4, 5, 6, 7, 28, 47, 48 }) {
+    const BYTE specials[] = { 4, 5, 6, 7, 28, 47, 48 };
+    for (BYTE special : specials) {
         INFO("specifier " << static_cast<int>(special));
         CAIObjectType type(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
         type.m_SpecialCase[0] = special;

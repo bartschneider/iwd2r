@@ -211,7 +211,8 @@ TEST_CASE("creature render: CGameAnimationTypeMonster draws a mind flayer", "[re
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 0, 12 }) {
+    const WORD facings[] = { 0, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x7F01, colors, facing));
         REQUIRE(dynamic_cast<CGameAnimationTypeMonster*>(pAnimation.get()) != nullptr);
@@ -230,7 +231,8 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterOld draws a wolf", "[render
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 0, 12 }) {
+    const WORD facings[] = { 0, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x7B00, colors, facing));
         REQUIRE(dynamic_cast<CGameAnimationTypeMonsterOld*>(pAnimation.get()) != nullptr);
@@ -404,7 +406,8 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterQuadrant draws each quadran
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 0, 12 }) {
+    const WORD facings[] = { 0, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x1001, colors, facing));
         auto* pWyvern = dynamic_cast<CGameAnimationTypeMonsterQuadrant*>(pAnimation.get());
@@ -1347,7 +1350,8 @@ TEST_CASE("creature render: a character's weapon goes behind its body unless its
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 3, 4, 6, 12 }) {
+    const WORD facings[] = { 3, 4, 6, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x6100, colors, facing));
         auto* pCharacter = dynamic_cast<CGameAnimationTypeCharacter*>(pAnimation.get());
