@@ -1116,6 +1116,99 @@ void BltBmp24To24(CaseContext& ctx)
     ::operator delete(oursStorage);
 }
 
+// CVidBitmap::BltBmp24To16(pSurface, lPitch, pData, bmpSize, nDataJump,
+// dwFlags) (0x7B37A0), `ret 0x18`: reads the video mode's shifts (and, for
+// the keyed form, its masks) only.
+constexpr uintptr_t kBltBmp24To16 = 0x7B37A0;
+
+// 24-bit bitmaps 1 to 32 wide (0 hits the original's single-pixel path,
+// which then writes one pixel per row) and 1 to 32 high, drawn upward from
+// the last row of a 64x40 16-bit canvas of random bytes, with random data
+// jumps, plain, keyed (0x1) and keyed with shadows (0x5), the data mixing
+// pure green, black and random pixels, on 5-6-5 and 5-5-5. The whole canvas
+// and the result are compared.
+void BltBmp24To16(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    constexpr int kW = 64;
+    constexpr int kH = 40;
+    constexpr size_t kSize = kW * kH * 2;
+    constexpr size_t kDataSize = 64 * 32 * 3;
+    uint8_t* self = nullptr;
+    uint8_t* canvas = nullptr;
+    uint8_t* data = nullptr;
+    uint8_t* size = nullptr;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        self = OriginalBlock(0x100);
+        canvas = OriginalBlock(kSize);
+        data = OriginalBlock(kDataSize);
+        size = OriginalBlock(8);
+    });
+    auto* oursStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(oursStorage, 0, sizeof(CVidBitmap));
+    auto* ours = reinterpret_cast<CVidBitmap*>(oursStorage);
+    std::vector<uint8_t> mine(kSize);
+    std::vector<uint8_t> pixels(kDataSize);
+    Picks picks(ctx.seed, 0x426D703136000000ull); // "Bmp16"
+    const int count = 600 + ctx.iterations / 10;
+    for (int format = 0; format < 2; ++format) {
+        SetMode16(video, ctx, format == 0);
+        for (int n = 0; n < count; ++n) {
+            const int32_t cx = n % 11 == 0 ? 0 : (n % 9 == 0 ? 1 : picks.Between(2, 32));
+            const int32_t cy = picks.Between(1, 32);
+            const int32_t jump = picks.Between(0, 8);
+            const int32_t x = picks.Between(0, kW - cx);
+            const int32_t y = picks.Between(cy - 1, kH - 1);
+            const uint32_t flags[3] = { 0u, 1u, 5u };
+            const uint32_t dwFlags = flags[picks.Between(0, 2)];
+            for (size_t i = 0; i < kDataSize; i += 3) {
+                const int kind = picks.Between(0, 5);
+                if (kind == 0) {
+                    pixels[i] = 0;
+                    pixels[i + 1] = 0xFF;
+                    pixels[i + 2] = 0;
+                } else if (kind == 1) {
+                    pixels[i] = pixels[i + 1] = pixels[i + 2] = 0;
+                } else {
+                    pixels[i] = static_cast<uint8_t>(picks.Bits());
+                    pixels[i + 1] = static_cast<uint8_t>(picks.Bits());
+                    pixels[i + 2] = static_cast<uint8_t>(picks.Bits());
+                }
+            }
+            for (uint8_t& b : mine) {
+                b = static_cast<uint8_t>(picks.Bits());
+            }
+            char inputs[200];
+            std::snprintf(inputs, sizeof(inputs), "input %d (%s): %dx%d, last row at (%d,%d), jump %d, flags 0x%X",
+                n, format == 0 ? "5-6-5" : "5-5-5", cx, cy, x, y, jump, dwFlags);
+            ctx.SetInputs(inputs);
+            const size_t offset = static_cast<size_t>((y * kW + x) * 2);
+            int32_t originalResult = 0;
+            ctx.CallOriginal([&] {
+                std::memcpy(canvas, mine.data(), kSize);
+                std::memcpy(data, pixels.data(), kDataSize);
+                const int32_t sz[2] = { cx, cy };
+                std::memcpy(size, sz, 8);
+                originalResult = reinterpret_cast<BltBmpFn>(kBltBmp24To16)(self, nullptr, canvas + offset, kW * 2,
+                    data, size, jump, dwFlags);
+            });
+            const BOOL oursResult = ours->BltBmp24To16(reinterpret_cast<WORD*>(mine.data() + offset), kW * 2,
+                pixels.data(), CSize(cx, cy), jump, dwFlags);
+            ctx.CountInputs(1);
+            if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+                for (size_t i = 0; i < kSize; ++i) {
+                    if (canvas[i] != mine[i]) {
+                        ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    ::operator delete(oursStorage);
+}
+
 // CVidPalette::RealizeRange (0x7BF870) at 32 bpp: a range palette of 256
 // random entries, the seven ranges each with or without a tint, an add and a
 // light (pulsing or steady), the suppress mask, the global tint, add and
@@ -2961,6 +3054,7 @@ ORACLE_CASE("vid/blt_stencil_tile8to16", BltStencilTile8To16);
 ORACLE_CASE("vid/blt_tile8to24", BltTile8To24);
 ORACLE_CASE("vid/blt_stencil_tile8to24", BltStencilTile8To24);
 ORACLE_CASE("vid/blt_bmp24to24", BltBmp24To24);
+ORACLE_CASE("vid/blt_bmp24to16", BltBmp24To16);
 ORACLE_CASE("vid/draw_ellipse32", Ellipse32);
 ORACLE_CASE("vid/draw_recticle32", Recticle32);
 ORACLE_CASE("vid/draw_recticle16", Recticle16);
