@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
 #include "CGameSound.h"
@@ -11,6 +12,7 @@
 #include "CItem.h"
 #include "CMemINI.h"
 #include "CMessage.h"
+#include "CMoveList.h"
 #include "CScreenCreateChar.h"
 #include "CSpawn.h"
 #include "CUtil.h"
@@ -240,7 +242,7 @@ CGameSprite* NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -350,7 +352,7 @@ LONG SpriteId(CGameArea* pArea, const char* name)
     CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
     for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex && found == -1; n++) {
         const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (pArray->m_pArray[n].m_objectId == -1
             || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
             continue;
@@ -370,7 +372,7 @@ std::map<int, int> ObjectTypesIn(CGameArea* pArea)
     CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
     for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex; n++) {
         const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (pArray->m_pArray[n].m_objectId == -1
             || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
             continue;
@@ -581,6 +583,75 @@ TEST_CASE("gam: SaveGame packs AR1000 into ICEWIND2.SAV and LoadGame brings back
     }
 }
 
+// CGameArea::Marshal (0x471630): for the master area the original empties
+// field_AAA and then fills it again from the game's move and limbo lists, so
+// a save carries a creature that is between areas, in no area's list.
+TEST_CASE("gam: SaveGame carries a creature that is in the move list", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        if (pGame->m_gameAreas[n] != NULL)
+            pGame->m_gameAreas[n]->SortLists();
+    }
+    const std::map<int, int> before = ObjectTypesIn(pGame->m_pGameAreaMaster);
+
+    // A creature of no area, as one in transit: it is in the object array and
+    // a pending move names it, but no area list holds it.
+    CCreatureFile creatureData;
+    creatureData.SetResRef(CResRef("10GOB"), TRUE, TRUE);
+    REQUIRE(creatureData.GetDataSize() > 0);
+    CGameSprite* pTraveller = new CGameSprite(creatureData.GetData(),
+        creatureData.GetDataSize(),
+        0,
+        0,
+        -1,
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+    creatureData.ReleaseData();
+    REQUIRE_FALSE(pTraveller->m_bGlobal);
+    CMoveListEntry* pEntry = new CMoveListEntry();
+    pEntry->m_nSpriteId = pTraveller->GetId();
+    pEntry->m_areaResRef = "AR1001";
+    pEntry->m_ptDestination = CPoint(1000, 1000);
+    pGame->m_cMoveList.AddTail(pEntry);
+
+    REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
+    const fs::path dir = Child(Child(g_view, "mpsave"), "default");
+    const std::map<std::string, std::string> packed = UnpackSav(ReadFile(Child(dir, "ICEWIND2.SAV")));
+    REQUIRE(packed.count("AR1000.ARE") == 1);
+    // AR1000's own 35 creatures and the one the move list hands the area.
+    CHECK(CheckAreaCreatures(packed.at("AR1000.ARE")) == 36);
+
+    // The reloaded area holds it, so it came back with the save. The pending
+    // move is dropped first, so nothing in it outlives the game it names.
+    pGame->m_cMoveList.RemoveAll();
+    delete pEntry;
+    pGame->DestroyGame(FALSE, FALSE);
+    pGame->LoadGame(FALSE, FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    const std::map<int, int> after = ObjectTypesIn(pGame->m_pGameAreaMaster);
+    CHECK(after.at(CGameObject::TYPE_SPRITE) == before.at(CGameObject::TYPE_SPRITE) + 1);
+}
+
 // The ids on the area's front list, head to tail.
 static std::vector<LONG> FrontIds(CGameArea* pArea)
 {
@@ -594,7 +665,7 @@ static std::vector<LONG> FrontIds(CGameArea* pArea)
 // The y of object `id`.
 static LONG YOf(LONG id)
 {
-    CGameObject* pObject;
+    CGameObject* pObject = nullptr;
     REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
     const LONG y = pObject->GetPos().y;
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
@@ -671,7 +742,7 @@ TEST_CASE("gam: SortLists merges a queued object into the front list once and ke
     while (pos != NULL) {
         POSITION here = pos;
         const LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos)));
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         REQUIRE(pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
         CHECK(pObject->GetVertListPos() == here);
         pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
@@ -707,7 +778,7 @@ TEST_CASE("gam: SortLists drops a queued object deleted before the sort", "[gam]
 
     // An object queued for the front list, then deleted from the array.
     CGameObject* pObject = new CGameObject();
-    LONG id;
+    LONG id = 0;
     REQUIRE(pGame->GetObjectArray()->Add(&id, pObject, INFINITE) == CGameObjectArray::SUCCESS);
     pArea->m_lVertSortAdd.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(id)));
     REQUIRE(pGame->GetObjectArray()->Delete(id, CGameObjectArray::THREAD_ASYNCH, NULL, INFINITE) == CGameObjectArray::SUCCESS);
@@ -1297,7 +1368,7 @@ std::vector<std::string> NewSprites(const std::vector<LONG>& before, const std::
     std::set_difference(after.begin(), after.end(), before.begin(), before.end(), std::back_inserter(added));
     std::vector<std::string> names;
     for (LONG id : added) {
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE)
             != CGameObjectArray::SUCCESS) {
             continue;

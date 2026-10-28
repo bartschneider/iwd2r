@@ -206,7 +206,7 @@ CGameSprite* NewGameInStartArea(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -243,7 +243,7 @@ CGameSprite* AddCreature(CGameArea* pArea, const char* resRef, const CPoint& pos
         creatureData.GetDataSize(),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -535,7 +535,7 @@ TEST_CASE("combat: DropInventory puts a goblin's droppable items and gold on its
 
     LONG nPile = g_pBaldurChitin->GetObjectGame()->GetGroundPile(pGoblin->GetId());
     REQUIRE(nPile != CGameObjectArray::INVALID_INDEX);
-    CGameContainer* pPile;
+    CGameContainer* pPile = nullptr;
     REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nPile, CGameObjectArray::THREAD_ASYNCH,
                 reinterpret_cast<CGameObject**>(&pPile), INFINITE)
         == CGameObjectArray::SUCCESS);
@@ -2472,10 +2472,10 @@ TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
     // changes the colour.
     INT nCellX = -1;
     INT nCellY = -1;
-    RGBQUAD d00;
-    RGBQUAD d10;
-    RGBQUAD d01;
-    RGBQUAD d11;
+    RGBQUAD d00 = {};
+    RGBQUAD d10 = {};
+    RGBQUAD d01 = {};
+    RGBQUAD d11 = {};
     for (INT y = 0; y < 200 && nCellX == -1; y++) {
         for (INT x = 0; x < 300; x++) {
             if (!pArea->m_bmLum.GetPixelColor(d00, x, y, FALSE)

@@ -198,7 +198,7 @@ CGameSprite* MakeSprite(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -283,7 +283,7 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     REQUIRE(pArea != NULL);
     REQUIRE(party[1]->GetArea() == pArea);
 
-    STRREF strError = -1;
+    STRREF strError = static_cast<STRREF>(-1);
     // AR1000's header forbids resting (flag 0x2): "You may not rest at
     // this time."
     const DWORD flags = pArea->m_header.m_flags;
@@ -303,13 +303,13 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     const CPoint home = party[1]->m_pos;
     party[1]->m_pos.x = party[0]->m_pos.x + 600;
     party[1]->m_pos.y = party[0]->m_pos.y;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 16457);
 
     // Just inside: 511^2 + 0 <= 0x40000.
     party[1]->m_pos.x = party[0]->m_pos.x + 511;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
 
     // Vertically 384 is in range (384^2 * 16 / 9 == 0x40000), 385 is not.
@@ -323,14 +323,14 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     // The third argument answers TRUE for any gathered party, before the
     // save checks; a scattered one goes on to them.
     party[1]->m_pos = home;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, TRUE, FALSE) == TRUE);
     CHECK(strError == 10309);
 
     // The no-rest flag is ignored when the party rents a room (the second
     // argument) or with the fourth argument.
     pArea->m_header.m_flags |= 0x2;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 10309);
     CHECK(pGame->CanRestParty(strError, TRUE, FALSE, FALSE) == TRUE);
@@ -349,11 +349,60 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     const DWORD state1 = party[1]->m_derivedStats.m_generalState;
     party[0]->m_derivedStats.m_generalState |= STATE_DEAD;
     party[1]->m_derivedStats.m_generalState |= STATE_DEAD;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 10309);
     party[0]->m_derivedStats.m_generalState = state0;
     party[1]->m_derivedStats.m_generalState = state1;
+    pArea->m_header.m_flags = flags;
+}
+
+TEST_CASE("rest: CanRestParty refuses while a party member has Mold Touch or Shroud of Flame", "[rest][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(2);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = party[0]->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // AR1000's header forbids resting; take that out so that only the spell
+    // states can refuse it.
+    const DWORD flags = pArea->m_header.m_flags;
+    pArea->m_header.m_flags = flags & ~0x2;
+
+    STRREF strError = -1;
+    REQUIRE(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
+    REQUIRE(strError == 15358);
+
+    // CGameObjectArray 0x5C9300: SPLSTATE_MOLD_TOUCH on any sprite refuses
+    // the rest: "You may not rest at this time."
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, true);
+    strError = -1;
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
+    CHECK(strError == 10309);
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, false);
+
+    // The same for SPLSTATE_SHROUD_OF_FLAME.
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, true);
+    strError = -1;
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
+    CHECK(strError == 10309);
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, false);
+
+    // Cleared: the normal answer.
+    strError = -1;
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
+    CHECK(strError == 15358);
+
     pArea->m_header.m_flags = flags;
 }
 

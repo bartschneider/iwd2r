@@ -78,12 +78,9 @@ void CMoveList::Marshal(CGameArea* pArea)
         } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
 
         if (rc == CGameObjectArray::SUCCESS) {
-            // TODO: Incomplete. The original adds the sprite's id to the
-            // area's list at 0xAAA here, which CGameArea::Marshal then saves
-            // with the area's creatures:
-            //   pArea->field_AAA.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(pSprite->GetId())));
-            // `field_AAA` is declared by the game-file stream's CGameArea.h,
-            // not yet merged here.
+            // The original queues the id here so CGameArea::Marshal (0x471630)
+            // saves the travelling sprite with the area's creatures.
+            pArea->field_AAA.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(pSprite->GetId())));
             pSprite->AddEffect(pEffect, CGameAIBase::EFFECT_LIST_TIMED, TRUE, FALSE);
 
             g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(pNode->m_nSpriteId,
