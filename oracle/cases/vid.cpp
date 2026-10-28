@@ -788,6 +788,77 @@ void SetMode16(VideoFixture& video, CaseContext& ctx, bool green6)
     video.oursChitin->cVideo.m_nBpp = 16;
 }
 
+// CVidMode::DrawLightingEffect16(pSurface, lPitch, ptCenter, size, rgbLight,
+// rgbAmbient) (0x7968C0), `ret 0x18` at 0x7977C6. One WORD per pixel, lPitch
+// in pixels; the channels come from the mode's masks (+0x18/+0x1C/+0x20) and
+// are clamped at the mask's value, so the case runs 5-6-5 and 5-5-5 in turn
+// (SetMode16). It reads rgbGlobalTint (0xA4) and calls
+// GetEllipseArcPixelList through the vtable (0xC0), as the 32-bit sibling.
+using Lighting16Fn = void(__fastcall*)(void* self, void* edx, uint16_t* pSurface, int32_t lPitch, const void* pt,
+    const void* size, uint32_t a6, uint32_t a7);
+constexpr uintptr_t kDrawLightingEffect16 = 0x7968C0;
+constexpr int kLightCanvas16 = 200;
+
+// DrawLightingEffect16 on a 200x200 canvas of random pixels, centred, with
+// half-axes 1 to 40 (height 0 draws nothing; width 0 divides by zero in the
+// original, 0x7971E0), random light and ambient colours, the global tint
+// none or random, and the mode's masks alternating 5-6-5 / 5-5-5. The whole
+// canvas is compared, word by word.
+void LightingEffect16(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint16_t* canvas = nullptr;
+    uint8_t* pt = nullptr;
+    uint8_t* size = nullptr;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        canvas = reinterpret_cast<uint16_t*>(OriginalBlock(kLightCanvas16 * kLightCanvas16 * 2));
+        pt = OriginalBlock(8);
+        size = OriginalBlock(8);
+    });
+    std::vector<uint16_t> mine(kLightCanvas16 * kLightCanvas16);
+    Picks picks(ctx.seed, 0x4C69676874313600ull); // "Light16"
+    const int count = 200 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        const bool green6 = picks.Between(0, 1) != 0;
+        SetMode16(video, ctx, green6);
+        const int32_t cx = picks.Between(1, 40);
+        const int32_t cy = n < 4 ? 0 : picks.Between(1, 40);
+        const int32_t x = picks.Between(80, 120);
+        const int32_t y = picks.Between(80, 120);
+        const uint32_t a6 = picks.Bits() & 0xFFFFFF;
+        const uint32_t a7 = picks.Bits() & 0xFFFFFF;
+        const uint32_t tint = picks.Between(0, 1) ? 0xFFFFFFu : (picks.Bits() & 0xFFFFFF);
+        for (uint16_t& pixel : mine) {
+            pixel = static_cast<uint16_t>(picks.Bits());
+        }
+        char inputs[192];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: %s, centre (%d, %d), axes (%d, %d), light 0x%06X, ambient 0x%06X, global tint 0x%06X", n,
+            green6 ? "5-6-5" : "5-5-5", x, y, cx, cy, a6, a7, tint);
+        ctx.SetInputs(inputs);
+        const int32_t p[2] = { x, y };
+        const int32_t sz[2] = { cx, cy };
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size() * 2);
+            std::memcpy(pt, p, sizeof(p));
+            std::memcpy(size, sz, sizeof(sz));
+            Put<uint32_t>(video.mode, kGlobalTintOffset, tint);
+            reinterpret_cast<Lighting16Fn>(kDrawLightingEffect16)(video.mode, nullptr, canvas, kLightCanvas16, pt, size,
+                a6, a7);
+        });
+        video.oursMode->rgbGlobalTint = tint;
+        video.oursMode->DrawLightingEffect16(mine.data(), kLightCanvas16, CPoint(x, y), CSize(cx, cy), a6, a7);
+        ctx.CountInputs(1);
+        for (size_t i = 0; i < mine.size(); ++i) {
+            if (canvas[i] != mine[i]) {
+                ctx.Fail(ctx.Inputs() + ", pixel " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                break;
+            }
+        }
+    }
+}
+
 // One 16-, 24- or 32-bit span function (solid, dithered, shaded, mirrored
 // or not) on a 64x1 row of random pixels, as HLineShaded does for 32 bits:
 // every span once with the widest surface rectangle, then random spans and
@@ -2868,6 +2939,7 @@ ORACLE_CASE("vid/draw_line24", DrawLine24);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
 ORACLE_CASE("vid/lighting_effect32", LightingEffect32);
 ORACLE_CASE("vid/lighting_effect24", LightingEffect24);
+ORACLE_CASE("vid/lighting_effect16", LightingEffect16);
 ORACLE_CASE("vid/fill_convex_poly", FillConvexPoly);
 ORACLE_CASE("vid/fill_poly", FillPoly);
 ORACLE_CASE("vid/cell_translucent32", CellTranslucent);

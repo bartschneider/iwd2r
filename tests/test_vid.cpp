@@ -2375,3 +2375,62 @@ TEST_CASE("vid: DrawLightingEffect24 brightens inside the pool and leaves the re
     CHECK(colouredPixel(31, 32)[1] == 176);
     CHECK(colouredPixel(31, 32)[2] == 0xFF);
 }
+
+// CVidMode::DrawLightingEffect16 (0x7968C0): the light pool on a 16-bpp
+// surface, one WORD per pixel with lPitch in pixels. Each channel is taken
+// through the mode's masks (+0x18/+0x1C/+0x20) and clamped at the mask's
+// value rather than 255, so the case sets 5-6-5 up front. No surface and no
+// GPU: a plain buffer is enough, and the function reads only the global tint
+// (and the arc list through the mode's vtable).
+TEST_CASE("vid: DrawLightingEffect16 brightens inside the pool and leaves the rest", "[vid]")
+{
+    constexpr int kCanvas = 64;
+    constexpr int kPitch = kCanvas; // pixels
+    constexpr WORD kGrey = 0x8410; // 5-6-5 mid grey
+
+    CVidInf mode;
+    mode.m_dwRBitMask = 0xF800;
+    mode.m_dwGBitMask = 0x07E0;
+    mode.m_dwBBitMask = 0x001F;
+    mode.rgbGlobalTint = RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT);
+
+    // The white light on a black ambient clamps every channel at its mask in
+    // the middle of the pool; the edges only brighten part of the way.
+    std::vector<WORD> canvas(static_cast<size_t>(kPitch) * kCanvas + 2, kGrey);
+    const std::vector<WORD> before = canvas;
+    mode.DrawLightingEffect16(canvas.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0xFFFFFF, 0x000000);
+
+    const auto pixel = [&](int x, int y) -> WORD { return canvas[static_cast<size_t>(y) * kPitch + x]; };
+    // The middle band ramps up to x = 31 and down from x = 32.
+    CHECK(pixel(31, 32) == 0xFFFF);
+    CHECK(pixel(24, 32) != kGrey);
+    CHECK(pixel(38, 32) != kGrey);
+    // Everything outside the pool is byte-identical, including the two
+    // canary words after the buffer (the 16-bit write is one WORD).
+    CHECK(pixel(0, 0) == kGrey);
+    CHECK(pixel(32 + 12, 32) == kGrey);
+    CHECK(pixel(32, 32 + 12) == kGrey);
+    CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas] == kGrey);
+    CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas + 1] == kGrey);
+
+    // Height 0 draws nothing (the original leaks the pixel list there), and
+    // so does a light whose channels all end at zero (no light, a white
+    // ambient): the buffer stays byte-identical.
+    {
+        std::vector<WORD> flat = before;
+        mode.DrawLightingEffect16(flat.data(), kPitch, CPoint(32, 32), CSize(8, 0), 0xFFFFFF, 0x000000);
+        CHECK(flat == before);
+    }
+    {
+        std::vector<WORD> dark = before;
+        mode.DrawLightingEffect16(dark.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0x000000, 0xFFFFFF);
+        CHECK(dark == before);
+    }
+
+    // A global tint other than none scales the ambient first: a black tint
+    // zeroes it, and the same white light still fills the middle of the pool.
+    mode.rgbGlobalTint = 0x000000;
+    std::vector<WORD> tinted = before;
+    mode.DrawLightingEffect16(tinted.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0xFFFFFF, 0x808080);
+    CHECK(tinted[static_cast<size_t>(32) * kPitch + 31] == 0xFFFF);
+}
