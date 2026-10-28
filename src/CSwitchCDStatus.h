@@ -6,6 +6,8 @@
 #include "CVidFont.h"
 #include "CVidMosaic.h"
 
+class CVidInf;
+
 class CSwitchCDStatus {
 public:
     CSwitchCDStatus();
@@ -13,6 +15,7 @@ public:
 
     void Init();
     void Update(BOOLEAN a1, BOOLEAN a2, BYTE a3, const CString& a4, BOOLEAN a5, BOOLEAN a6, BOOLEAN a7);
+    void DrawTextBlock(CVidInf* pVidInf, int x, int y, int* pSize, CRect* pClip, const CString& sText, CVidFont* pFont, WORD nFlags);
 
     /* 0000 */ int field_0;
     /* 0004 */ int field_4;
