@@ -1,6 +1,8 @@
 # Structural-parity gate dependencies (tools/parity/run.py's exe-based columns).
 pefile==2024.8.26
 capstone==5.0.9
-# tools/ghidra/make_project.py's cross-worktree lock -- needed to run
-# ExportCallGraph.java on the iwd2 project (tools/ghidra/ has no venv of its own).
+# tools/ghidra/make_project.py's cross-worktree lock -- needed by
+# tools/ghidra/export_callgraph.py (its two TSVs), the one analyzeHeadless
+# run of ExportCallGraph.java on the iwd2 project (tools/ghidra/ has no venv
+# of its own).
 filelock==3.20.0

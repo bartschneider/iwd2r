@@ -379,27 +379,27 @@ TEST_CASE("rest: CanRestParty refuses while a party member has Mold Touch or Shr
     const DWORD flags = pArea->m_header.m_flags;
     pArea->m_header.m_flags = flags & ~0x2;
 
-    STRREF strError = -1;
+    STRREF strError = static_cast<STRREF>(-1);
     REQUIRE(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
     REQUIRE(strError == 15358);
 
     // CGameObjectArray 0x5C9300: SPLSTATE_MOLD_TOUCH on any sprite refuses
     // the rest: "You may not rest at this time."
     party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, true);
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 10309);
     party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, false);
 
     // The same for SPLSTATE_SHROUD_OF_FLAME.
     party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, true);
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 10309);
     party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, false);
 
     // Cleared: the normal answer.
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
     CHECK(strError == 15358);
 

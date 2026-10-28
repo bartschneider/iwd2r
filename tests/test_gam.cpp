@@ -663,7 +663,7 @@ TEST_CASE("gam: SaveGame carries a creature that is in the move list", "[gam][da
         creatureData.GetDataSize(),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -2168,6 +2168,38 @@ TEST_CASE("items: CMessageContainerAddItem keeps its compress flag", "[spawn][da
     CHECK(keep.m_slotNum == 3);
     const CMessageContainerAddItem drop(CItem(), 4, FALSE, 1, 2);
     CHECK(drop.m_bCompressContainer == FALSE);
+}
+
+// CSwitchCDStatus::Update (0x54D5A0): the overlay demands its border mosaics,
+// the two message mosaics and the two fonts when it is shown, and releases
+// them when it is dismissed. The draw branch needs a presentable back buffer,
+// so only the two state branches run here.
+TEST_CASE("gam: the CD switch overlay demands and releases its resources", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    NewGameWithOneCharacter(cre, "Probe");
+
+    CSwitchCDStatus& overlay = g_pBaldurChitin->m_cSwitchingCDStatus;
+    CString sDrive("D:");
+
+    overlay.Update(TRUE, FALSE, 1, sDrive, TRUE, TRUE, TRUE);
+    CHECK(overlay.field_4 != 0);
+    CHECK(overlay.field_0 == 0);
+
+    overlay.Update(FALSE, FALSE, 1, sDrive, TRUE, TRUE, TRUE);
+    CHECK(overlay.field_4 == 0);
+    CHECK(overlay.field_0 == 0);
 }
 
 // CGameSprite::CheckReputation (0x737990): a paladin below reputation 70 falls
