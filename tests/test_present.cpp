@@ -851,7 +851,9 @@ TEST_CASE("probe_child_outcomes", "[present]")
 {
     namespace probe = platform::gpu_probe;
     const ScriptDir scripts;
-    probe::Result r = probe::Run("/bin/false", 10000);
+    // macOS has false only in /usr/bin.
+    const char* falseExe = std::filesystem::exists("/bin/false") ? "/bin/false" : "/usr/bin/false";
+    probe::Result r = probe::Run(falseExe, 10000);
     CHECK(r.outcome == probe::Outcome::Failed);
     CHECK(r.reason == "exited with code 1");
 

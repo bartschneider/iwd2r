@@ -191,12 +191,12 @@ TEST_CASE("data_dir ResolveDataDirFrom success configures the engine", "[data_di
     CHECK(std::string(platform::DataDirSource()) == "env");
     CHECK(platform::fs::DataRoot() == data.generic_string());
     CHECK(stdfs::equivalent(stdfs::current_path(), data));
-#ifdef _WIN32
-    // Case-insensitive: the resolver keeps the spelling it was given.
-    CHECK(compat::ResolvePath("CHITIN.KEY") == "CHITIN.KEY");
-#else
-    CHECK(compat::ResolvePath("CHITIN.KEY") == "chitin.key");
-#endif
+    // Case-insensitive (Windows, macOS's default APFS): the resolver keeps
+    // the spelling it was given.
+    if (stdfs::exists(data / "CHITIN.KEY"))
+        CHECK(compat::ResolvePath("CHITIN.KEY") == "CHITIN.KEY");
+    else
+        CHECK(compat::ResolvePath("CHITIN.KEY") == "chitin.key");
 }
 
 TEST_CASE("data_dir ReportFatal goes through the installed handler", "[data_dir]")
