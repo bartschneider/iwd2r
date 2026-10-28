@@ -2169,3 +2169,116 @@ TEST_CASE("items: CMessageContainerAddItem keeps its compress flag", "[spawn][da
     const CMessageContainerAddItem drop(CItem(), 4, FALSE, 1, 2);
     CHECK(drop.m_bCompressContainer == FALSE);
 }
+
+// CGameSprite::CheckReputation (0x737990): a paladin below reputation 70 falls
+// - the class switches to fighter in the three AI types, the state gains 0x200,
+// the five innate spells are removed and the XP is rewritten to the next-level
+// threshold. The derived class levels come back from the base header because
+// the tail's Reload rebuilds them (the original's paladin branch does not write
+// the base levels; report-T49), so they are asserted to equal the base's.
+// A second call is a no-op (the paladin mask is gone) and reputation 80 falls
+// nobody. A ranger at 60 moves its levels in the base header (which survives).
+TEST_CASE("gam: CheckReputation drops a paladin below reputation 70 to fighter", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    const CRuleTables& ruleTables = pGame->GetRuleTables();
+
+    // A consistent level-7 paladin: the base header says paladin 7/fighter 0,
+    // the derived stats match, reputation 60, the 0x800 bit armed.
+    pSprite->m_baseStats.m_characterLevel = 7;
+    pSprite->m_baseStats.m_paladinLevel = 7;
+    pSprite->m_baseStats.m_fighterLevel = 0;
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_PALADIN, 7);
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_FIGHTER, 0);
+    pSprite->m_typeAI.m_nClassMask |= 0x40;
+    pSprite->m_derivedStats.m_nReputation = 60;
+    pSprite->m_baseStats.m_flags |= 0x800;
+    // The five innate spells the fall removes, so their removal is visible.
+    const CResRef* const spells[] = { &CGameSprite::SPIN109, &CGameSprite::SPIN120, &CGameSprite::SPIN121,
+        &CGameSprite::SPIN125, &CGameSprite::SPIN152 };
+    UINT spellIds[5] = {};
+    for (int n = 0; n < 5; n++) {
+        REQUIRE(pGame->GetInnateSpells()->Find(*spells[n], spellIds[n]) == TRUE);
+        REQUIRE(pSprite->m_innateSpells.Add(spellIds[n], 1, 0, 0) == TRUE);
+    }
+
+    pSprite->CheckReputation();
+
+    // The durable effects of the fall.
+    CHECK((pSprite->m_baseStats.m_flags & 0x200) != 0);
+    CHECK(pSprite->m_typeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    CHECK(pSprite->m_liveTypeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    CHECK(pSprite->m_startTypeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    CHECK((pSprite->m_typeAI.m_nClassMask & 0x40) == 0);
+    CHECK((pSprite->m_startTypeAI.m_nClassMask & 0x40) == 0);
+    for (UINT nId : spellIds) {
+        UINT nIndex = 0;
+        CHECK(pSprite->m_innateSpells.Find(nId, nIndex) == FALSE);
+    }
+    const DWORD nNextLevelXP = ruleTables.GetNextLevelXP(7);
+    CHECK(pSprite->m_baseStats.m_xp == nNextLevelXP);
+    CHECK(pSprite->m_derivedStats.m_nXP == nNextLevelXP);
+    // The tail's Reload rebuilds the derived levels from the base header, which
+    // the paladin branch does not touch: they are the base's values again.
+    CHECK(pSprite->m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_PALADIN) == 7u);
+    CHECK(pSprite->m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_FIGHTER) == 0u);
+
+    // A second call finds no paladin: nothing changes.
+    const DWORD nFlagsAfter = pSprite->m_baseStats.m_flags;
+    const DWORD nXpAfter = pSprite->m_baseStats.m_xp;
+    const int nMaskAfter = pSprite->m_typeAI.m_nClassMask;
+    pSprite->CheckReputation();
+    CHECK(pSprite->m_baseStats.m_flags == nFlagsAfter);
+    CHECK(pSprite->m_baseStats.m_xp == nXpAfter);
+    CHECK(pSprite->m_typeAI.m_nClassMask == nMaskAfter);
+
+    // A paladin at reputation 80 does not fall.
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_PALADIN, 7);
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_FIGHTER, 0);
+    pSprite->m_typeAI.m_nClassMask |= 0x40;
+    pSprite->m_derivedStats.m_nReputation = 80;
+    pSprite->m_baseStats.m_flags &= ~0x200u;
+    const DWORD nEightyFlags = pSprite->m_baseStats.m_flags;
+    const DWORD nEightyXp = pSprite->m_baseStats.m_xp;
+    pSprite->CheckReputation();
+    CHECK((pSprite->m_baseStats.m_flags & 0x200) == 0);
+    CHECK(pSprite->m_baseStats.m_flags == nEightyFlags);
+    CHECK(pSprite->m_baseStats.m_xp == nEightyXp);
+
+    // A ranger at 60: its levels move in the base header, where the tail's
+    // Reload finds them.
+    pSprite->m_baseStats.m_characterLevel = 7;
+    pSprite->m_baseStats.m_rangerLevel = 7;
+    pSprite->m_baseStats.m_fighterLevel = 0;
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_RANGER, 7);
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_FIGHTER, 0);
+    pSprite->m_typeAI.m_nClassMask |= 0x80;
+    pSprite->m_derivedStats.m_nReputation = 60;
+    pSprite->m_baseStats.m_flags |= 0x800;
+    pSprite->m_baseStats.m_flags &= ~0x400u;
+    pSprite->CheckReputation();
+    CHECK((pSprite->m_baseStats.m_flags & 0x400) != 0);
+    CHECK(pSprite->m_baseStats.m_rangerLevel == 0);
+    CHECK(pSprite->m_baseStats.m_fighterLevel == 7);
+    CHECK(pSprite->m_baseStats.m_characterLevel == 7);
+    CHECK(pSprite->m_typeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    // NOTE: the typeAI class mask still has the ranger bit after the tail
+    // (0x80 observed); the branch does clear it, so the tail's ResetAIType
+    // path re-derives it. Not asserted until that path is understood (T49 §6's
+    // CheckStatsChange follow-up is the likely place).
+}
