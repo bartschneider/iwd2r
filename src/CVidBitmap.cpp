@@ -361,12 +361,82 @@ BOOL CVidBitmap::BltBmp8To16(WORD* pSurface, LONG lPitch, BYTE* pData, const CSi
     return FALSE;
 }
 
+// The 24-bit BMP (three bytes, B then G then R) onto a 16-bit surface,
+// through the mode's channel shifts: the source shift (8 - the destination's
+// bit count, field_C2/C6/CA) brings a byte down to the destination's width
+// and the destination shift (m_dwRBitShift/...) places it. lPitch is in
+// bytes and the rows go bottom-up, as the 32-bit sibling does.
+//
 // 0x7B37A0
 BOOL CVidBitmap::BltBmp24To16(WORD* pSurface, LONG lPitch, BYTE* pData, const CSize& bmpSize, LONG nDataJump, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
 
-    return FALSE;
+    DWORD dwRSrcShift = pVidMode->field_C2;
+    DWORD dwGSrcShift = pVidMode->field_C6;
+    DWORD dwBSrcShift = pVidMode->field_CA;
+    DWORD dwRBitShift = pVidMode->m_dwRBitShift;
+    DWORD dwGBitShift = pVidMode->m_dwGBitShift;
+    DWORD dwBBitShift = pVidMode->m_dwBBitShift;
+
+    auto Convert = [&](const BYTE* p) {
+        return static_cast<WORD>(((p[0] >> dwBSrcShift) << dwBBitShift)
+            | ((p[1] >> dwGSrcShift) << dwGBitShift)
+            | ((p[2] >> dwRSrcShift) << dwRBitShift));
+    };
+
+    if ((dwFlags & 0x1) == 0) {
+        for (LONG y = 0; y < bmpSize.cy; y++) {
+            if (bmpSize.cx < 2) {
+                // NOTE: The original's single-pixel path (0x7B3940) runs at
+                // least once, so a zero-width blit still writes one pixel and
+                // consumes one source pixel per row; kept as it is.
+                *pSurface = Convert(pData);
+                pSurface += 1 - bmpSize.cx - lPitch / 2;
+                pData += 3 + nDataJump;
+            } else {
+                for (LONG x = 0; x < bmpSize.cx; x++) {
+                    *pSurface++ = Convert(pData);
+                    pData += 3;
+                }
+
+                pSurface += -bmpSize.cx - lPitch / 2;
+                pData += nDataJump;
+            }
+        }
+    } else {
+        // The keyed form the 32-bit sibling has: pure green is transparent,
+        // and with 0x4 a pure black pixel is half the destination's colour
+        // (the destination channel read back through its mask and shift).
+        for (LONG y = 0; y < bmpSize.cy; y++) {
+            for (LONG x = 0; x < bmpSize.cx; x++) {
+                BYTE r = pData[2];
+                BYTE g = pData[1];
+                BYTE b = pData[0];
+
+                if (r != 0 || g != 255 || b != 0) {
+                    if ((dwFlags & 0x4) != 0 && r == 0 && g == 0 && b == 0) {
+                        WORD nPixel = *pSurface;
+                        r = static_cast<BYTE>((((nPixel & pVidMode->m_dwRBitMask) >> dwRBitShift) << dwRSrcShift) >> 1);
+                        g = static_cast<BYTE>((((nPixel & pVidMode->m_dwGBitMask) >> dwGBitShift) << dwGSrcShift) >> 1);
+                        b = static_cast<BYTE>((((nPixel & pVidMode->m_dwBBitMask) >> dwBBitShift) << dwBSrcShift) >> 1);
+                    }
+
+                    *pSurface = static_cast<WORD>(((b >> dwBSrcShift) << dwBBitShift)
+                        | ((g >> dwGSrcShift) << dwGBitShift)
+                        | ((r >> dwRSrcShift) << dwRBitShift));
+                }
+
+                pSurface++;
+                pData += 3;
+            }
+
+            pSurface += -bmpSize.cx - lPitch / 2;
+            pData += nDataJump;
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x7B3B70
