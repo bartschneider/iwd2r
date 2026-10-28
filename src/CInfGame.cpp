@@ -5127,7 +5127,57 @@ CStore* CInfGame::GetServerStore(const CResRef& store)
 // 0x5AF160
 void CInfGame::SwapCharacters(DWORD pos1, DWORD pos2)
 {
-    // TODO: Incomplete.
+    UTIL_ASSERT(pos1 < (DWORD)m_nCharacters && pos2 < (DWORD)m_nCharacters);
+
+    LONG nId1 = m_characterPortraits[pos2];
+    LONG nId2 = m_characterPortraits[pos1];
+    m_characterPortraits[pos1] = nId1;
+    m_characterPortraits[pos2] = nId2;
+
+    CGameSprite* pSprite;
+
+    BYTE rc;
+    do {
+        rc = m_cObjectArray.GetDeny(nId2,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc == CGameObjectArray::SUCCESS) {
+        // NOTE: Uninline.
+        pSprite->FetchCommonStrings();
+
+        UpdatePortraitToolTip(pos2, pSprite->GetNameRef());
+
+        m_cObjectArray.ReleaseDeny(nId2, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+        do {
+            rc = m_cObjectArray.GetDeny(nId1,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            // NOTE: Uninline.
+            pSprite->FetchCommonStrings();
+
+            UpdatePortraitToolTip(pos1, pSprite->GetNameRef());
+
+            m_cObjectArray.ReleaseDeny(nId1, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+            if (pos1 == 0 || pos2 == 0) {
+                // The new leader's "selected" voice. The original checks the
+                // allocation and calls AddMessage(0, 0) on failure, which our
+                // new cannot return and AddMessage cannot take.
+                LONG nLeaderId = m_characterPortraits[0];
+                CMessage* pMessage = new CMessagePlaySound(2, TRUE, FALSE, nLeaderId, nLeaderId);
+
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+            }
+        }
+    }
 }
 
 // 0x5AF360
