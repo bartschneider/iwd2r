@@ -2305,3 +2305,59 @@ TEST_CASE("infinity_dawn_and_dusk_keep_the_light_and_the_rain_apart", "[vid]")
         }
     }
 }
+
+// CVidMode::DrawLightingEffect24 (0x7C8F70): a light pool on a 24-bpp
+// surface, three bytes per pixel (R, G, B) with lPitch in bytes. No surface
+// and no GPU: a plain buffer is enough, and the function reads only the
+// global tint (and the arc list through the mode's vtable).
+TEST_CASE("vid: DrawLightingEffect24 brightens inside the pool and leaves the rest", "[vid]")
+{
+    constexpr int kCanvas = 64;
+    constexpr int kPitch = kCanvas * 3;
+    constexpr BYTE kGrey = 0x80;
+
+    CVidInf mode;
+    mode.rgbGlobalTint = RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT);
+
+    // The white light on a black ambient clamps every channel at 255 in the
+    // middle of the pool; the edges only brighten part of the way.
+    std::vector<BYTE> canvas(static_cast<size_t>(kPitch) * kCanvas + 4, kGrey);
+    const std::vector<BYTE> before = canvas;
+    mode.DrawLightingEffect24(canvas.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0xFFFFFF, 0x000000);
+
+    const auto pixel = [&](int x, int y) { return &canvas[static_cast<size_t>(y) * kPitch + x * 3]; };
+    // The middle band ramps up to x = 31 and down from x = 32.
+    CHECK(pixel(31, 32)[0] == 0xFF);
+    CHECK(pixel(31, 32)[1] == 0xFF);
+    CHECK(pixel(31, 32)[2] == 0xFF);
+    CHECK(pixel(24, 32)[0] > kGrey);
+    CHECK(pixel(38, 32)[0] > kGrey);
+    // Everything outside the pool is byte-identical, including the four
+    // canary bytes after the buffer (the 24-bit write is three bytes).
+    CHECK(pixel(0, 0)[0] == kGrey);
+    CHECK(std::memcmp(pixel(32 + 12, 32), &before[static_cast<size_t>(32) * kPitch + 44 * 3], 3) == 0);
+    CHECK(std::memcmp(pixel(32, 32 + 12), &before[static_cast<size_t>(44) * kPitch + 32 * 3], 3) == 0);
+    CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas] == kGrey);
+    CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas + 3] == kGrey);
+
+    // Height 0 draws nothing (the original leaks the pixel list there), and
+    // so does a light whose channels all end at zero (no light, a white
+    // ambient): the buffer stays byte-identical.
+    {
+        std::vector<BYTE> flat = before;
+        mode.DrawLightingEffect24(flat.data(), kPitch, CPoint(32, 32), CSize(8, 0), 0xFFFFFF, 0x000000);
+        CHECK(flat == before);
+    }
+    {
+        std::vector<BYTE> dark = before;
+        mode.DrawLightingEffect24(dark.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0x000000, 0xFFFFFF);
+        CHECK(dark == before);
+    }
+
+    // A global tint other than none scales the ambient first: a black tint
+    // zeroes it, and the same white light still fills the middle of the pool.
+    mode.rgbGlobalTint = 0x000000;
+    std::vector<BYTE> tinted = before;
+    mode.DrawLightingEffect24(tinted.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0xFFFFFF, 0x808080);
+    CHECK(tinted[static_cast<size_t>(32) * kPitch + 31 * 3] == 0xFF);
+}

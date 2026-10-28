@@ -2372,10 +2372,212 @@ LONG CVidMode::DrawEllipseVOctant24(LONG x, LONG y, INT nArcLength, BYTE* pSurfa
     return x;
 }
 
+// A light pool on a 24-bpp surface: an ellipse of half-axes a5 centred on a4
+// whose pixels are scaled by a factor rising from the edge toward the centre.
+// a6 is the light's colour, a7 the ambient colour (tinted by the global tint).
+// Pixels are three bytes, R at +0, G at +1, B at +2; lPitch is in bytes.
+//
 // 0x7C8F70
 void CVidMode::DrawLightingEffect24(BYTE* pSurface, LONG lPitch, const CPoint& a4, const CSize& a5, unsigned long a6, unsigned long a7)
 {
-    // TODO: Incomplete.
+    // The scale starts at 64 and a pixel is scaled by it >> 6 (.rdata
+    // 0x85DE38, 0x85DE3A), as in the 32-bit sibling.
+    const BYTE nBase = 64;
+    const BYTE nShift = 6;
+
+    LONG nHeight = a5.cy;
+    if (nHeight == 0) {
+        // NOTE: The original allocates the pixel list first and leaks it
+        // here (0x7C8F8E); ours allocates after this test.
+        return;
+    }
+
+    BYTE* pPixelBuffer = new BYTE[a5.cx > a5.cy ? a5.cx : a5.cy];
+    BYTE* pPixelList = pPixelBuffer;
+
+    DWORD rgbAmbient;
+    if (rgbGlobalTint != RGB(CVidPalette::NO_TINT, CVidPalette::NO_TINT, CVidPalette::NO_TINT)) {
+        rgbAmbient = (((((rgbGlobalTint >> 16) & 0xFF) * ((a7 >> 16) & 0xFF)) >> 8) & 0xFF) << 16
+            | ((((a7 >> 8) & 0xFF) * ((rgbGlobalTint >> 8) & 0xFF)) & 0xFF00)
+            | ((((a7 & 0xFF) * (rgbGlobalTint & 0xFF)) >> 8) & 0xFF);
+    } else {
+        rgbAmbient = a7;
+    }
+
+    // Each channel brightens to the light's colour plus half the ambient's
+    // shortfall, rounded down to a multiple of the height above the base.
+    BYTE nRed = 255;
+    if (static_cast<INT>(a6 & 0xFF) + ((255 - static_cast<INT>(rgbAmbient & 0xFF)) >> 1) <= 255) {
+        nRed = static_cast<BYTE>((a6 & 0xFF) + ((255 - static_cast<INT>(rgbAmbient & 0xFF)) >> 1));
+    }
+
+    BYTE nGreen = 255;
+    if (static_cast<INT>((a6 >> 8) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 8) & 0xFF)) >> 1) <= 255) {
+        nGreen = static_cast<BYTE>(((a6 >> 8) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 8) & 0xFF)) >> 1));
+    }
+
+    BYTE nBlue = 255;
+    if (static_cast<INT>((a6 >> 16) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 16) & 0xFF)) >> 1) <= 255) {
+        nBlue = static_cast<BYTE>(((a6 >> 16) & 0xFF) + ((255 - static_cast<INT>((rgbAmbient >> 16) & 0xFF)) >> 1));
+    }
+
+    nRed = nRed > nBase ? static_cast<BYTE>((nRed - nBase) / nHeight * static_cast<BYTE>(nHeight)) : 0;
+    nGreen = nGreen > nBase ? static_cast<BYTE>((nGreen - nBase) / nHeight * static_cast<BYTE>(nHeight)) : 0;
+    nBlue = nBlue > nBase ? static_cast<BYTE>((nBlue - nBase) / nHeight * static_cast<BYTE>(nHeight)) : 0;
+
+    if (nRed == 0 && nGreen == 0 && nBlue == 0) {
+        // NOTE: The original leaks the pixel list here (0x7C90A9); ours frees
+        // it.
+        delete[] pPixelBuffer;
+        return;
+    }
+
+    // Writes one pixel scaled by (nScaleRed, nScaleGreen, nScaleBlue) >> 6,
+    // each channel at most 255; the byte after it is not touched.
+    auto Scale = [nShift](BYTE* pPixel, BYTE nScaleRed, BYTE nScaleGreen, BYTE nScaleBlue) {
+        INT r = (static_cast<INT>(pPixel[0]) * nScaleRed) >> nShift;
+        if (r >= 255) {
+            r = 255;
+        }
+        INT g = (static_cast<INT>(pPixel[1]) * nScaleGreen) >> nShift;
+        if (g >= 255) {
+            g = 255;
+        }
+        INT b = (static_cast<INT>(pPixel[2]) * nScaleBlue) >> nShift;
+        if (b >= 255) {
+            b = 255;
+        }
+        pPixel[0] = static_cast<BYTE>(r);
+        pPixel[1] = static_cast<BYTE>(g);
+        pPixel[2] = static_cast<BYTE>(b);
+    };
+
+    // The upper and lower caps: rows from the top (and the bottom) toward
+    // the centre, each a ramp up and down that widens by a pixel to the
+    // left as the arc steps.
+    LONG nArc = GetEllipseArcPixelList(a5.cx, a5.cy, pPixelList);
+    BYTE* pRow = pSurface + (a4.y - nHeight) * lPitch + a4.x * 3;
+    BYTE nStepRed = static_cast<BYTE>(nRed / nHeight);
+    BYTE nStepGreen = static_cast<BYTE>(nGreen / nHeight);
+    BYTE nStepBlue = static_cast<BYTE>(nBlue / nHeight);
+
+    for (SHORT nHalf = 0; nHalf < 2; nHalf++) {
+        BYTE nRowRed = nStepRed;
+        BYTE nRowGreen = nStepGreen;
+        BYTE nRowBlue = nStepBlue;
+
+        for (INT nWidth = 1; nWidth - 1 < nArc; nWidth++) {
+            if (pPixelList[nWidth - 1] != 0) {
+                BYTE* pPixel = pRow;
+                BYTE nDeltaRed = static_cast<BYTE>(nRowRed / nWidth);
+                BYTE nDeltaGreen = static_cast<BYTE>(nRowGreen / nWidth);
+                BYTE nDeltaBlue = static_cast<BYTE>(nRowBlue / nWidth);
+                BYTE nScaleRed = nBase;
+                BYTE nScaleGreen = nBase;
+                BYTE nScaleBlue = nBase;
+
+                for (SHORT x = 0; x < nWidth; x++) {
+                    nScaleRed += nDeltaRed;
+                    nScaleGreen += nDeltaGreen;
+                    nScaleBlue += nDeltaBlue;
+                    Scale(pPixel, nScaleRed, nScaleGreen, nScaleBlue);
+                    pPixel += 3;
+                }
+
+                for (SHORT x = 0; x < nWidth - 1; x++) {
+                    nScaleRed -= nDeltaRed;
+                    nScaleGreen -= nDeltaGreen;
+                    nScaleBlue -= nDeltaBlue;
+                    Scale(pPixel, nScaleRed, nScaleGreen, nScaleBlue);
+                    pPixel += 3;
+                }
+
+                pRow += lPitch;
+                nRowRed += nStepRed;
+                nRowGreen += nStepGreen;
+                nRowBlue += nStepBlue;
+            }
+            pRow -= 3;
+        }
+
+        if (nHalf == 0) {
+            pRow = pSurface + (a4.y + nHeight) * lPitch + a4.x * 3;
+        }
+
+        lPitch = -lPitch;
+    }
+
+    // The middle band: rows from the centre outward, a ramp up across the
+    // full width and down across the full width again, narrowing as the arc
+    // steps. (The 32-bit sibling ramps down only (nWidth - 1) >> 1 pixels
+    // here; the original's 24-bit code draws nWidth down steps, the last one
+    // peeled out of the loop - 0x7C96F8, 0x7C97E0. Kept as it is.)
+    nArc = GetEllipseArcPixelList(a5.cy, a5.cx, pPixelList);
+    LONG nWidth = a5.cx;
+    pRow = pSurface + a4.y * lPitch - nWidth * 3 + a4.x * 3;
+
+    for (SHORT nHalf = 0; nHalf < 2; nHalf++) {
+        BYTE nRowRed = nRed;
+        BYTE nRowGreen = nGreen;
+        BYTE nRowBlue = nBlue;
+
+        if (nArc > 0) {
+            for (INT nIndex = 0; nIndex < nArc; nIndex++) {
+                // NOTE: The original divides by zero here once the band has
+                // no width left (0x7C9612); ours stops drawing.
+                if (nWidth == 0) {
+                    delete[] pPixelBuffer;
+                    return;
+                }
+
+                BYTE* pPixel = pRow;
+                BYTE nDeltaRed = static_cast<BYTE>(nRowRed / nWidth);
+                BYTE nDeltaGreen = static_cast<BYTE>(nRowGreen / nWidth);
+                BYTE nDeltaBlue = static_cast<BYTE>(nRowBlue / nWidth);
+                BYTE nScaleRed = nBase;
+                BYTE nScaleGreen = nBase;
+                BYTE nScaleBlue = nBase;
+
+                for (SHORT x = 0; x < nWidth; x++) {
+                    nScaleRed += nDeltaRed;
+                    nScaleGreen += nDeltaGreen;
+                    nScaleBlue += nDeltaBlue;
+                    Scale(pPixel, nScaleRed, nScaleGreen, nScaleBlue);
+                    pPixel += 3;
+                }
+
+                for (SHORT x = 0; x < nWidth; x++) {
+                    nScaleRed -= nDeltaRed;
+                    nScaleGreen -= nDeltaGreen;
+                    nScaleBlue -= nDeltaBlue;
+                    Scale(pPixel, nScaleRed, nScaleGreen, nScaleBlue);
+                    pPixel += 3;
+                }
+
+                if (pPixelList[nIndex] != 0) {
+                    pRow += 3;
+                    nWidth--;
+                }
+
+                pRow -= lPitch;
+                nRowRed -= nStepRed;
+                nRowGreen -= nStepGreen;
+                nRowBlue -= nStepBlue;
+            }
+        }
+
+        if (nHalf == 0) {
+            // The lower half starts a row below the centre, without the
+            // first arc step.
+            pRow = pSurface + (a4.y + 1) * lPitch - a5.cx * 3 + a4.x * 3 + pPixelList[0] * 3;
+            nWidth = a5.cx - pPixelList[0];
+            nArc--;
+            pPixelList++;
+            lPitch = -lPitch;
+        }
+    }
+
+    delete[] pPixelBuffer;
 }
 
 // 0x7C9990

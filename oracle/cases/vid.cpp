@@ -615,6 +615,79 @@ void LightingEffect32(CaseContext& ctx)
     }
 }
 
+// CVidMode::DrawLightingEffect24(pSurface, lPitch, ptCenter, size, rgbLight,
+// rgbAmbient) (0x7C8F70), `ret 0x18` at 0x7C997E. Three bytes per pixel, R at
+// +0, G at +1, B at +2, lPitch in bytes; it reads rgbGlobalTint (0xA4) and
+// calls GetEllipseArcPixelList through the vtable (0xC0), as the 32-bit
+// sibling does.
+using Lighting24Fn = void(__fastcall*)(void* self, void* edx, uint8_t* pSurface, int32_t lPitch, const void* pt,
+    const void* size, uint32_t a6, uint32_t a7);
+constexpr uintptr_t kDrawLightingEffect24 = 0x7C8F70;
+constexpr int kLightCanvas24 = 200;
+constexpr int kLightPitch24 = kLightCanvas24 * 3;
+
+// DrawLightingEffect24 on a 200x200 canvas of random bytes (three per
+// pixel, lPitch in bytes), centred, with half-axes 1 to 40 (height 0 draws
+// nothing; width 0 divides by zero in the original, 0x7C9612), random light
+// and ambient colours, and the global tint none or random. The whole canvas
+// is compared, byte by byte. The video mode is a CVidInf from the original's
+// constructor.
+void LightingEffect24(CaseContext& ctx)
+{
+    uint8_t* mode = nullptr;
+    uint8_t* canvas = nullptr;
+    uint8_t* pt = nullptr;
+    uint8_t* size = nullptr;
+    ctx.SetInputs("building the original's video mode and canvas");
+    ctx.CallOriginal([&] {
+        mode = OriginalBlock(kVidInfSize);
+        reinterpret_cast<VidInfCtorFn>(kVidInfCtor)(mode, nullptr);
+        canvas = reinterpret_cast<uint8_t*>(OriginalBlock(static_cast<size_t>(kLightPitch24) * kLightCanvas24));
+        pt = OriginalBlock(8);
+        size = OriginalBlock(8);
+    });
+    CVidInf ours;
+    std::vector<uint8_t> mine(static_cast<size_t>(kLightPitch24) * kLightCanvas24);
+    Picks picks(ctx.seed, 0x4C69676874323400ull); // "Light24"
+    const int count = 200 + ctx.iterations / 20;
+    for (int n = 0; n < count; ++n) {
+        const int32_t cx = picks.Between(1, 40);
+        const int32_t cy = n < 4 ? 0 : picks.Between(1, 40);
+        const int32_t x = picks.Between(80, 120);
+        const int32_t y = picks.Between(80, 120);
+        const uint32_t a6 = picks.Bits() & 0xFFFFFF;
+        const uint32_t a7 = picks.Bits() & 0xFFFFFF;
+        const uint32_t tint = picks.Between(0, 1) ? 0xFFFFFFu : (picks.Bits() & 0xFFFFFF);
+        for (uint8_t& byte : mine) {
+            byte = static_cast<uint8_t>(picks.Bits());
+        }
+        char inputs[160];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: centre (%d, %d), axes (%d, %d), light 0x%06X, ambient 0x%06X, global tint 0x%06X", n, x, y,
+            cx, cy, a6, a7, tint);
+        ctx.SetInputs(inputs);
+        const int32_t p[2] = { x, y };
+        const int32_t sz[2] = { cx, cy };
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), mine.size());
+            std::memcpy(pt, p, sizeof(p));
+            std::memcpy(size, sz, sizeof(sz));
+            Put<uint32_t>(mode, kGlobalTintOffset, tint);
+            reinterpret_cast<Lighting24Fn>(kDrawLightingEffect24)(mode, nullptr, canvas, kLightPitch24, pt, size, a6,
+                a7);
+        });
+        ours.rgbGlobalTint = tint;
+        ours.DrawLightingEffect24(mine.data(), kLightPitch24, CPoint(x, y), CSize(cx, cy), a6, a7);
+        ctx.CountInputs(1);
+        for (size_t i = 0; i < mine.size(); ++i) {
+            if (canvas[i] != mine[i]) {
+                ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                break;
+            }
+        }
+    }
+}
+
 // The video mode both sides read.
 struct ModeValues {
     uint8_t fade;
@@ -2794,6 +2867,7 @@ ORACLE_CASE("vid/thick_line24", ThickLine24);
 ORACLE_CASE("vid/draw_line24", DrawLine24);
 ORACLE_CASE("vid/brightness_contrast", BrightnessContrast);
 ORACLE_CASE("vid/lighting_effect32", LightingEffect32);
+ORACLE_CASE("vid/lighting_effect24", LightingEffect24);
 ORACLE_CASE("vid/fill_convex_poly", FillConvexPoly);
 ORACLE_CASE("vid/fill_poly", FillPoly);
 ORACLE_CASE("vid/cell_translucent32", CellTranslucent);
