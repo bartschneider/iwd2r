@@ -2972,9 +2972,10 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
     field_AAA.RemoveAll();
 
     if (g_pBaldurChitin->GetObjectGame()->m_pGameAreaMaster == this) {
-        // TODO: Incomplete. The original calls 0x5170F0 on the game's
-        // `m_cMoveList` and `m_cLimboList` with this area (it re-applies an
-        // effect to each listed sprite); CMoveList does not have it yet.
+        // The original fills this area's list again right after emptying it,
+        // so the sprites of pending moves go into this area's creature list.
+        g_pBaldurChitin->GetObjectGame()->m_cMoveList.Marshal(this);
+        g_pBaldurChitin->GetObjectGame()->m_cLimboList.Marshal(this);
     }
 
     if (bProgressBarInPlace == TRUE) {
