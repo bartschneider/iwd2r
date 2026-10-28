@@ -9,6 +9,7 @@
 #include "CGameAnimationTypeMonster.h"
 #include "CGameAnimationTypeMonsterAnkheg.h"
 #include "CGameAnimationTypeMonsterIcewind.h"
+#include "CGameAnimationTypeMonsterIcewindNew.h"
 #include "CGameAnimationTypeMonsterLarge.h"
 #include "CGameAnimationTypeMonsterLarge16.h"
 #include "CGameAnimationTypeMonsterMulti.h"
@@ -348,6 +349,44 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterMulti draws the black drago
     CheckQuadrants(scope, pDragon, pDragon->m_currentVidCell, pDragon->m_nQuadrants, CPoint(320, 330), "dragon_12_quadrants");
     pDragon->ChangeDirection(0);
     CheckQuadrants(scope, pDragon, pDragon->m_currentVidCell, pDragon->m_nQuadrants, CPoint(320, 330), "dragon_0_quadrants");
+}
+
+// The death sound by animation family (0x6E8180). The constructor's switch on
+// `animationID & 0xF00` writes m_pSndDeath at six sites; the exe's are all the
+// same instruction, `mov dword ptr [esi+0x1e], <literal>`, and there are two
+// literals: 0x8B63D0 "FAL_01B" at 0x6E86FE (family 0x200), 0x6E8967 (0x300)
+// and 0x6E8A29 (0x700); 0x8B6400 "FAL_03B" at 0x6E87FB (0x000), 0x6E8BB2
+// (0x500) and 0x6E8C84 (0x400). Family 0x100 sets none and keeps the base
+// class's. The factory picks this class for `animationID & 0xF000 == 0xF000`;
+// family 0x700 accepts only the low nibbles 0x70, 0x80 and 0x90 (its default
+// asserts).
+TEST_CASE("creature render: MonsterIcewindNew keeps the exe's death sound by family", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    BYTE colors[16] = {};
+    struct Family {
+        USHORT nAnimationID; // 0xF000 | family | low nibble
+        const char* pSndDeath;
+    };
+    const Family families[] = {
+        { 0xF000, "FAL_03B" },
+        { 0xF200, "FAL_01B" },
+        { 0xF300, "FAL_01B" },
+        { 0xF400, "FAL_03B" },
+        { 0xF500, "FAL_03B" },
+        { 0xF770, "FAL_01B" },
+    };
+    for (const Family& family : families) {
+        INFO("animation id 0x" << std::hex << family.nAnimationID);
+        std::unique_ptr<CGameAnimationType> pAnimation(
+            CGameAnimationType::SetAnimationType(family.nAnimationID, colors, 0));
+        auto* pMonster = dynamic_cast<CGameAnimationTypeMonsterIcewindNew*>(pAnimation.get());
+        REQUIRE(pMonster != nullptr);
+        CHECK(std::string(pMonster->GetSndDeath()) == family.pSndDeath);
+    }
 }
 
 // The white wyvern (0x1001, MWYV in four quadrant BAMs, 50WYRWH and six
