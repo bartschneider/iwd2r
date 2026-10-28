@@ -663,7 +663,7 @@ TEST_CASE("gam: SaveGame carries a creature that is in the move list", "[gam][da
         creatureData.GetDataSize(),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
