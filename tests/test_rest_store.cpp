@@ -1139,11 +1139,17 @@ TEST_CASE("store: InvalidateStore cuts the temp copy of a store to an empty STOO
     CHECK(after.m_lInventory.GetCount() == 0);
 }
 
-// 0x46FEA0: the area's rest encounter. Two chance rolls (this hour and the
-// next), then the rest's random delay; then a rarity roll, the creature entry
-// and the count jitter. The delay is drawn before the square search, so the
-// clock's jump pins the first two draws against the same libc; the search's
-// tie-breaks and the spawn placement come after and cannot move them.
+// 0x46FEA0: the area's rest encounter. One chance roll (a miss returns FALSE;
+// the binary's retry counter never takes its back edge), then the rest's random
+// delay; then a rarity roll, the creature entry and the count jitter. The delay
+// is drawn before the square search, so the clock's jump pins the first two
+// draws against the same libc; the search's tie-breaks and the spawn placement
+// come after and cannot move them.
+//
+// NOT asserted here (implemented from the disassembly only): the rarity 0 path
+// (GetNearestOpenSquare + rand() % 2 per creature instead of the formation
+// offsets), the search's rand() % 7 tie-breaks, and AddCurrentTime's <= 900
+// branch (the seeds chosen always give a delay above it).
 TEST_CASE("rest: a rest encounter interrupts the rest with its rolled delay and creatures", "[rest][data]")
 {
     if (DataDir() == nullptr) {
@@ -1228,14 +1234,15 @@ TEST_CASE("rest: a rest encounter interrupts the rest with its rolled delay and 
     CHECK(rand() % 100 <= 100);
     CHECK(static_cast<ULONG>(rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR) == nDelay);
 
-    // No chance: both rolls happen and both miss, so nothing changes.
+    // No chance: the one roll happens and misses (a 0 chance still hits on a
+    // 0 draw, so the seed is chosen to draw non-zero), so nothing changes.
     rest.m_probDay = 0;
     rest.m_probNight = 0;
 
     int nMissSeed = 0;
     for (int n = 1; n < 1000 && nMissSeed == 0; n++) {
         srand(n);
-        if (rand() % 100 != 0 && rand() % 100 != 0) {
+        if (rand() % 100 != 0) {
             nMissSeed = n;
         }
     }
@@ -1302,4 +1309,34 @@ TEST_CASE("rest: a rest encounter interrupts the rest with its rolled delay and 
     g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
     CHECK(HasQueuedAction(party[0], 96));
     CHECK(party[0]->m_baseStats.m_hitPoints > 1);
+
+    // The dawn tick is day: the binary's band is TIME_DAWN <= t < TIME_NIGHT
+    // (`div` then `cmp [0x84EC34] 99000; jae night` / `cmp [0x84EC1C] 27000;
+    // jae day` at 0x46FEE7-0x46FEFB). At exactly 27000 with the day chance 100
+    // and the night chance 0 the day roll is the one taken; the night roll of
+    // the old `>` port missed on every seed but a 1-in-100.
+    pGame->m_worldTime.m_gameTime = CTimerWorld::TIME_DAWN;
+    rest.m_probDay = 100;
+    rest.m_probNight = 0;
+
+    // The seed's first draw (the chance) must not be 0 - the night roll would
+    // then hit on it - and its second (the delay) must be above 900, or the
+    // clock's own minimum swallows the jump.
+    int nEdgeSeed = 0;
+    for (int n = 1; n < 1000 && nEdgeSeed == 0; n++) {
+        srand(n);
+        if (rand() % 100 == 0) {
+            continue;
+        }
+        if (rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR > 900) {
+            nEdgeSeed = n;
+        }
+    }
+    REQUIRE(nEdgeSeed != 0);
+
+    srand(nEdgeSeed);
+    ClearMessages();
+    const ULONG nBeforeEdge = pGame->m_worldTime.m_gameTime;
+    CHECK(pArea->CheckRestEncounter() == TRUE);
+    CHECK(pGame->m_worldTime.m_gameTime > nBeforeEdge);
 }

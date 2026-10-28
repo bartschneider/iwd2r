@@ -2647,14 +2647,19 @@ BOOL CGameArea::CheckRestEncounter()
         return FALSE;
     }
 
-    // Two chances, this hour and the next one: day chance in the dawn-to-night
-    // band of the 108000 ms day, the night chance otherwise.
+    // One chance, at the hour the rest starts: the day chance in the
+    // dawn-to-night band of the 108000 ms day (27000 <= t < 99000: the dawn
+    // tick is day, the `jae` against TIME_DAWN at 0x46FEF5-0x46FEFB), the night
+    // chance otherwise. A miss returns FALSE - the retry counter starts at 0
+    // and the back edge (`inc bl; cmp bl,1; jb` at 0x46FF39-0x46FF3E) is never
+    // taken, so the +TIMESCALE_MSEC_PER_HOUR second roll below never happens
+    // and only the binary's shape remains of it.
     INT nDelay = 0;
     BYTE nTries = 0;
 
     do {
         UINT nTime = (pGame->m_worldTime.m_gameTime + nDelay) % CTimerWorld::TIMESCALE_MSEC_PER_DAY;
-        if (nTime > CTimerWorld::TIME_DAWN && nTime < CTimerWorld::TIME_NIGHT) {
+        if (nTime >= CTimerWorld::TIME_DAWN && nTime < CTimerWorld::TIME_NIGHT) {
             if (rand() % 100 <= m_headerRestEncounter.m_probDay) {
                 break;
             }
