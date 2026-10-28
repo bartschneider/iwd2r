@@ -53,3 +53,29 @@ TEST_CASE("CAliasList::ResolveFileName joins a parsed alias without a semicolon"
     CHECK(aliases.ResolveFileName(requested, resolved) == TRUE);
     CHECK(std::string(static_cast<const char*>(resolved)) == "C:\\GOG Games\\Icewind Dale II\\data\\GUIfont.bif");
 }
+
+TEST_CASE("CAlias::ParseRawData only \":=\" names an alias, not a lone ':' or '='", "[alias]")
+{
+    // The separator the original searches for is the two-character string
+    // ":=" (0x8B99EC, CString::Find at 0x7FAB62): a lone ':' or '=' in the
+    // raw line parses nothing, so the alias stays empty (oracle case
+    // aliases-781800).
+    for (const char* raw : {"a:b", "a=b", "a: b", "a=b=c"}) {
+        CString line(raw);
+        CAlias alias(line);
+
+        INFO(raw);
+        CHECK(alias.field_4 == FALSE);
+        CHECK(std::string(static_cast<const char*>(alias.field_8)).empty());
+        CHECK(Values(alias).empty());
+    }
+
+    // With both characters the name is the text before the ':' plus the
+    // path separator, and the value starts after ":=".
+    CString line("a:=b");
+    CAlias alias(line);
+
+    CHECK(alias.field_4 == TRUE);
+    CHECK(std::string(static_cast<const char*>(alias.field_8)) == "a:\\");
+    CHECK(Values(alias) == "b\\");
+}
