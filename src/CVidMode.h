@@ -182,9 +182,9 @@ public:
     /* 000C */ DWORD m_dwCursorRenderFlags;
     /* 0010 */ int field_10;
     /* 0014 */ int field_14;
-    /* 0018 */ DWORD m_dwRBitMask; // #guess
-    /* 001C */ DWORD m_dwGBitMask; // #guess
-    /* 0020 */ DWORD m_dwBBitMask; // #guess
+    /* 0018 */ DWORD m_dwRBitMask;
+    /* 001C */ DWORD m_dwGBitMask;
+    /* 0020 */ DWORD m_dwBBitMask;
     /* 0024 */ int field_24;
     /* 0028 */ CCriticalSection m_csRenderPointer;
     /* 0048 */ BOOLEAN m_bFadeTo;

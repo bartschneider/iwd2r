@@ -2405,6 +2405,12 @@ TEST_CASE("vid: DrawLightingEffect16 brightens inside the pool and leaves the re
     CHECK(pixel(31, 32) == 0xFFFF);
     CHECK(pixel(24, 32) != kGrey);
     CHECK(pixel(38, 32) != kGrey);
+    // The band's down ramp is nWidth - 1 pixels (0x797191), so x = 39 is
+    // outside the pool. NOTE: the extra step a 24-bit-style nWidth ramp would
+    // take lands on scale 64, which rewrites the pixel unchanged, so this pin
+    // documents the extent but no pixel value distinguishes the two widths;
+    // the exact ramp values below are what pin the sequence.
+    CHECK(pixel(39, 32) == kGrey);
     // Everything outside the pool is byte-identical, including the two
     // canary words after the buffer (the 16-bit write is one WORD).
     CHECK(pixel(0, 0) == kGrey);
@@ -2412,6 +2418,16 @@ TEST_CASE("vid: DrawLightingEffect16 brightens inside the pool and leaves the re
     CHECK(pixel(32, 32 + 12) == kGrey);
     CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas] == kGrey);
     CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas + 1] == kGrey);
+
+    // A dim light never reaches the masks, so the ramp's arithmetic shows
+    // exactly: 0x101010 on a black ambient gives (16 + 127), quantised to a
+    // multiple of 8 above 64, i.e. 72 per channel and a step of 9; the middle
+    // band's first two pixels get scales 73 and 82, turning the grey 5-6-5
+    // channels (16, 32, 16) into (18, 36, 18) and (20, 41, 20).
+    std::vector<WORD> dim = before;
+    mode.DrawLightingEffect16(dim.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0x101010, 0x000000);
+    CHECK(dim[static_cast<size_t>(32) * kPitch + 24] == 0x9492);
+    CHECK(dim[static_cast<size_t>(32) * kPitch + 25] == 0xA534);
 
     // Height 0 draws nothing (the original leaks the pixel list there), and
     // so does a light whose channels all end at zero (no light, a white
