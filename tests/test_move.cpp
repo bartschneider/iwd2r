@@ -352,6 +352,43 @@ TEST_CASE("move: the limbo list counts down and hands a move to an unloaded area
     delete pGone;
 }
 
+TEST_CASE("move: Marshal queues the moving sprite in the area's saved list", "[move][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(1);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = party[0];
+    CGameArea* pArea = pSprite->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // A sprite in transit belongs to no area list; Marshal puts its id in the
+    // area's field_AAA, which CGameArea::Marshal saves with the creatures.
+    CMoveListEntry* pEntry = new CMoveListEntry();
+    pEntry->m_nSpriteId = pSprite->GetId();
+    pEntry->m_areaResRef = "AR1000";
+    pEntry->m_ptDestination = pSprite->GetPos();
+    pGame->m_cMoveList.AddTail(pEntry);
+
+    pArea->field_AAA.RemoveAll();
+    pGame->m_cMoveList.Marshal(pArea);
+
+    REQUIRE(pArea->field_AAA.GetCount() == 1);
+    CHECK(reinterpret_cast<INT_PTR>(pArea->field_AAA.GetHead()) == pSprite->GetId());
+
+    pGame->m_cMoveList.RemoveAll();
+    delete pEntry;
+}
+
 TEST_CASE("move: HandleFollowPath replaces the followers' actions with the leader's path", "[move][data]")
 {
     if (DataDir() == nullptr) {

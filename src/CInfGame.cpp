@@ -9319,18 +9319,12 @@ BOOL CInfGame::CanRestParty(STRREF& strError, unsigned char bInStore, unsigned c
         }
     }
 
-    // TODO: `CGameObjectArray` 0x5C9300 (CGameObjectArray.cpp, not ported):
-    // FALSE when any sprite in the array has spell state 46 or 47
-    // (SPLSTATE_MOLD_TOUCH, SPLSTATE_SHROUD_OF_FLAME), TRUE otherwise
-    // (0x5C20B0-0x5C20C9):
-    //
-    //     if (!m_cObjectArray.sub_5C9300()) {
-    //         bResult = FALSE;
-    //         strError = 10309;
-    //     }
-    //
-    // Until it is ported the check passes, as it does when no sprite has
-    // either state.
+    // FALSE when a sprite in the array has SPLSTATE_MOLD_TOUCH or
+    // SPLSTATE_SHROUD_OF_FLAME: "You may not rest at this time."
+    if (!m_cObjectArray.AnySpriteIsDiseased()) {
+        bResult = FALSE;
+        strError = 10309;
+    }
 
     return bResult;
 }
