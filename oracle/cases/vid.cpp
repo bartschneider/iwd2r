@@ -1155,12 +1155,12 @@ void BltBmp24To16(CaseContext& ctx)
     for (int format = 0; format < 2; ++format) {
         SetMode16(video, ctx, format == 0);
         for (int n = 0; n < count; ++n) {
-            // Width 1 hits the original's single-pixel path; width 0 is left
-            // out: its row step is one pixel forward then a full row back and
-            // the original faults on it (the runner reported a fault inside
-            // the original at height 1), while the port keeps the path with a
-            // NOTE and the unit test covers it.
-            const int32_t cx = n % 9 == 0 ? 1 : picks.Between(2, 32);
+            // Widths 0 and 1 take the original's single-pixel path, which
+            // faults under the rig (the runner reported an access violation
+            // right after the call for a 1-byte-wide input), so the case
+            // starts at 2; the port keeps that path with a NOTE and the unit
+            // test covers widths 0 and 1.
+            const int32_t cx = picks.Between(2, 32);
             const int32_t cy = picks.Between(1, 32);
             const int32_t jump = picks.Between(0, 8);
             const int32_t x = picks.Between(0, kW - cx);
