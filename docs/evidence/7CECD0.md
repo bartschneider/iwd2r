@@ -2,7 +2,7 @@
 address: 0x7CECD0
 name: CVidCell::Blt8To24
 oracle_case: vid/cell_blt8to24_fast
-kind: read-only
+kind: oracle
 ghidra_version: 12.1.4
 parity_waiver: "lints 2026-10-29 blt8to24: the only finding in the function's span is RE004 on its own address-derived name (the definition line every stub carries): the export has no name for 0x7CECD0, so the port keeps the stub's and a real rename (report-T50.md proposes Blt8To24) needs a Ghidra-side rename of the project, a follow-up that also removes the base's RE005 this port already did. The base stub was red for both RE004 and RE005, so the mechanical `red reproduces at base` comparison cannot match the now-smaller finding set. Nothing else in the span trips a lint; asm is green (the four callees are named in src)."
 ---
@@ -180,6 +180,22 @@ canvas; the oracle case `vid/cell_blt8to24_fast` (oracle/cases/vid.cpp) compares
 the whole 96x96 24-bit canvas against 0x7CECD0 for random raw and RLE frames,
 the palette flags and both shadow settings.
 
-`kind: read-only` for now: the case is written but has not been run - the rig is
-unreachable. It becomes `kind: oracle` in the follow-up commit once the case has
-passed there (the same route `docs/evidence/7B37A0.md` took).
+`kind: oracle`: the case runs in the gate on our Windows rig (the run below).
+
+## Oracle
+
+`vid/cell_blt8to24_fast` (oracle/cases/vid.cpp): random 1..8 x 1..4 frames, raw and RLE with
+transparent pixels mixed in, the palette flags {0, 0x10000, 0x80000, 0x200000}, the shadow entry on
+and off, drawn 8 rows and 8 pixels into a 96x96 three-byte canvas of random bytes; the whole canvas
+and the result are compared - 900 inputs.
+
+Run by iwd2r-w4's T58 on 2026-10-29, the runner built from this branch's tip (`1d96e430`,
+`--file vid`), verbatim from report-T58.md §2:
+
+```
+$ w1_run_case.py ...\t58-blt8to24\...\iwd2r_oracle.exe t58-blt8to24 vid
+...
+vid/cell_blt8to24_fast           passed, 900 inputs, 0 failures
+54 passed, 0 expected failures or crashes, 0 pending, 0 unexpected; run PASSED
+report: C:\iwd2r-cos\runs\20261029-085202-t58-blt8to24\oracle.json
+```
