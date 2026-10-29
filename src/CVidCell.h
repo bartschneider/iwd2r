@@ -59,7 +59,7 @@ public:
     BOOL sub_7AFB50(WORD* pSurface, LONG lPitch, DWORD dwFlags);
     BOOL sub_7AFED0(WORD* pSurface, LONG lPitch, DWORD dwFlags, INT nTransVal);
 
-    BOOL sub_7CECD0(BYTE* pSurface, LONG lPitch, DWORD dwFlags);
+    BOOL Blt8To24(BYTE* pSurface, LONG lPitch, DWORD dwFlags);
     BOOL Blt8To24(BYTE* pSurface, LONG lPitch, const CPoint& pt, const CRect& rClip, DWORD dwFlags, const CPoint& ptSource);
     BOOL sub_7CF3F0(BYTE* pSurface, LONG lPitch, DWORD dwFlags);
     BOOL sub_7CF650(BYTE* pSurface, LONG lPitch, DWORD dwFlags);

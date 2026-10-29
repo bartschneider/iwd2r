@@ -550,9 +550,14 @@ struct CellFixture {
         cell = reinterpret_cast<CVidCell*>(cellStorage);
         static_cast<CResHelper<CResCell, 1000>*>(cell)->pRes = res;
         cell->m_pFrame = &frame;
+        palette.resize(256);
         for (int i = 0; i < 256; ++i) {
             CVidImage::rgbTempPal[i] = 0xEE000000u | static_cast<DWORD>(i) * 0x010203u;
+            // For the fast blits, which realize the palette themselves.
+            palette[i] = RGBQUAD { static_cast<BYTE>(i), static_cast<BYTE>(255 - i),
+                static_cast<BYTE>(i * 7), 0 };
         }
+        res->m_pPalette = palette.data();
     }
     ~CellFixture()
     {
@@ -563,6 +568,7 @@ struct CellFixture {
     CellFixture& operator=(const CellFixture&) = delete;
 
     std::vector<BYTE> bam;
+    std::vector<RGBQUAD> palette;
     FRAMEENTRY frame = {};
     unsigned char* resStorage;
     unsigned char* cellStorage;
@@ -627,6 +633,72 @@ TEST_CASE("blt8to24_point", "[vid]")
         }
         CHECK(pixels == expected);
     }
+}
+
+// Blt8To24 (0x7CECD0): the whole frame at the surface pointer through the
+// realized 24-bit palette, three bytes a pixel, rows bottom-up by lPitch in
+// bytes, the transparent index left untouched. Registered as an oracle case
+// (vid/cell_blt8to24_fast); this pins the walk in the harness's own terms.
+TEST_CASE("blt8to24_fast", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->m_dwRBitShift = 16;
+    mode->m_dwGBitShift = 8;
+    mode->m_dwBBitShift = 0;
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    for (int compressed = 0; compressed < 2; ++compressed) {
+        CellFixture fixture(compressed != 0);
+        INFO("compressed " << compressed);
+        for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+            INFO("shadow " << shadowOn);
+            fixture.cell->m_bShadowOn = shadowOn != 0;
+
+            std::vector<BYTE> pixels(kDepthW * kDepthH * 3, 0xAA);
+            REQUIRE(fixture.cell->Blt8To24(pixels.data(), kDepthW * 3, 0));
+
+            // The realized palette, read back after the call: the palette
+            // conversion itself is the oracle case's business, the walk is this.
+            std::vector<BYTE> expected(kDepthW * kDepthH * 3, 0xAA);
+            for (int y = 0; y < 3; ++y) {
+                for (int x = 0; x < 4; ++x) {
+                    const BYTE index = kFrame[y * 4 + x];
+                    if (index == 0) {
+                        continue; // transparent
+                    }
+                    const DWORD rgb = CVidImage::rgbTempPal[index];
+                    BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+                    p[0] = static_cast<BYTE>(rgb);
+                    p[1] = static_cast<BYTE>(rgb >> 8);
+                    p[2] = static_cast<BYTE>(rgb >> 16);
+                }
+            }
+            CHECK(pixels == expected);
+
+            // The frame's index 1 (bottom right) takes the mode's shadow
+            // colour unless the cell draws its shadow entry.
+            const BYTE* shadow = pixels.data() + (2 * kDepthW + 3) * 3;
+            const DWORD drawn = static_cast<DWORD>(shadow[0]) | (static_cast<DWORD>(shadow[1]) << 8)
+                | (static_cast<DWORD>(shadow[2]) << 16);
+            CHECK(drawn == (shadowOn != 0 ? static_cast<DWORD>(CVidImage::rgbTempPal[1]) : static_cast<DWORD>(mode->field_24)));
+        }
+    }
+
+    // A zero-size frame draws nothing and answers TRUE.
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<BYTE> untouched(16, 0xAA);
+    CHECK(empty.cell->Blt8To24(untouched.data(), kDepthW * 3, 0) == TRUE);
+    CHECK(untouched == std::vector<BYTE>(16, 0xAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
 }
 
 // BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows

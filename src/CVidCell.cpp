@@ -831,7 +831,7 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPointX, INT nRefPoint
                     dwFlags);
                 break;
             case 24:
-                bSuccess = sub_7CECD0(reinterpret_cast<BYTE*>(pSurface)
+                bSuccess = Blt8To24(reinterpret_cast<BYTE*>(pSurface)
                         + lPitch * (nRefPointY - m_pFrame->nCenterY)
                         + 3 * (nRefPointX - m_pFrame->nCenterX),
                     lPitch,
@@ -990,7 +990,7 @@ BOOL CVidCell::Render(INT nSurface, int x, int y, const CRect& rClip, CVidPoly* 
                 dwFlags);
             break;
         case 24:
-            bSuccess = sub_7CECD0(reinterpret_cast<BYTE*>(ddsd.lpSurface),
+            bSuccess = Blt8To24(reinterpret_cast<BYTE*>(ddsd.lpSurface),
                 ddsd.lPitch,
                 dwFlags);
             break;
@@ -1614,10 +1614,102 @@ void CVidCell::StoreBackground(INT x, INT y, const CRect& rClip, CRect& rStorage
     }
 }
 
+// The plain 24-bit blit of the whole frame at the surface pointer: the 8-bit
+// frame through the realized 24-bit palette (three bytes a pixel, bottom-up by
+// lPitch in bytes), the transparent index skipped. The 24-bit twin of the fast
+// Blt8To32; unlike that one it has no nTransVal (the palette is realized with
+// 255) and none of its field_174 block.
+//
 // 0x7CECD0
-BOOL CVidCell::sub_7CECD0(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
+BOOL CVidCell::Blt8To24(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    int nWidth = m_pFrame->nWidth;
+    int nHeight = m_pFrame->nHeight;
+
+    if (nWidth == 0 || nHeight == 0) {
+        return TRUE;
+    }
+
+    if (!m_bPaletteChanged) {
+        m_cPalette.SetPalette(pRes->m_pPalette, 256, CVidPalette::TYPE_RESOURCE);
+    }
+
+    m_cPalette.Realize(CVidImage::rgbTempPal, 24, dwFlags, &m_paletteAffects, 0xFF);
+
+    if (!m_bShadowOn) {
+        CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] = g_pChitin->GetCurrentVideoMode()->field_24;
+    }
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    // NOTE: The pitch stays in bytes; the original computes the rest of a row
+    // once (lPitch - width * 3) and adds it after each row's pixels.
+    LONG lRowStep = lPitch - nWidth * 3;
+
+    if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        int nRunLength = 0;
+        int pos = 0;
+
+        for (int y = 0; y < nHeight; y++) {
+            int nRemainingWidth = nWidth;
+
+            while (nRemainingWidth != 0) {
+                BYTE nColor = pFrameData[pos];
+
+                if (nColor == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemainingWidth == nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRemainingWidth * 3;
+                        nRunLength = 0;
+                        nRemainingWidth = 0;
+                    } else if (nRemainingWidth > nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRunLength * 3;
+                        nRemainingWidth -= nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pSurface += nRemainingWidth * 3;
+                        nRunLength -= nRemainingWidth;
+                        nRemainingWidth = 0;
+                    }
+                } else {
+                    pos++;
+
+                    DWORD rgb = CVidImage::rgbTempPal[nColor];
+                    *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(rgb);
+                    pSurface[2] = static_cast<BYTE>(rgb >> 16);
+                    pSurface += 3;
+                    nRemainingWidth--;
+                }
+            }
+
+            pSurface += lRowStep;
+        }
+    } else {
+        for (int y = 0; y < nHeight; y++) {
+            for (int x = 0; x < nWidth; x++) {
+                BYTE nColor = *pFrameData;
+                if (nColor != nTransparentColor) {
+                    DWORD rgb = CVidImage::rgbTempPal[nColor];
+                    *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(rgb);
+                    pSurface[2] = static_cast<BYTE>(rgb >> 16);
+                }
+                pFrameData++;
+                pSurface += 3;
+            }
+            pSurface += lRowStep;
+        }
+    }
 
     return TRUE;
 }
