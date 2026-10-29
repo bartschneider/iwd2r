@@ -1116,6 +1116,137 @@ void BltBmp24To24(CaseContext& ctx)
     ::operator delete(oursStorage);
 }
 
+// CVidBitmap::BltBmp24To24Tint(pSurface, lPitch, pData, bmpSize,
+// nDataJump, dwFlags) (0x7CCE80), `ret 0x18`: reads the video mode's shifts,
+// global tint, brightness and gamma, and the bitmap's m_paletteAffects (in
+// the original at 0x28 - its 32-bit layout - for the tint, add and light
+// colours here only).
+constexpr uintptr_t kBltBmp24To24Tint = 0x7CCE80;
+constexpr size_t kOriginalAffectOffset = 0x28;
+
+// 24-bit bitmaps 2 to 32 wide (the unkeyed loop never ends below 2 in the
+// original) and 1 to 32 high, drawn upward from the last row of a 64x40
+// 24-bit canvas of random bytes, with random data jumps; plain, keyed (0x1)
+// and keyed with shadows (0x5) with the grey (0x80000), tint (0x30000), add
+// (0x40000) and light (0x200000) flags mixed in; data mixing pure green,
+// black and random pixels; under shifts 16/8/0 and 0/8/16, with random tint,
+// add and light colours and the mode's brightness, gamma and global tint.
+// The whole canvas and the result are compared.
+void BltBmp24To24Tint(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    constexpr int kW = 64;
+    constexpr int kH = 40;
+    constexpr size_t kSize = kW * kH * 3;
+    constexpr size_t kDataSize = 64 * 32 * 3;
+    uint8_t* self = nullptr;
+    uint8_t* canvas = nullptr;
+    uint8_t* data = nullptr;
+    uint8_t* size = nullptr;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        self = OriginalBlock(0x100);
+        canvas = OriginalBlock(kSize);
+        data = OriginalBlock(kDataSize);
+        size = OriginalBlock(8);
+    });
+    auto* oursStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(oursStorage, 0, sizeof(CVidBitmap));
+    auto* ours = reinterpret_cast<CVidBitmap*>(oursStorage);
+    std::vector<uint8_t> mine(kSize);
+    std::vector<uint8_t> pixels(kDataSize);
+    Picks picks(ctx.seed, 0x426D703334000000ull); // "Bmp34"
+    const int count = 600 + ctx.iterations / 10;
+    for (int format = 0; format < 2; ++format) {
+        const uint32_t r = format == 0 ? 16 : 0;
+        const uint32_t b = format == 0 ? 0 : 16;
+        ctx.CallOriginal([&] {
+            Put<uint32_t>(video.mode, kRShiftOffset, r);
+            Put<uint32_t>(video.mode, kBShiftOffset, b);
+        });
+        video.oursMode->m_dwRBitShift = r;
+        video.oursMode->m_dwBBitShift = b;
+        for (int n = 0; n < count; ++n) {
+            const uint32_t tint = picks.Between(0, 2) == 0 ? 0xFFFFFF : (picks.Bits() & 0xFFFFFF);
+            const uint32_t add = picks.Between(0, 2) == 0 ? 0xFFFFFF : (picks.Bits() & 0xFFFFFF);
+            const uint32_t light = picks.Between(0, 2) == 0 ? 0xFFFFFF : (picks.Bits() & 0xFFFFFF);
+            const uint8_t brightness = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 255) : 0);
+            const uint8_t gamma = static_cast<uint8_t>(picks.Between(0, 2) == 0 ? picks.Between(0, 40) : 0);
+            const uint32_t globalTint = picks.Between(0, 2) == 0 ? 0xFFFFFF : (picks.Bits() & 0xFFFFFF);
+            uint32_t dwFlags = (n % 3 == 0) ? 0u : ((n % 3 == 1) ? 1u : 5u);
+            const uint32_t extra[5] = { 0x80000, 0x10000, 0x20000, 0x40000, 0x200000 };
+            for (const uint32_t bit : extra) {
+                if (picks.Between(0, 2) == 0) {
+                    dwFlags |= bit;
+                }
+            }
+            const int32_t cx = picks.Between(2, 32);
+            const int32_t cy = picks.Between(1, 32);
+            const int32_t jump = picks.Between(0, 8);
+            const int32_t x = picks.Between(0, kW - cx);
+            const int32_t y = picks.Between(cy - 1, kH - 1);
+            for (size_t i = 0; i < kDataSize; i += 3) {
+                const int kind = picks.Between(0, 5);
+                if (kind == 0) {
+                    pixels[i] = 0;
+                    pixels[i + 1] = 0xFF;
+                    pixels[i + 2] = 0;
+                } else if (kind == 1) {
+                    pixels[i] = pixels[i + 1] = pixels[i + 2] = 0;
+                } else {
+                    pixels[i] = static_cast<uint8_t>(picks.Bits());
+                    pixels[i + 1] = static_cast<uint8_t>(picks.Bits());
+                    pixels[i + 2] = static_cast<uint8_t>(picks.Bits());
+                }
+            }
+            for (uint8_t& pixel : mine) {
+                pixel = static_cast<uint8_t>(picks.Bits());
+            }
+            char inputs[240];
+            std::snprintf(inputs, sizeof(inputs),
+                "input %d (%s): %dx%d, last row at (%d,%d), jump %d, flags 0x%X, tint 0x%X, add 0x%X, "
+                "light 0x%X, brightness %u, gamma %u, global tint 0x%X",
+                n, format == 0 ? "16/8/0" : "0/8/16", cx, cy, x, y, jump, dwFlags, tint, add, light, brightness,
+                gamma, globalTint);
+            ctx.SetInputs(inputs);
+            const size_t offset = static_cast<size_t>((y * kW + x) * 3);
+            int32_t originalResult = 0;
+            ctx.CallOriginal([&] {
+                std::memcpy(canvas, mine.data(), kSize);
+                std::memcpy(data, pixels.data(), kDataSize);
+                const int32_t sz[2] = { cx, cy };
+                std::memcpy(size, sz, 8);
+                Put<uint32_t>(self, kOriginalAffectOffset + 0x0, tint);
+                Put<uint32_t>(self, kOriginalAffectOffset + 0x4, add);
+                Put<uint32_t>(self, kOriginalAffectOffset + 0x8, light);
+                Put<uint32_t>(video.mode, kGlobalTintOffset, globalTint);
+                Put<uint8_t>(video.mode, kBrightnessOffset, brightness);
+                Put<uint8_t>(video.mode, kGammaOffset, gamma);
+                originalResult = reinterpret_cast<BltBmpFn>(kBltBmp24To24Tint)(self, nullptr, canvas + offset,
+                    kW * 3, data, size, jump, dwFlags);
+            });
+            ours->m_paletteAffects.rgbTintColor = tint;
+            ours->m_paletteAffects.rgbAddColor = add;
+            ours->m_paletteAffects.rgbLightColor = light;
+            video.oursMode->rgbGlobalTint = globalTint;
+            video.oursMode->m_nBrightnessCorrection = brightness;
+            video.oursMode->m_nGammaCorrection = gamma;
+            const BOOL oursResult = ours->BltBmp24To24Tint(mine.data() + offset, kW * 3, pixels.data(),
+                CSize(cx, cy), jump, dwFlags);
+            ctx.CountInputs(1);
+            if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+                for (size_t i = 0; i < kSize; ++i) {
+                    if (canvas[i] != mine[i]) {
+                        ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    ::operator delete(oursStorage);
+}
+
 // CVidBitmap::BltBmp24To16(pSurface, lPitch, pData, bmpSize, nDataJump,
 // dwFlags) (0x7B37A0), `ret 0x18`: reads the video mode's shifts (and, for
 // the keyed form, its masks) only.
@@ -3059,6 +3190,7 @@ ORACLE_CASE("vid/blt_stencil_tile8to16", BltStencilTile8To16);
 ORACLE_CASE("vid/blt_tile8to24", BltTile8To24);
 ORACLE_CASE("vid/blt_stencil_tile8to24", BltStencilTile8To24);
 ORACLE_CASE("vid/blt_bmp24to24", BltBmp24To24);
+ORACLE_CASE("vid/blt_bmp24to24_tint", BltBmp24To24Tint);
 ORACLE_CASE("vid/blt_bmp24to16", BltBmp24To16);
 ORACLE_CASE("vid/draw_ellipse32", Ellipse32);
 ORACLE_CASE("vid/draw_recticle32", Recticle32);

@@ -2535,3 +2535,152 @@ TEST_CASE("vid: BltBmp24To16 converts 24-bit pixels into the mode's 16-bit field
 
     ::operator delete(storage);
 }
+
+// CVidBitmap::BltBmp24To24Tint (0x7CCE80): a 24-bit BMP (three bytes, B then
+// G then R) onto a 24-bit surface through the same tint, add and light passes
+// as BltBmp24To32Tint, with its keyed form (pure green transparent; with 0x4
+// a pure black pixel a shadow). Rows bottom-up (lPitch in bytes); a drawn
+// pixel before a row's last writes a fourth byte over the next pixel's first.
+TEST_CASE("vid: BltBmp24To24Tint tints, adds, lights and keys 24-bit pixels", "[vid]")
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(storage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(storage);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setShifts = [&mode](DWORD r, DWORD g, DWORD b) {
+        mode.m_dwRBitShift = r;
+        mode.m_dwGBitShift = g;
+        mode.m_dwBBitShift = b;
+    };
+
+    constexpr int kW = 4;
+    constexpr int kH = 3;
+    constexpr size_t kPitch = kW * 3;
+    const auto index = [](int x, int y) { return static_cast<size_t>(y) * kW + x; };
+    const auto rowBytes = [&](const std::vector<BYTE>& canvas, int x, int y, int n) {
+        std::vector<BYTE> out(n);
+        std::copy_n(canvas.begin() + static_cast<ptrdiff_t>(index(x, y) * 3), n, out.begin());
+        return out;
+    };
+
+    // Plain (flags 0), shifts 16/8/0: the source's B, G, R bytes land at
+    // bytes 0, 1, 2, the rows going up from the pointer handed in.
+    const BYTE plain[18] = {
+        0x11,
+        0x22,
+        0x33,
+        0x44,
+        0x55,
+        0x66,
+        0x77,
+        0x88,
+        0x99,
+        0x12,
+        0x34,
+        0x56,
+        0x78,
+        0x9A,
+        0xBC,
+        0xDE,
+        0xF0,
+        0x12,
+    };
+    setShifts(16, 8, 0);
+    std::vector<BYTE> canvas(kW * kH * 3, 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 2) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(3, 2), 0, 0));
+    CHECK(rowBytes(canvas, 0, 2, 9) == std::vector<BYTE> { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 });
+    CHECK(rowBytes(canvas, 0, 1, 9) == std::vector<BYTE> { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x12 });
+    CHECK(canvas[index(3, 2) * 3] == 0xEE); // the column right of the blit
+
+    // Shifts 0/8/16: the same conversion with R at byte 0 and B at byte 2.
+    setShifts(0, 8, 16);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(3, 1), 0, 0));
+    CHECK(rowBytes(canvas, 0, 0, 9) == std::vector<BYTE> { 0x33, 0x22, 0x11, 0x66, 0x55, 0x44, 0x99, 0x88, 0x77 });
+
+    // The tint (0x20000), 8-bit shift: channel * colour / 256. The first
+    // pixel's fourth byte lands on the second's first, which its own write
+    // overwrites again.
+    bitmap->m_paletteAffects.rgbTintColor = RGB(0x80, 0x40, 0xFF);
+    setShifts(16, 8, 0);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(2, 1), 0, 0x20000));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x10, 0x08, 0x19, 0x43, 0x15, 0x33 });
+
+    // The add (0x40000): ~((~(channel * (~colour)) >> 8)), an 8-bit shift.
+    bitmap->m_paletteAffects.rgbAddColor = RGB(0x10, 0x20, 0x30);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(2, 1), 0, 0x40000));
+    CHECK(rowBytes(canvas, 0, 0, 6) == std::vector<BYTE> { 0x3F, 0x3F, 0x41, 0x68, 0x6B, 0x71 });
+
+    // The light (0x200000), scale 8 + the colour: the product above 255 keeps
+    // its high bits (the original clamps only the low byte), so red 0x1FF
+    // carries its bit 8 into green's byte with shifts 0/8/16.
+    bitmap->m_paletteAffects.rgbLightColor = RGB(0x40, 0x20, 0x10);
+    setShifts(0, 8, 16);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 2) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(2, 1), 0, 0x200000));
+    CHECK(rowBytes(canvas, 0, 2, 6) == std::vector<BYTE> { 0xFF, 0xAB, 0x33, 0xFF, 0xFF, 0xCD });
+
+    // Keyed (0x5), shifts 0/8/16: pure green is transparent, and a black
+    // pixel is half the destination (the black level is 0 here). The first
+    // pixel's fourth byte zeroes the green one's first, which stays zero.
+    setShifts(0, 8, 16);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    canvas[index(0, 1) * 3] = 0x40;
+    canvas[index(0, 1) * 3 + 1] = 0x80;
+    canvas[index(0, 1) * 3 + 2] = 0xC0;
+    canvas[index(1, 1) * 3] = 0x10;
+    canvas[index(1, 1) * 3 + 1] = 0x20;
+    canvas[index(1, 1) * 3 + 2] = 0x30;
+    const BYTE shadowed[6] = { 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(shadowed), CSize(2, 1), 0, 0x5));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x20, 0x40, 0x60, 0x00, 0x20, 0x30 });
+
+    // Keyed (0x5), shifts 16/8/0: the row's last pixel reads a WORD for red
+    // and green, so its red stays black and its blue halves the destination's
+    // red byte; the drawn first pixel's fourth byte zeroes the word's low one.
+    setShifts(16, 8, 0);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    canvas[index(0, 1) * 3] = 0x40;
+    canvas[index(0, 1) * 3 + 1] = 0x80;
+    canvas[index(0, 1) * 3 + 2] = 0xC0;
+    canvas[index(1, 1) * 3] = 0x10;
+    canvas[index(1, 1) * 3 + 1] = 0x20;
+    canvas[index(1, 1) * 3 + 2] = 0x30;
+    const BYTE shadowTail[6] = { 0x11, 0x22, 0x33, 0x00, 0x00, 0x00 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(shadowTail), CSize(2, 1), 0, 0x5));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x11, 0x22, 0x33, 0x18, 0x10, 0x00 });
+
+    // The keyed tint and grey of the same branch: a key leaves the pixel, the
+    // tint truncates to bytes, and 0x80000 greys the source first.
+    setShifts(16, 8, 0);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    const BYTE keyed[6] = { 0x00, 0xFF, 0x00, 0x11, 0x22, 0x33 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(keyed), CSize(2, 1), 0, 0x20001));
+    CHECK(rowBytes(canvas, 0, 0, 6) == std::vector<BYTE> { 0xEE, 0xEE, 0xEE, 0x10, 0x08, 0x19 });
+    const BYTE grey[3] = { 0x10, 0x20, 0x30 };
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(grey), CSize(1, 1), 0, 0x80001));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x18, 0x18, 0x18 });
+    // Black without 0x4 is written as black (only green is the key).
+    const BYTE black[3] = { 0x00, 0x00, 0x00 };
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(black), CSize(1, 1), 0, 0x1));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x00, 0x00, 0x00 });
+
+    ::operator delete(storage);
+}
