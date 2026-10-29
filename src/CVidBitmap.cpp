@@ -547,45 +547,63 @@ BOOL CVidBitmap::BltBmp24To16Tint(WORD* pSurface, LONG lPitch, BYTE* pData, cons
     } else {
         for (LONG y = 0; y < bmpSize.cy; y++) {
             for (LONG x = 0; x < bmpSize.cx; x++) {
-                BYTE r = pData[2];
-                BYTE g = pData[1];
-                BYTE b = pData[0];
+                // NOTE: The original keeps each channel in a whole register
+                // (FUN_007b3ff8's shared tail, helper 0x7B3F66), and the
+                // light step can leave a value above 255 there: its clamp
+                // tests the second byte and only replaces the first
+                // (`test ah, 0xff` / `mov al, 0xff`), so the second byte
+                // survives. The pack then shifts the full 16-bit pair
+                // (`shr al` leaves ah, `shl ax`), so an overflowing channel
+                // leaks into the neighbouring fields - the accent in the
+                // destination word. Masking each step to a byte loses that.
+                INT r = pData[2];
+                INT g = pData[1];
+                INT b = pData[0];
 
                 if ((dwFlags & 0x80000) != 0) {
-                    r = static_cast<BYTE>((r + g + b) >> 2);
+                    r = (r + g + b) >> 2;
                     g = r;
                     b = r;
                 }
 
                 if (bTint) {
-                    r = static_cast<BYTE>(static_cast<INT>(r * nTintRed) >> nTintShift);
-                    g = static_cast<BYTE>(static_cast<INT>(g * nTintGreen) >> nTintShift);
-                    b = static_cast<BYTE>(static_cast<INT>(b * nTintBlue) >> nTintShift);
+                    r = (r * static_cast<INT>(nTintRed)) >> nTintShift;
+                    g = (g * static_cast<INT>(nTintGreen)) >> nTintShift;
+                    b = (b * static_cast<INT>(nTintBlue)) >> nTintShift;
                 }
 
                 if (bAdd) {
-                    r = ~static_cast<BYTE>((static_cast<BYTE>(~r) * nAddRed) >> nAddShift);
-                    g = ~static_cast<BYTE>((static_cast<BYTE>(~g) * nAddGreen) >> nAddShift);
-                    b = ~static_cast<BYTE>((static_cast<BYTE>(~b) * nAddBlue) >> nAddShift);
+                    // `not al` twice: only the low byte is inverted, and the
+                    // multiply-shift cannot raise the register above 255.
+                    r = (~((static_cast<BYTE>(~static_cast<BYTE>(r)) * nAddRed) >> nAddShift)) & 0xFF;
+                    g = (~((static_cast<BYTE>(~static_cast<BYTE>(g)) * nAddGreen) >> nAddShift)) & 0xFF;
+                    b = (~((static_cast<BYTE>(~static_cast<BYTE>(b)) * nAddBlue) >> nAddShift)) & 0xFF;
                 }
 
                 if (bLight) {
-                    INT nValue = (r * nLightRed) >> CVidPalette::LIGHT_SCALE;
-                    r = nValue > 255 ? 255 : static_cast<BYTE>(nValue);
-                    nValue = (g * nLightGreen) >> CVidPalette::LIGHT_SCALE;
-                    g = nValue > 255 ? 255 : static_cast<BYTE>(nValue);
-                    nValue = (b * nLightBlue) >> CVidPalette::LIGHT_SCALE;
-                    b = nValue > 255 ? 255 : static_cast<BYTE>(nValue);
+                    r = (r * nLightRed) >> CVidPalette::LIGHT_SCALE;
+                    g = (g * nLightGreen) >> CVidPalette::LIGHT_SCALE;
+                    b = (b * nLightBlue) >> CVidPalette::LIGHT_SCALE;
 
-                    // Keep it off the transparent colour.
-                    if (r == 0 && g == 255 && b == 0) {
-                        g = 254;
+                    // The clamp leaves the second byte in place.
+                    if ((r >> 8) != 0) {
+                        r = (r & 0xFF00) | 0xFF;
+                    }
+                    if ((g >> 8) != 0) {
+                        g = (g & 0xFF00) | 0xFF;
+                    }
+                    if ((b >> 8) != 0) {
+                        b = (b & 0xFF00) | 0xFF;
                     }
                 }
 
-                *pSurface = static_cast<WORD>(((b >> nBSrcShift) << nBShift)
-                    | ((g >> nGSrcShift) << nGShift)
-                    | ((r >> nRSrcShift) << nRShift));
+                // The 16-bit pack: the second byte of each value is shifted
+                // along with the first, as the register pair is.
+                const WORD nR = static_cast<WORD>(((r & 0xFF00) | ((r & 0xFF) >> nRSrcShift)) << nRShift);
+                const WORD nG = static_cast<WORD>(((g & 0xFF00) | ((g & 0xFF) >> nGSrcShift)) << nGShift);
+                const WORD nB = static_cast<WORD>(((b & 0xFF00) | ((b & 0xFF) >> nBSrcShift)) << nBShift);
+
+                *pSurface = static_cast<WORD>(nB | nG | nR);
 
                 pSurface++;
                 pData += 3;

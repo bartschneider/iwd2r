@@ -2641,3 +2641,73 @@ TEST_CASE("vid: BltBmp24To16Tint applies the tint, add and light of the 24-to-16
 
     ::operator delete(storage);
 }
+
+// CVidBitmap::BltBmp24To16Tint's unkeyed pack (0x7B3B70's shared tail
+// 0x7B3FF8): the light step's clamp replaces only the low byte of the
+// register, so a channel whose lit value passes 255 keeps its second byte,
+// and the 16-bit pack shifts it along with the first - the overflow lands in
+// the neighbouring fields. These are the original's own words for the pixels
+// (checked against the rig's vid/blt_bmp24to16_tint case), not the port's
+// arithmetic, so a regression that masks each channel to a byte shows here.
+TEST_CASE("vid: BltBmp24To16Tint packs the unkeyed light overflow into the neighbouring fields", "[vid]")
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(storage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(storage);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode.m_dwRBitMask = 0x1Fu << rShift;
+        mode.m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode.m_dwBBitMask = 0x1F;
+        mode.m_dwRBitShift = rShift;
+        mode.m_dwGBitShift = 5;
+        mode.m_dwBBitShift = 0;
+        mode.field_C2 = 3;
+        mode.field_C6 = 8 - gBits;
+        mode.field_CA = 3;
+        mode.rgbGlobalTint = RGB(255, 255, 255);
+        mode.m_nBrightnessCorrection = 55;
+        mode.m_nGammaCorrection = 8;
+    };
+
+    constexpr int kW = 4;
+    constexpr size_t kPitch = kW * 2;
+    // (B, G, R) per pixel: green and blue overflow the light step, red does
+    // not, so the green's second byte accents the red field.
+    const BYTE data[12] = { 131, 250, 25, 100, 111, 50, 10, 20, 30, 0, 255, 0 };
+
+    setMode16(true);
+    std::vector<WORD> canvas(kW, 0x1111);
+    CHECK(bitmap->BltBmp24To16Tint(canvas.data(), static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(4, 1), 0, 0));
+    CHECK(canvas[0] == 0xBFFF);
+    CHECK(canvas[1] == 0xBFFF);
+    CHECK(canvas[2] == 0xA490);
+    CHECK(canvas[3] == 0x77EE);
+
+    // The same pixels through the odd-width tail (three of them).
+    std::fill(canvas.begin(), canvas.end(), 0x1111);
+    CHECK(bitmap->BltBmp24To16Tint(canvas.data(), static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(3, 1), 0, 0));
+    CHECK(canvas[0] == 0xBFFF);
+    CHECK(canvas[1] == 0xBFFF);
+    CHECK(canvas[2] == 0xA490);
+    CHECK(canvas[3] == 0x1111);
+
+    // 5-5-5: five bits each, so the same overflow reaches the green field.
+    setMode16(false);
+    std::fill(canvas.begin(), canvas.end(), 0x1111);
+    CHECK(bitmap->BltBmp24To16Tint(canvas.data(), static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(4, 1), 0, 0));
+    CHECK(canvas[0] == 0x6FFF);
+    CHECK(canvas[1] == 0x7FFF);
+    CHECK(canvas[2] == 0x5250);
+    CHECK(canvas[3] == 0x3BEE);
+
+    ::operator delete(storage);
+}
