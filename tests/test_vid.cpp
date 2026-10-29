@@ -635,6 +635,106 @@ TEST_CASE("blt8to24_point", "[vid]")
     }
 }
 
+// Blt8To16 (0x7AF1C0): the whole frame at the surface pointer through the
+// realized 16-bit palette, one WORD a pixel, rows bottom-up by lPitch in
+// bytes, the transparent index left untouched. The raw walk reads one byte
+// ahead (0x7AF384), unlike the 24- and 32-bit siblings. Registered as an
+// oracle case (vid/cell_blt8to16_fast); this pins the walk in the harness's
+// own terms.
+TEST_CASE("blt8to16_fast", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode->m_dwRBitMask = 0x1Fu << rShift;
+        mode->m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode->m_dwBBitMask = 0x1F;
+        mode->m_dwRBitShift = rShift;
+        mode->m_dwGBitShift = 5;
+        mode->m_dwBBitShift = 0;
+        mode->field_C2 = 3;
+        mode->field_C6 = 8 - gBits;
+        mode->field_CA = 3;
+    };
+
+    for (int format = 0; format < 2; ++format) {
+        setMode16(format == 0);
+        for (int compressed = 0; compressed < 2; ++compressed) {
+            CellFixture fixture(compressed != 0);
+            INFO("format " << format << ", compressed " << compressed);
+            for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+                INFO("shadow " << shadowOn);
+                fixture.cell->m_bShadowOn = shadowOn != 0;
+
+                std::vector<WORD> pixels(kDepthW * kDepthH, 0xAAAA);
+                REQUIRE(fixture.cell->sub_7AF1C0(pixels.data(), kDepthW * 2, 0));
+
+                std::vector<WORD> expected(kDepthW * kDepthH, 0xAAAA);
+                for (int y = 0; y < 3; ++y) {
+                    for (int x = 0; x < 4; ++x) {
+                        // Raw frames read one byte ahead, so the frame lands
+                        // shifted; past its end the BAM's zero is index 0.
+                        const int at = y * 4 + x + (compressed ? 0 : 1);
+                        const BYTE index = at < 12 ? kFrame[at] : 0;
+                        if (index != 0) {
+                            expected[y * kDepthW + x] = static_cast<WORD>(CVidImage::rgbTempPal[index]);
+                        }
+                    }
+                }
+                CHECK(pixels == expected);
+
+                // Entry 1 takes only the low word of the mode's shadow colour
+                // unless the cell draws its shadow entry.
+                const WORD entry = static_cast<WORD>(CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY]);
+                if (shadowOn != 0) {
+                    CHECK(entry != static_cast<WORD>(mode->field_24 & 0xFFFF));
+                } else {
+                    CHECK(entry == static_cast<WORD>(mode->field_24 & 0xFFFF));
+                }
+            }
+        }
+    }
+
+    // The compressed walk's early row end: the original's loop closes with
+    // `ja` (0x7AF358), which reads the carry of the transparent comparison
+    // above (`dec` does not set it), so a drawn index below the transparent
+    // one ends the row early. 3x1, transparent 104, indices 139, 101, 1: the
+    // row ends after 101, so 1 lands in the next row (none here) and the
+    // third pixel keeps the destination.
+    CellFixture quirk(true);
+    quirk.bam[0xB] = 104;
+    quirk.bam[0x20] = 139;
+    quirk.bam[0x21] = 101;
+    quirk.bam[0x22] = 1;
+    quirk.frame.nWidth = 3;
+    quirk.frame.nHeight = 1;
+    quirk.cell->m_bShadowOn = TRUE;
+    std::vector<WORD> quirkPixels(kDepthW * kDepthH, 0xAAAA);
+    CHECK(quirk.cell->sub_7AF1C0(quirkPixels.data(), kDepthW * 2, 0));
+    CHECK(quirkPixels[0] == static_cast<WORD>(CVidImage::rgbTempPal[139]));
+    CHECK(quirkPixels[1] == static_cast<WORD>(CVidImage::rgbTempPal[101]));
+    CHECK(quirkPixels[2] == 0xAAAA); // below the transparent index: row ended
+
+    // A zero-size frame draws nothing and answers TRUE.
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<WORD> untouched(16, 0xAAAA);
+    CHECK(empty.cell->sub_7AF1C0(untouched.data(), kDepthW * 2, 0) == TRUE);
+    CHECK(untouched == std::vector<WORD>(16, 0xAAAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
 // Blt8To24 (0x7CECD0): the whole frame at the surface pointer through the
 // realized 24-bit palette, three bytes a pixel, rows bottom-up by lPitch in
 // bytes, the transparent index left untouched. Registered as an oracle case
