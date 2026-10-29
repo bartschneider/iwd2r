@@ -7824,7 +7824,91 @@ void CInfGame::sub_5BDBA0(int a1, BOOL a2)
 // 0x5BDC00
 void CInfGame::ReputationAdjustment(SHORT reputationAdjustment, BOOL set)
 {
-    // TODO: Incomplete.
+    if (set != FALSE) {
+        // "Set the reputation to N" travels as the delta to N.
+        reputationAdjustment -= m_nReputation;
+    }
+
+    // The change reaches the other players as a message whose Run applies it
+    // here; while that runs, this call must not post another one back.
+    if (g_pBaldurChitin->GetBaldurMessage()->m_bInReputationChange == FALSE) {
+        CMessage* message = new CMessageReputationChange(reputationAdjustment,
+            GetProtagonist(),
+            GetProtagonist());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    m_nReputation += reputationAdjustment;
+    // 1..20 in game terms, stored x10.
+    if (m_nReputation > 200) {
+        m_nReputation = 200;
+    }
+    if (m_nReputation < 10) {
+        m_nReputation = 10;
+    }
+
+    // Opcode 0x6C, the reputation effect every party member wears.
+    ITEM_EFFECT itemEffect;
+    CGameEffect::ClearItemEffect(&itemEffect, CGAMEEFFECT_REPUTATION);
+    itemEffect.effectAmount = m_nReputation;
+    itemEffect.dwFlags = 1;
+    // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+    itemEffect.durationType = 1;
+
+    for (SHORT nPortrait = 0; nPortrait < m_nCharacters; nPortrait++) {
+        LONG id = GetCharacterId(nPortrait);
+        CGameSprite* pSprite;
+        BYTE rc;
+        CMessage* message;
+
+        do {
+            rc = m_cObjectArray.GetDeny(id,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID) {
+            // HAPPY.2DA: the row is the reputation, the column the member's
+            // alignment (good, neutral, evil); anything else is good and an
+            // out-of-range cell is the table's default.
+            SHORT nColumn = 0;
+            BYTE nAlignment = pSprite->GetAIType().m_nAlignment & 0xF;
+            if (nAlignment == 2) {
+                nColumn = 1;
+            } else if (nAlignment == 3) {
+                nColumn = 2;
+            }
+            SHORT nRow = static_cast<SHORT>(m_nReputation / REPUTATION_MULTIPLIER - 1);
+            SHORT nHappiness = static_cast<SHORT>(m_ruleTables.m_tHappiness.GetAtLong(CPoint(nColumn, nRow)));
+
+            message = new CMessageSetHappiness(nHappiness, id, id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&itemEffect,
+                CPoint(-1, -1),
+                -1,
+                CPoint(-1, -1));
+            message = new CMessageAddEffect(pEffect, id, id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            pSprite->CheckReputation();
+        }
+
+        m_cObjectArray.ReleaseDeny(id,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == FALSE
+        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        FeedBack(FEEDBACK_REPUTATION, reputationAdjustment / REPUTATION_MULTIPLIER, TRUE);
+    }
 }
 
 // 0x5BDF80
