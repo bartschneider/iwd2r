@@ -147,10 +147,13 @@ LAB_007cee51:
 The plain 24-bit cell blit, called by both `CVidCell::Render` overloads for the
 `else` column of the dispatcher (no translucent, brightest or clear-shadow flag)
 at 24 bpp. Ghidra has no name for it, hence `sub_7CECD0` in the listing above;
-the port names it `Blt8To24` after its role, as the survey (report-T50.md) and
-the dispatcher define it - the 6-argument `CVidCell::Blt8To24` at 0x7CEEB0
-(already in src) is the clipped overload, exactly as `Blt8To32` has a fast and a
-clipped form. `ret 0xc`: `(BYTE* pSurface, LONG lPitch, DWORD dwFlags)`.
+the survey (report-T50.md) names it `Blt8To24` after its role in the
+dispatcher, but the export calls it `sub_7CECD0` and the code keeps that name:
+renaming it rewrites the two `CVidCell::Render` call sites, which makes both
+Render overloads touched functions whose pre-existing `sub_` placeholders turn
+the gate's lints red and whose asm row then misses the old name. The 6-argument
+`CVidCell::Blt8To24` at 0x7CEEB0 (already in src) is the clipped overload,
+exactly as `Blt8To32` has a fast and a clipped form. `ret 0xc`: `(BYTE* pSurface, LONG lPitch, DWORD dwFlags)`.
 
 The listing is the fast `Blt8To32` (0x7CFBC0) with the 24-bit differences:
 

@@ -831,7 +831,7 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPointX, INT nRefPoint
                     dwFlags);
                 break;
             case 24:
-                bSuccess = Blt8To24(reinterpret_cast<BYTE*>(pSurface)
+                bSuccess = sub_7CECD0(reinterpret_cast<BYTE*>(pSurface)
                         + lPitch * (nRefPointY - m_pFrame->nCenterY)
                         + 3 * (nRefPointX - m_pFrame->nCenterX),
                     lPitch,
@@ -990,7 +990,7 @@ BOOL CVidCell::Render(INT nSurface, int x, int y, const CRect& rClip, CVidPoly* 
                 dwFlags);
             break;
         case 24:
-            bSuccess = Blt8To24(reinterpret_cast<BYTE*>(ddsd.lpSurface),
+            bSuccess = sub_7CECD0(reinterpret_cast<BYTE*>(ddsd.lpSurface),
                 ddsd.lPitch,
                 dwFlags);
             break;
@@ -1618,10 +1618,12 @@ void CVidCell::StoreBackground(INT x, INT y, const CRect& rClip, CRect& rStorage
 // frame through the realized 24-bit palette (three bytes a pixel, bottom-up by
 // lPitch in bytes), the transparent index skipped. The 24-bit twin of the fast
 // Blt8To32; unlike that one it has no nTransVal (the palette is realized with
-// 255) and none of its field_174 block.
+// 255) and none of its field_174 block. NOTE: The survey (report-T50.md) names
+// it Blt8To24 after its dispatcher role; the export names it sub_7CECD0, so the
+// code keeps that name and the dispatcher's call sites stay untouched.
 //
 // 0x7CECD0
-BOOL CVidCell::Blt8To24(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
+BOOL CVidCell::sub_7CECD0(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
 {
     int nWidth = m_pFrame->nWidth;
     int nHeight = m_pFrame->nHeight;

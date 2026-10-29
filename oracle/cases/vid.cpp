@@ -2182,7 +2182,7 @@ void CellBlt8To24(CaseContext& ctx)
     CellPointBlt(ctx, 24, 0x426C743234000000ull); // "Blt24"
 }
 
-// CVidCell::Blt8To24 (0x7CECD0): the whole frame at the surface pointer,
+// CVidCell::sub_7CECD0 (0x7CECD0): the whole frame at the surface pointer,
 // (pSurface, lPitch, dwFlags), `ret 0xc` - the plain 24-bit blit, three bytes
 // a pixel, the transparent index skipped, the palette realized for 24 bpp with
 // 255, rows bottom-up by lPitch in bytes. Unreachable in iwd2r, which runs at
@@ -2300,7 +2300,7 @@ void CellBlt8To24Fast(CaseContext& ctx)
         oursFrame = entry;
         oursCell->m_bShadowOn = shadowOn;
         video.oursMode->field_24 = shadow;
-        const BOOL oursResult = oursCell->Blt8To24(reinterpret_cast<BYTE*>(mine.data()) + start,
+        const BOOL oursResult = oursCell->sub_7CECD0(reinterpret_cast<BYTE*>(mine.data()) + start,
             kCellCanvas * 3, dwFlags);
         ctx.CountInputs(1);
         if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {

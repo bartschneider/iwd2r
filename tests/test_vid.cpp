@@ -621,7 +621,7 @@ TEST_CASE("blt8to24_point", "[vid]")
         INFO("compressed " << compressed);
 
         std::vector<BYTE> pixels(kDepthW * kDepthH * 3, 0xAA);
-        REQUIRE(fixture.cell->Blt8To24(pixels.data(), kDepthW * 3, CPoint(2, 1), CRect(0, 0, kDepthW, kDepthH), 0,
+        REQUIRE(fixture.cell->sub_7CECD0(pixels.data(), kDepthW * 3, CPoint(2, 1), CRect(0, 0, kDepthW, kDepthH), 0,
             CPoint(1, 0)));
         std::vector<BYTE> expected(kDepthW * kDepthH * 3, 0xAA);
         for (const auto& [at, index] : FrameAt21()) {
@@ -660,7 +660,7 @@ TEST_CASE("blt8to24_fast", "[vid]")
             fixture.cell->m_bShadowOn = shadowOn != 0;
 
             std::vector<BYTE> pixels(kDepthW * kDepthH * 3, 0xAA);
-            REQUIRE(fixture.cell->Blt8To24(pixels.data(), kDepthW * 3, 0));
+            REQUIRE(fixture.cell->sub_7CECD0(pixels.data(), kDepthW * 3, 0));
 
             // The realized palette, read back after the call: the palette
             // conversion itself is the oracle case's business, the walk is this.
@@ -694,7 +694,7 @@ TEST_CASE("blt8to24_fast", "[vid]")
     empty.frame.nWidth = 0;
     empty.frame.nHeight = 0;
     std::vector<BYTE> untouched(16, 0xAA);
-    CHECK(empty.cell->Blt8To24(untouched.data(), kDepthW * 3, 0) == TRUE);
+    CHECK(empty.cell->sub_7CECD0(untouched.data(), kDepthW * 3, 0) == TRUE);
     CHECK(untouched == std::vector<BYTE>(16, 0xAA));
 
     g_pChitin->pActiveEngine = nullptr;
