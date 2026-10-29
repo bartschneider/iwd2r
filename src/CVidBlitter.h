@@ -18,14 +18,21 @@ public:
     void Reset();
     HRESULT SoftBlt(IDirectDrawSurface* lpDDSurface, LPRECT lpDestRect, IDirectDrawSurface* lpDDSrcSurface, LPRECT lpSrcRect, DWORD dwFlags, LPDDBLTFX lpDDBltFx);
     HRESULT SoftSrcKeyBlt(IDirectDrawSurface* lpDDSurface, LPRECT lpDestRect, IDirectDrawSurface* lpDDSrcSurface, LPRECT lpSrcRect, DWORD dwFlags, LPDDBLTFX lpDDBltFx);
+    HRESULT SoftColorFill(IDirectDrawSurface* lpDDSurface, LPRECT lpDestRect, LPDDBLTFX lpDDBltFx);
+    int SoftLockSurfaces(IDirectDrawSurface* lpDDSurface, LPRECT lpDestRect, IDirectDrawSurface* lpDDSrcSurface, LPRECT lpSrcRect);
+    static void SoftMirrorRow(BYTE* pDest, const BYTE* pSrc, DWORD nBytes);
+    static void SoftMirrorKeyRow(BYTE* pDest, const BYTE* pSrc, DWORD nBytes, WORD nKey);
+    static void SoftKeyRow(BYTE* pDest, const BYTE* pSrc, DWORD nBytes, WORD nKey);
 
     /* 0000 */ BOOLEAN m_bSoftSrcKeyBltFast; // #guess
     /* 0001 */ BOOLEAN m_bSoftBltFast; // #guess
     /* 0002 */ BOOLEAN m_bSoftSrcKeyBlt; // #guess
     /* 0003 */ BOOLEAN m_bSoftBlt; // #guess
     /* 0004 */ BOOLEAN m_bSoftMirrorBlt; // #guess
-    /* 00DE */ int field_DE;
-    /* 00E2 */ int field_E2;
+    /* 0006 */ DDSURFACEDESC m_destDesc;
+    /* 0072 */ DDSURFACEDESC m_srcDesc;
+    /* 00DE */ LPVOID m_pSrcSurface; // NOTE: The original's +0xDE holds the source row.
+    /* 00E2 */ LPVOID m_pDestSurface; // NOTE: and its +0xE2 the destination row.
     /* 00E6 */ unsigned char field_E6;
     /* 00E8 */ BltFunc m_pfnBltNoFX; // #guess
     /* 00EC */ BltFunc m_pfnSrcKeyBltNoFX; // #guess
