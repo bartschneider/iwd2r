@@ -587,6 +587,100 @@ uint32_t Dword(const std::vector<char>& d, size_t at)
 
 }
 
+// Reputation: CInfGame::ReputationAdjustment (0x5BDC00). REPUTATI.2DA gives
+// the delta for the reputation the test sets and HAPPY.2DA the happiness of
+// the new one, so the numbers below are the shipped tables' cells.
+TEST_CASE("reputation: ChangeReputation moves the party and posts one happiness and one 0x6C effect per member", "[reputation][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+
+    std::vector<CGameSprite*> party = NewGameWithParty(2);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    REQUIRE(party.size() == 2);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CMessageHandler* pHandler = g_pBaldurChitin->GetMessageHandler();
+    pHandler->AsynchronousUpdate();
+
+    // HAPPY.2DA's columns: neutral 1, evil 2, anything else good 0.
+    party[0]->m_typeAI.m_nAlignment = 2;
+    party[1]->m_typeAI.m_nAlignment = 3;
+
+    // Two different starting reputations, so the effect's SET is visible.
+    party[0]->GetBaseStats()->m_reputation = 100;
+    party[1]->GetBaseStats()->m_reputation = 30;
+
+    // REPUTATI.2DA row 10 (reputation 100): KILL_INNOCENT is -40.
+    pGame->m_nReputation = 100;
+    pGame->ChangeReputation(0);
+    CHECK(pGame->m_nReputation == 60);
+
+    int nHappiness = 0;
+    int nEffect = 0;
+    for (POSITION pos = pHandler->m_messageList.GetHeadPosition(); pos != NULL;) {
+        CMessage* pMessage = pHandler->m_messageList.GetNext(pos);
+        if (pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_HAPPINESS) {
+            nHappiness++;
+        } else if (pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_EFFECT) {
+            nEffect++;
+        }
+    }
+    CHECK(nHappiness == 2);
+    CHECK(nEffect == 2);
+
+    pHandler->AsynchronousUpdate();
+
+    // HAPPY.2DA row 6 (reputation 60): neutral 0, evil 80.
+    CHECK(party[0]->m_nHappiness == 0);
+    CHECK(party[1]->m_nHappiness == 80);
+
+    // The effect is opcode 0x6C, amount the new reputation, duration type 1.
+    // The 0x6C effect is applied immediately (dwFlags 1, duration type 1):
+    // it SETS the member's base reputation to the party's, so a member at
+    // 100 and one at 30 both end at 60 and neither was added to.
+    CHECK(party[0]->GetBaseStats()->m_reputation == 60);
+    CHECK(party[1]->GetBaseStats()->m_reputation == 60);
+
+    // Clamped to reputation 1 (10 stored) and "set to 100" travels as a delta.
+    pGame->ReputationAdjustment(-200, FALSE);
+    CHECK(pGame->m_nReputation == 10);
+    pGame->ReputationAdjustment(100, TRUE);
+    CHECK(pGame->m_nReputation == 100);
+    pHandler->AsynchronousUpdate();
+
+    // A member another player controls gets neither message.
+    const INT nServiceProvider = g_pChitin->cNetwork.m_nServiceProvider;
+    const PLAYER_ID nLocalPlayer = g_pChitin->cNetwork.m_idLocalPlayer;
+    g_pChitin->cNetwork.m_nServiceProvider = 1;
+    g_pChitin->cNetwork.m_idLocalPlayer = 1;
+    party[0]->m_remotePlayerID = 2;
+    party[1]->m_remotePlayerID = 1;
+    pGame->m_nReputation = 100;
+    pGame->ChangeReputation(0);
+    int nLocalMessages = 0;
+    for (POSITION pos = pHandler->m_messageList.GetHeadPosition(); pos != NULL;) {
+        CMessage* pMessage = pHandler->m_messageList.GetNext(pos);
+        if (pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_HAPPINESS
+            || pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_EFFECT) {
+            nLocalMessages++;
+        }
+    }
+    CHECK(g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL);
+    CHECK(nLocalMessages == 2); // one of each, for the member this player controls
+    g_pChitin->cNetwork.m_nServiceProvider = nServiceProvider;
+    g_pChitin->cNetwork.m_idLocalPlayer = nLocalPlayer;
+    party[0]->m_remotePlayerID = 0;
+    party[1]->m_remotePlayerID = 0;
+    pHandler->AsynchronousUpdate();
+}
+
 TEST_CASE("store: Marshal writes the store SetResRef read, without its sold-out items", "[store][data]")
 {
     if (DataDir() == nullptr) {
