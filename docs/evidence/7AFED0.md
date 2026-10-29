@@ -2,8 +2,9 @@
 address: 0x7AFED0
 name: CVidCell::sub_7AFED0
 oracle_case: vid/cell_translucent16
-kind: read-only
+kind: oracle
 ghidra_version: 12.1.4
+parity_waiver: "asm lints 2026-10-29 T72: asm: the two flagged callees are ours through constructs the tokenizer cannot see - CUtil::UtilAssert (0x780C00) is the body's UTIL_ASSERT(nTransVal <= 256) (the macro at src/CUtil.h:26) and operator_new (0x7FC95B) is the lazy `new BYTE[0x20000]` blend-table build (0x7AFFBA); no game call is missing. lints: the only finding in the span is RE004 on the function's own address-derived name (the definition line every stub carries): the export has no name for 0x7AFED0, so the port keeps the stub's and a real rename (report-T50.md proposes Blt8To16Translucent) needs a Ghidra-side rename of the project, a follow-up that also removes the base stub's RE005 this port already did. The base stub was red for both RE004 and RE005, so the mechanical `red reproduces at base` comparison cannot match the now-smaller finding set."
 ---
 
 # 0x7AFED0 CVidCell::sub_7AFED0
@@ -310,3 +311,16 @@ inside the canvas, and the BAM's zero bytes there are the palette's index 0, as 
 them. The whole canvas and the result are compared. The unit test (`tests/test_vid.cpp`,
 "translucent16") pins the walk, the blend at weight 0/16/32, the shadow skip, the raw extra row and
 the raw walk's treatment of the transparent index on both mask layouts.
+
+Run on our Windows rig (runner built from this branch, `--file vid`). The branch was merged with
+origin/main (`0621c60f`) before the gate, as the conveyor requires; the port and the case are
+unchanged by the merge. Verbatim:
+
+```
+  vid/cell_translucent16           passed (1800 inputs, 0 failures)
+vid/cell_translucent16           passed, 1800 inputs, 0 failures
+55 passed, 0 expected failures or crashes, 0 pending, 0 unexpected; run PASSED
+```
+
+It passed on the first run, on both mask layouts, raw and RLE frames, both shadow settings and the
+nTransVal range including 0 and 256.
