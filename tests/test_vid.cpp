@@ -2535,3 +2535,109 @@ TEST_CASE("vid: BltBmp24To16 converts 24-bit pixels into the mode's 16-bit field
 
     ::operator delete(storage);
 }
+
+// CVidBitmap::BltBmp24To16Tint (0x7B3B70): the same 24-to-16 conversion with
+// the image's tint, add and light multipliers and the high-word flags, i.e.
+// the 16-bit counterpart of BltBmp24To32Tint. The bitmap is zeroed (no range
+// tints); the mode's global tint, brightness and gamma drive GetTint, GetAdd
+// and GetLight, so the maths is the shipped functions'.
+TEST_CASE("vid: BltBmp24To16Tint applies the tint, add and light of the 24-to-16 blit", "[vid]")
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(storage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(storage);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode.m_dwRBitMask = 0x1Fu << rShift;
+        mode.m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode.m_dwBBitMask = 0x1F;
+        mode.m_dwRBitShift = rShift;
+        mode.m_dwGBitShift = 5;
+        mode.m_dwBBitShift = 0;
+        mode.field_C2 = 3;
+        mode.field_C6 = 8 - gBits;
+        mode.field_CA = 3;
+        mode.rgbGlobalTint = RGB(255, 255, 255);
+        mode.m_nBrightnessCorrection = 0;
+        mode.m_nGammaCorrection = 0;
+    };
+
+    constexpr int kW = 4;
+    constexpr int kH = 4;
+    constexpr size_t kPitch = kW * 2;
+    const auto index = [](int x, int y) { return static_cast<size_t>(y) * kW + x; };
+
+    setMode16(true);
+
+    // The global tint (0x10000) halves every channel: 255 * 128 >> 8 = 127,
+    // 127 >> 3 = 15 in the 5-bit red field.
+    const BYTE red[3] = { 0x00, 0x00, 0xFF };
+    mode.rgbGlobalTint = RGB(128, 128, 128);
+    std::vector<WORD> canvas(kW * kH, 0xFFFF);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(red),
+        CSize(1, 1), 0, 0x10001));
+    CHECK(canvas[index(1, 2)] == 0x7800); // r 127 -> 15 << 11
+
+    // The transparent green is skipped before the tint: the pixel keeps the
+    // destination.
+    const BYTE green[6] = { 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF };
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(0, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(green),
+        CSize(2, 1), 0, 0x10001));
+    CHECK(canvas[index(0, 1)] == 0xFFFF);
+    CHECK(canvas[index(1, 1)] == 0x7800); // red 255 -> 127 -> 15 << 11
+
+    // The brightness correction (0x40000) adds through GetAdd: a black
+    // source comes out 129 in every channel ((~255 * 32385) >> 16 -> ~126).
+    mode.rgbGlobalTint = RGB(255, 255, 255);
+    mode.m_nBrightnessCorrection = 128;
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    const BYTE black[3] = { 0x00, 0x00, 0x00 };
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(2, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(black),
+        CSize(1, 1), 0, 0x40001));
+    CHECK(canvas[index(2, 1)] == 0x8410); // 129 in each field: 16 | 32 << 5 | 16 << 11
+
+    // The gamma correction (0x200000) doubles through GetLight (8 + 8 over
+    // the light scale of 3) and clamps at 255.
+    mode.m_nBrightnessCorrection = 0;
+    mode.m_nGammaCorrection = 8;
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    const BYTE grey[6] = { 0x40, 0x40, 0x40, 0xFF, 0xFF, 0xFF };
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(0, 0)], static_cast<LONG>(kPitch), const_cast<BYTE*>(grey),
+        CSize(2, 1), 0, 0x200001));
+    CHECK(canvas[index(0, 0)] == 0x8410); // 64 -> 128 in each field
+    CHECK(canvas[index(1, 0)] == 0xFFFF); // white stays white
+    mode.m_nGammaCorrection = 0;
+
+    // 0x80000 makes the pixel grey first: (0x30 + 0x60 + 0x90) >> 2 = 72.
+    const BYTE mixed[3] = { 0x30, 0x60, 0x90 };
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(3, 0)], static_cast<LONG>(kPitch), const_cast<BYTE*>(mixed),
+        CSize(1, 1), 0, 0x80001));
+    CHECK(canvas[index(3, 0)] == 0x4A49); // 72: 9 | 18 << 5 | 9 << 11
+
+    // The shadow (0x4) halves the destination channel with no tint at all:
+    // 0xF800's red field (31) widened to 248 is 124, i.e. 15 in the field.
+    std::fill(canvas.begin(), canvas.end(), 0xF800);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(black),
+        CSize(1, 1), 0, 0x5));
+    CHECK(canvas[index(1, 2)] == 0x7800);
+
+    // The plain form (no 0x1) tints too, walks two rows upward through the
+    // mode's shifts and steps nDataJump bytes between them.
+    setMode16(false); // 5-5-5
+    mode.rgbGlobalTint = RGB(128, 128, 128);
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    const BYTE rows[9] = { 0x00, 0x00, 0xFF, 0x11, 0x88, 0x44, 0x22, 0x00, 0x00 };
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(rows),
+        CSize(1, 2), 1, 0x10000));
+    CHECK(canvas[index(1, 2)] == 0x3C00); // red 127 -> 15 << 10
+    CHECK(canvas[index(1, 1)] == 0x0888); // (0x88, 0x44, 0x22) halved: 8 | 4 << 5 | 2 << 10
+
+    ::operator delete(storage);
+}
