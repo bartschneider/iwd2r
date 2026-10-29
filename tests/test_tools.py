@@ -170,6 +170,7 @@ def load_ghidra_tool(name):
 
 labels = load_ghidra_tool('labels')
 export_decompiles = load_ghidra_tool('export_decompiles')
+export_callgraph = load_ghidra_tool('export_callgraph')
 
 
 def scenario_files():
@@ -8385,6 +8386,78 @@ class SrcFindTest(unittest.TestCase):
         self.assertEqual(src_find.find('0x401000', root=self.root),
                          [('CInfGame.cpp', 2, 'int CInfGame::GetDice(int nSides)')])
         self.assertEqual(src_find.find('NoSuch::Thing', root=self.root), [])
+
+
+class ExportCallgraphTest(unittest.TestCase):
+    """tools/ghidra/export_callgraph -- the two files tools/parity/run.py
+    reads, from one read-only headless run of ExportCallGraph.java."""
+
+    FUNCTIONS = '401000\tA::f\t16\n401010\tA::g\t8\n'
+    CALLGRAPH = '401000\t401010\n401010\n'
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.exports = os.path.join(tmp.name, 'exports')
+        self.calls = []
+        self.rc = 0
+        self.empty = None
+        self.mp = export_callgraph.mp
+        saved = self.mp.headless
+        self.addCleanup(setattr, self.mp, 'headless', saved)
+        self.mp.headless = self.fake_headless
+
+    def fake_headless(self, args, log, read_only=False, **kw):
+        self.assertTrue(read_only)
+        self.assertIn('-readOnly', args)
+        i = args.index('ExportCallGraph.java')
+        out = args[i + 1]
+        self.calls.append(out)
+        if self.rc == 0:
+            for name, text in (('functions.tsv', self.FUNCTIONS),
+                               ('callgraph.tsv', self.CALLGRAPH)):
+                _write(os.path.join(out, name),
+                       '' if name == self.empty else text)
+        return types.SimpleNamespace(
+            returncode=self.rc,
+            stdout=(f'EXPORTCALLGRAPH\t2 functions\t1 direct edges\t'
+                    f'{out}/functions.tsv  (GhidraScript)\n'),
+            stderr='')
+
+    def test_writes_both_files_and_makes_the_dir(self):
+        out = io.StringIO()
+        paths = export_callgraph.export(self.exports, out=out)
+        self.assertEqual(paths, [os.path.join(self.exports, 'functions.tsv'),
+                                 os.path.join(self.exports, 'callgraph.tsv')])
+        self.assertEqual(self.calls, [self.exports])
+        with open(paths[0]) as f:
+            self.assertEqual(f.read(), self.FUNCTIONS)
+        with open(paths[1]) as f:
+            self.assertEqual(f.read(), self.CALLGRAPH)
+        # The script's own counts are echoed, not parsed.
+        self.assertIn('2 functions\t1 direct edges', out.getvalue())
+
+    def test_an_empty_export_is_a_failure(self):
+        # An empty callgraph reads as "no callees": parity would call every
+        # asm column vacuously green, so it must not pass silently.
+        self.empty = 'callgraph.tsv'
+        with self.assertRaisesRegex(SystemExit, 'callgraph.tsv'):
+            export_callgraph.export(self.exports, out=io.StringIO())
+
+    def test_a_failed_headless_run_exits_nonzero(self):
+        self.rc = 1
+        with self.assertRaisesRegex(SystemExit, 'analyzeHeadless failed'):
+            export_callgraph.export(self.exports, out=io.StringIO())
+
+    def test_main_needs_the_project_and_takes_exports_dir(self):
+        with mock.patch.object(self.mp, 'project_exists', lambda: False):
+            with self.assertRaisesRegex(SystemExit, 'no project'):
+                export_callgraph.main(['--exports', self.exports])
+        with mock.patch.object(self.mp, 'project_exists', lambda: True):
+            self.assertEqual(export_callgraph.main(['--exports',
+                                                    self.exports]), 0)
+        self.assertTrue(os.path.isfile(os.path.join(self.exports,
+                                                    'functions.tsv')))
 
 
 class ExportDecompilesTest(unittest.TestCase):
