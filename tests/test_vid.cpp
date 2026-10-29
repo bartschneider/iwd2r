@@ -2405,6 +2405,12 @@ TEST_CASE("vid: DrawLightingEffect16 brightens inside the pool and leaves the re
     CHECK(pixel(31, 32) == 0xFFFF);
     CHECK(pixel(24, 32) != kGrey);
     CHECK(pixel(38, 32) != kGrey);
+    // The band's down ramp is nWidth - 1 pixels (0x797191), so x = 39 is
+    // outside the pool. NOTE: the extra step a 24-bit-style nWidth ramp would
+    // take lands on scale 64, which rewrites the pixel unchanged, so this pin
+    // documents the extent but no pixel value distinguishes the two widths;
+    // the exact ramp values below are what pin the sequence.
+    CHECK(pixel(39, 32) == kGrey);
     // Everything outside the pool is byte-identical, including the two
     // canary words after the buffer (the 16-bit write is one WORD).
     CHECK(pixel(0, 0) == kGrey);
@@ -2412,6 +2418,16 @@ TEST_CASE("vid: DrawLightingEffect16 brightens inside the pool and leaves the re
     CHECK(pixel(32, 32 + 12) == kGrey);
     CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas] == kGrey);
     CHECK(canvas[static_cast<size_t>(kPitch) * kCanvas + 1] == kGrey);
+
+    // A dim light never reaches the masks, so the ramp's arithmetic shows
+    // exactly: 0x101010 on a black ambient gives (16 + 127), quantised to a
+    // multiple of 8 above 64, i.e. 72 per channel and a step of 9; the middle
+    // band's first two pixels get scales 73 and 82, turning the grey 5-6-5
+    // channels (16, 32, 16) into (18, 36, 18) and (20, 41, 20).
+    std::vector<WORD> dim = before;
+    mode.DrawLightingEffect16(dim.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0x101010, 0x000000);
+    CHECK(dim[static_cast<size_t>(32) * kPitch + 24] == 0x9492);
+    CHECK(dim[static_cast<size_t>(32) * kPitch + 25] == 0xA534);
 
     // Height 0 draws nothing (the original leaks the pixel list there), and
     // so does a light whose channels all end at zero (no light, a white
@@ -2433,4 +2449,89 @@ TEST_CASE("vid: DrawLightingEffect16 brightens inside the pool and leaves the re
     std::vector<WORD> tinted = before;
     mode.DrawLightingEffect16(tinted.data(), kPitch, CPoint(32, 32), CSize(8, 8), 0xFFFFFF, 0x808080);
     CHECK(tinted[static_cast<size_t>(32) * kPitch + 31] == 0xFFFF);
+}
+
+// CVidBitmap::BltBmp24To16 (0x7B37A0): a 24-bit BMP (three bytes, B then G
+// then R) onto a 16-bit surface through the mode's channel shifts, rows
+// bottom-up (lPitch in bytes). The function reads nothing from the bitmap
+// object, so a plain buffer and a zeroed object are enough - no surface, no
+// GPU.
+TEST_CASE("vid: BltBmp24To16 converts 24-bit pixels into the mode's 16-bit fields", "[vid]")
+{
+    // A zeroed object: the port reads nothing from it (the oracle case does
+    // the same).
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(storage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(storage);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode.m_dwRBitMask = 0x1Fu << rShift;
+        mode.m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode.m_dwBBitMask = 0x1F;
+        mode.m_dwRBitShift = rShift;
+        mode.m_dwGBitShift = 5;
+        mode.m_dwBBitShift = 0;
+        mode.field_C2 = 3;
+        mode.field_C6 = 8 - gBits;
+        mode.field_CA = 3;
+    };
+
+    constexpr int kW = 4;
+    constexpr int kH = 4;
+    constexpr size_t kPitch = kW * 2;
+    const auto index = [](int x, int y) { return static_cast<size_t>(y) * kW + x; };
+
+    // 5-6-5: pure blue, green and red bytes land in their fields; the rows go
+    // up from the pointer handed in (row 2 then row 1).
+    setMode16(true);
+    std::vector<WORD> canvas(kW * kH, 0xFFFF);
+    const BYTE data[12] = { 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x12, 0x34, 0x56 };
+    CHECK(bitmap->BltBmp24To16(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(3, 2), 0, 0));
+    CHECK(canvas[index(1, 2)] == 0x001F); // blue 0xFF -> 31
+    CHECK(canvas[index(2, 2)] == 0x07E0); // green 0xFF -> 63 << 5
+    CHECK(canvas[index(3, 2)] == 0xF800); // red 0xFF -> 31 << 11
+    CHECK(canvas[index(1, 1)] == 0x51A2); // (0x12 >> 3) | ((0x34 >> 2) << 5) | ((0x56 >> 3) << 11)
+    CHECK(canvas[index(0, 2)] == 0xFFFF); // the columns left of the blit
+    CHECK(canvas[index(0, 1)] == 0xFFFF);
+
+    // 5-5-5: the same bytes, five bits each.
+    setMode16(false);
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    CHECK(bitmap->BltBmp24To16(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(3, 2), 0, 0));
+    CHECK(canvas[index(1, 2)] == 0x001F);
+    CHECK(canvas[index(2, 2)] == 0x03E0);
+    CHECK(canvas[index(3, 2)] == 0x7C00);
+
+    // The keyed form (0x1): pure green is transparent, so the pixel keeps the
+    // destination; with 0x4 a black pixel is half of it.
+    setMode16(true);
+    std::fill(canvas.begin(), canvas.end(), 0xF800); // pure red destination
+    const BYTE keyed[9] = { 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00 };
+    CHECK(bitmap->BltBmp24To16(&canvas[index(0, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(keyed),
+        CSize(3, 1), 0, 0x1));
+    CHECK(canvas[index(0, 1)] == 0xF800); // the key leaves it
+    CHECK(canvas[index(1, 1)] == 0x0000); // black written as black (only green is the key)
+    CHECK(canvas[index(2, 1)] == 0x001F); // blue
+    std::fill(canvas.begin(), canvas.end(), 0xF800);
+    CHECK(bitmap->BltBmp24To16(&canvas[index(1, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(keyed + 3),
+        CSize(1, 1), 0, 0x5));
+    CHECK(canvas[index(1, 1)] == 0x7800); // half the red field (31 >> 1 = 15 << 11)
+
+    // NOTE: the original's single-pixel path runs once even at width 0.
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    const BYTE one[6] = { 0xFF, 0x00, 0x00, 0x00, 0xFF, 0x00 };
+    CHECK(bitmap->BltBmp24To16(&canvas[index(2, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(one),
+        CSize(0, 2), 0, 0));
+    CHECK(canvas[index(2, 2)] == 0x001F);
+    // The row step of that path is one pixel forward then a full row back.
+    CHECK(canvas[index(3, 1)] == 0x07E0);
+
+    ::operator delete(storage);
 }

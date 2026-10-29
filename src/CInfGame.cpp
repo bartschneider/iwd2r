@@ -9137,18 +9137,11 @@ BOOLEAN CInfGame::RestPartyPrivate(INT nHP, BOOLEAN bRenting)
 
         nHealed = 0;
 
-        // TODO: `CGameArea::CheckRestEncounter` 0x46FEA0 (CGameArea.cpp,
-        // not ported): the original asks the visible area for a rest
-        // encounter when the party is not renting a room, and an encounter
-        // ends the rest here (0x5C150F-0x5C1525):
-        //
-        //     if (!bRenting
-        //         && m_gameAreas[m_visibleArea]->CheckRestEncounter()) {
-        //         goto done;
-        //     }
-        //
-        // The check draws rand() (0x46FEFD onwards), so until it is ported
-        // a rest draws none of its numbers and is never interrupted.
+        // NOTE: The encounter draws rand() before the rest's own time.
+        if (!bRenting
+            && m_gameAreas[m_visibleArea]->CheckRestEncounter()) {
+            goto done;
+        }
 
         SHORT nCharacters = m_nCharacters;
         if (m_bHealPartyOnRest) {
@@ -9258,7 +9251,7 @@ BOOLEAN CInfGame::RestPartyPrivate(INT nHP, BOOLEAN bRenting)
             &fadeAction);
     }
 
-    // done:
+done:
     if (!bRenting) {
         bResult = FALSE;
 
