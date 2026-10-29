@@ -2316,6 +2316,141 @@ void CellBlt8To32Point(CaseContext& ctx)
     CellPointBlt(ctx, 32, 0x426C743332000000ull); // "Blt32"
 }
 
+// CVidCell::sub_7AFB50 (0x7AFB50): the whole frame at the surface pointer,
+// (pSurface, lPitch, dwFlags), `ret 0xc` - the brightest 16-bit blit, one WORD
+// a pixel, the transparent index skipped, the palette realized for 16 bpp with
+// 255, rows bottom-up by lPitch in bytes, each drawn pixel the per-channel
+// brighter of the destination and the palette through the mode's masks.
+// Unreachable in iwd2r, which runs at 32 bpp only (the DirectDraw shim lists
+// no 16-bit mode), and ported for the record; the 16-bit twin of
+// Blt8To32Brightest.
+using CellBrightest16Fn = int32_t(__fastcall*)(void* self, void* edx, uint16_t* pSurface, int32_t lPitch,
+    uint32_t dwFlags);
+constexpr uintptr_t kCellBrightest16 = 0x7AFB50;
+
+// Random frames up to 8x4 (raw and RLE, transparent pixels mixed in), the
+// palette flags, the shadow entry on and off, drawn at 8 rows and 8 pixels
+// into a 64x64 16-bit canvas of random bytes, on 5-6-5 and 5-5-5 in turn (the
+// realization and the per-channel max read the mode's masks). The whole canvas
+// and the result are compared.
+void CellBrightest16(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint8_t* cell = nullptr;
+    uint8_t* res = nullptr;
+    uint8_t* bam = nullptr;
+    uint8_t* palette = nullptr;
+    uint8_t* frame = nullptr;
+    uint8_t* canvas = nullptr;
+    constexpr size_t kBamSize = 0x1000;
+    constexpr int kCanvasBytes = kCellCanvas * kCellCanvas * 2;
+    ctx.SetInputs("building the original's cell");
+    ctx.CallOriginal([&] {
+        cell = OriginalBlock(kCellSize);
+        res = OriginalBlock(kResCellSize);
+        bam = OriginalBlock(kBamSize);
+        palette = OriginalBlock(256 * 4);
+        frame = OriginalBlock(12);
+        canvas = OriginalBlock(kCanvasBytes);
+        Put<uint32_t>(res, 0x50, 1);
+        Put<uint32_t>(res, 0x54, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(bam)));
+        Put<uint32_t>(res, 0x6A, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(palette)));
+        Put<uint32_t>(cell, 0xA8, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(res)));
+        Put<uint32_t>(cell, 0xD0, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(frame)));
+    });
+
+    auto* oursCellStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidCell)));
+    std::memset(oursCellStorage, 0, sizeof(CVidCell));
+    auto* oursResStorage = static_cast<unsigned char*>(::operator new(sizeof(CResCell)));
+    std::memset(oursResStorage, 0, sizeof(CResCell));
+    auto* oursCell = reinterpret_cast<CVidCell*>(oursCellStorage);
+    auto* oursRes = reinterpret_cast<CResCell*>(oursResStorage);
+    std::vector<uint8_t> oursBam(kBamSize);
+    std::vector<RGBQUAD> oursPalette(256);
+    FRAMEENTRY oursFrame = {};
+    oursRes->m_bParsed = TRUE;
+    oursRes->m_pBamHeader = reinterpret_cast<BAMHEADER*>(oursBam.data());
+    oursRes->m_pPalette = oursPalette.data();
+    static_cast<CResHelper<CResCell, 1000>*>(oursCell)->pRes = oursRes;
+    oursCell->m_pFrame = &oursFrame;
+
+    std::vector<uint32_t> mine(kCanvasBytes / 4);
+    Picks picks(ctx.seed, 0x436C723136427200ull); // "Clr16Br"
+    const uint32_t kFlags[] = { 0, 0x10000, 0x80000, 0x200000 };
+    const int count = 400 + ctx.iterations / 20;
+    const int start = (8 * kCellCanvas + 8) * 2;
+    for (int format = 0; format < 2; ++format) {
+        SetMode16(video, ctx, format == 0);
+        for (int n = 0; n < count; ++n) {
+            const int width = picks.Between(1, 8);
+            const int height = picks.Between(1, 4);
+            const bool compressed = picks.Between(0, 1) != 0;
+            const uint8_t transparent = static_cast<uint8_t>(picks.Between(1, 255));
+            const uint8_t shadowOn = static_cast<uint8_t>(picks.Between(0, 1));
+            const uint32_t shadow = picks.Bits() & 0xFFFF;
+            const uint32_t dwFlags = kFlags[picks.Between(0, 3)];
+            std::vector<uint8_t> pixels(static_cast<size_t>(width * height));
+            for (uint8_t& p : pixels) {
+                const int32_t k = picks.Between(0, 5);
+                p = k == 0 ? transparent : (k == 1 ? 1 : static_cast<uint8_t>(picks.Between(1, 255)));
+            }
+            const std::vector<uint8_t> data = compressed ? RunLengthEncode(pixels, transparent) : pixels;
+            std::vector<uint8_t> image(kBamSize, 0);
+            image[0xB] = transparent;
+            std::memcpy(image.data() + kFrameDataOffset, data.data(), data.size());
+            std::vector<RGBQUAD> colors(256);
+            for (RGBQUAD& c : colors) {
+                const uint32_t bits = picks.Bits();
+                std::memcpy(&c, &bits, 4);
+            }
+            std::memset(&colors[0], 0, sizeof(RGBQUAD)); // the bytes after raw data
+            for (int i = 0; i < 256; i += 3) {
+                colors[i].rgbRed >>= 2;
+                colors[i].rgbGreen >>= 2;
+                colors[i].rgbBlue >>= 2;
+            }
+            FRAMEENTRY entry = {};
+            entry.nWidth = static_cast<WORD>(width);
+            entry.nHeight = static_cast<WORD>(height);
+            entry.nOffset = static_cast<DWORD>(kFrameDataOffset) | (compressed ? 0u : 0x80000000u);
+            for (uint32_t& word : mine) {
+                word = picks.Bits();
+            }
+
+            char inputs[200];
+            std::snprintf(inputs, sizeof(inputs),
+                "input %d (%s): %dx%d %s, transparent %u, shadow %s 0x%04X, flags 0x%X", n,
+                format == 0 ? "5-6-5" : "5-5-5", width, height, compressed ? "RLE" : "raw", transparent,
+                shadowOn ? "on" : "off", shadow, dwFlags);
+            ctx.SetInputs(inputs);
+            int32_t originalResult = 0;
+            ctx.CallOriginal([&] {
+                std::memcpy(bam, image.data(), kBamSize);
+                std::memcpy(palette, colors.data(), 256 * 4);
+                std::memcpy(frame, &entry, sizeof(entry));
+                std::memcpy(canvas, mine.data(), kCanvasBytes);
+                Put<uint8_t>(cell, 0xD4, shadowOn);
+                Put<uint32_t>(video.mode, kShadowColorOffset, shadow);
+                originalResult = reinterpret_cast<CellBrightest16Fn>(kCellBrightest16)(cell, nullptr,
+                    reinterpret_cast<uint16_t*>(canvas + start), kCellCanvas * 2, dwFlags);
+            });
+            std::memcpy(oursBam.data(), image.data(), kBamSize);
+            std::memcpy(oursPalette.data(), colors.data(), 256 * 4);
+            oursFrame = entry;
+            oursCell->m_bShadowOn = shadowOn;
+            video.oursMode->field_24 = static_cast<int>(shadow);
+            const BOOL oursResult = oursCell->sub_7AFB50(
+                reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(mine.data()) + start), kCellCanvas * 2, dwFlags);
+            ctx.CountInputs(1);
+            if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+                CompareArrays(ctx, reinterpret_cast<const uint32_t*>(canvas), mine.data(), kCanvasBytes / 4);
+            }
+        }
+    }
+    ::operator delete(oursResStorage);
+    ::operator delete(oursCellStorage);
+}
+
 // CVidMode::DrawLine16(nXFrom, nYFrom, nXTo, nYTo, pSurface, lPitch,
 // rSurface, color, bClipped) (0x797D30), `ret 0x24`, with its run-slice
 // helper ScanLine16 (0x79A860). Unreachable in iwd2r (32 bpp only). lPitch
@@ -3177,6 +3312,7 @@ ORACLE_CASE("vid/cell_brightest32", CellBrightest32);
 ORACLE_CASE("vid/cell_blt8to16", CellBlt8To16);
 ORACLE_CASE("vid/cell_blt8to24", CellBlt8To24);
 ORACLE_CASE("vid/cell_blt8to24_fast", CellBlt8To24Fast);
+ORACLE_CASE("vid/cell_brightest16", CellBrightest16);
 ORACLE_CASE("vid/cell_blt8to32_point", CellBlt8To32Point);
 ORACLE_CASE("vid/draw_line16", DrawLine16);
 ORACLE_CASE("vid/draw_line32", DrawLine32);

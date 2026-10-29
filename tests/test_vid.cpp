@@ -701,6 +701,92 @@ TEST_CASE("blt8to24_fast", "[vid]")
     ::operator delete(static_cast<void*>(engine));
 }
 
+// Blt8To16Brightest (0x7AFB50): the whole frame at the surface pointer
+// through the realized 16-bit palette, one WORD a pixel, rows bottom-up by
+// lPitch in bytes, the transparent index left untouched, and every drawn pixel
+// the per-channel brighter of the destination and the palette (through the
+// mode's masks). Registered as an oracle case (vid/cell_brightest16); this
+// pins the walk and the max in the harness's own terms.
+TEST_CASE("brightest16", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    const auto setMode16 = [&](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode->m_dwRBitMask = 0x1Fu << rShift;
+        mode->m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode->m_dwBBitMask = 0x1F;
+        mode->m_dwRBitShift = rShift;
+        mode->m_dwGBitShift = 5;
+        mode->m_dwBBitShift = 0;
+        mode->field_C2 = 3;
+        mode->field_C6 = 8 - gBits;
+        mode->field_CA = 3;
+    };
+
+    constexpr WORD kDst = 0x1234;
+    const auto brighter = [](DWORD a, DWORD b) { return a > b ? a : b; };
+    const auto brightest = [&](WORD dest, WORD pal) {
+        return static_cast<WORD>(
+            brighter(dest & mode->m_dwRBitMask, pal & mode->m_dwRBitMask)
+            | brighter(dest & mode->m_dwGBitMask, pal & mode->m_dwGBitMask)
+            | brighter(dest & mode->m_dwBBitMask, pal & mode->m_dwBBitMask));
+    };
+
+    for (int format = 0; format < 2; ++format) {
+        setMode16(format == 0);
+        for (int compressed = 0; compressed < 2; ++compressed) {
+            CellFixture fixture(compressed != 0);
+            for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+                INFO("format " << format << ", compressed " << compressed << ", shadow " << shadowOn);
+                fixture.cell->m_bShadowOn = shadowOn != 0;
+
+                std::vector<WORD> pixels(kDepthW * kDepthH, kDst);
+                REQUIRE(fixture.cell->sub_7AFB50(pixels.data(), kDepthW * 2, 0));
+
+                std::vector<WORD> expected(kDepthW * kDepthH, kDst);
+                for (int y = 0; y < 3; ++y) {
+                    for (int x = 0; x < 4; ++x) {
+                        const BYTE index = kFrame[y * 4 + x];
+                        if (index == 0) {
+                            continue; // transparent
+                        }
+                        // The realized palette, read back after the call: with
+                        // the shadow off entry 1 is the mode's colour.
+                        const WORD pal = static_cast<WORD>(CVidImage::rgbTempPal[index]);
+                        expected[y * kDepthW + x] = brightest(kDst, pal);
+                    }
+                }
+                CHECK(pixels == expected);
+
+                // kFrame's (0, 0) is index 5 - palette {5, 250, 35} (B, G, R)
+                // against 0x1234: 5-6-5 keeps R 4, G 62, B 20 (0x27D4), 5-5-5
+                // R 4, G 31, B 20 (0x13F4).
+                CHECK(pixels[0] == (format == 0 ? 0x27D4 : 0x13F4));
+            }
+        }
+    }
+
+    // A zero-size frame draws nothing and answers TRUE (the original has no
+    // guard and its do-while loops would spin; Render never passes one).
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<WORD> untouched(kDepthW * kDepthH, 0xAAAA);
+    CHECK(empty.cell->sub_7AFB50(untouched.data(), kDepthW * 2, 0) == TRUE);
+    CHECK(untouched == std::vector<WORD>(kDepthW * kDepthH, 0xAAAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
 // BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows
 // keep the first pixel of each pair and put field_24's low word in the
 // second; odd rows put field_24 in the first and OR its high word into the
