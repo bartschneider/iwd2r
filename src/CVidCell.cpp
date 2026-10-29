@@ -2445,10 +2445,136 @@ BOOL CVidCell::sub_7CF3F0(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
     return TRUE;
 }
 
+// The brightest twin of sub_7CECD0: the same 24-bit walk, but a drawn pixel
+// keeps, channel by channel, the larger of the destination's byte and the
+// realized palette's (B, G and R compared and written separately; a channel
+// equal to the palette's is written too, the same value). Unlike the 32-bit
+// twin there is no frame-0 `field_174` block and no "palette colour is black"
+// guard in the compressed walk. NOTE: The survey (report-T50.md) names it
+// Blt8To24Brightest after its 32-bit sibling and dispatcher role; the export
+// has only the address for it, so the code keeps the address-derived name the
+// stub had (sub_7CECD0's T60 precedent) and the dispatcher's call sites stay
+// untouched. Kept as the exe does: a zero-sized frame answers TRUE before any
+// palette work, and the raw walk reads and writes a whole dword per pixel
+// (0x7CF813-0x7CF84E), which stores the fourth byte back unchanged - the
+// per-pixel form here writes the same bytes.
+//
 // 0x7CF650
 BOOL CVidCell::sub_7CF650(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    int nWidth = m_pFrame->nWidth;
+    int nHeight = m_pFrame->nHeight;
+
+    if (nWidth == 0 || nHeight == 0) {
+        return TRUE;
+    }
+
+    // NOTE: The pitch stays in bytes; the original computes the rest of a row
+    // once (lPitch - width * 3) and adds it after each row's pixels.
+    LONG lRowStep = lPitch - nWidth * 3;
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+
+    if (!m_bPaletteChanged) {
+        m_cPalette.SetPalette(pRes->m_pPalette, 256, CVidPalette::TYPE_RESOURCE);
+    }
+
+    m_cPalette.Realize(CVidImage::rgbTempPal, 24, dwFlags, &m_paletteAffects, 0xFF);
+
+    if (!m_bShadowOn) {
+        CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] = g_pChitin->GetCurrentVideoMode()->field_24;
+    }
+
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        int nRunLength = 0;
+        int pos = 0;
+
+        for (int y = 0; y < nHeight; y++) {
+            int nRemainingWidth = nWidth;
+
+            while (nRemainingWidth != 0) {
+                BYTE nColor = pFrameData[pos];
+
+                if (nColor == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemainingWidth == nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRemainingWidth * 3;
+                        nRunLength = 0;
+                        nRemainingWidth = 0;
+                    } else if (nRemainingWidth > nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRunLength * 3;
+                        nRemainingWidth -= nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pSurface += nRemainingWidth * 3;
+                        nRunLength -= nRemainingWidth;
+                        nRemainingWidth = 0;
+                    }
+                } else {
+                    pos++;
+
+                    DWORD rgb = CVidImage::rgbTempPal[nColor];
+                    BYTE nBlue = static_cast<BYTE>(rgb);
+                    BYTE nGreen = static_cast<BYTE>(rgb >> 8);
+                    BYTE nRed = static_cast<BYTE>(rgb >> 16);
+
+                    if (pSurface[0] < nBlue) {
+                        pSurface[0] = nBlue;
+                    }
+                    if (pSurface[1] < nGreen) {
+                        pSurface[1] = nGreen;
+                    }
+                    if (pSurface[2] < nRed) {
+                        pSurface[2] = nRed;
+                    }
+
+                    pSurface += 3;
+                    nRemainingWidth--;
+                }
+            }
+
+            pSurface += lRowStep;
+        }
+    } else {
+        for (int y = 0; y < nHeight; y++) {
+            for (int x = 0; x < nWidth; x++) {
+                BYTE nColor = *pFrameData;
+
+                if (nColor != nTransparentColor) {
+                    DWORD rgb = CVidImage::rgbTempPal[nColor];
+                    BYTE nBlue = static_cast<BYTE>(rgb);
+                    BYTE nGreen = static_cast<BYTE>(rgb >> 8);
+                    BYTE nRed = static_cast<BYTE>(rgb >> 16);
+
+                    if (pSurface[0] < nBlue) {
+                        pSurface[0] = nBlue;
+                    }
+                    if (pSurface[1] < nGreen) {
+                        pSurface[1] = nGreen;
+                    }
+                    if (pSurface[2] < nRed) {
+                        pSurface[2] = nRed;
+                    }
+                }
+
+                pFrameData++;
+                pSurface += 3;
+            }
+            pSurface += lRowStep;
+        }
+    }
 
     return TRUE;
 }
