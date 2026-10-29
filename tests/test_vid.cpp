@@ -701,6 +701,86 @@ TEST_CASE("blt8to24_fast", "[vid]")
     ::operator delete(static_cast<void*>(engine));
 }
 
+// sub_7CF650 (0x7CF650): the brightest twin of sub_7CECD0. Each channel of a
+// drawn pixel keeps the larger of the destination byte and the realized
+// palette's, compared and written separately (B, G, R); the transparent index
+// is left untouched. Registered as an oracle case (vid/cell_brightest24);
+// this pins the walk, the per-channel max and the shadow-off palette in the
+// harness's own terms.
+TEST_CASE("blt8to24_brightest", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->m_dwRBitShift = 16;
+    mode->m_dwGBitShift = 8;
+    mode->m_dwBBitShift = 0;
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    // A destination with channels on both sides of the palette's bytes.
+    std::vector<BYTE> before(kDepthW * kDepthH * 3);
+    for (size_t i = 0; i < before.size(); ++i) {
+        before[i] = static_cast<BYTE>((i * 37 + 11) & 0xFF);
+    }
+
+    for (int compressed = 0; compressed < 2; ++compressed) {
+        CellFixture fixture(compressed != 0);
+        INFO("compressed " << compressed);
+        for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+            INFO("shadow " << shadowOn);
+            fixture.cell->m_bShadowOn = shadowOn != 0;
+
+            std::vector<BYTE> pixels = before;
+            REQUIRE(fixture.cell->sub_7CF650(pixels.data(), kDepthW * 3, 0));
+
+            std::vector<BYTE> expected = before;
+            for (int y = 0; y < 3; ++y) {
+                for (int x = 0; x < 4; ++x) {
+                    const BYTE index = kFrame[y * 4 + x];
+                    if (index == 0) {
+                        continue; // transparent, left as it was
+                    }
+                    BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+                    const DWORD rgb = CVidImage::rgbTempPal[index];
+                    p[0] = std::max(p[0], static_cast<BYTE>(rgb));
+                    p[1] = std::max(p[1], static_cast<BYTE>(rgb >> 8));
+                    p[2] = std::max(p[2], static_cast<BYTE>(rgb >> 16));
+                }
+            }
+            CHECK(pixels == expected);
+
+            // The shadow entry (bottom right) draws from the palette like any
+            // other index; with the shadow off the palette's entry 1 is the
+            // mode's field_24, whose bytes take part in the max.
+            const size_t at = (2 * kDepthW + 3) * 3;
+            const RGBQUAD& shadowColor = fixture.palette[CVidPalette::SHADOW_ENTRY];
+            const DWORD paletteValue = (static_cast<DWORD>(shadowColor.rgbRed) << 16)
+                | (static_cast<DWORD>(shadowColor.rgbGreen) << 8) | shadowColor.rgbBlue;
+            CHECK(CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY]
+                == (shadowOn != 0 ? paletteValue : static_cast<DWORD>(mode->field_24)));
+            const DWORD drawn = CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY];
+            for (int channel = 0; channel < 3; ++channel) {
+                const BYTE paletteByte = static_cast<BYTE>(drawn >> (channel * 8));
+                CHECK(pixels[at + channel] == std::max(before[at + channel], paletteByte));
+            }
+        }
+    }
+
+    // A zero-size frame draws nothing and answers TRUE before any palette work.
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<BYTE> untouched(16, 0xAA);
+    CHECK(empty.cell->sub_7CF650(untouched.data(), kDepthW * 3, 0) == TRUE);
+    CHECK(untouched == std::vector<BYTE>(16, 0xAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
 // BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows
 // keep the first pixel of each pair and put field_24's low word in the
 // second; odd rows put field_24 in the first and OR its high word into the
