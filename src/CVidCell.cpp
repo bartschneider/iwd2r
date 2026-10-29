@@ -1619,8 +1619,9 @@ void CVidCell::StoreBackground(INT x, INT y, const CRect& rClip, CRect& rStorage
 // lPitch in bytes), the transparent index skipped. The 24-bit twin of the fast
 // Blt8To32; unlike that one it has no nTransVal (the palette is realized with
 // 255) and none of its field_174 block. NOTE: The survey (report-T50.md) names
-// it Blt8To24 after its dispatcher role; the export names it sub_7CECD0, so the
-// code keeps that name and the dispatcher's call sites stay untouched.
+// it Blt8To24 after its dispatcher role; the export has only the address for
+// it, so the code keeps the address-derived name the stub had and the
+// dispatcher's call sites stay untouched.
 //
 // 0x7CECD0
 BOOL CVidCell::sub_7CECD0(BYTE* pSurface, LONG lPitch, DWORD dwFlags)

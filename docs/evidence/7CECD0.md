@@ -4,6 +4,7 @@ name: CVidCell::Blt8To24
 oracle_case: vid/cell_blt8to24_fast
 kind: read-only
 ghidra_version: 12.1.4
+parity_waiver: "lints 2026-10-29 blt8to24: the only finding in the function's span is RE004 on its own address-derived name (the definition line every stub carries): the export has no name for 0x7CECD0, so the port keeps the stub's and a real rename (report-T50.md proposes Blt8To24) needs a Ghidra-side rename of the project, a follow-up that also removes the base's RE005 this port already did. The base stub was red for both RE004 and RE005, so the mechanical `red reproduces at base` comparison cannot match the now-smaller finding set. Nothing else in the span trips a lint; asm is green (the four callees are named in src)."
 ---
 
 # 0x7CECD0 CVidCell::Blt8To24
