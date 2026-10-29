@@ -1345,6 +1345,118 @@ void BltBmp24To16(CaseContext& ctx)
     ::operator delete(oursStorage);
 }
 
+// CVidBitmap::BltBmp24To16Tint(pSurface, lPitch, pData, bmpSize,
+// nDataJump, dwFlags) (0x7B3B70), `ret 0x18`: the tinted 24-to-16 blit. It
+// reads the mode's shifts, masks, global tint (0xA4), brightness (0xA8) and
+// gamma (0xA9); the bitmap's own palette-affect ranges stay zero, so the
+// tint, add and light come from those mode fields, set on both sides.
+using BltBmp24To16TintFn = int32_t(__fastcall*)(void* self, void* edx, uint8_t* pSurface, int32_t lPitch,
+    const uint8_t* pData, const void* bmpSize, int32_t nDataJump, uint32_t dwFlags);
+constexpr uintptr_t kBltBmp24To16Tint = 0x7B3B70;
+
+// 24-bit bitmaps 2 to 32 wide (0 and 1 take the original's single-pixel
+// path, which faults under the rig), 1 to 32 high, drawn upward from the last
+// row of a 64x40 16-bit canvas of random bytes, with random data jumps, the
+// eight flag combinations the family uses (plain, tint, keyed, keyed with
+// add, light, monochrome or shadow), random global tint, brightness and gamma
+// each iteration, and pixel data mixing pure green, black and random bytes,
+// on 5-6-5 and 5-5-5. The whole canvas and the result are compared.
+void BltBmp24To16Tint(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    constexpr int kW = 64;
+    constexpr int kH = 40;
+    constexpr size_t kSize = kW * kH * 2;
+    constexpr size_t kDataSize = 64 * 32 * 3;
+    uint8_t* self = nullptr;
+    uint8_t* canvas = nullptr;
+    uint8_t* data = nullptr;
+    uint8_t* size = nullptr;
+    ctx.SetInputs("building the original's canvas");
+    ctx.CallOriginal([&] {
+        self = OriginalBlock(0x100);
+        canvas = OriginalBlock(kSize);
+        data = OriginalBlock(kDataSize);
+        size = OriginalBlock(8);
+    });
+    auto* oursStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(oursStorage, 0, sizeof(CVidBitmap));
+    auto* ours = reinterpret_cast<CVidBitmap*>(oursStorage);
+    std::vector<uint8_t> mine(kSize);
+    std::vector<uint8_t> pixels(kDataSize);
+    Picks picks(ctx.seed, 0x426D703136540000ull); // "Bmp16T"
+    const int count = 600 + ctx.iterations / 10;
+    const uint32_t flags[8] = { 0u, 0x10000u, 0x10001u, 0x40001u, 0x200001u, 0x80001u, 0x5u, 0x10005u };
+    for (int format = 0; format < 2; ++format) {
+        SetMode16(video, ctx, format == 0);
+        for (int n = 0; n < count; ++n) {
+            const int32_t cx = picks.Between(2, 32);
+            const int32_t cy = picks.Between(1, 32);
+            const int32_t jump = picks.Between(0, 8);
+            const int32_t x = picks.Between(0, kW - cx);
+            const int32_t y = picks.Between(cy - 1, kH - 1);
+            const uint32_t dwFlags = flags[picks.Between(0, 7)];
+            const uint32_t tint = picks.Bits() & 0xFFFFFF;
+            const uint8_t brightness = static_cast<uint8_t>(picks.Between(0, 80));
+            const uint8_t gamma = static_cast<uint8_t>(picks.Between(0, 16));
+            ctx.CallOriginal([&] {
+                Put<uint32_t>(video.mode, kGlobalTintOffset, tint);
+                Put<uint8_t>(video.mode, kBrightnessOffset, brightness);
+                Put<uint8_t>(video.mode, kGammaOffset, gamma);
+            });
+            video.oursMode->rgbGlobalTint = tint;
+            video.oursMode->m_nBrightnessCorrection = brightness;
+            video.oursMode->m_nGammaCorrection = gamma;
+            for (size_t i = 0; i < kDataSize; i += 3) {
+                const int kind = picks.Between(0, 6);
+                if (kind == 0) {
+                    pixels[i] = 0;
+                    pixels[i + 1] = 0xFF;
+                    pixels[i + 2] = 0;
+                } else if (kind == 1) {
+                    pixels[i] = pixels[i + 1] = pixels[i + 2] = 0;
+                } else if (kind == 2) {
+                    pixels[i] = pixels[i + 1] = pixels[i + 2] = 0xFF;
+                } else {
+                    pixels[i] = static_cast<uint8_t>(picks.Bits());
+                    pixels[i + 1] = static_cast<uint8_t>(picks.Bits());
+                    pixels[i + 2] = static_cast<uint8_t>(picks.Bits());
+                }
+            }
+            for (uint8_t& b : mine) {
+                b = static_cast<uint8_t>(picks.Bits());
+            }
+            char inputs[240];
+            std::snprintf(inputs, sizeof(inputs),
+                "input %d (%s): %dx%d, last row at (%d,%d), jump %d, flags 0x%X, tint 0x%06X, brightness %u, gamma %u",
+                n, format == 0 ? "5-6-5" : "5-5-5", cx, cy, x, y, jump, dwFlags, tint, brightness, gamma);
+            ctx.SetInputs(inputs);
+            const size_t offset = static_cast<size_t>((y * kW + x) * 2);
+            int32_t originalResult = 0;
+            ctx.CallOriginal([&] {
+                std::memcpy(canvas, mine.data(), kSize);
+                std::memcpy(data, pixels.data(), kDataSize);
+                const int32_t sz[2] = { cx, cy };
+                std::memcpy(size, sz, 8);
+                originalResult = reinterpret_cast<BltBmp24To16TintFn>(kBltBmp24To16Tint)(self, nullptr,
+                    canvas + offset, kW * 2, data, size, jump, dwFlags);
+            });
+            const BOOL oursResult = ours->BltBmp24To16Tint(reinterpret_cast<WORD*>(mine.data() + offset), kW * 2,
+                pixels.data(), CSize(cx, cy), jump, dwFlags);
+            ctx.CountInputs(1);
+            if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+                for (size_t i = 0; i < kSize; ++i) {
+                    if (canvas[i] != mine[i]) {
+                        ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    ::operator delete(oursStorage);
+}
+
 // CVidPalette::RealizeRange (0x7BF870) at 32 bpp: a range palette of 256
 // random entries, the seven ranges each with or without a tint, an add and a
 // light (pulsing or steady), the suppress mask, the global tint, add and
@@ -3460,6 +3572,7 @@ ORACLE_CASE("vid/blt_stencil_tile8to24", BltStencilTile8To24);
 ORACLE_CASE("vid/blt_bmp24to24", BltBmp24To24);
 ORACLE_CASE("vid/blt_bmp24to24_tint", BltBmp24To24Tint);
 ORACLE_CASE("vid/blt_bmp24to16", BltBmp24To16);
+ORACLE_CASE("vid/blt_bmp24to16_tint", BltBmp24To16Tint);
 ORACLE_CASE("vid/draw_ellipse32", Ellipse32);
 ORACLE_CASE("vid/draw_recticle32", Recticle32);
 ORACLE_CASE("vid/draw_recticle16", Recticle16);
