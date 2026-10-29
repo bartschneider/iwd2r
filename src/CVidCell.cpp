@@ -1123,8 +1123,7 @@ BOOL CVidCell::sub_7AF1C0(WORD* pSurface, LONG lPitch, DWORD dwFlags)
 
     if (!m_bShadowOn) {
         // Only the low word of the entry is written (mov word ptr at 0x7AF262).
-        CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] =
-            (CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] & 0xFFFF0000u)
+        CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] = (CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] & 0xFFFF0000u)
             | (static_cast<DWORD>(g_pChitin->GetCurrentVideoMode()->field_24) & 0xFFFF);
     }
 
@@ -1181,6 +1180,15 @@ BOOL CVidCell::sub_7AF1C0(WORD* pSurface, LONG lPitch, DWORD dwFlags)
                     *pSurface = static_cast<WORD>(CVidImage::rgbTempPal[nColor]);
                     pSurface++;
                     nRemainingWidth--;
+
+                    // NOTE: The row's continuation is `ja` at 0x7AF358, which
+                    // reads the carry left by the transparent comparison above
+                    // (`dec` does not set CF): a drawn index below the
+                    // transparent one ends the row early, as if its width were
+                    // used up. The 24- and 32-bit siblings use `jne` there.
+                    if (nColor < nTransparentColor) {
+                        nRemainingWidth = 0;
+                    }
                 }
             }
 

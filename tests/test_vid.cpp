@@ -703,6 +703,26 @@ TEST_CASE("blt8to16_fast", "[vid]")
         }
     }
 
+    // The compressed walk's early row end: the original's loop closes with
+    // `ja` (0x7AF358), which reads the carry of the transparent comparison
+    // above (`dec` does not set it), so a drawn index below the transparent
+    // one ends the row early. 3x1, transparent 104, indices 139, 101, 1: the
+    // row ends after 101, so 1 lands in the next row (none here) and the
+    // third pixel keeps the destination.
+    CellFixture quirk(true);
+    quirk.bam[0xB] = 104;
+    quirk.bam[0x20] = 139;
+    quirk.bam[0x21] = 101;
+    quirk.bam[0x22] = 1;
+    quirk.frame.nWidth = 3;
+    quirk.frame.nHeight = 1;
+    quirk.cell->m_bShadowOn = TRUE;
+    std::vector<WORD> quirkPixels(kDepthW * kDepthH, 0xAAAA);
+    CHECK(quirk.cell->sub_7AF1C0(quirkPixels.data(), kDepthW * 2, 0));
+    CHECK(quirkPixels[0] == static_cast<WORD>(CVidImage::rgbTempPal[139]));
+    CHECK(quirkPixels[1] == static_cast<WORD>(CVidImage::rgbTempPal[101]));
+    CHECK(quirkPixels[2] == 0xAAAA); // below the transparent index: row ended
+
     // A zero-size frame draws nothing and answers TRUE.
     CellFixture empty(false);
     empty.frame.nWidth = 0;
