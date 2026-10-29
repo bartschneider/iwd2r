@@ -701,6 +701,107 @@ TEST_CASE("blt8to24_fast", "[vid]")
     ::operator delete(static_cast<void*>(engine));
 }
 
+// Blt8To24Translucent (0x7CF8D0): the fast 24-bit walk with each drawn
+// pixel blended into the destination per byte, dst = (src * (256 -
+// nTransVal) + dst * nTransVal) >> 8, through the realized palette. A pixel
+// whose realized colour is the mode's shadow colour is skipped in the
+// compressed walk (not drawn opaque as in the 32-bit form); the raw walk
+// tests the palette entry's blue byte against the whole shadow colour and
+// the transparent index (the original's clobbered register), so a shadow
+// colour above 255 never skips there. Registered as an oracle case
+// (vid/cell_translucent24); this pins the walk and the blend by hand.
+TEST_CASE("blt8to24_translucent", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->m_dwRBitShift = 16;
+    mode->m_dwGBitShift = 8;
+    mode->m_dwBBitShift = 0;
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    // The expected canvas for a call: the realized palette read back after
+    // it (the conversion is the oracle case's business, as blt8to24_fast's),
+    // each drawn pixel (src * (256 - trans) + 0xAA * trans) >> 8 a byte.
+    const auto expectedFor = [](int trans, bool isCompressed, const CVidInf* vidMode) {
+        std::vector<BYTE> expected(kDepthW * kDepthH * 3, 0xAA);
+        for (int y = 0; y < 3; ++y) {
+            for (int x = 0; x < 4; ++x) {
+                const BYTE index = kFrame[y * 4 + x];
+                const DWORD rgb = CVidImage::rgbTempPal[index] & 0xFFFFFF;
+                if (isCompressed) {
+                    if (index == 0 || rgb == static_cast<DWORD>(vidMode->field_24)) {
+                        continue; // the transparent index; the shadow colour skipped
+                    }
+                } else if (static_cast<BYTE>(rgb) == static_cast<DWORD>(vidMode->field_24)
+                    || static_cast<BYTE>(rgb) == 0) {
+                    continue; // the raw walk's blue-byte tests (0 is the fixture's index)
+                }
+                BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+                p[0] = static_cast<BYTE>(((rgb & 0xFF) * (256 - trans) + 0xAA * trans) >> 8);
+                p[1] = static_cast<BYTE>((((rgb >> 8) & 0xFF) * (256 - trans) + 0xAA * trans) >> 8);
+                p[2] = static_cast<BYTE>((((rgb >> 16) & 0xFF) * (256 - trans) + 0xAA * trans) >> 8);
+            }
+        }
+        return expected;
+    };
+
+    for (int compressed = 0; compressed < 2; ++compressed) {
+        INFO("compressed " << compressed);
+        for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+            INFO("shadow " << shadowOn);
+            CellFixture fixture(compressed != 0);
+            fixture.cell->m_bShadowOn = shadowOn != 0;
+
+            // Half blend.
+            std::vector<BYTE> pixels(kDepthW * kDepthH * 3, 0xAA);
+            REQUIRE(fixture.cell->sub_7CF8D0(pixels.data(), kDepthW * 3, 0, 128));
+            CHECK(pixels == expectedFor(128, compressed != 0, mode.get()));
+
+            // The frame's index 1 (bottom right) is the shadow entry: with
+            // the cell's shadow off it is the mode's colour — skipped under
+            // RLE (stays 0xAA), blended under raw (the quirk above); with
+            // the shadow on it keeps the palette's own entry 1 and blends
+            // like any other colour.
+            const DWORD entry = CVidImage::rgbTempPal[1] & 0xFFFFFF;
+            const std::vector<BYTE> blendedEntry = {
+                static_cast<BYTE>(((entry & 0xFF) + 0xAA) >> 1),
+                static_cast<BYTE>((((entry >> 8) & 0xFF) + 0xAA) >> 1),
+                static_cast<BYTE>(((entry >> 16) + 0xAA) >> 1),
+            };
+            const BYTE* shadow = pixels.data() + (2 * kDepthW + 3) * 3;
+            if (compressed != 0) {
+                CHECK(std::vector<BYTE>(shadow, shadow + 3)
+                    == (shadowOn != 0 ? blendedEntry : std::vector<BYTE> { 0xAA, 0xAA, 0xAA }));
+            } else {
+                CHECK(std::vector<BYTE>(shadow, shadow + 3)
+                    == (shadowOn != 0 ? blendedEntry : std::vector<BYTE> { 0x5D, 0x66, 0x6E }));
+            }
+
+            // nTransVal 256 leaves the destination; 0 draws the source.
+            std::fill(pixels.begin(), pixels.end(), 0xAA);
+            REQUIRE(fixture.cell->sub_7CF8D0(pixels.data(), kDepthW * 3, 0, 256));
+            CHECK(pixels == std::vector<BYTE>(kDepthW * kDepthH * 3, 0xAA));
+            REQUIRE(fixture.cell->sub_7CF8D0(pixels.data(), kDepthW * 3, 0, 0));
+            CHECK(pixels == expectedFor(0, compressed != 0, mode.get()));
+        }
+    }
+
+    // A zero-size frame draws nothing and answers TRUE.
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<BYTE> untouched(16, 0xAA);
+    CHECK(empty.cell->sub_7CF8D0(untouched.data(), kDepthW * 3, 0, 128) == TRUE);
+    CHECK(untouched == std::vector<BYTE>(16, 0xAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
 // BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows
 // keep the first pixel of each pair and put field_24's low word in the
 // second; odd rows put field_24 in the first and OR its high word into the
