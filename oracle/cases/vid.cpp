@@ -2447,6 +2447,8 @@ void CellTranslucent24(CaseContext& ctx)
     ::operator delete(oursResStorage);
     ::operator delete(oursCellStorage);
 }
+
+void CellBlt8To32Point(CaseContext& ctx)
 {
     CellPointBlt(ctx, 32, 0x426C743332000000ull); // "Blt32"
 }
