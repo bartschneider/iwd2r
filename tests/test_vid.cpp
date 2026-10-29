@@ -701,6 +701,120 @@ TEST_CASE("blt8to24_fast", "[vid]")
     ::operator delete(static_cast<void*>(engine));
 }
 
+// sub_7CF3F0 (0x7CF3F0): the clear-shadow twin of sub_7CECD0. With the cell's
+// shadow on, the source's shadow entry halves the destination pixel under it
+// (each channel trimmed of its low bit by the mode's masks); with the shadow
+// off, the palette's shadow entry holds the mode's field_24 and index 1 draws
+// that. Registered as an oracle case (vid/cell_clear_shadow24); this pins the
+// walk and the two branches in the harness's own terms.
+TEST_CASE("blt8to24_clear_shadow", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->m_dwRBitMask = 0x00FF0000;
+    mode->m_dwGBitMask = 0x0000FF00;
+    mode->m_dwBBitMask = 0x000000FF;
+    mode->m_dwRBitShift = 16;
+    mode->m_dwGBitShift = 8;
+    mode->m_dwBBitShift = 0;
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    const DWORD dwShadowMask = 0x007F7F7F;
+
+    // Every 24-bit pixel the call sees before it overwrites it.
+    std::vector<BYTE> before(kDepthW * kDepthH * 3);
+    for (size_t i = 0; i < before.size(); ++i) {
+        before[i] = static_cast<BYTE>(0x30 + i * 5);
+    }
+
+    for (int compressed = 0; compressed < 2; ++compressed) {
+        CellFixture fixture(compressed != 0);
+        INFO("compressed " << compressed);
+        for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+            INFO("shadow " << shadowOn);
+            fixture.cell->m_bShadowOn = shadowOn != 0;
+
+            std::vector<BYTE> pixels = before;
+            REQUIRE(fixture.cell->sub_7CF3F0(pixels.data(), kDepthW * 3, 0));
+
+            std::vector<BYTE> expected = before;
+            for (int y = 0; y < 3; ++y) {
+                for (int x = 0; x < 4; ++x) {
+                    const BYTE index = kFrame[y * 4 + x];
+                    if (index == 0) {
+                        continue; // left as it was
+                    }
+                    BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+                    if (shadowOn != 0 && index == CVidPalette::SHADOW_ENTRY) {
+                        DWORD rgb = (static_cast<DWORD>(p[2]) << 16)
+                            | (static_cast<DWORD>(p[1]) << 8)
+                            | static_cast<DWORD>(p[0]);
+                        rgb = (rgb >> 1) & dwShadowMask;
+                        p[0] = static_cast<BYTE>(rgb);
+                        p[1] = static_cast<BYTE>(rgb >> 8);
+                        p[2] = static_cast<BYTE>(rgb >> 16);
+                    } else {
+                        const DWORD rgb = CVidImage::rgbTempPal[index];
+                        p[0] = static_cast<BYTE>(rgb);
+                        p[1] = static_cast<BYTE>(rgb >> 8);
+                        p[2] = static_cast<BYTE>(rgb >> 16);
+                    }
+                }
+            }
+            CHECK(pixels == expected);
+
+            // The shadow entry (bottom right) is the branch under test.
+            const BYTE* shadow = pixels.data() + (2 * kDepthW + 3) * 3;
+            const DWORD drawn = static_cast<DWORD>(shadow[0]) | (static_cast<DWORD>(shadow[1]) << 8)
+                | (static_cast<DWORD>(shadow[2]) << 16);
+            const DWORD shadowSource = (static_cast<DWORD>(before[(2 * kDepthW + 3) * 3 + 2]) << 16)
+                | (static_cast<DWORD>(before[(2 * kDepthW + 3) * 3 + 1]) << 8)
+                | static_cast<DWORD>(before[(2 * kDepthW + 3) * 3]);
+            CHECK(drawn == (shadowOn != 0 ? ((shadowSource >> 1) & dwShadowMask) : static_cast<DWORD>(mode->field_24)));
+        }
+    }
+
+    // The raw path skips palette index 0, not the frame's transparent index
+    // (0x7CF61D): with the transparent index changed to one the frame does not
+    // use, the zero pixels stay untouched and index 1 still draws the shadow
+    // colour.
+    CellFixture raw(false);
+    raw.bam[0xB] = 4;
+    raw.cell->m_bShadowOn = FALSE;
+    std::vector<BYTE> pixels = before;
+    REQUIRE(raw.cell->sub_7CF3F0(pixels.data(), kDepthW * 3, 0));
+    std::vector<BYTE> expected = before;
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            const BYTE index = kFrame[y * 4 + x];
+            if (index == 0) {
+                continue;
+            }
+            const DWORD rgb = CVidImage::rgbTempPal[index];
+            BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+            p[0] = static_cast<BYTE>(rgb);
+            p[1] = static_cast<BYTE>(rgb >> 8);
+            p[2] = static_cast<BYTE>(rgb >> 16);
+        }
+    }
+    CHECK(pixels == expected);
+
+    // A zero-size frame draws nothing and answers TRUE before any palette work.
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<BYTE> untouched(16, 0xAA);
+    CHECK(empty.cell->sub_7CF3F0(untouched.data(), kDepthW * 3, 0) == TRUE);
+    CHECK(untouched == std::vector<BYTE>(16, 0xAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
 // BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows
 // keep the first pixel of each pair and put field_24's low word in the
 // second; odd rows put field_24 in the first and OR its high word into the

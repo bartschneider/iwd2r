@@ -1955,10 +1955,141 @@ BOOL CVidCell::Blt8To24(BYTE* pSurface, LONG lPitch, const CPoint& pt, const CRe
     return TRUE;
 }
 
+// The clear-shadow twin of sub_7CECD0: the same 24-bit walk, but the source's
+// shadow entry is drawn as the mode's shadow colour instead of the palette's.
+// With the cell's shadow on, a shadow pixel becomes half of the destination
+// pixel under it - the destination's B, G and R assembled into a dword, shifted
+// right once and masked with the mode's own channel masks, each halved and
+// trimmed of its low bit - while with the shadow off the realized palette's
+// shadow entry already holds the mode's field_24 and index 1 is drawn from the
+// palette like any other. NOTE: The survey (report-T50.md) names it
+// Blt8To24ClearShadow after its 32-bit sibling and dispatcher role; the export
+// has only the address for it, so the code keeps the address-derived name the
+// stub had (sub_7CECD0's T60 precedent) and the dispatcher's call sites stay
+// untouched. Kept as the exe does: a zero-sized frame answers TRUE before any
+// palette work, and the raw path skips palette index 0 rather than the frame's
+// transparent index, the asymmetry with its RLE path.
+//
 // 0x7CF3F0
 BOOL CVidCell::sub_7CF3F0(BYTE* pSurface, LONG lPitch, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    int nWidth = m_pFrame->nWidth;
+    int nHeight = m_pFrame->nHeight;
+
+    if (nWidth == 0 || nHeight == 0) {
+        return TRUE;
+    }
+
+    if (!m_bPaletteChanged) {
+        m_cPalette.SetPalette(pRes->m_pPalette, 256, CVidPalette::TYPE_RESOURCE);
+    }
+
+    m_cPalette.Realize(CVidImage::rgbTempPal, 24, dwFlags, &m_paletteAffects, 0xFF);
+
+    DWORD dwShadowMask = 0;
+
+    if (!m_bShadowOn) {
+        CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] = g_pChitin->GetCurrentVideoMode()->field_24;
+    } else {
+        // The exe's (mask >> 1) & mask per channel: the shadow pixel is the
+        // destination's, each channel halved with its low bit trimmed.
+        CVidMode* pVidMode = g_pChitin->GetCurrentVideoMode();
+        dwShadowMask = ((pVidMode->m_dwRBitMask >> 1) & pVidMode->m_dwRBitMask)
+            + ((pVidMode->m_dwGBitMask >> 1) & pVidMode->m_dwGBitMask)
+            + ((pVidMode->m_dwBBitMask >> 1) & pVidMode->m_dwBBitMask);
+    }
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    // NOTE: The pitch stays in bytes; the original computes the rest of a row
+    // once (lPitch - width * 3) and adds it after each row's pixels.
+    LONG lRowStep = lPitch - nWidth * 3;
+
+    if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        int nRunLength = 0;
+        int pos = 0;
+
+        for (int y = 0; y < nHeight; y++) {
+            int nRemainingWidth = nWidth;
+
+            while (nRemainingWidth != 0) {
+                BYTE nColor = pFrameData[pos];
+
+                if (nColor == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemainingWidth == nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRemainingWidth * 3;
+                        nRunLength = 0;
+                        nRemainingWidth = 0;
+                    } else if (nRemainingWidth > nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRunLength * 3;
+                        nRemainingWidth -= nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pSurface += nRemainingWidth * 3;
+                        nRunLength -= nRemainingWidth;
+                        nRemainingWidth = 0;
+                    }
+                } else {
+                    pos++;
+
+                    DWORD rgb;
+
+                    if (m_bShadowOn && nColor == CVidPalette::SHADOW_ENTRY) {
+                        rgb = (static_cast<DWORD>(pSurface[2]) << 16)
+                            | (static_cast<DWORD>(pSurface[1]) << 8)
+                            | static_cast<DWORD>(pSurface[0]);
+                        rgb = (rgb >> 1) & dwShadowMask;
+                    } else {
+                        rgb = CVidImage::rgbTempPal[nColor];
+                    }
+
+                    *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(rgb);
+                    pSurface[2] = static_cast<BYTE>(rgb >> 16);
+                    pSurface += 3;
+                    nRemainingWidth--;
+                }
+            }
+
+            pSurface += lRowStep;
+        }
+    } else {
+        for (int y = 0; y < nHeight; y++) {
+            for (int x = 0; x < nWidth; x++) {
+                BYTE nColor = *pFrameData;
+
+                if (m_bShadowOn && nColor == CVidPalette::SHADOW_ENTRY) {
+                    DWORD rgb = (static_cast<DWORD>(pSurface[2]) << 16)
+                        | (static_cast<DWORD>(pSurface[1]) << 8)
+                        | static_cast<DWORD>(pSurface[0]);
+                    rgb = (rgb >> 1) & dwShadowMask;
+
+                    *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(rgb);
+                    pSurface[2] = static_cast<BYTE>(rgb >> 16);
+                } else if (nColor != 0) {
+                    DWORD rgb = CVidImage::rgbTempPal[nColor];
+
+                    *reinterpret_cast<WORD*>(pSurface) = static_cast<WORD>(rgb);
+                    pSurface[2] = static_cast<BYTE>(rgb >> 16);
+                }
+
+                pFrameData++;
+                pSurface += 3;
+            }
+            pSurface += lRowStep;
+        }
+    }
 
     return TRUE;
 }
