@@ -550,9 +550,14 @@ struct CellFixture {
         cell = reinterpret_cast<CVidCell*>(cellStorage);
         static_cast<CResHelper<CResCell, 1000>*>(cell)->pRes = res;
         cell->m_pFrame = &frame;
+        palette.resize(256);
         for (int i = 0; i < 256; ++i) {
             CVidImage::rgbTempPal[i] = 0xEE000000u | static_cast<DWORD>(i) * 0x010203u;
+            // For the fast blits, which realize the palette themselves.
+            palette[i] = RGBQUAD { static_cast<BYTE>(i), static_cast<BYTE>(255 - i),
+                static_cast<BYTE>(i * 7), 0 };
         }
+        res->m_pPalette = palette.data();
     }
     ~CellFixture()
     {
@@ -563,6 +568,7 @@ struct CellFixture {
     CellFixture& operator=(const CellFixture&) = delete;
 
     std::vector<BYTE> bam;
+    std::vector<RGBQUAD> palette;
     FRAMEENTRY frame = {};
     unsigned char* resStorage;
     unsigned char* cellStorage;
@@ -627,6 +633,86 @@ TEST_CASE("blt8to24_point", "[vid]")
         }
         CHECK(pixels == expected);
     }
+}
+
+// Blt8To16 (0x7AF1C0): the whole frame at the surface pointer through the
+// realized 16-bit palette, one WORD a pixel, rows bottom-up by lPitch in
+// bytes, the transparent index left untouched. The raw walk reads one byte
+// ahead (0x7AF384), unlike the 24- and 32-bit siblings. Registered as an
+// oracle case (vid/cell_blt8to16_fast); this pins the walk in the harness's
+// own terms.
+TEST_CASE("blt8to16_fast", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode->m_dwRBitMask = 0x1Fu << rShift;
+        mode->m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode->m_dwBBitMask = 0x1F;
+        mode->m_dwRBitShift = rShift;
+        mode->m_dwGBitShift = 5;
+        mode->m_dwBBitShift = 0;
+        mode->field_C2 = 3;
+        mode->field_C6 = 8 - gBits;
+        mode->field_CA = 3;
+    };
+
+    for (int format = 0; format < 2; ++format) {
+        setMode16(format == 0);
+        for (int compressed = 0; compressed < 2; ++compressed) {
+            CellFixture fixture(compressed != 0);
+            INFO("format " << format << ", compressed " << compressed);
+            for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+                INFO("shadow " << shadowOn);
+                fixture.cell->m_bShadowOn = shadowOn != 0;
+
+                std::vector<WORD> pixels(kDepthW * kDepthH, 0xAAAA);
+                REQUIRE(fixture.cell->sub_7AF1C0(pixels.data(), kDepthW * 2, 0));
+
+                std::vector<WORD> expected(kDepthW * kDepthH, 0xAAAA);
+                for (int y = 0; y < 3; ++y) {
+                    for (int x = 0; x < 4; ++x) {
+                        // Raw frames read one byte ahead, so the frame lands
+                        // shifted; past its end the BAM's zero is index 0.
+                        const int at = y * 4 + x + (compressed ? 0 : 1);
+                        const BYTE index = at < 12 ? kFrame[at] : 0;
+                        if (index != 0) {
+                            expected[y * kDepthW + x] = static_cast<WORD>(CVidImage::rgbTempPal[index]);
+                        }
+                    }
+                }
+                CHECK(pixels == expected);
+
+                // Entry 1 takes only the low word of the mode's shadow colour
+                // unless the cell draws its shadow entry.
+                const WORD entry = static_cast<WORD>(CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY]);
+                if (shadowOn != 0) {
+                    CHECK(entry != static_cast<WORD>(mode->field_24 & 0xFFFF));
+                } else {
+                    CHECK(entry == static_cast<WORD>(mode->field_24 & 0xFFFF));
+                }
+            }
+        }
+    }
+
+    // A zero-size frame draws nothing and answers TRUE.
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<WORD> untouched(16, 0xAAAA);
+    CHECK(empty.cell->sub_7AF1C0(untouched.data(), kDepthW * 2, 0) == TRUE);
+    CHECK(untouched == std::vector<WORD>(16, 0xAAAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
 }
 
 // BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows

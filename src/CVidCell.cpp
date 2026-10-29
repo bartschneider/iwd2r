@@ -1096,10 +1096,113 @@ BOOL CVidCell::Render(WORD* pSurface, LONG lPitch, INT nRefPtX, INT nRefPtY, con
     return bResult;
 }
 
+// The plain 16-bit blit of the whole frame at the surface pointer: the 8-bit
+// frame through the realized 16-bit palette (one WORD a pixel, bottom-up by
+// lPitch in bytes), the transparent index skipped. The 16-bit twin of the fast
+// Blt8To32; unlike that one it has no nTransVal (the palette is realized with
+// 255) and none of its field_174 block. NOTE: The survey (report-T50.md) names
+// it Blt8To16 after its dispatcher role; the export has only the address for
+// it, so the code keeps the address-derived name the stub had and the
+// dispatcher's call sites stay untouched.
+//
 // 0x7AF1C0
 BOOL CVidCell::sub_7AF1C0(WORD* pSurface, LONG lPitch, DWORD dwFlags)
 {
-    // TODO: Incomplete.
+    int nWidth = m_pFrame->nWidth;
+    int nHeight = m_pFrame->nHeight;
+
+    if (nWidth == 0 || nHeight == 0) {
+        return TRUE;
+    }
+
+    if (!m_bPaletteChanged) {
+        m_cPalette.SetPalette(pRes->m_pPalette, 256, CVidPalette::TYPE_RESOURCE);
+    }
+
+    m_cPalette.Realize(CVidImage::rgbTempPal, 16, dwFlags, &m_paletteAffects, 0xFF);
+
+    if (!m_bShadowOn) {
+        // Only the low word of the entry is written (mov word ptr at 0x7AF262).
+        CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] =
+            (CVidImage::rgbTempPal[CVidPalette::SHADOW_ENTRY] & 0xFFFF0000u)
+            | (static_cast<DWORD>(g_pChitin->GetCurrentVideoMode()->field_24) & 0xFFFF);
+    }
+
+    BYTE* pFrameData = pRes->GetFrameData(m_pFrame, m_bDoubleSize);
+
+    // __FILE__: C:\Projects\Icewind2\src\chitin\ChVidImage.cpp
+    // __LINE__: 2396
+    UTIL_ASSERT(pFrameData != NULL);
+
+    BAMHEADER* pBamHeader = pRes->m_bCacheHeader
+        ? pRes->m_pBamHeaderCopy
+        : pRes->m_pBamHeader;
+    BYTE nTransparentColor = pBamHeader->nTransparentColor;
+
+    // NOTE: The pitch stays in bytes; the original computes the rest of a row
+    // once (lPitch - width * 2) and adds it after each row's pixels.
+    LONG lRowStep = lPitch - nWidth * 2;
+
+    if (pRes->GetCompressed(m_pFrame, m_bDoubleSize)) {
+        int nRunLength = 0;
+        int pos = 0;
+
+        for (int y = 0; y < nHeight; y++) {
+            int nRemainingWidth = nWidth;
+
+            while (nRemainingWidth != 0) {
+                BYTE nColor = pFrameData[pos];
+
+                if (nColor == nTransparentColor) {
+                    if (nRunLength == 0) {
+                        nRunLength = pFrameData[pos + 1] + 1;
+                    }
+
+                    if (nRemainingWidth == nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRemainingWidth;
+                        nRunLength = 0;
+                        nRemainingWidth = 0;
+                    } else if (nRemainingWidth > nRunLength) {
+                        pos += 2;
+
+                        pSurface += nRunLength;
+                        nRemainingWidth -= nRunLength;
+                        nRunLength = 0;
+                    } else {
+                        pSurface += nRemainingWidth;
+                        nRunLength -= nRemainingWidth;
+                        nRemainingWidth = 0;
+                    }
+                } else {
+                    pos++;
+
+                    *pSurface = static_cast<WORD>(CVidImage::rgbTempPal[nColor]);
+                    pSurface++;
+                    nRemainingWidth--;
+                }
+            }
+
+            pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + lRowStep);
+        }
+    } else {
+        // NOTE: The uncompressed walk reads one byte ahead of the pointer
+        // (0x7AF384: [esi + 1]), unlike the 24- and 32-bit siblings, so the
+        // frame lands shifted by a pixel and the last pixel of the last row
+        // reads one past the data. Kept.
+        for (int y = 0; y < nHeight; y++) {
+            for (int x = 0; x < nWidth; x++) {
+                BYTE nColor = pFrameData[1];
+                if (nColor != nTransparentColor) {
+                    *pSurface = static_cast<WORD>(CVidImage::rgbTempPal[nColor]);
+                }
+                pFrameData++;
+                pSurface++;
+            }
+            pSurface = reinterpret_cast<WORD*>(reinterpret_cast<BYTE*>(pSurface) + lRowStep);
+        }
+    }
 
     return TRUE;
 }
