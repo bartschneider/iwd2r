@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
+#include "CVidBlitter.h"
 #include "platform/ddraw_shim.h"
 #include "platform/present.h"
 
@@ -60,6 +61,33 @@ void SetPixel(const DDSURFACEDESC& ddsd, int x, int y, uint32_t value)
 {
     uint8_t* row = static_cast<uint8_t*>(ddsd.lpSurface) + y * ddsd.lPitch;
     std::memcpy(row + x * 4, &value, sizeof(value));
+}
+
+// A 16-bit lane at the start of each 32-bit shim surface row: the software
+// blitter copies 2-byte pixels, so a row of `nWidth` pixels is the row's first
+// 2 * nWidth bytes.
+void FillLanes16(IDirectDrawSurface* surface, int nWidth, WORD (*Pattern16)(int x, int y))
+{
+    DDSURFACEDESC ddsd = LockAll(surface);
+    for (DWORD y = 0; y < ddsd.dwHeight; y++) {
+        uint8_t* row = static_cast<uint8_t*>(ddsd.lpSurface) + y * ddsd.lPitch;
+        for (int x = 0; x < nWidth; x++) {
+            const WORD value = Pattern16(x, static_cast<int>(y));
+            std::memcpy(row + x * 2, &value, sizeof(value));
+        }
+        std::memset(row + nWidth * 2, 0xEE, ddsd.dwWidth * 4 - nWidth * 2);
+    }
+    REQUIRE(surface->Unlock(nullptr) == DD_OK);
+}
+
+WORD Lane16(IDirectDrawSurface* surface, int x, int y)
+{
+    DDSURFACEDESC ddsd = LockAll(surface);
+    const uint8_t* row = static_cast<const uint8_t*>(ddsd.lpSurface) + y * ddsd.lPitch;
+    WORD value = 0;
+    std::memcpy(&value, row + x * 2, sizeof(value));
+    REQUIRE(surface->Unlock(nullptr) == DD_OK);
+    return value;
 }
 
 void FillSurface(IDirectDrawSurface* surface, uint32_t value)
@@ -636,4 +664,160 @@ TEST_CASE("ddraw WindowToFrame follows the logical presentation", "[ddraw]")
     CHECK(fy == 6.0f);
     SDL_DestroyWindow(window);
     SDL_Quit();
+}
+
+// CVidBlitter::SoftBlt (0x7B7280): the 16-bpp software blit the classic
+// renderer selects at 16 bpp. Its pixels are 2 bytes, so on a 32-bpp shim
+// surface a row of N pixels is the row's first 2 * N bytes and the row step is
+// the surface pitch; the rect starts at the surface origin because the shim's
+// Lock offsets in its own 32-bit pixels. Ported for the record (iwd2r runs at
+// 32 bpp only) and pinned here by hand - there is no oracle case, the blits
+// need DD surfaces.
+TEST_CASE("ddraw SoftBlt copies the source rows, plain and mirrored", "[ddraw]")
+{
+    IDirectDraw* dd = NewDirectDraw(DDSCL_NORMAL);
+    IDirectDrawSurface* dst = NewOffscreen(dd, 16, 8);
+    IDirectDrawSurface* src = NewOffscreen(dd, 16, 8);
+
+    const auto source = [](int x, int y) { return static_cast<WORD>(0x1000 + y * 0x10 + x); };
+    const auto marker = [](int, int) { return static_cast<WORD>(0xEEEE); };
+    FillLanes16(src, 4, source);
+
+    CVidBlitter blitter;
+    RECT rSrc = { 0, 0, 4, 3 };
+    RECT rDst = { 0, 0, 4, 3 };
+    DDBLTFX fx = {};
+    fx.dwSize = sizeof(fx);
+
+    // Plain: the 4x3 block, 16-bit pixels, nothing after the block moves.
+    FillLanes16(dst, 16, marker);
+    REQUIRE(blitter.SoftBlt(dst, &rDst, src, &rSrc, 0, &fx) == DD_OK);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            INFO("plain " << x << ", " << y);
+            CHECK(Lane16(dst, x, y) == source(x, y));
+        }
+        CHECK(Lane16(dst, 4, y) == 0xEEEE);
+    }
+    CHECK(Lane16(dst, 0, 3) == 0xEEEE);
+
+    // Mirrored left to right: the columns reverse inside the same rect.
+    FillLanes16(dst, 16, marker);
+    fx.dwDDFX = DDBLTFX_MIRRORLEFTRIGHT;
+    REQUIRE(blitter.SoftBlt(dst, &rDst, src, &rSrc, DDBLT_DDFX, &fx) == DD_OK);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            INFO("mirror lr " << x << ", " << y);
+            CHECK(Lane16(dst, x, y) == source(3 - x, y));
+        }
+    }
+
+    // Mirrored up and down: the rows reverse.
+    FillLanes16(dst, 16, marker);
+    fx.dwDDFX = DDBLTFX_MIRRORUPDOWN;
+    REQUIRE(blitter.SoftBlt(dst, &rDst, src, &rSrc, DDBLT_DDFX, &fx) == DD_OK);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            INFO("mirror ud " << x << ", " << y);
+            CHECK(Lane16(dst, x, y) == source(x, 2 - y));
+        }
+    }
+
+    // Both at once.
+    FillLanes16(dst, 16, marker);
+    fx.dwDDFX = DDBLTFX_MIRRORLEFTRIGHT | DDBLTFX_MIRRORUPDOWN;
+    REQUIRE(blitter.SoftBlt(dst, &rDst, src, &rSrc, DDBLT_DDFX, &fx) == DD_OK);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            INFO("mirror both " << x << ", " << y);
+            CHECK(Lane16(dst, x, y) == source(3 - x, 2 - y));
+        }
+    }
+
+    // A destination rect outside the surface is the lock's refusal, passed on.
+    RECT rBad = { 0, 6, 4, 9 };
+    CHECK(blitter.SoftBlt(dst, &rBad, src, &rSrc, 0, &fx) == DDERR_INVALIDPARAMS);
+
+    CHECK(dst->Release() == 0);
+    CHECK(src->Release() == 0);
+    CHECK(dd->Release() == 0);
+}
+
+// CVidBlitter::SoftSrcKeyBlt (0x7B74F0): the same blit with the source's
+// DDCKEY_SRCBLT key, a key pixel leaving the destination's pixel as it was.
+TEST_CASE("ddraw SoftSrcKeyBlt leaves the key pixels alone", "[ddraw]")
+{
+    IDirectDraw* dd = NewDirectDraw(DDSCL_NORMAL);
+    IDirectDrawSurface* dst = NewOffscreen(dd, 16, 8);
+    IDirectDrawSurface* src = NewOffscreen(dd, 16, 8);
+
+    const auto source = [](int x, int y) { return static_cast<WORD>(0x2000 + y * 0x10 + x); };
+    const auto marker = [](int, int) { return static_cast<WORD>(0xEEEE); };
+    FillLanes16(src, 4, source);
+    DDCOLORKEY key = { source(1, 0), source(1, 0) };
+    REQUIRE(src->SetColorKey(DDCKEY_SRCBLT, &key) == DD_OK);
+
+    CVidBlitter blitter;
+    RECT rSrc = { 0, 0, 4, 3 };
+    RECT rDst = { 0, 0, 4, 3 };
+    DDBLTFX fx = {};
+    fx.dwSize = sizeof(fx);
+
+    FillLanes16(dst, 16, marker);
+    REQUIRE(blitter.SoftSrcKeyBlt(dst, &rDst, src, &rSrc, 0, &fx) == DD_OK);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            INFO("key " << x << ", " << y);
+            CHECK(Lane16(dst, x, y) == (source(x, y) == key.dwColorSpaceLowValue ? 0xEEEE : source(x, y)));
+        }
+    }
+    CHECK(Lane16(dst, 1, 0) == 0xEEEE);
+    CHECK(Lane16(dst, 4, 0) == 0xEEEE);
+
+    // Mirrored left to right the key still skips: source(1, 0) lands at x 2.
+    FillLanes16(dst, 16, marker);
+    fx.dwDDFX = DDBLTFX_MIRRORLEFTRIGHT;
+    REQUIRE(blitter.SoftSrcKeyBlt(dst, &rDst, src, &rSrc, DDBLT_DDFX, &fx) == DD_OK);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            INFO("key lr " << x << ", " << y);
+            CHECK(Lane16(dst, x, y) == (source(3 - x, y) == key.dwColorSpaceLowValue ? 0xEEEE : source(3 - x, y)));
+        }
+    }
+    CHECK(Lane16(dst, 2, 0) == 0xEEEE);
+
+    CHECK(dst->Release() == 0);
+    CHECK(src->Release() == 0);
+    CHECK(dd->Release() == 0);
+}
+
+// CVidBlitter::SoftColorFill (0x7B7070), reached through SoftBlt's
+// DDBLT_COLORFILL: the destination rect filled with the DDBLTFX's fill colour.
+TEST_CASE("ddraw SoftBlt fills a rect for DDBLT_COLORFILL", "[ddraw]")
+{
+    IDirectDraw* dd = NewDirectDraw(DDSCL_NORMAL);
+    IDirectDrawSurface* dst = NewOffscreen(dd, 16, 8);
+
+    const auto marker = [](int, int) { return static_cast<WORD>(0xEEEE); };
+    FillLanes16(dst, 16, marker);
+
+    CVidBlitter blitter;
+    RECT rDst = { 0, 0, 4, 3 };
+    RECT rSrc = { 0, 0, 0, 0 };
+    DDBLTFX fx = {};
+    fx.dwSize = sizeof(fx);
+    fx.dwFillColor = 0x1234;
+
+    REQUIRE(blitter.SoftBlt(dst, &rDst, nullptr, &rSrc, DDBLT_COLORFILL, &fx) == DD_OK);
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 4; x++) {
+            INFO("fill " << x << ", " << y);
+            CHECK(Lane16(dst, x, y) == 0x1234);
+        }
+        CHECK(Lane16(dst, 4, y) == 0xEEEE);
+    }
+    CHECK(Lane16(dst, 0, 3) == 0xEEEE);
+
+    CHECK(dst->Release() == 0);
+    CHECK(dd->Release() == 0);
 }
