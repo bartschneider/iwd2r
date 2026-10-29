@@ -701,6 +701,111 @@ TEST_CASE("blt8to24_fast", "[vid]")
     ::operator delete(static_cast<void*>(engine));
 }
 
+// Blt8To16Translucent (0x7AFED0): the whole frame at the surface pointer
+// through the realized 16-bit palette, one WORD a pixel, rows bottom-up by
+// lPitch in bytes, each drawn pixel blended through the 64x64x32 table at
+// weight nTransVal >> 3 (the table's row is the destination channel, its
+// column the palette's). A palette word equal to the mode's shadow colour is
+// left untouched. The raw walk draws height + 1 rows and does not skip the
+// transparent index; the compressed one does. Registered as an oracle case
+// (vid/cell_translucent16); this pins the walk and the blend in the harness's
+// own terms.
+TEST_CASE("translucent16", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    const auto setMode16 = [&](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode->m_dwRBitMask = 0x1Fu << rShift;
+        mode->m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode->m_dwBBitMask = 0x1F;
+        mode->m_dwRBitShift = rShift;
+        mode->m_dwGBitShift = 5;
+        mode->m_dwBBitShift = 0;
+        mode->field_C2 = 3;
+        mode->field_C6 = 8 - gBits;
+        mode->field_CA = 3;
+    };
+
+    constexpr WORD kDst = 0x1234;
+    const auto blend = [&](WORD dest, WORD pal, DWORD weight) {
+        const DWORD masks[3] = { mode->m_dwRBitMask, mode->m_dwGBitMask, mode->m_dwBBitMask };
+        const DWORD shifts[3] = { mode->m_dwRBitShift, mode->m_dwGBitShift, mode->m_dwBBitShift };
+        WORD out = 0;
+        for (int c = 0; c < 3; ++c) {
+            const DWORD d = (dest & masks[c]) >> shifts[c];
+            const DWORD p = (pal & masks[c]) >> shifts[c];
+            const BYTE value = CVidImage::m_pBlendTable[(d * 0x40 + p) * 0x20 + weight];
+            out |= static_cast<WORD>(value << shifts[c]);
+        }
+        return out;
+    };
+
+    for (int format = 0; format < 2; ++format) {
+        setMode16(format == 0);
+        for (int compressed = 0; compressed < 2; ++compressed) {
+            CellFixture fixture(compressed != 0);
+            for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+                for (int trans = 0; trans < 3; ++trans) {
+                    const INT nTransVal = trans == 0 ? 0 : (trans == 1 ? 128 : 256);
+                    INFO("format " << format << ", compressed " << compressed << ", shadow " << shadowOn
+                                   << ", nTransVal " << nTransVal);
+                    fixture.cell->m_bShadowOn = shadowOn != 0;
+
+                    std::vector<WORD> pixels(kDepthW * kDepthH, kDst);
+                    REQUIRE(fixture.cell->sub_7AFED0(pixels.data(), kDepthW * 2, 0, nTransVal));
+
+                    // The raw walk draws one row past the frame (the BAM's zero
+                    // bytes there are index 0) and blends every pixel; the
+                    // compressed walk draws height rows and skips transparent
+                    // tokens.
+                    const int rows = compressed != 0 ? 3 : 4;
+                    const DWORD weight = static_cast<DWORD>(nTransVal) >> 3;
+                    std::vector<WORD> expected(kDepthW * kDepthH, kDst);
+                    for (int y = 0; y < rows; ++y) {
+                        for (int x = 0; x < 4; ++x) {
+                            const BYTE index = y < 3 ? kFrame[y * 4 + x] : 0;
+                            if (compressed != 0 && index == 0) {
+                                continue; // transparent token
+                            }
+                            const WORD pal = static_cast<WORD>(CVidImage::rgbTempPal[index]);
+                            if (pal != static_cast<WORD>(mode->field_24 & 0xFFFF)) {
+                                expected[y * kDepthW + x] = blend(kDst, pal, weight);
+                            }
+                        }
+                    }
+                    CHECK(pixels == expected);
+
+                    // Weight 0 is the palette itself: kFrame's (0, 0) is index
+                    // 5, whose realized value is 0x27C0 at 5-6-5 and 0x13E0 at
+                    // 5-5-5.
+                    if (nTransVal == 0) {
+                        CHECK(pixels[0] == (format == 0 ? 0x27C0 : 0x13E0));
+                    }
+
+                    // The shadow entry: with the cell's shadow off entry 1 is
+                    // the mode's colour and the pixel keeps the destination.
+                    if (shadowOn == 0) {
+                        CHECK(pixels[2 * kDepthW + 3] == kDst);
+                    } else {
+                        CHECK(pixels[2 * kDepthW + 3] != kDst);
+                    }
+                }
+            }
+        }
+    }
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
 // BltTile8To16 writes pixel pairs as one DWORD. Dithered (0x8), even rows
 // keep the first pixel of each pair and put field_24's low word in the
 // second; odd rows put field_24 in the first and OR its high word into the
