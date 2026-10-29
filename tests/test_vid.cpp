@@ -801,6 +801,335 @@ TEST_CASE("blt8to24_fast", "[vid]")
     ::operator delete(static_cast<void*>(engine));
 }
 
+// Blt8To16ClearShadow (0x7AF8A0): the whole frame at the surface pointer
+// through the realized 16-bit palette, one WORD a pixel, rows bottom-up by
+// lPitch in bytes, the transparent index left untouched. With the cell's
+// shadow on, index 1 is half the destination (per channel through the mode's
+// masks) instead of a palette entry; the raw walk does that for any index
+// below two. With the shadow off the entry is the mode's shadow colour and
+// the frame is drawn plainly. Registered as an oracle case
+// (vid/cell_clear_shadow16); this pins the walk in the harness's own terms.
+TEST_CASE("clear_shadow16", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    DWORD shadowMask = 0;
+    const auto setMode16 = [&](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode->m_dwRBitMask = 0x1Fu << rShift;
+        mode->m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode->m_dwBBitMask = 0x1F;
+        mode->m_dwRBitShift = rShift;
+        mode->m_dwGBitShift = 5;
+        mode->m_dwBBitShift = 0;
+        mode->field_C2 = 3;
+        mode->field_C6 = 8 - gBits;
+        mode->field_CA = 3;
+        shadowMask = ((mode->m_dwRBitMask >> 1) & mode->m_dwRBitMask)
+            + ((mode->m_dwGBitMask >> 1) & mode->m_dwGBitMask)
+            + ((mode->m_dwBBitMask >> 1) & mode->m_dwBBitMask);
+    };
+
+    constexpr WORD kDst = 0xFFFF;
+
+    for (int format = 0; format < 2; ++format) {
+        setMode16(format == 0);
+        const WORD halved = static_cast<WORD>((kDst >> 1) & shadowMask);
+        for (int compressed = 0; compressed < 2; ++compressed) {
+            CellFixture fixture(compressed != 0);
+            for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+                INFO("format " << format << ", compressed " << compressed << ", shadow " << shadowOn);
+                fixture.cell->m_bShadowOn = shadowOn != 0;
+
+                std::vector<WORD> pixels(kDepthW * kDepthH, kDst);
+                REQUIRE(fixture.cell->sub_7AF8A0(pixels.data(), kDepthW * 2, 0));
+
+                std::vector<WORD> expected(kDepthW * kDepthH, kDst);
+                for (int y = 0; y < 3; ++y) {
+                    for (int x = 0; x < 4; ++x) {
+                        const BYTE index = kFrame[y * 4 + x];
+                        if (index == 0) {
+                            continue; // transparent
+                        }
+                        const size_t at = static_cast<size_t>(y) * kDepthW + x;
+                        if (shadowOn != 0 && (compressed != 0 ? index == 1 : index < 2)) {
+                            expected[at] = halved;
+                        } else {
+                            // The realized palette, read back after the call:
+                            // with the shadow off entry 1 is the mode's colour.
+                            expected[at] = static_cast<WORD>(CVidImage::rgbTempPal[index]);
+                        }
+                    }
+                }
+                CHECK(pixels == expected);
+                CHECK(halved == (format == 0 ? 0x7BEF : 0x3DEF));
+            }
+        }
+    }
+
+    // The raw walk halves for any index below two (cmp eax,1; ja at 0x7AFADB),
+    // the compressed one only index 1; a nonzero transparent index lets index
+    // 0 reach the write. 3x1, transparent 200, indices 0, 1, 5.
+    {
+        setMode16(true);
+        const WORD halved = static_cast<WORD>((kDst >> 1) & shadowMask);
+        for (int compressed = 0; compressed < 2; ++compressed) {
+            CellFixture fixture(compressed != 0);
+            fixture.bam[0xB] = 200;
+            fixture.bam[0x20] = 0;
+            fixture.bam[0x21] = 1;
+            fixture.bam[0x22] = 5;
+            fixture.frame.nWidth = 3;
+            fixture.frame.nHeight = 1;
+            fixture.cell->m_bShadowOn = TRUE;
+            std::vector<WORD> row(kDepthW, kDst);
+            CHECK(fixture.cell->sub_7AF8A0(row.data(), kDepthW * 2, 0));
+            INFO("compressed " << compressed);
+            CHECK(row[0] == (compressed != 0 ? static_cast<WORD>(CVidImage::rgbTempPal[0]) : halved));
+            CHECK(row[1] == halved);
+            CHECK(row[2] == static_cast<WORD>(CVidImage::rgbTempPal[5]));
+        }
+
+        // With the shadow off the compressed branch stays a plain palette
+        // write: the original halves there with a half mask it never computes
+        // (an uninitialized read), which cannot be reproduced; the 32-bit
+        // sibling writes the realized palette, as this does.
+        CellFixture off(true);
+        off.bam[0xB] = 200;
+        off.bam[0x20] = 0;
+        off.bam[0x21] = 1;
+        off.bam[0x22] = 5;
+        off.frame.nWidth = 3;
+        off.frame.nHeight = 1;
+        off.cell->m_bShadowOn = FALSE;
+        std::vector<WORD> row(kDepthW, kDst);
+        CHECK(off.cell->sub_7AF8A0(row.data(), kDepthW * 2, 0));
+        CHECK(row[0] == static_cast<WORD>(CVidImage::rgbTempPal[0]));
+        CHECK(row[1] == static_cast<WORD>(CVidImage::rgbTempPal[1]));
+        CHECK(row[1] == static_cast<WORD>(mode->field_24 & 0xFFFF));
+        CHECK(row[2] == static_cast<WORD>(CVidImage::rgbTempPal[5]));
+    }
+
+    // A zero-size frame draws nothing and answers TRUE (the original has no
+    // guard and its do-while loops would spin; Render never passes one).
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<WORD> untouched(kDepthW * kDepthH, 0xAAAA);
+    CHECK(empty.cell->sub_7AF8A0(untouched.data(), kDepthW * 2, 0) == TRUE);
+    CHECK(untouched == std::vector<WORD>(kDepthW * kDepthH, 0xAAAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
+// sub_7CF3F0 (0x7CF3F0): the clear-shadow twin of sub_7CECD0. With the cell's
+// shadow on, the source's shadow entry halves the destination pixel under it
+// (each channel trimmed of its low bit by the mode's masks); with the shadow
+// off, the palette's shadow entry holds the mode's field_24 and index 1 draws
+// that. Registered as an oracle case (vid/cell_clear_shadow24); this pins the
+// walk and the two branches in the harness's own terms.
+TEST_CASE("blt8to24_clear_shadow", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->m_dwRBitMask = 0x00FF0000;
+    mode->m_dwGBitMask = 0x0000FF00;
+    mode->m_dwBBitMask = 0x000000FF;
+    mode->m_dwRBitShift = 16;
+    mode->m_dwGBitShift = 8;
+    mode->m_dwBBitShift = 0;
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    const DWORD dwShadowMask = 0x007F7F7F;
+
+    // Every 24-bit pixel the call sees before it overwrites it.
+    std::vector<BYTE> before(kDepthW * kDepthH * 3);
+    for (size_t i = 0; i < before.size(); ++i) {
+        before[i] = static_cast<BYTE>(0x30 + i * 5);
+    }
+
+    for (int compressed = 0; compressed < 2; ++compressed) {
+        CellFixture fixture(compressed != 0);
+        INFO("compressed " << compressed);
+        for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+            INFO("shadow " << shadowOn);
+            fixture.cell->m_bShadowOn = shadowOn != 0;
+
+            std::vector<BYTE> pixels = before;
+            REQUIRE(fixture.cell->sub_7CF3F0(pixels.data(), kDepthW * 3, 0));
+
+            std::vector<BYTE> expected = before;
+            for (int y = 0; y < 3; ++y) {
+                for (int x = 0; x < 4; ++x) {
+                    const BYTE index = kFrame[y * 4 + x];
+                    if (index == 0) {
+                        continue; // left as it was
+                    }
+                    BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+                    if (shadowOn != 0 && index == CVidPalette::SHADOW_ENTRY) {
+                        DWORD rgb = (static_cast<DWORD>(p[2]) << 16)
+                            | (static_cast<DWORD>(p[1]) << 8)
+                            | static_cast<DWORD>(p[0]);
+                        rgb = (rgb >> 1) & dwShadowMask;
+                        p[0] = static_cast<BYTE>(rgb);
+                        p[1] = static_cast<BYTE>(rgb >> 8);
+                        p[2] = static_cast<BYTE>(rgb >> 16);
+                    } else {
+                        const DWORD rgb = CVidImage::rgbTempPal[index];
+                        p[0] = static_cast<BYTE>(rgb);
+                        p[1] = static_cast<BYTE>(rgb >> 8);
+                        p[2] = static_cast<BYTE>(rgb >> 16);
+                    }
+                }
+            }
+            CHECK(pixels == expected);
+
+            // The shadow entry (bottom right) is the branch under test.
+            const BYTE* shadow = pixels.data() + (2 * kDepthW + 3) * 3;
+            const DWORD drawn = static_cast<DWORD>(shadow[0]) | (static_cast<DWORD>(shadow[1]) << 8)
+                | (static_cast<DWORD>(shadow[2]) << 16);
+            const DWORD shadowSource = (static_cast<DWORD>(before[(2 * kDepthW + 3) * 3 + 2]) << 16)
+                | (static_cast<DWORD>(before[(2 * kDepthW + 3) * 3 + 1]) << 8)
+                | static_cast<DWORD>(before[(2 * kDepthW + 3) * 3]);
+            CHECK(drawn == (shadowOn != 0 ? ((shadowSource >> 1) & dwShadowMask) : static_cast<DWORD>(mode->field_24)));
+        }
+    }
+
+    // The raw path skips palette index 0, not the frame's transparent index
+    // (0x7CF61D): with the transparent index changed to one the frame does not
+    // use, the zero pixels stay untouched and index 1 still draws the shadow
+    // colour.
+    CellFixture raw(false);
+    raw.bam[0xB] = 4;
+    raw.cell->m_bShadowOn = FALSE;
+    std::vector<BYTE> pixels = before;
+    REQUIRE(raw.cell->sub_7CF3F0(pixels.data(), kDepthW * 3, 0));
+    std::vector<BYTE> expected = before;
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            const BYTE index = kFrame[y * 4 + x];
+            if (index == 0) {
+                continue;
+            }
+            const DWORD rgb = CVidImage::rgbTempPal[index];
+            BYTE* p = expected.data() + (y * kDepthW + x) * 3;
+            p[0] = static_cast<BYTE>(rgb);
+            p[1] = static_cast<BYTE>(rgb >> 8);
+            p[2] = static_cast<BYTE>(rgb >> 16);
+        }
+    }
+    CHECK(pixels == expected);
+
+    // A zero-size frame draws nothing and answers TRUE before any palette work.
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<BYTE> untouched(16, 0xAA);
+    CHECK(empty.cell->sub_7CF3F0(untouched.data(), kDepthW * 3, 0) == TRUE);
+    CHECK(untouched == std::vector<BYTE>(16, 0xAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
+// Blt8To16Brightest (0x7AFB50): the whole frame at the surface pointer
+// through the realized 16-bit palette, one WORD a pixel, rows bottom-up by
+// lPitch in bytes, the transparent index left untouched, and every drawn pixel
+// the per-channel brighter of the destination and the palette (through the
+// mode's masks). Registered as an oracle case (vid/cell_brightest16); this
+// pins the walk and the max in the harness's own terms.
+TEST_CASE("brightest16", "[vid]")
+{
+    ChitinScope scope;
+    CWarp* engine = reinterpret_cast<CWarp*>(::operator new(sizeof(CWarp)));
+    std::memset(static_cast<void*>(engine), 0, sizeof(CWarp));
+    auto mode = std::make_unique<CVidInf>();
+    mode->field_24 = 0x00332211;
+    engine->pVidMode = mode.get();
+    g_pChitin->pActiveEngine = engine;
+
+    const auto setMode16 = [&](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode->m_dwRBitMask = 0x1Fu << rShift;
+        mode->m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode->m_dwBBitMask = 0x1F;
+        mode->m_dwRBitShift = rShift;
+        mode->m_dwGBitShift = 5;
+        mode->m_dwBBitShift = 0;
+        mode->field_C2 = 3;
+        mode->field_C6 = 8 - gBits;
+        mode->field_CA = 3;
+    };
+
+    constexpr WORD kDst = 0x1234;
+    const auto brighter = [](DWORD a, DWORD b) { return a > b ? a : b; };
+    const auto brightest = [&](WORD dest, WORD pal) {
+        return static_cast<WORD>(
+            brighter(dest & mode->m_dwRBitMask, pal & mode->m_dwRBitMask)
+            | brighter(dest & mode->m_dwGBitMask, pal & mode->m_dwGBitMask)
+            | brighter(dest & mode->m_dwBBitMask, pal & mode->m_dwBBitMask));
+    };
+
+    for (int format = 0; format < 2; ++format) {
+        setMode16(format == 0);
+        for (int compressed = 0; compressed < 2; ++compressed) {
+            CellFixture fixture(compressed != 0);
+            for (int shadowOn = 0; shadowOn < 2; ++shadowOn) {
+                INFO("format " << format << ", compressed " << compressed << ", shadow " << shadowOn);
+                fixture.cell->m_bShadowOn = shadowOn != 0;
+
+                std::vector<WORD> pixels(kDepthW * kDepthH, kDst);
+                REQUIRE(fixture.cell->sub_7AFB50(pixels.data(), kDepthW * 2, 0));
+
+                std::vector<WORD> expected(kDepthW * kDepthH, kDst);
+                for (int y = 0; y < 3; ++y) {
+                    for (int x = 0; x < 4; ++x) {
+                        const BYTE index = kFrame[y * 4 + x];
+                        if (index == 0) {
+                            continue; // transparent
+                        }
+                        // The realized palette, read back after the call: with
+                        // the shadow off entry 1 is the mode's colour.
+                        const WORD pal = static_cast<WORD>(CVidImage::rgbTempPal[index]);
+                        expected[y * kDepthW + x] = brightest(kDst, pal);
+                    }
+                }
+                CHECK(pixels == expected);
+
+                // kFrame's (0, 0) is index 5 - palette {5, 250, 35} (B, G, R)
+                // against 0x1234: 5-6-5 keeps R 4, G 62, B 20 (0x27D4), 5-5-5
+                // R 4, G 31, B 20 (0x13F4).
+                CHECK(pixels[0] == (format == 0 ? 0x27D4 : 0x13F4));
+            }
+        }
+    }
+
+    // A zero-size frame draws nothing and answers TRUE (the original has no
+    // guard and its do-while loops would spin; Render never passes one).
+    CellFixture empty(false);
+    empty.frame.nWidth = 0;
+    empty.frame.nHeight = 0;
+    std::vector<WORD> untouched(kDepthW * kDepthH, 0xAAAA);
+    CHECK(empty.cell->sub_7AFB50(untouched.data(), kDepthW * 2, 0) == TRUE);
+    CHECK(untouched == std::vector<WORD>(kDepthW * kDepthH, 0xAAAA));
+
+    g_pChitin->pActiveEngine = nullptr;
+    ::operator delete(static_cast<void*>(engine));
+}
+
 // sub_7CF650 (0x7CF650): the brightest twin of sub_7CECD0. Each channel of a
 // drawn pixel keeps the larger of the destination byte and the realized
 // palette's, compared and written separately (B, G, R); the transparent index
@@ -2784,6 +3113,392 @@ TEST_CASE("vid: BltBmp24To16 converts 24-bit pixels into the mode's 16-bit field
     CHECK(canvas[index(2, 2)] == 0x001F);
     // The row step of that path is one pixel forward then a full row back.
     CHECK(canvas[index(3, 1)] == 0x07E0);
+
+    ::operator delete(storage);
+}
+
+// CVidBitmap::BltBmp24To24Tint (0x7CCE80): a 24-bit BMP (three bytes, B then
+// G then R) onto a 24-bit surface through the same tint, add and light passes
+// as BltBmp24To32Tint, with its keyed form (pure green transparent; with 0x4
+// a pure black pixel a shadow). Rows bottom-up (lPitch in bytes); a drawn
+// pixel before a row's last writes a fourth byte over the next pixel's first.
+TEST_CASE("vid: BltBmp24To24Tint tints, adds, lights and keys 24-bit pixels", "[vid]")
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(storage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(storage);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setShifts = [&mode](DWORD r, DWORD g, DWORD b) {
+        mode.m_dwRBitShift = r;
+        mode.m_dwGBitShift = g;
+        mode.m_dwBBitShift = b;
+    };
+
+    constexpr int kW = 4;
+    constexpr int kH = 3;
+    constexpr size_t kPitch = kW * 3;
+    const auto index = [](int x, int y) { return static_cast<size_t>(y) * kW + x; };
+    const auto rowBytes = [&](const std::vector<BYTE>& canvas, int x, int y, int n) {
+        std::vector<BYTE> out(n);
+        std::copy_n(canvas.begin() + static_cast<ptrdiff_t>(index(x, y) * 3), n, out.begin());
+        return out;
+    };
+
+    // Plain (flags 0), shifts 16/8/0: the source's B, G, R bytes land at
+    // bytes 0, 1, 2, the rows going up from the pointer handed in.
+    const BYTE plain[18] = {
+        0x11,
+        0x22,
+        0x33,
+        0x44,
+        0x55,
+        0x66,
+        0x77,
+        0x88,
+        0x99,
+        0x12,
+        0x34,
+        0x56,
+        0x78,
+        0x9A,
+        0xBC,
+        0xDE,
+        0xF0,
+        0x12,
+    };
+    setShifts(16, 8, 0);
+    std::vector<BYTE> canvas(kW * kH * 3, 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 2) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(3, 2), 0, 0));
+    CHECK(rowBytes(canvas, 0, 2, 9) == std::vector<BYTE> { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 });
+    CHECK(rowBytes(canvas, 0, 1, 9) == std::vector<BYTE> { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x12 });
+    CHECK(canvas[index(3, 2) * 3] == 0xEE); // the column right of the blit
+
+    // Shifts 0/8/16: the same conversion with R at byte 0 and B at byte 2.
+    setShifts(0, 8, 16);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(3, 1), 0, 0));
+    CHECK(rowBytes(canvas, 0, 0, 9) == std::vector<BYTE> { 0x33, 0x22, 0x11, 0x66, 0x55, 0x44, 0x99, 0x88, 0x77 });
+
+    // The tint (0x20000), 8-bit shift: channel * colour / 256. The first
+    // pixel's fourth byte lands on the second's first, which its own write
+    // overwrites again.
+    bitmap->m_paletteAffects.rgbTintColor = RGB(0x80, 0x40, 0xFF);
+    setShifts(16, 8, 0);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(2, 1), 0, 0x20000));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x10, 0x08, 0x19, 0x43, 0x15, 0x33 });
+
+    // The add (0x40000): ~((~(channel * (~colour)) >> 8)), an 8-bit shift.
+    bitmap->m_paletteAffects.rgbAddColor = RGB(0x10, 0x20, 0x30);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(2, 1), 0, 0x40000));
+    CHECK(rowBytes(canvas, 0, 0, 6) == std::vector<BYTE> { 0x3F, 0x3F, 0x41, 0x68, 0x6B, 0x71 });
+
+    // The light (0x200000), scale 8 + the colour: the product above 255 keeps
+    // its high bits (the original clamps only the low byte), so red 0x1FF
+    // carries its bit 8 into green's byte with shifts 0/8/16.
+    bitmap->m_paletteAffects.rgbLightColor = RGB(0x40, 0x20, 0x10);
+    setShifts(0, 8, 16);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 2) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(2, 1), 0, 0x200000));
+    CHECK(rowBytes(canvas, 0, 2, 6) == std::vector<BYTE> { 0xFF, 0xAB, 0x33, 0xFF, 0xFF, 0xCD });
+
+    // Keyed (0x5), shifts 0/8/16: pure green is transparent, and a black
+    // pixel is half the destination (the black level is 0 here). The first
+    // pixel's fourth byte zeroes the green one's first, which stays zero.
+    setShifts(0, 8, 16);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    canvas[index(0, 1) * 3] = 0x40;
+    canvas[index(0, 1) * 3 + 1] = 0x80;
+    canvas[index(0, 1) * 3 + 2] = 0xC0;
+    canvas[index(1, 1) * 3] = 0x10;
+    canvas[index(1, 1) * 3 + 1] = 0x20;
+    canvas[index(1, 1) * 3 + 2] = 0x30;
+    const BYTE shadowed[6] = { 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(shadowed), CSize(2, 1), 0, 0x5));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x20, 0x40, 0x60, 0x00, 0x20, 0x30 });
+
+    // Keyed (0x5), shifts 16/8/0: the row's last pixel reads a WORD for red
+    // and green, so its red stays black and its blue halves the destination's
+    // red byte; the drawn first pixel's fourth byte zeroes the word's low one.
+    setShifts(16, 8, 0);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    canvas[index(0, 1) * 3] = 0x40;
+    canvas[index(0, 1) * 3 + 1] = 0x80;
+    canvas[index(0, 1) * 3 + 2] = 0xC0;
+    canvas[index(1, 1) * 3] = 0x10;
+    canvas[index(1, 1) * 3 + 1] = 0x20;
+    canvas[index(1, 1) * 3 + 2] = 0x30;
+    const BYTE shadowTail[6] = { 0x11, 0x22, 0x33, 0x00, 0x00, 0x00 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(shadowTail), CSize(2, 1), 0, 0x5));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x11, 0x22, 0x33, 0x18, 0x10, 0x00 });
+
+    // The keyed tint and grey of the same branch: a key leaves the pixel, the
+    // tint truncates to bytes, and 0x80000 greys the source first.
+    setShifts(16, 8, 0);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    const BYTE keyed[6] = { 0x00, 0xFF, 0x00, 0x11, 0x22, 0x33 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(keyed), CSize(2, 1), 0, 0x20001));
+    CHECK(rowBytes(canvas, 0, 0, 6) == std::vector<BYTE> { 0xEE, 0xEE, 0xEE, 0x10, 0x08, 0x19 });
+    const BYTE grey[3] = { 0x10, 0x20, 0x30 };
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(grey), CSize(1, 1), 0, 0x80001));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x18, 0x18, 0x18 });
+    // Black without 0x4 is written as black (only green is the key).
+    const BYTE black[3] = { 0x00, 0x00, 0x00 };
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(black), CSize(1, 1), 0, 0x1));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x00, 0x00, 0x00 });
+
+    // The no-flag paths (the T58 oracle failure's shape on the 16-bit
+    // sibling): GetAdd and GetLight answer the mode's brightness and gamma
+    // with no flag bits at all, and 0x10000 tints with the mode's global
+    // tint - here a different colour from the palette's, so the source shows.
+    setShifts(16, 8, 0);
+
+    // Flags 0x0, brightness 0x40: the add runs with ~0x40 = 191, shift 8
+    // (((0x33 ^ 0xFF) * 191 >> 8) ^ 0xFF = 0x67, and so on).
+    mode.m_nBrightnessCorrection = 0x40;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x0));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x4E, 0x5B, 0x67 });
+
+    // Flags 0x0, gamma 0x20: the light runs with 8 + 0x20 = 40 over the scale
+    // of 3 (0x33 * 40 >> 3 = 0xFF).
+    mode.m_nBrightnessCorrection = 0;
+    mode.m_nGammaCorrection = 0x20;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x0));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x55, 0xAA, 0xFF });
+
+    // 0x10000 tints with the global tint (0x33 * 0x40 >> 8 = 0x0C), the
+    // brightness add on top.
+    mode.m_nGammaCorrection = 0;
+    mode.m_nBrightnessCorrection = 0x40;
+    mode.rgbGlobalTint = RGB(0x40, 0x20, 0x10);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x10000));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x42, 0x44, 0x4A });
+
+    // The same global tint with the gamma light instead.
+    mode.m_nBrightnessCorrection = 0;
+    mode.m_nGammaCorrection = 0x20;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x10000));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x05, 0x14, 0x3C });
+    mode.m_nGammaCorrection = 0;
+    mode.rgbGlobalTint = RGB(0xFF, 0xFF, 0xFF);
+
+    // Keyed with shadows (0x5), brightness 0x40: the black level is
+    // ApplyBrightnessContrast(0) = 0x41 a channel, the shadow half the
+    // destination plus it; the key keeps its pixel bar its first byte, which
+    // the shadow's fourth (zero) byte overwrote.
+    mode.m_nBrightnessCorrection = 0x40;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    canvas[index(0, 1) * 3] = 0x10;
+    canvas[index(0, 1) * 3 + 1] = 0x20;
+    canvas[index(0, 1) * 3 + 2] = 0x30;
+    canvas[index(1, 1) * 3] = 0x40;
+    canvas[index(1, 1) * 3 + 1] = 0x50;
+    canvas[index(1, 1) * 3 + 2] = 0x60;
+    const BYTE shadowBright[6] = { 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(shadowBright), CSize(2, 1), 0, 0x5));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x28, 0x30, 0x38, 0x00, 0x50, 0x60 });
+    mode.m_nBrightnessCorrection = 0;
+
+    ::operator delete(storage);
+}
+
+// CVidBitmap::BltBmp24To16Tint (0x7B3B70): the same 24-to-16 conversion with
+// the image's tint, add and light multipliers and the high-word flags, i.e.
+// the 16-bit counterpart of BltBmp24To32Tint. The bitmap is zeroed (no range
+// tints); the mode's global tint, brightness and gamma drive GetTint, GetAdd
+// and GetLight, so the maths is the shipped functions'.
+TEST_CASE("vid: BltBmp24To16Tint applies the tint, add and light of the 24-to-16 blit", "[vid]")
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(storage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(storage);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode.m_dwRBitMask = 0x1Fu << rShift;
+        mode.m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode.m_dwBBitMask = 0x1F;
+        mode.m_dwRBitShift = rShift;
+        mode.m_dwGBitShift = 5;
+        mode.m_dwBBitShift = 0;
+        mode.field_C2 = 3;
+        mode.field_C6 = 8 - gBits;
+        mode.field_CA = 3;
+        mode.rgbGlobalTint = RGB(255, 255, 255);
+        mode.m_nBrightnessCorrection = 0;
+        mode.m_nGammaCorrection = 0;
+    };
+
+    constexpr int kW = 4;
+    constexpr int kH = 4;
+    constexpr size_t kPitch = kW * 2;
+    const auto index = [](int x, int y) { return static_cast<size_t>(y) * kW + x; };
+
+    setMode16(true);
+
+    // The global tint (0x10000) halves every channel: 255 * 128 >> 8 = 127,
+    // 127 >> 3 = 15 in the 5-bit red field.
+    const BYTE red[3] = { 0x00, 0x00, 0xFF };
+    mode.rgbGlobalTint = RGB(128, 128, 128);
+    std::vector<WORD> canvas(kW * kH, 0xFFFF);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(red),
+        CSize(1, 1), 0, 0x10001));
+    CHECK(canvas[index(1, 2)] == 0x7800); // r 127 -> 15 << 11
+
+    // The transparent green is skipped before the tint: the pixel keeps the
+    // destination.
+    const BYTE green[6] = { 0x00, 0xFF, 0x00, 0x00, 0x00, 0xFF };
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(0, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(green),
+        CSize(2, 1), 0, 0x10001));
+    CHECK(canvas[index(0, 1)] == 0xFFFF);
+    CHECK(canvas[index(1, 1)] == 0x7800); // red 255 -> 127 -> 15 << 11
+
+    // The brightness correction (0x40000) adds through GetAdd: a black
+    // source comes out 129 in every channel ((~255 * 32385) >> 16 -> ~126).
+    mode.rgbGlobalTint = RGB(255, 255, 255);
+    mode.m_nBrightnessCorrection = 128;
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    const BYTE black[3] = { 0x00, 0x00, 0x00 };
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(2, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(black),
+        CSize(1, 1), 0, 0x40001));
+    CHECK(canvas[index(2, 1)] == 0x8410); // 129 in each field: 16 | 32 << 5 | 16 << 11
+
+    // The gamma correction (0x200000) doubles through GetLight (8 + 8 over
+    // the light scale of 3) and clamps at 255.
+    mode.m_nBrightnessCorrection = 0;
+    mode.m_nGammaCorrection = 8;
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    const BYTE grey[6] = { 0x40, 0x40, 0x40, 0xFF, 0xFF, 0xFF };
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(0, 0)], static_cast<LONG>(kPitch), const_cast<BYTE*>(grey),
+        CSize(2, 1), 0, 0x200001));
+    CHECK(canvas[index(0, 0)] == 0x8410); // 64 -> 128 in each field
+    CHECK(canvas[index(1, 0)] == 0xFFFF); // white stays white
+    mode.m_nGammaCorrection = 0;
+
+    // 0x80000 makes the pixel grey first: (0x30 + 0x60 + 0x90) >> 2 = 72.
+    const BYTE mixed[3] = { 0x30, 0x60, 0x90 };
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(3, 0)], static_cast<LONG>(kPitch), const_cast<BYTE*>(mixed),
+        CSize(1, 1), 0, 0x80001));
+    CHECK(canvas[index(3, 0)] == 0x4A49); // 72: 9 | 18 << 5 | 9 << 11
+
+    // The shadow (0x4) halves the destination channel with no tint at all:
+    // 0xF800's red field (31) widened to 248 is 124, i.e. 15 in the field.
+    std::fill(canvas.begin(), canvas.end(), 0xF800);
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(black),
+        CSize(1, 1), 0, 0x5));
+    CHECK(canvas[index(1, 2)] == 0x7800);
+
+    // The plain form (no 0x1) tints too, walks two rows upward through the
+    // mode's shifts and steps nDataJump bytes between them.
+    setMode16(false); // 5-5-5
+    mode.rgbGlobalTint = RGB(128, 128, 128);
+    std::fill(canvas.begin(), canvas.end(), 0xFFFF);
+    const BYTE rows[9] = { 0x00, 0x00, 0xFF, 0x11, 0x88, 0x44, 0x22, 0x00, 0x00 };
+    CHECK(bitmap->BltBmp24To16Tint(&canvas[index(1, 2)], static_cast<LONG>(kPitch), const_cast<BYTE*>(rows),
+        CSize(1, 2), 1, 0x10000));
+    CHECK(canvas[index(1, 2)] == 0x3C00); // red 127 -> 15 << 10
+    CHECK(canvas[index(1, 1)] == 0x0888); // (0x88, 0x44, 0x22) halved: 8 | 4 << 5 | 2 << 10
+
+    ::operator delete(storage);
+}
+
+// CVidBitmap::BltBmp24To16Tint's unkeyed pack (0x7B3B70's shared tail
+// 0x7B3FF8): the light step's clamp replaces only the low byte of the
+// register, so a channel whose lit value passes 255 keeps its second byte,
+// and the 16-bit pack shifts it along with the first - the overflow lands in
+// the neighbouring fields. These are the original's own words for the pixels
+// (checked against the rig's vid/blt_bmp24to16_tint case), not the port's
+// arithmetic, so a regression that masks each channel to a byte shows here.
+TEST_CASE("vid: BltBmp24To16Tint packs the unkeyed light overflow into the neighbouring fields", "[vid]")
+{
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    std::memset(storage, 0, sizeof(CVidBitmap));
+    auto* bitmap = reinterpret_cast<CVidBitmap*>(storage);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode.m_dwRBitMask = 0x1Fu << rShift;
+        mode.m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode.m_dwBBitMask = 0x1F;
+        mode.m_dwRBitShift = rShift;
+        mode.m_dwGBitShift = 5;
+        mode.m_dwBBitShift = 0;
+        mode.field_C2 = 3;
+        mode.field_C6 = 8 - gBits;
+        mode.field_CA = 3;
+        mode.rgbGlobalTint = RGB(255, 255, 255);
+        mode.m_nBrightnessCorrection = 55;
+        mode.m_nGammaCorrection = 8;
+    };
+
+    constexpr int kW = 4;
+    constexpr size_t kPitch = kW * 2;
+    // (B, G, R) per pixel: green and blue overflow the light step, red does
+    // not, so the green's second byte accents the red field.
+    const BYTE data[12] = { 131, 250, 25, 100, 111, 50, 10, 20, 30, 0, 255, 0 };
+
+    setMode16(true);
+    std::vector<WORD> canvas(kW, 0x1111);
+    CHECK(bitmap->BltBmp24To16Tint(canvas.data(), static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(4, 1), 0, 0));
+    CHECK(canvas[0] == 0xBFFF);
+    CHECK(canvas[1] == 0xBFFF);
+    CHECK(canvas[2] == 0xA490);
+    CHECK(canvas[3] == 0x77EE);
+
+    // The same pixels through the odd-width tail (three of them).
+    std::fill(canvas.begin(), canvas.end(), 0x1111);
+    CHECK(bitmap->BltBmp24To16Tint(canvas.data(), static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(3, 1), 0, 0));
+    CHECK(canvas[0] == 0xBFFF);
+    CHECK(canvas[1] == 0xBFFF);
+    CHECK(canvas[2] == 0xA490);
+    CHECK(canvas[3] == 0x1111);
+
+    // 5-5-5: five bits each, so the same overflow reaches the green field.
+    setMode16(false);
+    std::fill(canvas.begin(), canvas.end(), 0x1111);
+    CHECK(bitmap->BltBmp24To16Tint(canvas.data(), static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(4, 1), 0, 0));
+    CHECK(canvas[0] == 0x6FFF);
+    CHECK(canvas[1] == 0x7FFF);
+    CHECK(canvas[2] == 0x5250);
+    CHECK(canvas[3] == 0x3BEE);
 
     ::operator delete(storage);
 }
