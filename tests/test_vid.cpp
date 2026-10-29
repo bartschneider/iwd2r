@@ -2682,5 +2682,66 @@ TEST_CASE("vid: BltBmp24To24Tint tints, adds, lights and keys 24-bit pixels", "[
         const_cast<BYTE*>(black), CSize(1, 1), 0, 0x1));
     CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x00, 0x00, 0x00 });
 
+    // The no-flag paths (the T58 oracle failure's shape on the 16-bit
+    // sibling): GetAdd and GetLight answer the mode's brightness and gamma
+    // with no flag bits at all, and 0x10000 tints with the mode's global
+    // tint - here a different colour from the palette's, so the source shows.
+    setShifts(16, 8, 0);
+
+    // Flags 0x0, brightness 0x40: the add runs with ~0x40 = 191, shift 8
+    // (((0x33 ^ 0xFF) * 191 >> 8) ^ 0xFF = 0x67, and so on).
+    mode.m_nBrightnessCorrection = 0x40;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x0));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x4E, 0x5B, 0x67 });
+
+    // Flags 0x0, gamma 0x20: the light runs with 8 + 0x20 = 40 over the scale
+    // of 3 (0x33 * 40 >> 3 = 0xFF).
+    mode.m_nBrightnessCorrection = 0;
+    mode.m_nGammaCorrection = 0x20;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x0));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x55, 0xAA, 0xFF });
+
+    // 0x10000 tints with the global tint (0x33 * 0x40 >> 8 = 0x0C), the
+    // brightness add on top.
+    mode.m_nGammaCorrection = 0;
+    mode.m_nBrightnessCorrection = 0x40;
+    mode.rgbGlobalTint = RGB(0x40, 0x20, 0x10);
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x10000));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x42, 0x44, 0x4A });
+
+    // The same global tint with the gamma light instead.
+    mode.m_nBrightnessCorrection = 0;
+    mode.m_nGammaCorrection = 0x20;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 0) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(plain), CSize(1, 1), 0, 0x10000));
+    CHECK(rowBytes(canvas, 0, 0, 3) == std::vector<BYTE> { 0x05, 0x14, 0x3C });
+    mode.m_nGammaCorrection = 0;
+    mode.rgbGlobalTint = RGB(0xFF, 0xFF, 0xFF);
+
+    // Keyed with shadows (0x5), brightness 0x40: the black level is
+    // ApplyBrightnessContrast(0) = 0x41 a channel, the shadow half the
+    // destination plus it; the key keeps its pixel bar its first byte, which
+    // the shadow's fourth (zero) byte overwrote.
+    mode.m_nBrightnessCorrection = 0x40;
+    std::fill(canvas.begin(), canvas.end(), 0xEE);
+    canvas[index(0, 1) * 3] = 0x10;
+    canvas[index(0, 1) * 3 + 1] = 0x20;
+    canvas[index(0, 1) * 3 + 2] = 0x30;
+    canvas[index(1, 1) * 3] = 0x40;
+    canvas[index(1, 1) * 3 + 1] = 0x50;
+    canvas[index(1, 1) * 3 + 2] = 0x60;
+    const BYTE shadowBright[6] = { 0x00, 0x00, 0x00, 0x00, 0xFF, 0x00 };
+    CHECK(bitmap->BltBmp24To24Tint(canvas.data() + index(0, 1) * 3, static_cast<LONG>(kPitch),
+        const_cast<BYTE*>(shadowBright), CSize(2, 1), 0, 0x5));
+    CHECK(rowBytes(canvas, 0, 1, 6) == std::vector<BYTE> { 0x28, 0x30, 0x38, 0x00, 0x50, 0x60 });
+    mode.m_nBrightnessCorrection = 0;
+
     ::operator delete(storage);
 }
