@@ -621,7 +621,7 @@ TEST_CASE("blt8to24_point", "[vid]")
         INFO("compressed " << compressed);
 
         std::vector<BYTE> pixels(kDepthW * kDepthH * 3, 0xAA);
-        REQUIRE(fixture.cell->sub_7CECD0(pixels.data(), kDepthW * 3, CPoint(2, 1), CRect(0, 0, kDepthW, kDepthH), 0,
+        REQUIRE(fixture.cell->Blt8To24(pixels.data(), kDepthW * 3, CPoint(2, 1), CRect(0, 0, kDepthW, kDepthH), 0,
             CPoint(1, 0)));
         std::vector<BYTE> expected(kDepthW * kDepthH * 3, 0xAA);
         for (const auto& [at, index] : FrameAt21()) {
