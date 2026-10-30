@@ -26061,6 +26061,26 @@ class ReStatusTest(unittest.TestCase):
         self.assertTrue(got['0x402000'])   # kept: FreeStr is not a member op
         self.assertTrue(got['0x403100'])   # rule 4 is for constructors/destructors
 
+    def test_rule4_accepts_the_compilers_member_array_helpers(self):
+        rs = load_tool('re_status')
+        table = {'401000': ('CWave::CWave', 90),
+                 '401100': ('CRectArray::~CRectArray', 96),
+                 '401200': ('construct_array', 106),
+                 '401300': ('array_destruct', 104),
+                 '401400': ('eh vector destructor iterator', 40),
+                 '401500': ('FreeStr', 10)}
+        graph = {'401000': ['401200'],
+                 '401100': ['401300', '401400'],
+                 '401600': ['401500']}
+        src = (
+            '// 0x401000\nCWave::CWave(int n)\n{\n}\n'
+            '// 0x401100\nCRectArray::~CRectArray()\n{\n}\n'
+            '// 0x401600\nCSpriteBank::~CSpriteBank()\n{\n}\n')
+        got = {a: s for a, n, s in rs.markers(src, table, graph)}
+        self.assertFalse(got['0x401000'])  # construct_array builds the members
+        self.assertFalse(got['0x401100'])  # array_destruct + eh vector iterator
+        self.assertTrue(got['0x401600'])   # FreeStr is still not a member op
+
     def test_compute_applies_the_rules_and_lists_what_rule4_keeps(self):
         self.write(self.exports, 'functions.tsv',
                    '401000\tCEff::CEff\t64\n401100\tCObj::CObj\t20\n'

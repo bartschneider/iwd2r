@@ -19,7 +19,9 @@ TODO, NotImplemented or assert(false) anywhere is a stub; any statement after
 masking comments is real; an empty body is real when the exe's function
 (functions.tsv) is at most 16 bytes; an empty constructor or destructor body
 is real when every callee (callgraph.tsv) is a constructor, destructor,
-`operator new`/`operator delete` or `_Construct`/`_Destruct`-style helper of
+`operator new`/`operator delete`, a `_Construct`/`_Destruct`-style helper or
+one of the compiler's member-array helpers (`construct_array`,
+`array_destruct`, the `eh vector` constructor/destructor iterators) of
 a base or member class. The rest stay stubs; rule 4's leftovers are the
 porting queue compute prints. Verified: recovered
 and the evidence file's kind is oracle, replay or trace. A scenario counts as
@@ -106,9 +108,11 @@ def _callee_name(address, table, ours):
 
 def _member_op(name):
     """True for a callee that only constructs or destroys a base or member:
-    a constructor, destructor, `operator new`/`operator delete` or a
-    `_Construct`/`_Destruct`-style helper, judged by its name (Ghidra's or
-    our marker's); thunk_ and j_ thunks count as their target."""
+    a constructor, destructor, `operator new`/`operator delete`, a
+    `_Construct`/`_Destruct`-style helper or one of the compiler's
+    member-array helpers (`construct_array`, `array_destruct`, the `eh
+    vector` constructor/destructor iterators), judged by its name (Ghidra's
+    or our marker's); thunk_ and j_ thunks count as their target."""
     if not name:
         return False
     while name.startswith(('thunk_', 'j_')):
@@ -116,6 +120,12 @@ def _member_op(name):
     if name.startswith(('??0', '??1')):
         return True
     if re.search(r'operator\s*(?:new|delete)\b', name):
+        return True
+    if name in ('construct_array', 'array_destruct'):
+        return True
+    lowered = name.lower()
+    if 'eh vector' in lowered and ('construct' in lowered
+                                   or 'destruct' in lowered):
         return True
     return (bool(CTOR.search(name)) or name.startswith('~')
             or name.endswith(('_Construct', '_Destruct')))
@@ -247,8 +257,8 @@ def scan(repo, table=None, graph=None):
     their comments made look long); `kept` lists [(address, name, exe size,
     callee)] of empty
     constructors and destructors rule 4 left as stubs, with the first callee
-    that is not a base/member constructor, destructor or operator
-    new/delete — the porting queue."""
+    that is not a base/member constructor, destructor, operator new/delete
+    or member-array helper — the porting queue."""
     bodies = []
     for ext in ('cpp', 'h'):
         for path in sorted(glob.glob(os.path.join(repo, 'src', '**', '*.' + ext),
@@ -384,7 +394,7 @@ def render(s):
         f"SEH funclets and {ex['thunks']:,} thunks. |",
         f"| Functions recovered | **{_pct(r['functions'], g['functions'])}** "
         f"({r['functions']:,} / {g['functions']:,}) | By count, same "
-        "denominator; a function counts once its body is more than a stub: TODO, NotImplemented or assert(false) bodies stay stubs, any statement counts, and an empty body counts when the exe's function is at most 16 bytes or is a constructor/destructor calling only base/member constructors, destructors and `operator new`/`operator delete`. |",
+        "denominator; a function counts once its body is more than a stub: TODO, NotImplemented or assert(false) bodies stay stubs, any statement counts, and an empty body counts when the exe's function is at most 16 bytes or is a constructor/destructor calling only base/member constructors, destructors and the compiler's member construction/destruction helpers (`operator new`/`operator delete`, `construct_array`, `array_destruct`, the `eh vector` iterators). |",
         f"| Verified against the original | "
         f"**{_pct(v['functions'], g['functions'])}** ({v['functions']:,} / "
         f"{g['functions']:,}; {v['bytes']:,} bytes) | Recovered functions whose "
