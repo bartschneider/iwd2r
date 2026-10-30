@@ -2,6 +2,7 @@
 
 #include "CBaldurChitin.h"
 #include "CScreenMap.h"
+#include "CSound.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
 
@@ -292,10 +293,184 @@ BOOL CGameAreaNotes::sub_47B150(WORD startX, WORD startY, CString szNote, DWORD 
     return FALSE;
 }
 
-// 0x47B090
+// The real body of the six-argument overload: the wrapper above reaches it
+// through the `// 0x47B090` entry, and the two multiplayer handlers
+// (0x43A470/0x43A7C0) call it directly. NOTE: Both trees labelled this stub
+// `// 0x47B090`; 0x47B090 is the five-line wrapper, the body is 0x47B330, so
+// the label moved here and the wrapper keeps its own.
+//
+// It creates (or updates) a note: a multiplayer send under the connection
+// flags, the list update through sub_47B150 (the TLK override included), a new
+// CAreaUserNote in m_areaNoteList, and - on the live map screen - the button
+// through AddButton, the grid square and the control's sequence. A note whose
+// square already holds one is either re-sequenced/re-texted (a non-empty text)
+// or handed to DeleteANote (an empty one). The unused CSound is the exe's: it
+// is constructed and destructed, nothing else.
+//
+// 0x47B330
 void CGameAreaNotes::Add(CString area, WORD startX, WORD startY, CString szNote, DWORD dwFlags, STRREF strRef)
 {
-    // TODO: Incomplete.
+    CSound sound;
+    STR_RES strRes;
+
+    // The same pair DeleteANote sends: a client asks the host and stops; a host
+    // resolves a text reference first, then announces to everyone.
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        if (g_pChitin->cNetwork.m_bIsHost == FALSE) {
+            if (g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce == FALSE) {
+                g_pBaldurChitin->GetBaldurMessage()->SendAreaMapNoteToServer(area,
+                    startX,
+                    startY,
+                    szNote,
+                    dwFlags,
+                    strRef);
+
+                return;
+            }
+        } else {
+            if (strRef == -1) {
+                strRef = g_pBaldurChitin->GetTlkTable().m_override.Add(szNote);
+            }
+
+            g_pBaldurChitin->GetBaldurMessage()->AnnounceAreaMapNote(area,
+                startX,
+                startY,
+                szNote,
+                dwFlags,
+                strRef);
+        }
+    }
+
+    if (!m_bInitialized) {
+        if (!sub_47B150(startX, startY, szNote, dwFlags, strRef)) {
+            m_cAreaNote.m_dwflags = dwFlags;
+            m_cAreaNote.m_startX = startX;
+            m_cAreaNote.m_startY = startY;
+
+            if (strRef == -1) {
+                m_cAreaNote.m_note = g_pBaldurChitin->GetTlkTable().m_override.Add(szNote);
+            } else {
+                strRes.szText = szNote;
+                g_pBaldurChitin->GetTlkTable().m_override.AddUserEntry(strRef, strRes);
+                m_cAreaNote.m_note = strRef;
+            }
+
+            CAreaUserNote* pNote = new CAreaUserNote();
+            *pNote = m_cAreaNote;
+            m_areaNoteList.AddTail(pNote);
+        }
+
+        return;
+    }
+
+    CPoint sq;
+    GetGridSquare(CPoint(startX, startY), sq, TRUE);
+
+    DWORD id = m_areaNoteGrid[sq.x][sq.y];
+
+    if (id == -1) {
+        // The map screen is not up: the list carries the change by itself.
+        if (g_pBaldurChitin->pActiveEngine != g_pBaldurChitin->m_pEngineMap) {
+            if (sub_47B150(startX, startY, szNote, dwFlags, strRef)) {
+                field_8E = 1;
+
+                return;
+            }
+        }
+
+        if (szNote.GetLength() > 0) {
+            m_cAreaNote.m_dwflags = dwFlags;
+            m_cAreaNote.m_startX = startX;
+            m_cAreaNote.m_startY = startY;
+
+            if (strRef == -1) {
+                m_cAreaNote.m_note = g_pBaldurChitin->GetTlkTable().m_override.Add(szNote);
+            } else {
+                strRes.szText = szNote;
+                g_pBaldurChitin->GetTlkTable().m_override.AddUserEntry(strRef, strRes);
+                m_cAreaNote.m_note = strRef;
+            }
+
+            if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+                if (g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineMap) {
+                    field_8D = static_cast<unsigned char>(m_cAreaNote.m_dwflags >> 16);
+                    AddButton(sq);
+
+                    CAreaUserNote* pNote = new CAreaUserNote();
+                    *pNote = m_cAreaNote;
+                    m_areaNoteList.AddTail(pNote);
+
+                    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2);
+                    CUIControlButtonMapAreaMap* pMapControl = static_cast<CUIControlButtonMapAreaMap*>(pPanel->GetControl(2));
+
+                    if (m_rArea.GetResRefStr() == area) {
+                        if (g_pBaldurChitin->m_pEngineMap->GetTopPopup() == NULL) {
+                            pMapControl->field_7BC = TRUE;
+                            pMapControl->InvalidateRect();
+                        }
+                    }
+                } else {
+                    CAreaUserNote* pNote = new CAreaUserNote();
+                    *pNote = m_cAreaNote;
+                    m_areaNoteList.AddTail(pNote);
+
+                    field_8E = 1;
+                }
+            }
+        }
+
+        return;
+    }
+
+    // A note already sits on that square: find it by the grid's id.
+    CAreaUserNote* pNote = NULL;
+    if (m_areaNoteList.GetCount() != 0) {
+        POSITION pos = m_areaNoteList.GetHeadPosition();
+        while (pos != NULL) {
+            CAreaUserNote* pCurrent = m_areaNoteList.GetNext(pos);
+            if (pCurrent->m_id == id) {
+                pNote = pCurrent;
+                break;
+            }
+        }
+    }
+
+    if (szNote.GetLength() == 0) {
+        DeleteANote(pNote->m_id);
+
+        return;
+    }
+
+    // The new high word is the note's sequence; the low word stays.
+    pNote->m_dwflags = (pNote->m_dwflags & 0xFFFF) | dwFlags;
+
+    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2);
+    CUIControlButtonMapNote* pNoteControl = static_cast<CUIControlButtonMapNote*>(pPanel->GetControl(pNote->m_id));
+
+    DWORD nSequence = dwFlags >> 16;
+    if (nSequence > 7) {
+        nSequence = 7;
+    }
+
+    pNoteControl->m_cVidCell.SequenceSet(static_cast<SHORT>(nSequence));
+
+    STRREF nNote = GetNoteButtonText(pNote->m_id);
+
+    strRes.szText = szNote;
+    g_pBaldurChitin->GetTlkTable().m_override.AddUserEntry(nNote, strRes);
+
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+        && g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineMap) {
+        CUIPanel* pAreaPanel = g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2);
+        CUIControlButtonMapAreaMap* pMapControl = static_cast<CUIControlButtonMapAreaMap*>(pAreaPanel->GetControl(2));
+
+        if (m_rArea.GetResRefStr() == area) {
+            if (g_pBaldurChitin->m_pEngineMap->GetTopPopup() == NULL) {
+                pMapControl->field_7BC = TRUE;
+                pMapControl->InvalidateRect();
+            }
+        }
+    }
 }
 
 // 0x47BAD0
