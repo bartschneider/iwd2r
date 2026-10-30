@@ -885,6 +885,31 @@ void IcewindCGameEffectSummon::sub_49DB60(int a1)
     field_190 = a1;
 }
 
+// 0x55FA10
+void IcewindCGameEffectSummon::AddSummonVisualHit(CGameSprite* pSpawned, int mode)
+{
+    if (mode == 0 || pSpawned == NULL) {
+        return;
+    }
+
+    CGameObject* pSource;
+    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(m_sourceID,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pSource,
+        INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    CGameEffect* pEffect = IcewindMisc::CreateEffectVisualSpellHit(pSource, mode, 0, 0);
+    pEffect->m_casterLevel = m_casterLevel;
+    pSpawned->AddEffect(pEffect, CGameAIBase::EFFECT_LIST_TIMED, TRUE, TRUE);
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(m_sourceID,
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x49E3E0

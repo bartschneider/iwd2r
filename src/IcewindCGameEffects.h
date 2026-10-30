@@ -214,6 +214,8 @@ public:
 
     void sub_49DB60(int a1);
 
+    void AddSummonVisualHit(CGameSprite* pSpawned, int mode);
+
     /* 018C */ int field_18C;
     /* 0190 */ int field_190;
 };
