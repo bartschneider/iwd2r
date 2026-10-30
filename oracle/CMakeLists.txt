@@ -66,7 +66,7 @@ constexpr uint32_t kVanillaCrtRanges[][2] = {
         cases/area.cpp cases/infinity.cpp cases/move.cpp cases/blood.cpp cases/wind_paladin.cpp cases/combat.cpp cases/ui_misc.cpp
         cases/store_spell.cpp cases/area_tint.cpp cases/messages.cpp cases/projectile.cpp
         cases/spell_list.cpp cases/effects.cpp cases/store_chat.cpp cases/rule_tables.cpp
-        cases/timer.cpp cases/anim_types.cpp cases/aliases.cpp
+        cases/timer.cpp cases/anim_types.cpp cases/aliases.cpp cases/chitin.cpp
         cases/store_spell.cpp cases/area_tint.cpp cases/messages_wire.cpp
         $<TARGET_OBJECTS:iwd2r_engine>)
     target_include_directories(iwd2r_oracle PRIVATE "${PROJECT_SOURCE_DIR}"
