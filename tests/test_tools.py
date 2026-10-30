@@ -8252,25 +8252,27 @@ class ParityTest(unittest.TestCase):
 class AnnotateTest(ParityTest):
     """tools/parity/annotate.py -- annotated disassembly for reviews."""
 
-    def make_pe(self, path):
+    def make_pe(self, path, code=None, rdata=None):
         """A tiny PE32: .text with the fixture code, .rdata with literals.
 
         ImageBase 0x400000; .text at 0x401000 (executable), .rdata at
-        0x402000. Code: push &g_hello, push "Plain", mov eax,[&"Plain"],
-        call B::g, jmp +0 (in-function, nameless). .rdata: "Hello\\0" at
-        0x402000, "Plain\\0" at 0x402008.
+        0x402000. Default code: push &g_hello, push "Plain", mov
+        eax,[&"Plain"], call B::g, jmp +0 (in-function, nameless). Default
+        .rdata: "Hello\\0" at 0x402000, "Plain\\0" at 0x402008. The
+        strings-column tests swap one or both: a custom rdata re-places the
+        literal at 0x402008, a custom code feeds UTIL_ASSERT's pushes.
         """
-        code = (b'\x68\x00\x20\x40\x00'   # 0x401000  push 0x402000
-                b'\x68\x08\x20\x40\x00'   # 0x401005  push 0x402008
-                b'\xa1\x08\x20\x40\x00'   # 0x40100a  mov eax,[0x402008]
-                b'\xe8\x0c\x00\x00\x00'   # 0x40100f  call 0x401020
-                b'\xe9\x00\x00\x00\x00'   # 0x401014  jmp 0x401019
-                b'\xc3'                   # 0x401019  ret
-                b'\xcc\xcc\xcc\xcc\xcc'   # 0x40101a  padding
-                b'\xc3')                  # 0x401020  ret (B::g)
-        rdata = (b'Hello\x00\x00\x00'
-                 b'Plain\x00')
-        assert len(code) == 32
+        code = code or (b'\x68\x00\x20\x40\x00'   # 0x401000  push 0x402000
+                        b'\x68\x08\x20\x40\x00'   # 0x401005  push 0x402008
+                        b'\xa1\x08\x20\x40\x00'   # 0x40100a  mov eax,[0x402008]
+                        b'\xe8\x0c\x00\x00\x00'   # 0x40100f  call 0x401020
+                        b'\xe9\x00\x00\x00\x00'   # 0x401014  jmp 0x401019
+                        b'\xc3'                   # 0x401019  ret
+                        b'\xcc\xcc\xcc\xcc\xcc'   # 0x40101a  padding
+                        b'\xc3')                  # 0x401020  ret (B::g)
+        rdata = rdata or (b'Hello\x00\x00\x00'
+                          b'Plain\x00')
+        assert len(code) <= 0x200 and len(rdata) <= 0x400  # section raw sizes
 
         sections = [
             (b'.text', len(code), 0x1000, 0x200, 0x200, 0x60000020),
@@ -8411,6 +8413,146 @@ class AnnotateTest(ParityTest):
         self.assertEqual(code, 0)
         self.assertIn('skipped', out.getvalue())
         self.assertIn('functions.tsv', out.getvalue())
+
+
+class StringsColumnTest(AnnotateTest):
+    """run.py's strings column -- the exe's literals are in the body."""
+
+    # The default PE's body shape: g_hello's label in the span excuses
+    # "Hello", "Plain" must be written in the body.
+    GREEN_SPAN = ('// 0x401000\n'
+                  'int A::f(int x)\n'
+                  '{\n'
+                  '    A::say("Plain");\n'
+                  '    return g_hello[0] + x;\n'
+                  '}\n'
+                  '\n'
+                  '// 0x402000\n'
+                  'const char g_hello[] = "Hello";\n')
+
+    def strings_case(self, src_a, code=None, rdata=None):
+        """(run, annotate, pe, ctx) for the column's cell on A::f.
+
+        The PE and exports stay the AnnotateTest fixture's (0x401000, size
+        32, ending at B::g); src/a.cpp and either PE section are the case's.
+        """
+        run = load_parity_tool('run')
+        annotate = load_parity_tool('annotate')
+        if annotate.pefile is None or annotate.capstone is None:
+            self.skipTest('pefile/capstone missing: strings skips')
+        pe = self.make_pe(os.path.join(self.home, 'iwd2.exe'),
+                          code=code, rdata=rdata)
+        self.exports('401000\tFUN_00401000\t32\n'
+                     '401020\tFUN_00401020\t4\n',
+                     '401000\t401020\n')
+        self.write('src/a.cpp', src_a)
+        exports = run.load_exports()
+        lines = run.read_lines(self.repo, 'src/a.cpp')
+        first, last = run.locate(lines, 0x401000)
+        item = ('src/a.cpp', 0x401000, 'A::f', lines, first, last)
+        ctx = run.make_ctx(item, self.repo, exports, pe, [], {})
+        return run, annotate, pe, ctx
+
+    def test_strings_green_when_literal_present(self):
+        run, _, _, ctx = self.strings_case(self.GREEN_SPAN)
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.GREEN, ["1 exe string(s) referenced, all among the "
+                         "body's literals"]))
+
+    def test_strings_yellow_names_the_missing(self):
+        # PR #47's bug: the body writes " " where the exe's data holds
+        # " :  " -- YELLOW naming the exact literal and address, never RED.
+        run, _, _, ctx = self.strings_case(
+            self.GREEN_SPAN.replace('"Plain"', '" "'),
+            rdata=b'Hello\x00\x00\x00 :  \x00')
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.YELLOW, ['exe strings not in the body (1 of 1 referenced):',
+                          '  " :  " (0x402008)']))
+
+    def test_strings_excludes_assert_arguments(self):
+        # UTIL_ASSERT hides its own arguments: the caller pushes the file
+        # path and the expression text the source never writes.
+        run, annotate, pe, ctx = self.strings_case(
+            '// 0x401000\n'
+            'int A::f(int x)\n'
+            '{\n'
+            '    UTIL_ASSERT(x > 0);\n'
+            '    return x;\n'
+            '}\n',
+            code=(b'\x68\x00\x20\x40\x00'   # 0x401000  push 0x402000
+                  b'\x68\x08\x20\x40\x00'   # 0x401005  push 0x402008
+                  b'\xe8\xf1\xfb\x37\x00'   # 0x40100a  call 0x780C00
+                  b'\xc3'))                 # 0x40100f  ret
+        # the collector does see both pushes -- the column's assert rule,
+        # not a blind spot, is what excises them
+        strings, labelled, pushed = annotate.referenced_strings(
+            0x401000, 0x401020, pe)
+        self.assertEqual(pushed.get(0x780C00), {0x402000, 0x402008})
+        self.assertEqual(strings, {0x402000: 'Hello', 0x402008: 'Plain'})
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.GREEN, ["0 exe string(s) referenced, all among the "
+                         "body's literals"]))
+
+    def test_strings_excludes_labelled_global_used_by_name(self):
+        # The same exe, two bodies: naming g_hello excuses "Hello" (the
+        # source uses the name, not the literal); not naming it does not.
+        run, _, _, ctx = self.strings_case(self.GREEN_SPAN)
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx)[0],
+                         run.GREEN)
+        _, _, _, ctx = self.strings_case(
+            '// 0x401000\n'
+            'int A::f(int x)\n'
+            '{\n'
+            '    A::say("Plain");\n'
+            '    return x;\n'
+            '}\n')
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.YELLOW, ['exe strings not in the body (1 of 2 referenced):',
+                          '  "Hello" (0x402000)']))
+
+    def test_strings_skips_without_exe_or_size(self):
+        run = load_parity_tool('run')
+        annotate = load_parity_tool('annotate')
+        exports = ({0x401000: 'FUN_00401000'}, {0x401000: 32}, {})
+        exe = os.path.join(self.home, 'no-such.exe')
+        ctx = {'repo': self.repo, 'rel': 'src/a.cpp', 'exports': exports,
+               'exe': exe, 'span_text': '', 'first': 0, 'last': 0}
+        # the import branch of the SKIP contract fires first, so the exe
+        # and size reasons are only observable where annotate imports
+        if annotate.pefile is not None and annotate.capstone is not None:
+            self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                             (run.SKIP, [f'no exe at {exe}']))
+            # a labelled function with no functions.tsv size cannot be walked
+            ctx['exe'] = self.make_pe(os.path.join(self.home, 'iwd2.exe'))
+            ctx['exports'] = ({0x401000: 'FUN_00401000'}, {}, {})
+            self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                             (run.SKIP,
+                              ['no size for 0x401000 in functions.tsv']))
+        # and the SKIP contract holds without pefile/capstone too
+        run._module = lambda name: None
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                         (run.SKIP, ['annotate not importable '
+                                     '(pefile/capstone missing? '
+                                     'tools/parity/setup.sh)']))
+
+    def test_strings_column_in_the_table(self):
+        run = load_parity_tool('run')
+        self.assertEqual(run.COLUMNS[1], 'strings')
+        self.assertNotIn('strings', run.DELEGATED_COLUMNS)
+        row = {col: ((run.YELLOW, ['exe strings not in the body'])
+                     if col == 'strings' else (run.GREEN, []))
+               for col in run.COLUMNS}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            run.print_table('base', 'x.exe', [(0x401000, 'A::f', row)])
+        header = out.getvalue().splitlines()[1].split()
+        self.assertEqual(header[header.index('asm') + 1], 'strings')
+        self.assertEqual(header[header.index('strings') + 1], 'vtable')
+        self.assertIn('[strings] yellow', out.getvalue())
 
 
 class FnDigestTest(unittest.TestCase):

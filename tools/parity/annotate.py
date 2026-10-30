@@ -242,6 +242,7 @@ def referenced_strings(address, end, exe, labels=None):
     path and the expression text the source never writes. `labels` is the
     merged marker_names pair (run.py caches that scan across rows).
     """
+    labels = labels or {}
     secs = sections(exe)
     strings, labelled, pushed = {}, {}, {}
     window = []  # the last four immediate pushes, in order
