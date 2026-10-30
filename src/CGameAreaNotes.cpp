@@ -1,8 +1,8 @@
 #include "CGameAreaNotes.h"
 
 #include "CBaldurChitin.h"
+#include "CGameArea.h"
 #include "CScreenMap.h"
-#include "CSound.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
 
@@ -304,13 +304,12 @@ BOOL CGameAreaNotes::sub_47B150(WORD startX, WORD startY, CString szNote, DWORD 
 // CAreaUserNote in m_areaNoteList, and - on the live map screen - the button
 // through AddButton, the grid square and the control's sequence. A note whose
 // square already holds one is either re-sequenced/re-texted (a non-empty text)
-// or handed to DeleteANote (an empty one). The unused CSound is the exe's: it
-// is constructed and destructed, nothing else.
+// or handed to DeleteANote (an empty one).
 //
 // 0x47B330
 void CGameAreaNotes::Add(CString area, WORD startX, WORD startY, CString szNote, DWORD dwFlags, STRREF strRef)
 {
-    CSound sound;
+    // strRes's cSound is the CSound the exe constructs on entry (0x47B36E).
     STR_RES strRes;
 
     // The same pair DeleteANote sends: a client asks the host and stops; a host
@@ -403,7 +402,9 @@ void CGameAreaNotes::Add(CString area, WORD startX, WORD startY, CString szNote,
                     CUIPanel* pPanel = g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2);
                     CUIControlButtonMapAreaMap* pMapControl = static_cast<CUIControlButtonMapAreaMap*>(pPanel->GetControl(2));
 
-                    if (m_rArea.GetResRefStr() == area) {
+                    // The area the map screen shows (the control's +0x71A), not
+                    // this object's m_rArea (0x47B739).
+                    if (pMapControl->m_pArea->m_resRef.GetResRefStr() == area) {
                         if (g_pBaldurChitin->m_pEngineMap->GetTopPopup() == NULL) {
                             pMapControl->field_7BC = TRUE;
                             pMapControl->InvalidateRect();
@@ -464,7 +465,7 @@ void CGameAreaNotes::Add(CString area, WORD startX, WORD startY, CString szNote,
         CUIPanel* pAreaPanel = g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2);
         CUIControlButtonMapAreaMap* pMapControl = static_cast<CUIControlButtonMapAreaMap*>(pAreaPanel->GetControl(2));
 
-        if (m_rArea.GetResRefStr() == area) {
+        if (pMapControl->m_pArea->m_resRef.GetResRefStr() == area) {
             if (g_pBaldurChitin->m_pEngineMap->GetTopPopup() == NULL) {
                 pMapControl->field_7BC = TRUE;
                 pMapControl->InvalidateRect();
