@@ -688,6 +688,7 @@ public:
     INT GetSkillValue(UINT iSkillNumber);
     INT GetSkillCost(UINT iSkillNumber, BYTE nClass);
     INT GetEffectiveCharacterLevel();
+    void CheckReputation();
     INT GetRacialFavoredClass(DWORD& nSpecialization);
     INT GetMulticlassingPenalty();
     void SetColorRange(BYTE rangeValue);

@@ -1,10 +1,16 @@
+#define NOMINMAX
 #include <catch2/catch_test_macros.hpp>
 
 #include "data_view.h"
 
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -29,9 +35,29 @@ std::string Read(const fs::path& path)
     return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
-bool IsLink(const fs::path& path)
+// A folder link: a symlink elsewhere, a junction on a Windows drive
+// (tests/data_view.cpp LinkEntry; std::filesystem does not report a
+// junction as a symlink).
+bool IsDirLink(const fs::path& path)
 {
+#ifdef _WIN32
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+#else
     return fs::is_symlink(path);
+#endif
+}
+
+// A file link: a symlink elsewhere, a hard link to the install's file on a
+// Windows drive (LinkEntry copies only when no hard link can be made).
+bool IsFileLink(const fs::path& path)
+{
+#ifdef _WIN32
+    std::error_code ec;
+    return fs::hard_link_count(path, ec) > 1;
+#else
+    return fs::is_symlink(path);
+#endif
 }
 
 }
@@ -69,20 +95,20 @@ TEST_CASE("a data view links the install and keeps writes private", "[dataview]"
     const DataViewRules rules = LoadDataViewRules(fs::path(IWD2R_SOURCE_DIR) / "tools" / "dataview_rules.json");
     MakeDataView(data, view, rules);
 
-    CHECK(IsLink(view / "CHITIN.KEY"));
-    CHECK(IsLink(view / "Data"));
+    CHECK(IsFileLink(view / "CHITIN.KEY"));
+    CHECK(IsDirLink(view / "Data"));
     for (const char* name : { "Temp", "cache", "tempsave", "save", "ScrnShot" }) {
         INFO(name);
         CHECK(fs::is_directory(view / name));
-        CHECK_FALSE(IsLink(view / name));
+        CHECK_FALSE(IsDirLink(view / name));
         CHECK(fs::is_empty(view / name));
     }
-    CHECK_FALSE(IsLink(view / "icewind2.ini"));
+    CHECK_FALSE(IsFileLink(view / "icewind2.ini"));
     CHECK(Read(view / "icewind2.ini") == "a=1");
-    CHECK_FALSE(IsLink(view / "Keymap.INI"));
-    CHECK_FALSE(IsLink(view / "mpsave"));
+    CHECK_FALSE(IsFileLink(view / "Keymap.INI"));
+    CHECK_FALSE(IsDirLink(view / "mpsave"));
     CHECK(Read(view / "mpsave" / "default" / "s.sav") == "save");
-    CHECK_FALSE(IsLink(view / "Characters"));
+    CHECK_FALSE(IsDirLink(view / "Characters"));
     CHECK(Read(view / "Characters" / "A.CHR") == "chr");
 
     // Writes stay in the view.
@@ -142,7 +168,7 @@ TEST_CASE("a data view without saves has empty save folders", "[dataview]")
     for (const char* name : { "MPSave", "save", "tempsave" }) {
         INFO(name);
         CHECK(fs::is_directory(view / name));
-        CHECK_FALSE(IsLink(view / name));
+        CHECK_FALSE(IsDirLink(view / name));
         CHECK(fs::is_empty(view / name));
     }
     CHECK(Read(view / "Characters" / "A.CHR") == "chr");

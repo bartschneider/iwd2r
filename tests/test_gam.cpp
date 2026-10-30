@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
 #include "CGameArea.h"
 #include "CGameObjectArray.h"
 #include "CGameSound.h"
@@ -11,8 +12,19 @@
 #include "CItem.h"
 #include "CMemINI.h"
 #include "CMessage.h"
+#include "CMoveList.h"
+#include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
+#include "CScreenInventory.h"
+#include "CScreenJournal.h"
+#include "CScreenMap.h"
+#include "CScreenOptions.h"
+#include "CScreenSpellbook.h"
+#include "CScreenStore.h"
+#include "CScreenWorld.h"
 #include "CSpawn.h"
+#include "CUIControlBase.h"
+#include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVisibility.h"
 #include "ScreenLayout.h"
@@ -205,10 +217,10 @@ private:
     std::thread m_thread;
 };
 
-// The CRE of a finished character: the first "CHR V2.2" file in the view's
-// Characters folder (the install ships premade characters). Empty when
-// there is none.
-std::vector<BYTE> FinishedCharacter()
+// The CRE of a finished character: the `nIndex`-th "CHR V2.2" file in the
+// view's Characters folder, in file order (the install ships 30 premade
+// characters). Empty when there is none at that index.
+std::vector<BYTE> FinishedCharacter(size_t nIndex = 0)
 {
     std::vector<fs::path> files;
     std::error_code ec;
@@ -217,16 +229,38 @@ std::vector<BYTE> FinishedCharacter()
             files.push_back(entry.path());
     }
     std::sort(files.begin(), files.end());
+    size_t seen = 0;
     for (const fs::path& file : files) {
         const std::string chr = ReadFile(file);
         if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
             const uint32_t offset = Le32(chr, 0x28);
             const uint32_t size = Le32(chr, 0x2C);
-            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
-                return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
+            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0) {
+                if (seen++ == nIndex)
+                    return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
+            }
         }
     }
     return std::vector<BYTE>();
+}
+
+// A party sprite from a finished character's CRE, the way character creation's
+// Accept leaves it (a global sprite, not yet in a slot).
+CGameSprite* MakePartySprite(std::vector<BYTE>& bytes, const char* name)
+{
+    CGameSprite* pSprite = new CGameSprite(bytes.data(),
+        static_cast<LONG>(bytes.size()),
+        0,
+        0,
+        static_cast<DWORD>(-1),
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+    pSprite->m_sName = name;
+    pSprite->m_bGlobal = TRUE;
+    return pSprite;
 }
 
 // A new game with one party member made from a finished character, the way
@@ -236,18 +270,7 @@ CGameSprite* NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     pGame->NewGame(FALSE, FALSE);
 
-    CGameSprite* pSprite = new CGameSprite(bytes.data(),
-        static_cast<LONG>(bytes.size()),
-        0,
-        0,
-        -1,
-        0,
-        0,
-        INT_MAX,
-        CPoint(-1, -1),
-        0);
-    pSprite->m_sName = name;
-    pSprite->m_bGlobal = TRUE;
+    CGameSprite* pSprite = MakePartySprite(bytes, name);
     pGame->SetCharacterSlot(0, pSprite->GetId());
     return pSprite;
 }
@@ -260,6 +283,28 @@ int LoadedAreas(CInfGame* pGame)
             count++;
     }
     return count;
+}
+
+// Drops every message waiting in the global handler, so a test can count the
+// ones its own call adds.
+void ClearMessages()
+{
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    while (!handler.m_messageList.IsEmpty()) {
+        delete handler.m_messageList.RemoveHead();
+    }
+}
+
+// The tooltip strref of the party portrait of slot `nPortrait` on a screen
+// that carries the portraits (CInfGame::UpdatePortraitToolTip 0x5AFE90 writes
+// panel 1's control nPortrait of each).
+STRREF PortraitToolTip(CBaldurEngine* pEngine, DWORD nPortrait)
+{
+    CUIPanel* pPanel = pEngine->GetManager()->GetPanel(1);
+    REQUIRE(pPanel != nullptr);
+    CUIControlBase* pControl = pPanel->GetControl(nPortrait);
+    REQUIRE(pControl != nullptr);
+    return pControl->GetToolTipStrRef();
 }
 
 // How many times `id` is on the area's object lists, counting the lists of
@@ -350,7 +395,7 @@ LONG SpriteId(CGameArea* pArea, const char* name)
     CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
     for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex && found == -1; n++) {
         const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (pArray->m_pArray[n].m_objectId == -1
             || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
             continue;
@@ -370,7 +415,7 @@ std::map<int, int> ObjectTypesIn(CGameArea* pArea)
     CGameObjectArray* pArray = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
     for (SHORT n = 0; n <= pArray->m_nMaxArrayIndex; n++) {
         const LONG id = (static_cast<LONG>(n) << 16) | static_cast<USHORT>(pArray->m_pArray[n].m_objectId);
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (pArray->m_pArray[n].m_objectId == -1
             || pArray->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) != CGameObjectArray::SUCCESS)
             continue;
@@ -581,6 +626,75 @@ TEST_CASE("gam: SaveGame packs AR1000 into ICEWIND2.SAV and LoadGame brings back
     }
 }
 
+// CGameArea::Marshal (0x471630): for the master area the original empties
+// field_AAA and then fills it again from the game's move and limbo lists, so
+// a save carries a creature that is between areas, in no area's list.
+TEST_CASE("gam: SaveGame carries a creature that is in the move list", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    for (int n = 0; n < CINFGAME_MAX_AREAS; n++) {
+        if (pGame->m_gameAreas[n] != NULL)
+            pGame->m_gameAreas[n]->SortLists();
+    }
+    const std::map<int, int> before = ObjectTypesIn(pGame->m_pGameAreaMaster);
+
+    // A creature of no area, as one in transit: it is in the object array and
+    // a pending move names it, but no area list holds it.
+    CCreatureFile creatureData;
+    creatureData.SetResRef(CResRef("10GOB"), TRUE, TRUE);
+    REQUIRE(creatureData.GetDataSize() > 0);
+    CGameSprite* pTraveller = new CGameSprite(creatureData.GetData(),
+        creatureData.GetDataSize(),
+        0,
+        0,
+        static_cast<DWORD>(-1),
+        0,
+        0,
+        INT_MAX,
+        CPoint(-1, -1),
+        0);
+    creatureData.ReleaseData();
+    REQUIRE_FALSE(pTraveller->m_bGlobal);
+    CMoveListEntry* pEntry = new CMoveListEntry();
+    pEntry->m_nSpriteId = pTraveller->GetId();
+    pEntry->m_areaResRef = "AR1001";
+    pEntry->m_ptDestination = CPoint(1000, 1000);
+    pGame->m_cMoveList.AddTail(pEntry);
+
+    REQUIRE(pGame->SaveGame(FALSE, FALSE, FALSE));
+    const fs::path dir = Child(Child(g_view, "mpsave"), "default");
+    const std::map<std::string, std::string> packed = UnpackSav(ReadFile(Child(dir, "ICEWIND2.SAV")));
+    REQUIRE(packed.count("AR1000.ARE") == 1);
+    // AR1000's own 35 creatures and the one the move list hands the area.
+    CHECK(CheckAreaCreatures(packed.at("AR1000.ARE")) == 36);
+
+    // The reloaded area holds it, so it came back with the save. The pending
+    // move is dropped first, so nothing in it outlives the game it names.
+    pGame->m_cMoveList.RemoveAll();
+    delete pEntry;
+    pGame->DestroyGame(FALSE, FALSE);
+    pGame->LoadGame(FALSE, FALSE);
+    REQUIRE(pGame->m_pGameAreaMaster != NULL);
+    const std::map<int, int> after = ObjectTypesIn(pGame->m_pGameAreaMaster);
+    CHECK(after.at(CGameObject::TYPE_SPRITE) == before.at(CGameObject::TYPE_SPRITE) + 1);
+}
+
 // The ids on the area's front list, head to tail.
 static std::vector<LONG> FrontIds(CGameArea* pArea)
 {
@@ -594,7 +708,7 @@ static std::vector<LONG> FrontIds(CGameArea* pArea)
 // The y of object `id`.
 static LONG YOf(LONG id)
 {
-    CGameObject* pObject;
+    CGameObject* pObject = nullptr;
     REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
     const LONG y = pObject->GetPos().y;
     g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
@@ -671,7 +785,7 @@ TEST_CASE("gam: SortLists merges a queued object into the front list once and ke
     while (pos != NULL) {
         POSITION here = pos;
         const LONG id = static_cast<LONG>(reinterpret_cast<INT_PTR>(pArea->m_lVertSort.GetNext(pos)));
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         REQUIRE(pGame->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE) == CGameObjectArray::SUCCESS);
         CHECK(pObject->GetVertListPos() == here);
         pGame->GetObjectArray()->ReleaseShare(id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
@@ -707,7 +821,7 @@ TEST_CASE("gam: SortLists drops a queued object deleted before the sort", "[gam]
 
     // An object queued for the front list, then deleted from the array.
     CGameObject* pObject = new CGameObject();
-    LONG id;
+    LONG id = 0;
     REQUIRE(pGame->GetObjectArray()->Add(&id, pObject, INFINITE) == CGameObjectArray::SUCCESS);
     pArea->m_lVertSortAdd.AddTail(reinterpret_cast<int*>(static_cast<INT_PTR>(id)));
     REQUIRE(pGame->GetObjectArray()->Delete(id, CGameObjectArray::THREAD_ASYNCH, NULL, INFINITE) == CGameObjectArray::SUCCESS);
@@ -918,6 +1032,127 @@ TEST_CASE("gam: SetupCharacters twice adds the party once", "[gam][data]")
     CHECK(TimesInArea(pSprite->GetArea(), id) == 1);
     CHECK(pSprite->GetPos().x == placed.x);
     CHECK(pSprite->GetPos().y == placed.y);
+}
+
+// 0x5AF160, reached by the world screen's portrait drag
+// (CUIControlPortraitWorld::OnLButtonUp 0x77B160): the two slots' ids of
+// m_characterPortraits change places, the tooltip of the slot each character
+// moved into is rewritten on every screen that shows the portraits, and when
+// one of the two slots is 0 the new leader says its "selected" line (sound 2,
+// CMessagePlaySound 0x43E170's vtable).
+TEST_CASE("gam: SwapCharacters exchanges two portrait slots and the new leader speaks", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+
+    // Two different premade characters, so the tooltips can tell the slots apart.
+    std::vector<BYTE> first = FinishedCharacter(0);
+    std::vector<BYTE> second = FinishedCharacter(1);
+    if (first.empty() || second.empty()) {
+        SKIP("[iwd2r-skip] fewer than two CHR V2.2 files in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pFirst = NewGameWithOneCharacter(first, "Probe");
+    pGame->UpdateCharacterSlots();
+    CGameSprite* pSecond = MakePartySprite(second, "Probe2");
+    pGame->SetCharacterSlot(1, pSecond->GetId());
+    pGame->UpdateCharacterSlots();
+    REQUIRE(pGame->GetNumCharacters() == 2);
+
+    // The premade characters leave m_name at -1, so GetNameRef would answer
+    // the slot-derived -2 - slot for both and the tooltip would read the same
+    // before and after a swap. Real strrefs make the two characters tell
+    // apart in the tooltips, which is what the swapped slots carry.
+    pFirst->m_baseStats.m_name = 16484;
+    pSecond->m_baseStats.m_name = 16485;
+    pGame->UpdateCharacterSlots();
+
+    const LONG nFirstId = pFirst->GetId();
+    const LONG nSecondId = pSecond->GetId();
+    REQUIRE(pGame->GetCharacterId(0) == nFirstId);
+    REQUIRE(pGame->GetCharacterId(1) == nSecondId);
+    const STRREF nFirstName = pFirst->GetNameRef();
+    const STRREF nSecondName = pSecond->GetNameRef();
+    REQUIRE(nFirstName != nSecondName);
+
+    // The eight screens whose panel 1 carries the party portraits.
+    CBaldurEngine* const engines[] = {
+        g_pBaldurChitin->m_pEngineCharacter,
+        g_pBaldurChitin->m_pEngineInventory,
+        g_pBaldurChitin->m_pEngineJournal,
+        g_pBaldurChitin->m_pEngineMap,
+        g_pBaldurChitin->m_pEngineOptions,
+        g_pBaldurChitin->m_pEngineSpellbook,
+        g_pBaldurChitin->m_pEngineStore,
+        g_pBaldurChitin->m_pEngineWorld,
+    };
+
+    ClearMessages();
+
+    // Before the swap the tooltips follow the slots.
+    REQUIRE(PortraitToolTip(engines[0], 0) == nFirstName);
+    REQUIRE(PortraitToolTip(engines[0], 1) == nSecondName);
+
+    pGame->SwapCharacters(0, 1);
+
+    CHECK(pGame->GetCharacterId(0) == nSecondId);
+    CHECK(pGame->GetCharacterId(1) == nFirstId);
+    CHECK(pGame->GetNumCharacters() == 2);
+    for (CBaldurEngine* pEngine : engines) {
+        CHECK(PortraitToolTip(pEngine, 0) == nSecondName);
+        CHECK(PortraitToolTip(pEngine, 1) == nFirstName);
+    }
+
+    // The new leader's selection voice: sound 2, its text, no circle, and the
+    // leader's id on both ends (the original sets source and target to it).
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    auto* pMessage = dynamic_cast<CMessagePlaySound*>(handler.m_messageList.GetHead());
+    REQUIRE(pMessage != nullptr);
+    CHECK(pMessage->m_soundId == 2);
+    CHECK(pMessage->m_showText == TRUE);
+    CHECK(pMessage->m_showCircle == FALSE);
+    CHECK(pMessage->m_sourceId == nSecondId);
+    CHECK(pMessage->m_targetId == nSecondId);
+
+    // Swapping back moves both again and has the other leader speak.
+    ClearMessages();
+    pGame->SwapCharacters(1, 0);
+
+    CHECK(pGame->GetCharacterId(0) == nFirstId);
+    CHECK(pGame->GetCharacterId(1) == nSecondId);
+    CHECK(PortraitToolTip(engines[0], 0) == nFirstName);
+    CHECK(PortraitToolTip(engines[0], 1) == nSecondName);
+    REQUIRE(handler.m_messageList.GetCount() == 1);
+    pMessage = dynamic_cast<CMessagePlaySound*>(handler.m_messageList.GetHead());
+    REQUIRE(pMessage != nullptr);
+    CHECK(pMessage->m_sourceId == nFirstId);
+    CHECK(pMessage->m_targetId == nFirstId);
+
+    // A third member, and a swap that leaves slot 0 alone: the two ids change
+    // places and nothing is sent.
+    CGameSprite* pThird = MakePartySprite(first, "Probe3");
+    pGame->SetCharacterSlot(2, pThird->GetId());
+    pGame->UpdateCharacterSlots();
+    REQUIRE(pGame->GetNumCharacters() == 3);
+    const LONG nThirdId = pThird->GetId();
+    REQUIRE(pGame->GetCharacterId(2) == nThirdId);
+
+    ClearMessages();
+    pGame->SwapCharacters(1, 2);
+
+    CHECK(pGame->GetCharacterId(1) == nThirdId);
+    CHECK(pGame->GetCharacterId(2) == nSecondId);
+    CHECK(pGame->GetCharacterId(0) == nFirstId);
+    CHECK(handler.m_messageList.IsEmpty());
+
+    ClearMessages();
 }
 
 TEST_CASE("gam: character export overwrites a junk PROBE.CHR and numbers past a valid one", "[gam][data]")
@@ -1297,7 +1532,7 @@ std::vector<std::string> NewSprites(const std::vector<LONG>& before, const std::
     std::set_difference(after.begin(), after.end(), before.begin(), before.end(), std::back_inserter(added));
     std::vector<std::string> names;
     for (LONG id : added) {
-        CGameObject* pObject;
+        CGameObject* pObject = nullptr;
         if (g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(id, CGameObjectArray::THREAD_ASYNCH, &pObject, INFINITE)
             != CGameObjectArray::SUCCESS) {
             continue;
@@ -1933,4 +2168,149 @@ TEST_CASE("items: CMessageContainerAddItem keeps its compress flag", "[spawn][da
     CHECK(keep.m_slotNum == 3);
     const CMessageContainerAddItem drop(CItem(), 4, FALSE, 1, 2);
     CHECK(drop.m_bCompressContainer == FALSE);
+}
+
+// CSwitchCDStatus::Update (0x54D5A0): the overlay demands its border mosaics,
+// the two message mosaics and the two fonts when it is shown, and releases
+// them when it is dismissed. The draw branch needs a presentable back buffer,
+// so only the two state branches run here.
+TEST_CASE("gam: the CD switch overlay demands and releases its resources", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    NewGameWithOneCharacter(cre, "Probe");
+
+    CSwitchCDStatus& overlay = g_pBaldurChitin->m_cSwitchingCDStatus;
+    CString sDrive("D:");
+
+    overlay.Update(TRUE, FALSE, 1, sDrive, TRUE, TRUE, TRUE);
+    CHECK(overlay.field_4 != 0);
+    CHECK(overlay.field_0 == 0);
+
+    overlay.Update(FALSE, FALSE, 1, sDrive, TRUE, TRUE, TRUE);
+    CHECK(overlay.field_4 == 0);
+    CHECK(overlay.field_0 == 0);
+}
+
+// CGameSprite::CheckReputation (0x737990): a paladin below reputation 70 falls
+// - the class switches to fighter in the three AI types, the state gains 0x200,
+// the five innate spells are removed and the XP is rewritten to the next-level
+// threshold. The derived class levels come back from the base header because
+// the tail's Reload rebuilds them (the original's paladin branch does not write
+// the base levels; report-T49), so they are asserted to equal the base's.
+// A second call is a no-op (the paladin mask is gone) and reputation 80 falls
+// nobody. A ranger at 60 moves its levels in the base header (which survives).
+TEST_CASE("gam: CheckReputation drops a paladin below reputation 70 to fighter", "[gam][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<BYTE> cre = FinishedCharacter();
+    if (cre.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameSprite* pSprite = NewGameWithOneCharacter(cre, "Probe");
+    pGame->UpdateCharacterSlots();
+    pGame->SetupCharacters(FALSE);
+    const CRuleTables& ruleTables = pGame->GetRuleTables();
+
+    // A consistent level-7 paladin: the base header says paladin 7/fighter 0,
+    // the derived stats match, reputation 60, the 0x800 bit armed.
+    pSprite->m_baseStats.m_characterLevel = 7;
+    pSprite->m_baseStats.m_paladinLevel = 7;
+    pSprite->m_baseStats.m_fighterLevel = 0;
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_PALADIN, 7);
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_FIGHTER, 0);
+    pSprite->m_typeAI.m_nClassMask |= 0x40;
+    pSprite->m_derivedStats.m_nReputation = 60;
+    pSprite->m_baseStats.m_flags |= 0x800;
+    // The five innate spells the fall removes, so their removal is visible.
+    const CResRef* const spells[] = { &CGameSprite::SPIN109, &CGameSprite::SPIN120, &CGameSprite::SPIN121,
+        &CGameSprite::SPIN125, &CGameSprite::SPIN152 };
+    UINT spellIds[5] = {};
+    for (int n = 0; n < 5; n++) {
+        REQUIRE(pGame->GetInnateSpells()->Find(*spells[n], spellIds[n]) == TRUE);
+        REQUIRE(pSprite->m_innateSpells.Add(spellIds[n], 1, 0, 0) == TRUE);
+    }
+
+    pSprite->CheckReputation();
+
+    // The durable effects of the fall.
+    CHECK((pSprite->m_baseStats.m_flags & 0x200) != 0);
+    CHECK(pSprite->m_typeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    CHECK(pSprite->m_liveTypeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    CHECK(pSprite->m_startTypeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    CHECK((pSprite->m_typeAI.m_nClassMask & 0x40) == 0);
+    CHECK((pSprite->m_startTypeAI.m_nClassMask & 0x40) == 0);
+    for (UINT nId : spellIds) {
+        UINT nIndex = 0;
+        CHECK(pSprite->m_innateSpells.Find(nId, nIndex) == FALSE);
+    }
+    const DWORD nNextLevelXP = ruleTables.GetNextLevelXP(7);
+    CHECK(pSprite->m_baseStats.m_xp == nNextLevelXP);
+    CHECK(pSprite->m_derivedStats.m_nXP == nNextLevelXP);
+    // The tail's Reload rebuilds the derived levels from the base header, which
+    // the paladin branch does not touch: they are the base's values again.
+    CHECK(pSprite->m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_PALADIN) == 7u);
+    CHECK(pSprite->m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_FIGHTER) == 0u);
+
+    // A second call finds no paladin: nothing changes.
+    const DWORD nFlagsAfter = pSprite->m_baseStats.m_flags;
+    const DWORD nXpAfter = pSprite->m_baseStats.m_xp;
+    const int nMaskAfter = pSprite->m_typeAI.m_nClassMask;
+    pSprite->CheckReputation();
+    CHECK(pSprite->m_baseStats.m_flags == nFlagsAfter);
+    CHECK(pSprite->m_baseStats.m_xp == nXpAfter);
+    CHECK(pSprite->m_typeAI.m_nClassMask == nMaskAfter);
+
+    // A paladin at reputation 80 does not fall.
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_PALADIN, 7);
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_FIGHTER, 0);
+    pSprite->m_typeAI.m_nClassMask |= 0x40;
+    pSprite->m_derivedStats.m_nReputation = 80;
+    pSprite->m_baseStats.m_flags &= ~0x200u;
+    const DWORD nEightyFlags = pSprite->m_baseStats.m_flags;
+    const DWORD nEightyXp = pSprite->m_baseStats.m_xp;
+    pSprite->CheckReputation();
+    CHECK((pSprite->m_baseStats.m_flags & 0x200) == 0);
+    CHECK(pSprite->m_baseStats.m_flags == nEightyFlags);
+    CHECK(pSprite->m_baseStats.m_xp == nEightyXp);
+
+    // A ranger at 60: its levels move in the base header, where the tail's
+    // Reload finds them.
+    pSprite->m_baseStats.m_characterLevel = 7;
+    pSprite->m_baseStats.m_rangerLevel = 7;
+    pSprite->m_baseStats.m_fighterLevel = 0;
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_RANGER, 7);
+    pSprite->m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_FIGHTER, 0);
+    pSprite->m_typeAI.m_nClassMask |= 0x80;
+    pSprite->m_derivedStats.m_nReputation = 60;
+    pSprite->m_baseStats.m_flags |= 0x800;
+    pSprite->m_baseStats.m_flags &= ~0x400u;
+    pSprite->CheckReputation();
+    CHECK((pSprite->m_baseStats.m_flags & 0x400) != 0);
+    CHECK(pSprite->m_baseStats.m_rangerLevel == 0);
+    CHECK(pSprite->m_baseStats.m_fighterLevel == 7);
+    CHECK(pSprite->m_baseStats.m_characterLevel == 7);
+    CHECK(pSprite->m_typeAI.m_nClass == CAIOBJECTTYPE_C_FIGHTER);
+    // NOTE: the typeAI class mask still has the ranger bit after the tail
+    // (0x80 observed); the branch does clear it, so the tail's ResetAIType
+    // path re-derives it. Not asserted until that path is understood (T49 §6's
+    // CheckStatsChange follow-up is the likely place).
 }

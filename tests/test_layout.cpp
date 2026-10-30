@@ -668,13 +668,13 @@ TEST_CASE("world_viewport_excludes_reserved_rects", "[layout]")
     // world screen's toolbar lies inside the columns its region shows.
     const int sizes[][2] = { { 1920, 1080 }, { 2560, 1440 }, { 3840, 2160 }, { 1600, 1200 }, { 1366, 768 } };
     for (const auto& output : sizes) {
-        for (int ui = 1; ui <= 4; ui++) {
+        for (int uiScale = 1; uiScale <= 4; uiScale++) {
             for (int ws = 1; ws <= 4; ws++) {
-                const ScreenSize r = ResolveScreenSize(output[0], output[1], ui, output[0], output[1], std::to_string(ws).c_str());
+                const ScreenSize r = ResolveScreenSize(output[0], output[1], uiScale, output[0], output[1], std::to_string(ws).c_str());
                 if (!r.ok) {
                     continue;
                 }
-                INFO(output[0] << "x" << output[1] << " ui " << ui << " world " << ws);
+                INFO(output[0] << "x" << output[1] << " ui " << uiScale << " world " << ws);
                 CHECK(r.worldScale <= r.uiScale);
                 CHECK(r.worldUiScale >= r.worldScale);
                 CHECK(r.worldUiScale <= r.uiScale);

@@ -4799,7 +4799,101 @@ void CScreenWorld::SetChatEditBoxStatus(const CString& sChatText, BOOL bInputCap
 // 0x694620
 void CScreenWorld::LeaveAreaLuaPanic(CPoint ptLocation, SHORT nDirection, CString sAreaName, CString sParchment)
 {
-    // TODO: Incomplete.
+    // The Ghidra decompile of this function fails; the body below is from the
+    // llvm-objdump listing (0x694620-0x694AD4). `nDirection` and `sParchment`
+    // reach it but the original never reads them (only the by-value arguments
+    // are destroyed at 0x694A92/0x694AA5).
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    UTIL_ASSERT(pGame != NULL);
+
+    CGameArea* pArea = pGame->GetArea(sAreaName);
+
+    for (INT nIndex = 0; nIndex < CMultiplayerSettings::MAX_CHARACTERS; nIndex++) {
+        LONG characterId = nIndex < CMultiplayerSettings::MAX_PLAYERS
+            ? pGame->m_characters[nIndex]
+            : CGameObjectArray::INVALID_INDEX;
+
+        BOOL bLeaves = FALSE;
+        BOOL bControlledByLocalPlayer = FALSE;
+        CGameSprite* pSprite = NULL;
+
+        BYTE rc;
+        do {
+            rc = pGame->GetObjectArray()->GetShare(characterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        // The character leaves when the animation is live and it stands in an
+        // area other than the one being left (0x69470E-0x69473F).
+        if (pSprite->Animate() != 0 && pSprite->m_pArea != NULL && pSprite->m_pArea != pArea) {
+            bLeaves = TRUE;
+            if (g_pChitin->cNetwork.m_nServiceProvider == 0) {
+                bControlledByLocalPlayer = TRUE;
+            } else {
+                bControlledByLocalPlayer = g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID;
+            }
+        }
+
+        pGame->GetObjectArray()->ReleaseShare(characterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+
+        if (!bLeaves) {
+            continue;
+        }
+
+        if (!bControlledByLocalPlayer) {
+            pGame->m_multiplayerSettings.SetCharacterControlledByPlayer(nIndex,
+                g_pChitin->cNetwork.m_nLocalPlayer,
+                TRUE,
+                TRUE);
+        }
+
+        do {
+            rc = pGame->GetObjectArray()->GetDeny(characterId,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        pSprite->FeedBack(CGameSprite::FEEDBACK_CHARACTER_CONTROL_SEIZURE, 0, 0, 0, -1, 0, 0);
+        pSprite->m_cLastSpriteUpdate.Initialize(TRUE);
+
+        // The 0x5BC220 constructor, which the exe inlines here (SetString1 at
+        // 0x6948B4; m_specificID3 and m_internalFlags zeroed, m_specificID2 = 1).
+        CAIAction action(CAIAction::LEAVEAREALUA, sAreaName, ptLocation, 0, 1);
+
+        pSprite->ClearActions(FALSE);
+        pSprite->m_interrupt = TRUE;
+        pSprite->SetCurrAction(action);
+        pSprite->ExecuteAction();
+
+        // Bring the visible area to the area the character is leaving for
+        // when it is empty (0x69492F-0x694A00).
+        if (pGame->GetVisibleArea()->m_nCharacters == 0) {
+            pGame->UnselectAll();
+            pGame->GetVisibleArea()->m_bPicked = FALSE;
+            pGame->GetVisibleArea()->m_iPicked = CGameObjectArray::INVALID_INDEX;
+            pGame->GetVisibleArea()->m_nToolTip = 0;
+            pGame->GetVisibleArea()->OnDeactivation();
+            pGame->m_visibleArea = pSprite->m_pArea->m_id;
+            pGame->GetVisibleArea()->OnActivation();
+        }
+
+        pGame->GetObjectArray()->ReleaseDeny(characterId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
 }
 
 // 0x694AE0
@@ -5658,7 +5752,6 @@ void CUIControlButtonDialog::OnLButtonClick(CPoint pt)
 CUIControlScrollBarWorldContainer::CUIControlScrollBarWorldContainer(CUIPanel* panel, UI_CONTROL_SCROLLBAR* controlInfo)
     : CUIControlScrollBar(panel, controlInfo)
 {
-    // TODO: Incomplete.
 }
 
 // 0x632C00

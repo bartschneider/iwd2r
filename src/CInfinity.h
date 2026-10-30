@@ -156,7 +156,7 @@ public:
     void CacheTiles();
     BOOL AttachVRamRect(int x1, int y1, int x2, int y2);
     BOOL CancelRequestRect(unsigned char a1);
-    void ScrollingCancelRequestRect(unsigned char a1);
+    BOOL ScrollingCancelRequestRect(unsigned char a1);
     BOOL DetachVRamRect();
     BOOL DrawEllipse(const CPoint& ptCenter, const CSize& axes, COLORREF rgbColor);
     BOOL DrawHighlightRect(const CRect& rSquare, COLORREF rgbColor, BYTE width);

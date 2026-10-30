@@ -32,7 +32,7 @@ HOME = os.environ.get('IWD2R_HOME',
                       os.path.expanduser('~/.local/share/iwd2r'))
 GHIDRA = os.path.join(HOME, 'ghidra')
 HEADLESS = os.path.join(GHIDRA, 'support', 'analyzeHeadless')
-JDK = '/usr/lib/jvm/java-21-openjdk-amd64'
+DEBIAN_JDK = '/usr/lib/jvm/java-21-openjdk-amd64'
 PROJECT_DIR = os.path.join(HOME, 'ghidra-projects', 'iwd2')
 PROJECT_NAME = 'iwd2'
 # One headless Ghidra at a time across every worktree (filelock.hold).
@@ -50,6 +50,25 @@ EXTRA_LABELS = os.path.join(HERE, 'extra_labels.txt')
 IEEX_DB = '/mnt/c/Games/Icewind Dale II/function_names.db'
 VANILLA_MD5 = '200f038bec3ed50a964d68b3f0f1f0e7'
 MAXMEM = '8G'
+
+
+def jdk_path():
+    """The JDK that runs Ghidra: $JAVA_HOME when it is a directory, else the
+    Debian apt path when that exists, else the java on PATH (`.../bin/java`,
+    so two levels up). Distros disagree on the path; Ghidra itself only needs
+    a Java 21 to start."""
+    home = os.environ.get('JAVA_HOME', '')
+    if home and os.path.isdir(home):
+        return home
+    if os.path.isdir(DEBIAN_JDK):
+        return DEBIAN_JDK
+    java = shutil.which('java')
+    if java:
+        return os.path.dirname(os.path.dirname(os.path.realpath(java)))
+    return DEBIAN_JDK
+
+
+JDK = jdk_path()
 
 
 def md5(path):
@@ -187,7 +206,9 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--src', default=os.path.join(ROOT, 'src'))
     p.add_argument('--extra', default=EXTRA_LABELS)
-    p.add_argument('--ieex', default=IEEX_DB)
+    p.add_argument('--ieex', default=IEEX_DB,
+                   help='IEex function_names.db (default: %(default)s); a '
+                        'missing file means no IEex names')
     p.add_argument('--exe', default=INSTALL_EXE)
     a = p.parse_args(argv)
 

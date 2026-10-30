@@ -23,7 +23,9 @@ BOOL CAlias::ParseRawData(CString& a2)
 
     field_4 = FALSE;
 
-    int pos = a2.FindOneOf(":=");
+    // The original only splits on ":=" (0x8B99EC): CString::Find, not
+    // FindOneOf, so "a:b" and "a=b" name no alias (0x78183B).
+    int pos = a2.Find(":=");
     if (pos > 0) {
         field_8 = a2.Left(pos + 1);
 
@@ -38,7 +40,7 @@ BOOL CAlias::ParseRawData(CString& a2)
                 if (semicolonPos == -1) {
                     temp = a2;
                     if (temp.GetAt(temp.GetLength() - 1) != '\\') {
-                        temp += ";";
+                        temp += "\\";
                     }
                     field_C.AddTail(temp);
                     a2 = "";
@@ -46,7 +48,7 @@ BOOL CAlias::ParseRawData(CString& a2)
                     temp = a2.Left(semicolonPos);
 
                     if (temp.GetAt(temp.GetLength() - 1) != '\\') {
-                        temp += ";";
+                        temp += "\\";
                     }
 
                     field_C.AddTail(temp);

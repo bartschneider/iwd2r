@@ -9,10 +9,12 @@
 #include "CChitin.h"
 #include "CDerivedStats.h"
 #include "CGameArea.h"
+#include "CGameAreaNotes.h"
 #include "CGameContainer.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
 #include "CGameTrigger.h"
+#include "CImm.h"
 #include "CInfButtonArray.h"
 #include "CInfGame.h"
 #include "CInfinity.h"
@@ -20,6 +22,7 @@
 #include "CMessage.h"
 #include "CParticle.h"
 #include "CPathSearch.h"
+#include "CResMosaic.h"
 #include "CRuleTables.h"
 #include "CScreenCharacter.h"
 #include "CScreenCreateChar.h"
@@ -34,6 +37,7 @@
 #include "CUIManager.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
+#include "CVidMosaic.h"
 #include "CWarp.h"
 #include "CWeather.h"
 #include "Icewind586B70.h"
@@ -248,7 +252,7 @@ void NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -1494,7 +1498,7 @@ void PressUnboundKey(TScreen* pScreen)
     pScreen->m_pVirtualKeysFlags[0] = KEY_UNBOUND;
     CHECK(ReturnsInTime([pScreen] { pScreen->OnKeyDown(1); }));
     pScreen->m_pVirtualKeysFlags[0] = savedPressed;
-    pScreen->m_bCtrlKeyDown = savedCtrl;
+    pScreen->m_bCtrlKeyDown = static_cast<BOOLEAN>(savedCtrl);
 }
 
 } // namespace
@@ -2352,7 +2356,7 @@ TEST_CASE("travel: a member leaving unsummons its summons", "[uimisc][travel][da
         static_cast<LONG>(cre.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -2559,4 +2563,304 @@ TEST_CASE("text display: a new string ends the scroll still to run", "[uimisc][t
     CHECK(pDisplay->field_5A == 2);
 
     pDisplay->RemoveAll();
+}
+
+// CGameAreaNotes::DeleteANote (0x47BBD0): the list half the harness can reach
+// honestly, without the map screen. An empty list and a missing id answer
+// FALSE and leave the list alone; a connected client takes the message branch
+// and returns before the UI, deferring the removal to the host's announce; the
+// removal DeleteANote performs (delete the note, RemoveAt its node) is the same
+// one sub_47B150 takes on an empty text, reached here through that helper.
+// The host branch and the local removal need the live map panel (GetPanel(2),
+// RemoveControl, RemoveNote) and the note's TLK override, which no honest
+// harness here provides.
+TEST_CASE("notes: DeleteANote's list walk and the removal helper", "[uimisc][notes]")
+{
+    // sub_47B150 constructs a STR_RES (a CSound), whose constructor takes the
+    // chitin's mixer; a zeroed chitin stands in when no engine is running
+    // (the same pattern as the FindOneOf case above).
+    CChitin* pSaved = g_pChitin;
+    std::unique_ptr<unsigned char[]> chitin;
+    if (g_pChitin == NULL) {
+        chitin.reset(new unsigned char[sizeof(CChitin)]());
+        g_pChitin = reinterpret_cast<CChitin*>(chitin.get());
+    }
+    struct Restore {
+        CChitin* pChitin;
+        ~Restore() { g_pChitin = pChitin; }
+    } restore { pSaved };
+
+    // Raw storage: the destructor walks the map screen's controls.
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CGameAreaNotes)));
+    std::memset(storage, 0, sizeof(CGameAreaNotes));
+    auto* notes = reinterpret_cast<CGameAreaNotes*>(storage);
+    notes->m_bInitialized = TRUE;
+
+    CHECK(notes->DeleteANote(7) == FALSE); // empty list
+
+    CAreaUserNote first = {};
+    first.m_startX = 3;
+    first.m_startY = 5;
+    first.m_note = 100;
+    first.m_id = 11;
+    notes->AddANote(first);
+
+    CAreaUserNote second = {};
+    second.m_startX = 8;
+    second.m_startY = 2;
+    second.m_note = 200;
+    second.m_id = 22;
+    notes->AddANote(second);
+
+    // Not in the list: FALSE and both notes stay, in order.
+    CHECK(notes->DeleteANote(33) == FALSE);
+    CHECK(notes->GetNoteButtonText(11) == 100);
+    CHECK(notes->GetNoteButtonText(22) == 200);
+
+    // A connected client with no announce in progress finds the note, takes
+    // the message branch and returns TRUE without touching the list: the
+    // host's announce handler owns the removal. A zeroed chitin has no
+    // session, so SendAreaMapNoteToServer itself stops at its first guard
+    // (and its Boolean is ignored here, as in the original).
+    {
+        CBaldurChitin* pSavedBaldur = g_pBaldurChitin;
+        std::unique_ptr<unsigned char[]> baldur(new unsigned char[sizeof(CBaldurChitin)]());
+        g_pBaldurChitin = reinterpret_cast<CBaldurChitin*>(baldur.get());
+        g_pChitin->cNetwork.m_bConnectionEstablished = TRUE;
+        g_pChitin->cNetwork.m_bIsHost = FALSE;
+        g_pChitin->cNetwork.m_nHostPlayer = -1; // no host name, so the send stops at its name guard
+        g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce = FALSE;
+
+        CHECK(notes->DeleteANote(11) == TRUE);
+        CHECK(notes->GetNoteButtonText(11) == 100); // still listed
+
+        g_pChitin->cNetwork.m_bConnectionEstablished = FALSE;
+        g_pBaldurChitin = pSavedBaldur;
+    }
+
+    // The removal primitive: sub_47B150 with no text deletes the note whose
+    // square matches and takes its node out of the list.
+    CHECK(notes->sub_47B150(8, 2, CString(""), 0, -1) == TRUE);
+    CHECK(notes->GetNoteButtonText(22) == static_cast<STRREF>(-1));
+    CHECK(notes->GetNoteButtonText(11) == 100);
+
+    // A second call for the same square finds nothing left to remove.
+    CHECK(notes->sub_47B150(8, 2, CString(""), 0, -1) == FALSE);
+
+    // The list's ownership, without the destructor's map-screen path.
+    POSITION pos = notes->m_areaNoteList.GetHeadPosition();
+    while (pos != NULL) {
+        delete notes->m_areaNoteList.GetNext(pos);
+    }
+    notes->m_areaNoteList.RemoveAll();
+    ::operator delete(storage);
+}
+
+// CGameAreaNotes::Add (0x47B330, the six-argument overload behind the
+// 0x47B090 wrapper): the list half the harness can reach honestly. With the
+// cell uninitialised the note is added, updated in place on the same square
+// (sub_47B150's non-empty path) or deleted there by an empty text; initialised
+// but off the map screen the same list update runs and field_8E is set; a
+// connected client sends and returns before touching the list. The map-screen
+// tail (AddButton, the grid, GetControl/SequenceSet, the TLK entry) needs the
+// live panel and is not faked.
+TEST_CASE("notes: Add writes and updates the list without the map screen", "[uimisc][notes]")
+{
+    CChitin* pSavedChitin = g_pChitin;
+    CBaldurChitin* pSavedBaldur = g_pBaldurChitin;
+    std::unique_ptr<unsigned char[]> chitinStorage(new unsigned char[sizeof(CBaldurChitin)]());
+    g_pChitin = reinterpret_cast<CChitin*>(chitinStorage.get());
+    g_pBaldurChitin = reinterpret_cast<CBaldurChitin*>(chitinStorage.get());
+    struct Restore {
+        CChitin* pChitin;
+        CBaldurChitin* pBaldur;
+        ~Restore()
+        {
+            g_pChitin = pChitin;
+            g_pBaldurChitin = pBaldur;
+        }
+    } restore { pSavedChitin, pSavedBaldur };
+
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CGameAreaNotes)));
+    std::memset(storage, 0, sizeof(CGameAreaNotes));
+    auto* notes = reinterpret_cast<CGameAreaNotes*>(storage);
+
+    // Uninitialised, no session: a new note in the list with the given text
+    // reference (a non--1 reference skips the TLK Add, whose files are shut).
+    notes->m_bInitialized = FALSE;
+    notes->Add(CString("AR1000"), 4, 6, CString("first"), 0x00020000, 42);
+    REQUIRE(notes->m_areaNoteList.GetCount() == 1);
+    {
+        CAreaUserNote* pNote = notes->m_areaNoteList.GetHead();
+        CHECK(pNote->m_startX == 4);
+        CHECK(pNote->m_startY == 6);
+        CHECK(pNote->m_note == 42);
+        CHECK(pNote->m_dwflags == 0x00020000);
+    }
+    // The same square again updates it in place: one note, the new flags and
+    // reference, the text replaced through sub_47B150.
+    notes->Add(CString("AR1000"), 4, 6, CString("second"), 0x00030000, 43);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+    {
+        CAreaUserNote* pNote = notes->m_areaNoteList.GetHead();
+        CHECK(pNote->m_dwflags == 0x00030000);
+        CHECK(pNote->m_note == 43);
+    }
+
+    // An empty text on that square is the helper's delete: the note goes.
+    notes->Add(CString("AR1000"), 4, 6, CString(), 0, 44);
+    CHECK(notes->m_areaNoteList.GetCount() == 0);
+
+    // Initialised, off the map screen (the active engine is not m_pEngineMap,
+    // which stays null): the note is added and field_8E marks the map stale.
+    notes->m_bInitialized = TRUE;
+    notes->m_ptCellSize.x = 1;
+    notes->m_ptCellSize.y = 1;
+    notes->m_ptButtonSize.x = 1;
+    notes->m_ptButtonSize.y = 1;
+    notes->m_areaNoteGrid = new DWORD*[1];
+    notes->m_areaNoteGrid[0] = new DWORD[1];
+    notes->m_areaNoteGrid[0][0] = -1;
+    static char sActiveEngine;
+    g_pChitin->cNetwork.m_bConnectionEstablished = TRUE;
+    g_pChitin->cNetwork.m_bIsHost = FALSE;
+    g_pChitin->pActiveEngine = reinterpret_cast<CWarp*>(&sActiveEngine);
+
+    // A client inside an announce: no send, so the list logic runs.
+    g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce = TRUE;
+
+    notes->Add(CString("AR1000"), 0, 0, CString("map off"), 0x00010000, 50);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+    CHECK(notes->field_8E == 1);
+    CHECK(notes->GetNoteButtonText(0) == 50);
+
+    // The same square now matches the helper first, so nothing is added (the
+    // grid stays -1: AddButton never ran) and field_8E is set again.
+    notes->Add(CString("AR1000"), 0, 0, CString("again"), 0x00010000, 51);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+
+    // A connected client with no announce in progress returns after the send,
+    // before the list: a new square adds nothing. (No host name in the zeroed
+    // session, so the send itself stops at its first name guard.)
+    g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce = FALSE;
+    g_pChitin->cNetwork.m_nHostPlayer = -1;
+    notes->Add(CString("AR1000"), 9, 9, CString("client"), 0x00010000, 52);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+
+    // Ownership, without the destructor's map-screen path.
+    POSITION pos = notes->m_areaNoteList.GetHeadPosition();
+    while (pos != NULL) {
+        delete notes->m_areaNoteList.GetNext(pos);
+    }
+    notes->m_areaNoteList.RemoveAll();
+    delete[] notes->m_areaNoteGrid[0];
+    delete[] notes->m_areaNoteGrid;
+    ::operator delete(storage);
+}
+
+// CImm::sub_7C3020 (0x7C3020), the composition window's rect (report-T80.md
+// §2.10; WSO calls it GetCompositionWindowRect): the mosaic's size from a
+// synthetic MOS resource, the height three lines of the edit's font plus the
+// padding either side clamped to the mosaic's height, and the placement
+// against the panel and the edit. The mosaic's GetSize Demands and Releases
+// its resource, so the synthetic CResMosaic is flagged loaded (0x4|0x10) and
+// carries a high m_nID: CDimm hands back m_pData without touching a file
+// (InternalDemand's shortcut), on a zeroed chitin or the engine's alike.
+TEST_CASE("ime: the composition window's rect follows the font, the mosaic and the panel", "[uimisc][ime]")
+{
+    CChitin* pSaved = g_pChitin;
+    std::unique_ptr<unsigned char[]> chitinStorage;
+    if (g_pChitin == NULL) {
+        chitinStorage.reset(new unsigned char[sizeof(CChitin)]());
+        g_pChitin = reinterpret_cast<CChitin*>(chitinStorage.get());
+    }
+    struct Restore {
+        CChitin* pChitin;
+        ~Restore() { g_pChitin = pChitin; }
+    } restore { pSaved };
+
+    // A 0x40-byte MOS blob: the magic and the version Parse checks (0x7805D0),
+    // then the header's sizes. Parse only computes pointers from the rest.
+    std::vector<BYTE> mos(0x40, 0);
+    std::memcpy(&mos[0], "MOS ", 4);
+    std::memcpy(&mos[4], "V1  ", 4);
+    const WORD nXTiles = 1;
+    const WORD nYTiles = 1;
+    const DWORD nPaletteOffset = 0x18;
+    std::memcpy(&mos[0xC], &nXTiles, 2);
+    std::memcpy(&mos[0xE], &nYTiles, 2);
+    std::memcpy(&mos[0x14], &nPaletteOffset, 4);
+
+    auto* resStorage = new unsigned char[sizeof(CResMosaic)]();
+    auto* res = reinterpret_cast<CResMosaic*>(resStorage);
+    res->dwFlags = CRes::RES_FLAG_0x04 | CRes::RES_FLAG_0x10;
+    res->m_pData = mos.data();
+    res->nSize = static_cast<DWORD>(mos.size());
+    res->field_18 = 0;
+    res->field_44 = 1;
+    res->m_nID = 0xFF000000;
+
+    auto* mosaicStorage = new unsigned char[sizeof(CVidMosaic)]();
+    auto* mosaic = reinterpret_cast<CVidMosaic*>(mosaicStorage);
+    mosaic->pRes = res;
+    mosaic->m_bDoubleSize = FALSE;
+
+    auto* immStorage = new unsigned char[sizeof(CImm)]();
+    auto* imm = reinterpret_cast<CImm*>(immStorage);
+    imm->field_13C = mosaic;
+
+    const auto setMosaic = [&mos](WORD cx, WORD cy) {
+        std::memcpy(&mos[8], &cx, 2);
+        std::memcpy(&mos[0xA], &cy, 2);
+    };
+    const auto rect = [imm](CPoint ptPanel, CSize panelSize, CPoint ptEdit, CSize editSize, SHORT nFontHeight) {
+        return imm->sub_7C3020(ptPanel, panelSize, ptEdit, editSize, nFontHeight);
+    };
+
+    // No mosaic: an empty rect.
+    imm->field_13C = NULL;
+    CHECK(rect(CPoint(10, 20), CSize(200, 150), CPoint(30, 5), CSize(60, 10), 10) == CRect(0, 0, 0, 0));
+    imm->field_13C = mosaic;
+
+    // The font asks 10*3 + 3*2 = 36, the mosaic is 40x12: the height clamps
+    // to 12; the edit leaves room below the panel's top, so the rect sits
+    // under it (top 20 + 10 + 5); the edit is wide enough (60 - 40 + 30 >= 0),
+    // so the left is the panel's plus the edit's size and offset
+    // ((10 - 40) + 60 + 30).
+    setMosaic(40, 12);
+    CHECK(rect(CPoint(10, 20), CSize(200, 150), CPoint(30, 5), CSize(60, 10), 10) == CRect(60, 35, 100, 47));
+
+    // The mosaic fits the panel's height (12 against 10): the rect starts at
+    // the panel's corner (no offset down); left as above.
+    CHECK(rect(CPoint(1, 7), CSize(200, 10), CPoint(30, 5), CSize(60, 10), 2) == CRect(51, 7, 91, 19));
+
+    // The edit is tall enough to reach past the panel with the rect (100 <
+    // 60 + 50 + 12) and starts below its top (50 - 12 >= 0): the rect goes
+    // above the edit's top (0 - 12 + 50); left ((0 - 40) + 60 + 0).
+    CHECK(rect(CPoint(0, 0), CSize(200, 100), CPoint(0, 50), CSize(60, 60), 2) == CRect(20, 38, 60, 50));
+
+    // The edit is so tall that the rect would end past the panel (100 <
+    // 90 + 2 + 12) and starts near its top (2 - 12 < 0): the rect centres in
+    // the panel's height ((100 - 12) / 2 + 5).
+    CHECK(rect(CPoint(5, 5), CSize(200, 100), CPoint(0, 2), CSize(60, 90), 2) == CRect(25, 49, 65, 61));
+
+    // The mosaic is wider than the panel (60 against 50): the left is the
+    // panel's own; top as the room-below case (4 + 20 + 0).
+    setMosaic(60, 12);
+    CHECK(rect(CPoint(3, 4), CSize(50, 100), CPoint(0, 0), CSize(60, 20), 2) == CRect(3, 24, 63, 36));
+
+    // The edit is narrower than the mosaic (10 - 40 + 0 < 0) and the panel
+    // reaches past it (50 < 0 + 40 is false): left + the edit's x (3 + 0).
+    setMosaic(40, 12);
+    CHECK(rect(CPoint(3, 4), CSize(50, 100), CPoint(0, 0), CSize(10, 20), 2) == CRect(3, 24, 43, 36));
+
+    // The same, but the edit starts before the mosaic's end (50 < 20 + 40)
+    // and is too narrow to reach it (10 - 40 + 20 < 0): the mosaic centres
+    // in the panel's width ((50 - 40) / 2 + 3).
+    CHECK(rect(CPoint(3, 4), CSize(50, 100), CPoint(20, 0), CSize(10, 20), 2) == CRect(8, 24, 48, 36));
+
+    // A mosaic shorter than the font asks (8 against 12): the height clamps
+    // down to the mosaic's own.
+    setMosaic(40, 8);
+    CHECK(rect(CPoint(0, 0), CSize(200, 50), CPoint(0, 0), CSize(60, 10), 2) == CRect(20, 10, 60, 18));
 }

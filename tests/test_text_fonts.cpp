@@ -59,7 +59,8 @@ TEST_CASE("text_cp1252_decoding", "[text]")
     REQUIRE(text::DecodeCp1252(0xA9) == 0x00A9);
     REQUIRE(text::DecodeCp1252(0xE9) == 0x00E9);
     REQUIRE(text::DecodeCp1252(0xFF) == 0x00FF);
-    for (uint8_t unassigned : { 0x81, 0x8D, 0x8F, 0x90, 0x9D })
+    const uint8_t unassignedCodes[] = { 0x81, 0x8D, 0x8F, 0x90, 0x9D };
+    for (uint8_t unassigned : unassignedCodes)
         REQUIRE(text::DecodeCp1252(unassigned) == unassigned);
 }
 
@@ -112,7 +113,8 @@ TEST_CASE("text_faces_cover_windows_1252", "[text]")
             REQUIRE(atlas.Has(static_cast<uint16_t>(c)));
             REQUIRE(atlas.Has(static_cast<uint16_t>(c + 32)));
         }
-        for (uint16_t accented : { 0xE9, 0xE8, 0xE0, 0xFC, 0xF1, 0xC9 }) {
+        const uint16_t accentedCodes[] = { 0xE9, 0xE8, 0xE0, 0xFC, 0xF1, 0xC9 };
+        for (uint16_t accented : accentedCodes) {
             INFO("face " << face << " U+" << std::hex << accented);
             REQUIRE(atlas.Has(accented));
         }

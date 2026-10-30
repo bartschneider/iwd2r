@@ -123,6 +123,14 @@ struct CaseCrashed : std::runtime_error {
 // the runner's one SEH function.
 bool CallGuarded(void (*thunk)(void*), void* arg, GuardedFault* fault);
 
+// Initializes the original's native CRITICAL_SECTION at section, a raw address
+// in a block a case allocated on the original's behalf. The engine's own
+// CRITICAL_SECTION is a different type (a single shim pointer), while the
+// original calls kernel32's on a native one, so a case that makes original code
+// enter a critical section must initialize it here. Defined in snapshot.cpp,
+// which includes <windows.h>.
+void InitializeOriginalCriticalSection(void* section);
+
 class CaseContext {
 public:
     CaseContext(uint64_t seedValue, int iterationCount)

@@ -5127,7 +5127,57 @@ CStore* CInfGame::GetServerStore(const CResRef& store)
 // 0x5AF160
 void CInfGame::SwapCharacters(DWORD pos1, DWORD pos2)
 {
-    // TODO: Incomplete.
+    UTIL_ASSERT(pos1 < (DWORD)m_nCharacters && pos2 < (DWORD)m_nCharacters);
+
+    LONG nId1 = m_characterPortraits[pos2];
+    LONG nId2 = m_characterPortraits[pos1];
+    m_characterPortraits[pos1] = nId1;
+    m_characterPortraits[pos2] = nId2;
+
+    CGameSprite* pSprite;
+
+    BYTE rc;
+    do {
+        rc = m_cObjectArray.GetDeny(nId2,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc == CGameObjectArray::SUCCESS) {
+        // NOTE: Uninline.
+        pSprite->FetchCommonStrings();
+
+        UpdatePortraitToolTip(pos2, pSprite->GetNameRef());
+
+        m_cObjectArray.ReleaseDeny(nId2, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+        do {
+            rc = m_cObjectArray.GetDeny(nId1,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            // NOTE: Uninline.
+            pSprite->FetchCommonStrings();
+
+            UpdatePortraitToolTip(pos1, pSprite->GetNameRef());
+
+            m_cObjectArray.ReleaseDeny(nId1, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+
+            if (pos1 == 0 || pos2 == 0) {
+                // The new leader's "selected" voice. The original checks the
+                // allocation and calls AddMessage(0, 0) on failure, which our
+                // new cannot return and AddMessage cannot take.
+                LONG nLeaderId = m_characterPortraits[0];
+                CMessage* pMessage = new CMessagePlaySound(2, TRUE, FALSE, nLeaderId, nLeaderId);
+
+                g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+            }
+        }
+    }
 }
 
 // 0x5AF360
@@ -7774,7 +7824,91 @@ void CInfGame::sub_5BDBA0(int a1, BOOL a2)
 // 0x5BDC00
 void CInfGame::ReputationAdjustment(SHORT reputationAdjustment, BOOL set)
 {
-    // TODO: Incomplete.
+    if (set != FALSE) {
+        // "Set the reputation to N" travels as the delta to N.
+        reputationAdjustment -= m_nReputation;
+    }
+
+    // The change reaches the other players as a message whose Run applies it
+    // here; while that runs, this call must not post another one back.
+    if (g_pBaldurChitin->GetBaldurMessage()->m_bInReputationChange == FALSE) {
+        CMessage* message = new CMessageReputationChange(reputationAdjustment,
+            GetProtagonist(),
+            GetProtagonist());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+    }
+
+    m_nReputation += reputationAdjustment;
+    // 1..20 in game terms, stored x10.
+    if (m_nReputation > 200) {
+        m_nReputation = 200;
+    }
+    if (m_nReputation < 10) {
+        m_nReputation = 10;
+    }
+
+    // Opcode 0x6C, the reputation effect every party member wears.
+    ITEM_EFFECT itemEffect;
+    CGameEffect::ClearItemEffect(&itemEffect, CGAMEEFFECT_REPUTATION);
+    itemEffect.effectAmount = m_nReputation;
+    itemEffect.dwFlags = 1;
+    // NOTE: The duration type is the WORD constant at 0x8491AA (1).
+    itemEffect.durationType = 1;
+
+    for (SHORT nPortrait = 0; nPortrait < m_nCharacters; nPortrait++) {
+        LONG id = GetCharacterId(nPortrait);
+        CGameSprite* pSprite;
+        BYTE rc;
+        CMessage* message;
+
+        do {
+            rc = m_cObjectArray.GetDeny(id,
+                CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pSprite),
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+            || g_pChitin->cNetwork.m_idLocalPlayer == pSprite->m_remotePlayerID) {
+            // HAPPY.2DA: the row is the reputation, the column the member's
+            // alignment (good, neutral, evil); anything else is good and an
+            // out-of-range cell is the table's default.
+            SHORT nColumn = 0;
+            BYTE nAlignment = pSprite->GetAIType().m_nAlignment & 0xF;
+            if (nAlignment == 2) {
+                nColumn = 1;
+            } else if (nAlignment == 3) {
+                nColumn = 2;
+            }
+            SHORT nRow = static_cast<SHORT>(m_nReputation / REPUTATION_MULTIPLIER - 1);
+            SHORT nHappiness = static_cast<SHORT>(m_ruleTables.m_tHappiness.GetAtLong(CPoint(nColumn, nRow)));
+
+            message = new CMessageSetHappiness(nHappiness, id, id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            CGameEffect* pEffect = CGameEffect::DecodeEffect(&itemEffect,
+                CPoint(-1, -1),
+                -1,
+                CPoint(-1, -1));
+            message = new CMessageAddEffect(pEffect, id, id);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+
+            pSprite->CheckReputation();
+        }
+
+        m_cObjectArray.ReleaseDeny(id,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == FALSE
+        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        FeedBack(FEEDBACK_REPUTATION, reputationAdjustment / REPUTATION_MULTIPLIER, TRUE);
+    }
 }
 
 // 0x5BDF80
@@ -9003,18 +9137,11 @@ BOOLEAN CInfGame::RestPartyPrivate(INT nHP, BOOLEAN bRenting)
 
         nHealed = 0;
 
-        // TODO: `CGameArea::CheckRestEncounter` 0x46FEA0 (CGameArea.cpp,
-        // not ported): the original asks the visible area for a rest
-        // encounter when the party is not renting a room, and an encounter
-        // ends the rest here (0x5C150F-0x5C1525):
-        //
-        //     if (!bRenting
-        //         && m_gameAreas[m_visibleArea]->CheckRestEncounter()) {
-        //         goto done;
-        //     }
-        //
-        // The check draws rand() (0x46FEFD onwards), so until it is ported
-        // a rest draws none of its numbers and is never interrupted.
+        // NOTE: The encounter draws rand() before the rest's own time.
+        if (!bRenting
+            && m_gameAreas[m_visibleArea]->CheckRestEncounter()) {
+            goto done;
+        }
 
         SHORT nCharacters = m_nCharacters;
         if (m_bHealPartyOnRest) {
@@ -9124,7 +9251,7 @@ BOOLEAN CInfGame::RestPartyPrivate(INT nHP, BOOLEAN bRenting)
             &fadeAction);
     }
 
-    // done:
+done:
     if (!bRenting) {
         bResult = FALSE;
 
@@ -9269,18 +9396,12 @@ BOOL CInfGame::CanRestParty(STRREF& strError, unsigned char bInStore, unsigned c
         }
     }
 
-    // TODO: `CGameObjectArray` 0x5C9300 (CGameObjectArray.cpp, not ported):
-    // FALSE when any sprite in the array has spell state 46 or 47
-    // (SPLSTATE_MOLD_TOUCH, SPLSTATE_SHROUD_OF_FLAME), TRUE otherwise
-    // (0x5C20B0-0x5C20C9):
-    //
-    //     if (!m_cObjectArray.sub_5C9300()) {
-    //         bResult = FALSE;
-    //         strError = 10309;
-    //     }
-    //
-    // Until it is ported the check passes, as it does when no sprite has
-    // either state.
+    // FALSE when a sprite in the array has SPLSTATE_MOLD_TOUCH or
+    // SPLSTATE_SHROUD_OF_FLAME: "You may not rest at this time."
+    if (!m_cObjectArray.AnySpriteIsDiseased()) {
+        bResult = FALSE;
+        strError = 10309;
+    }
 
     return bResult;
 }

@@ -762,6 +762,137 @@ void CAIGroup::SetGroupTriggerId(LONG triggerId)
     }
 }
 
+
+// 0x405A10
+SHORT* CAIGroup::GetFormationFaces(SHORT formationType, SHORT rotationDegrees)
+{
+    INT nMembers = m_memberList.GetCount();
+
+    SHORT* faces = new SHORT[nMembers];
+    for (INT index = 0; index < nMembers; index++) {
+        faces[index] = 0;
+    }
+
+    if (m_memberList.GetHeadPosition() == NULL) {
+        return faces;
+    }
+
+    // The leader is share-locked for the whole call; when it cannot be
+    // locked the faces stay zero.
+    LONG nLeaderId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetHead()));
+
+    CGameSprite* pLeader;
+    BYTE rc;
+    do {
+        rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nLeaderId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pLeader),
+            INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+    if (rc != CGameObjectArray::SUCCESS) {
+        return faces;
+    }
+
+    // Members past the formation's tables, and every member of the
+    // "no formation" type, face the way they already do.
+    LONG* pMemberIds = NULL;
+    if (nMembers > CAIGROUP_FORMATION_MAX_SIZE) {
+        pMemberIds = new LONG[nMembers];
+        LONG* pId = pMemberIds;
+        POSITION pos = m_memberList.GetHeadPosition();
+        while (pos != NULL) {
+            *pId++ = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+        }
+    }
+
+    if (formationType == FORMATION_NONE) {
+        if (pMemberIds != NULL) {
+            delete[] pMemberIds;
+        }
+
+        pMemberIds = new LONG[nMembers];
+        LONG* pId = pMemberIds;
+        POSITION pos = m_memberList.GetHeadPosition();
+        while (pos != NULL) {
+            *pId++ = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_memberList.GetNext(pos)));
+        }
+    }
+
+    for (INT index = 0; index < nMembers; index++) {
+        if (index >= CAIGROUP_FORMATION_MAX_SIZE || formationType == FORMATION_NONE) {
+            CGameSprite* pSprite;
+            do {
+                rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(pMemberIds[index],
+                    CGameObjectArray::THREAD_ASYNCH,
+                    reinterpret_cast<CGameObject**>(&pSprite),
+                    INFINITE);
+            } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+            if (rc != CGameObjectArray::SUCCESS) {
+                continue;
+            }
+
+            faces[index] = pSprite->m_nDirection;
+
+            g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pMemberIds[index],
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+        } else {
+            switch (formationType) {
+            case CAIGROUP_FORMATION_T:
+                faces[index] = FORMATION_T_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_GATHER:
+                faces[index] = FORMATION_GATHER_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_4AND2:
+                faces[index] = FORMATION_4AND2_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_3BY2:
+                faces[index] = FORMATION_3BY2_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_PROTECT:
+                faces[index] = FORMATION_PROTECT_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_2BY3:
+                faces[index] = FORMATION_2BY3_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_RANK:
+                faces[index] = FORMATION_RANK_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_V:
+                faces[index] = FORMATION_V_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_WEDGE:
+                faces[index] = FORMATION_WEDGE_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_S:
+                faces[index] = FORMATION_S_FACE[index];
+                break;
+            case CAIGROUP_FORMATION_LINE:
+                faces[index] = FORMATION_LINE_FACE[index];
+                break;
+            }
+        }
+
+        // Turn the face by the formation's rotation (16 faces to 360
+        // degrees); the remainder keeps the sign of the sum.
+        SHORT nRotated = static_cast<SHORT>(rotationDegrees * 16 / 360 + faces[index]);
+        faces[index] = static_cast<SHORT>(nRotated % 16);
+    }
+
+    g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(pLeader->GetId(),
+        CGameObjectArray::THREAD_ASYNCH,
+        INFINITE);
+
+    if (pMemberIds != NULL) {
+        delete[] pMemberIds;
+    }
+
+    return faces;
+}
+
 // 0x405E00
 void CAIGroup::RemoveFromSearch(CSearchBitmap* search)
 {

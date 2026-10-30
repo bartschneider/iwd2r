@@ -25,6 +25,7 @@ class CGameArea;
 class CGameContainer;
 class CGameDoor;
 class CGameEffect;
+class CGameSprite;
 
 class CBaldurMessage {
 public:
@@ -160,6 +161,10 @@ public:
     static const BYTE MSG_TYPE_BIOGRAPHY;
     static const BYTE MSG_SUBTYPE_BIOGRAPHY_CHANGE;
     static const BYTE MSG_SUBTYPE_BIOGRAPHY_CHANGE_ANNOUNCE;
+
+    static const BYTE MSG_TYPE_AREAMAPNOTE;
+    static const BYTE MSG_SUBTYPE_AREAMAPNOTE_SEND;
+    static const BYTE MSG_SUBTYPE_AREAMAPNOTE_ANNOUNCE;
 
     static const BYTE MSG_TYPE_DELETEAREA;
     static const BYTE MSG_SUBTYPE_DELETEAREA_POLL;
@@ -338,6 +343,8 @@ public:
     BOOLEAN OnSendEntryJournalChange(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
     BOOLEAN AnnounceJournalEntryChange(CString szText, BYTE nCharacter, INT nChapter, DWORD nIndex);
     BOOLEAN OnAnnounceJournalEntryChange(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
+    BOOLEAN SendAreaMapNoteToServer(CString sArea, WORD nStartX, WORD nStartY, CString sNote, DWORD dwFlags, STRREF strRef);
+    BOOLEAN AnnounceAreaMapNote(CString sArea, WORD nStartX, WORD nStartY, CString sNote, DWORD dwFlags, STRREF strRef);
     BOOLEAN SendBiographyToServer(BYTE nFixedPartyId, CString szBio);
     BOOLEAN OnSendBiography(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
     BOOLEAN AnnounceBiography(BYTE nFixedPartyId, CString szBio);
@@ -485,6 +492,8 @@ public:
     SHORT GetCommType() override;
     BYTE GetMsgType() override;
     BYTE GetMsgSubType() override;
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
     /* 000C */ CGameEffect* m_effect;
@@ -1085,9 +1094,8 @@ public:
 
 // NOTE: The original's message that sets (or increments) a script variable
 // on every machine (vtable 0x84882C, 0x1E bytes). Its comm type is
-// BROADCAST_FORCED, so the local player runs it too. Marshal and Unmarshal
-// (0x50A4D0, 0x50A6C0) are the network path and are omitted (single player
-// only, docs/adr/0002-single-player-only.md).
+// BROADCAST_FORCED, so the local player runs it too. Marshal (0x50A4D0) is
+// omitted (single player only, docs/adr/0002-single-player-only.md).
 class CMessageSetVariable : public CMessage {
 public:
     CMessageSetVariable(const CString& sScope, const CString& sName, LONG nValue, LONG caller, LONG target)
@@ -1104,6 +1112,7 @@ public:
     BYTE GetMsgType() override { return CBaldurMessage::MSG_TYPE_CMESSAGE; }
     // NOTE: The BYTE at 0x84CF0C (53).
     BYTE GetMsgSubType() override { return 53; }
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
     /* 000C */ CString m_sScope;
@@ -1945,6 +1954,49 @@ public:
     /* 0028 */ LONG m_nCharacterId;
     /* 002C */ DWORD m_nNextEntryIndex;
     /* 0030 */ BOOLEAN field_30;
+};
+
+// A message attaching a projectile's trailing visual effect, sent by the
+// projectile's originator so remote clients mirror it (vtable 0x84D328; the
+// exe packs the class to 42 bytes -- our member offsets are unaffected).
+class CMessageProjectileTrailingVFX : public CMessage {
+public:
+    CMessageProjectileTrailingVFX(const CResRef& resRef, const CString& area,
+        const CPoint& launch, CPoint targetPoint, SHORT launchHeight,
+        LONG caller, LONG target);
+
+    SHORT GetCommType() override;       // returns SEND (3)
+    BYTE GetMsgType() override;         // returns MSG_TYPE_CMESSAGE (0x43)
+    BYTE GetMsgSubType() override;      // returns MSG_SUBTYPE_CMESSAGE_PROJECTILE_TRAILING_VFX (0x56)
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
+    void Run() override;                // no-op
+
+    // The caller is the projectile's ID before Fire registers it.
+    /* 000C */ CResRef m_resRef;        // resource name from field_17E (8 bytes)
+    /* 0014 */ CString m_resRef2;       // area resource name
+    /* 0018 */ LONG m_launchX;          // launch position x
+    /* 001C */ LONG m_launchY;          // launch position y
+    /* 0020 */ LONG m_targetX;          // original Fire target point x
+    /* 0024 */ LONG m_targetY;          // original Fire target point y
+    /* 0028 */ SHORT m_launchHeight;    // launch height (from DetermineHeight, SHORT copy)
+};
+
+// A message replacing a sprite's projectile immunities before a projectile
+// fires (the exe folds its GetMsgSubType with the spell-level immunities
+// update: both report subtype 104).
+class CMessageProjectileImmumityUpdate : public CMessage {
+public:
+    CMessageProjectileImmumityUpdate(CGameSprite* pSprite, LONG caller, LONG target);
+    ~CMessageProjectileImmumityUpdate() override;
+    SHORT GetCommType() override;
+    BYTE GetMsgType() override;
+    BYTE GetMsgSubType() override;
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
+    void Run() override;
+
+    /* 000C */ CImmunitiesProjectile m_projectileImmunities;
 };
 
 // A message that runs a list of messages in order, sent as one (vtable

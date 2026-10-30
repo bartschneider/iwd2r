@@ -27324,6 +27324,128 @@ INT CGameSprite::GetSkillCost(UINT iSkillNumber, BYTE nClass)
 }
 
 // 0x764520
+// The paladin and ranger fall check: a character below reputation 70 whose
+// class mask has the paladin (or ranger) bit loses the fallen class's innate
+// spells and levels (they move to fighter) and its state gains 0x200 (0x400).
+//
+// 0x737990
+void CGameSprite::CheckReputation()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\ObjSprite.cpp
+    // __LINE__: 7570
+    UTIL_ASSERT(pGame != NULL);
+
+    BOOL bPaladinFell = FALSE;
+
+    // NOTE: The work is done when the state bit is set; the brief's note said
+    // the opposite, the bytes at 0x7379C4-0x7379DB decide.
+    if ((m_baseStats.m_flags & 0x800) != 0) {
+        const CRuleTables& ruleTables = pGame->GetRuleTables();
+
+        INT nOldFortitude = ruleTables.GetSavingThrow(m_startTypeAI, m_derivedStats, m_baseStats.m_CONBase, CRuleTables::FORTITUDE);
+        INT nOldReflex = ruleTables.GetSavingThrow(m_startTypeAI, m_derivedStats, m_baseStats.m_DEXBase, CRuleTables::REFLEX);
+        INT nOldWill = ruleTables.GetSavingThrow(m_startTypeAI, m_derivedStats, m_baseStats.m_WISBase, CRuleTables::WILL);
+
+        if ((m_typeAI.m_nClassMask & 0x40) != 0 && m_derivedStats.m_nReputation < 70) {
+            DWORD nNextLevelXP = ruleTables.GetNextLevelXP(static_cast<BYTE>(GetEffectiveCharacterLevel()));
+            m_baseStats.m_xp = nNextLevelXP;
+            m_derivedStats.m_nXP = nNextLevelXP;
+
+            RemoveInnateSpell(SPIN109, 1, 0, 0);
+            RemoveInnateSpell(SPIN120, 1, 0, 0);
+            RemoveInnateSpell(SPIN121, 1, 0, 0);
+            RemoveInnateSpell(SPIN125, 1, 0, 0);
+            RemoveInnateSpell(SPIN152, 1, 0, 0);
+
+            DWORD nPaladinLevel = m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_PALADIN);
+            m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_PALADIN, 0);
+            m_derivedStats.SetClassLevel(CAIOBJECTTYPE_C_FIGHTER,
+                nPaladinLevel + m_derivedStats.GetClassLevel(CAIOBJECTTYPE_C_FIGHTER));
+
+            // The AI types follow the class change: the class becomes fighter
+            // and the class mask the derived stats' (m_typeAI is at +0x38,
+            // m_liveTypeAI at +0x3E12, m_startTypeAI at +0x3E4E).
+            m_typeAI.m_nClass = CAIOBJECTTYPE_C_FIGHTER;
+            m_liveTypeAI.m_nClass = CAIOBJECTTYPE_C_FIGHTER;
+            m_startTypeAI.m_nClass = CAIOBJECTTYPE_C_FIGHTER;
+
+            m_typeAI.m_nClassMask = m_derivedStats.m_classMask;
+            m_liveTypeAI.m_nClassMask = m_derivedStats.m_classMask;
+            m_startTypeAI.m_nClassMask = m_derivedStats.m_classMask;
+
+            FeedBack(0x10, 0, 0, 0, 0x4CA4, 0, 0);
+            m_baseStats.m_flags |= 0x200;
+            bPaladinFell = TRUE;
+        }
+
+        if (!m_derivedStats.HasClassMask(0x80) || m_derivedStats.m_nReputation >= 70) {
+            if (!bPaladinFell) {
+                return;
+            }
+        } else {
+            DWORD nNextLevelXP = ruleTables.GetNextLevelXP(static_cast<BYTE>(GetEffectiveCharacterLevel()));
+            m_baseStats.m_xp = nNextLevelXP;
+            m_derivedStats.m_nXP = nNextLevelXP;
+
+            RemoveInnateSpell(SPIN108, 1, 0, 0);
+            RemoveInnateSpell(SPIN139, 1, 0, 0);
+
+            // The ranger's levels move to fighter; the three class bytes are
+            // replays of the original's byte arithmetic at 0x737E2x.
+            BYTE nRangerLevel = m_baseStats.m_rangerLevel;
+            m_baseStats.m_characterLevel -= nRangerLevel;
+            m_baseStats.m_rangerLevel = 0;
+            BYTE nFighterLevel = nRangerLevel + m_baseStats.m_fighterLevel;
+            m_baseStats.m_characterLevel += nFighterLevel - m_baseStats.m_fighterLevel;
+            m_baseStats.m_fighterLevel = nFighterLevel;
+
+            m_typeAI.m_nClass = CAIOBJECTTYPE_C_FIGHTER;
+            m_liveTypeAI.m_nClass = CAIOBJECTTYPE_C_FIGHTER;
+            m_startTypeAI.m_nClass = CAIOBJECTTYPE_C_FIGHTER;
+
+            m_typeAI.m_nClassMask = m_derivedStats.m_classMask;
+            m_liveTypeAI.m_nClassMask = m_derivedStats.m_classMask;
+            m_startTypeAI.m_nClassMask = m_derivedStats.m_classMask;
+
+            FeedBack(0x10, 0, 0, 0, 0x4CA5, 0, 0);
+            m_baseStats.m_flags |= 0x400;
+        }
+
+        INT nFortitude = ruleTables.GetSavingThrow(m_startTypeAI, m_derivedStats, m_baseStats.m_CONBase, CRuleTables::FORTITUDE);
+        INT nReflex = ruleTables.GetSavingThrow(m_startTypeAI, m_derivedStats, m_baseStats.m_DEXBase, CRuleTables::REFLEX);
+        INT nWill = ruleTables.GetSavingThrow(m_startTypeAI, m_derivedStats, m_baseStats.m_WISBase, CRuleTables::WILL);
+
+        // Only the non-negative difference is added (the mask at 0x737EE?:
+        // ((new - old < 0) - 1) & (BYTE)(new - old)).
+        if (nFortitude >= nOldFortitude) {
+            m_baseStats.m_saveVSFortitudeBase += static_cast<BYTE>(nFortitude - nOldFortitude);
+        }
+        if (nReflex >= nOldReflex) {
+            m_baseStats.m_saveVSReflexBase += static_cast<BYTE>(nReflex - nOldReflex);
+        }
+        if (nWill >= nOldWill) {
+            m_baseStats.m_saveVSWillBase += static_cast<BYTE>(nWill - nOldWill);
+        }
+
+        field_562C = 1;
+        ProcessEffectList();
+
+        if (pGame->GetCharacterPortraitNum(m_id) != -1) {
+            g_pBaldurChitin->GetActiveEngine()->UpdateCharacterStatus(m_id);
+
+            if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+                for (INT nSlot = 0; nSlot < 6; nSlot++) {
+                    if (pGame->m_characters[nSlot] == m_id) {
+                        g_pBaldurChitin->GetBaldurMessage()->BroadcastUpdateCharacterSlot(FALSE, nSlot, FALSE);
+                    }
+                }
+            }
+        }
+    }
+}
+
 INT CGameSprite::GetEffectiveCharacterLevel()
 {
     INT nLevel = m_derivedStats.m_nLevel;

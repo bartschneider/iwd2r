@@ -148,6 +148,11 @@ bool CallGuarded(void (*thunk)(void*), void* arg, GuardedFault* fault)
     }
 }
 
+void InitializeOriginalCriticalSection(void* section)
+{
+    InitializeCriticalSection(static_cast<LPCRITICAL_SECTION>(section));
+}
+
 bool OriginalHeapValid()
 {
     __try {

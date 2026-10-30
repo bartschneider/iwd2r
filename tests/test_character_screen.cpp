@@ -208,7 +208,7 @@ void NewGameWithOneCharacter(std::vector<BYTE>& bytes, const char* name)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
