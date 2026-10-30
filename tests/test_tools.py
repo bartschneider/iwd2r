@@ -25963,7 +25963,6 @@ class ReStatusTest(unittest.TestCase):
 
     def test_marker_parser(self):
         rs = load_tool('re_status')
-        stubby = load_tool('xrec').stubby
         body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
         src = (
             '// 0x1000\nint A::F(int x)\n{\n    ' + body + '}\n'
@@ -25979,7 +25978,7 @@ class ReStatusTest(unittest.TestCase):
             '// 0x100B\nvoid E::U() const;\n'
             '// 0x100C\nvoid E::V()\n{\n    assert(false);\n}\n'
             '// 0x100D\nvoid E::W()\n{\n}\n')
-        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        got = {a: (n, s) for a, n, s in rs.markers(src)}
         real = {a for a, (n, s) in got.items() if not s}
         self.assertEqual(real, {'0x1000', '0x1001', '0x1002', '0x1003', '0x1006',
                                 '0x1008', '0x1009'})
@@ -25994,7 +25993,6 @@ class ReStatusTest(unittest.TestCase):
 
     def test_operator_definitions_and_brace_initializers(self):
         rs = load_tool('re_status')
-        stubby = load_tool('xrec').stubby
         body = 'int total = x * 2 + 1;\n    total += x;\n    return total + 12345;\n'
         src = (
             '// 0x2000\nA& A::operator=(const A& o)\n{\n    ' + body + '}\n'
@@ -26002,11 +26000,101 @@ class ReStatusTest(unittest.TestCase):
             '// 0x2002\nint g_val = 3;\n'
             '// 0x2003\nB::B(int a)\n    : m_x{0}, m_y{a}\n{\n    ' + body + '}\n'
             '// 0x2004\nint A::operator()(int i)\n{\n    ' + body + '}\n')
-        got = {a: (n, s) for a, n, s in rs.markers(src, stubby)}
+        got = {a: (n, s) for a, n, s in rs.markers(src)}
         self.assertEqual({a for a, (n, s) in got.items() if not s},
                          {'0x2000', '0x2001', '0x2003', '0x2004'})
         self.assertNotIn('0x2002', got)
         self.assertEqual(got['0x2000'][0], 'A::operator=')
+
+    def test_rule1_todo_notimplemented_and_assert_stay_stubs_at_any_length(self):
+        rs = load_tool('re_status')
+        src = (
+            '// 0x3000\nvoid A::F()\n{\n    assert(false);\n    DoIt();\n}\n'
+            '// 0x3001\nvoid A::G()\n{\n    NotImplemented(); return;\n}\n'
+            '// 0x3002\nvoid A::H()\n{\n    TODO_fill_in_the_body(p);\n}\n')
+        self.assertEqual({a for a, n, s in rs.markers(src) if s},
+                         {'0x3000', '0x3001', '0x3002'})
+
+    def test_rule2_any_statement_is_real_and_comment_only_bodies_are_not(self):
+        rs = load_tool('re_status')
+        src = (
+            '// 0x3003\nvoid A::F()\n{\n    field_342.Set(type);\n}\n'
+            '// 0x3004\nvoid A::G()\n{\n    // NOTE: Uninline.\n    DeleteHash();\n}\n'
+            '// 0x3005\nvoid A::H()\n{\n    // a comment long enough that the old '
+            '40-character rule counted this body as real\n}\n')
+        got = {a: s for a, n, s in rs.markers(src)}
+        self.assertEqual({a for a, s in got.items() if not s},
+                         {'0x3003', '0x3004'})
+        self.assertTrue(got['0x3005'])
+
+    def test_rule3_empty_body_real_when_the_exe_function_is_at_most_16_bytes(self):
+        rs = load_tool('re_status')
+        table = {'401000': ('CUIControlBase::~CUIControlBase', 14),
+                 '401100': ('Big::F', 17)}
+        src = ('// 0x401000\nCUIControlBase::~CUIControlBase()\n{\n}\n'
+               '// 0x401100\nvoid Big::F()\n{\n}\n')
+        got = {a: s for a, n, s in rs.markers(src, table)}
+        self.assertFalse(got['0x401000'])
+        self.assertTrue(got['0x401100'])
+        # the size rule needs the exports: with no table both stay stubs
+        self.assertTrue({a: s for a, n, s in rs.markers(src)}['0x401000'])
+
+    def test_rule4_empty_ctor_or_dtor_real_only_with_base_or_member_callees(self):
+        rs = load_tool('re_status')
+        table = {'401000': ('CEffect::CEffect', 64),
+                 '401100': ('CGameObject::CGameObject', 20),
+                 '401200': ('operator delete', 6),
+                 '402000': ('CEffect::~CEffect', 30),
+                 '402100': ('FreeStr', 10),
+                 '403000': ('CHelper::_Destruct', 12),
+                 '403100': ('Plain::F', 64)}
+        graph = {'401000': ['401100', '401200'],
+                 '402000': ['402100'],
+                 '403100': ['403000']}
+        src = (
+            '// 0x401000\nCEffect::CEffect(const CPoint& pos)\n'
+            '    : CGameObject(pos.x, pos.y)\n{\n}\n'
+            '// 0x402000\nCEffect::~CEffect()\n{\n}\n'
+            '// 0x403100\nvoid Plain::F()\n{\n}\n')
+        got = {a: s for a, n, s in rs.markers(src, table, graph)}
+        self.assertFalse(got['0x401000'])  # rule 4: base ctor + operator delete
+        self.assertTrue(got['0x402000'])   # kept: FreeStr is not a member op
+        self.assertTrue(got['0x403100'])   # rule 4 is for constructors/destructors
+
+    def test_compute_applies_the_rules_and_lists_what_rule4_keeps(self):
+        self.write(self.exports, 'functions.tsv',
+                   '401000\tCEff::CEff\t64\n401100\tCObj::CObj\t20\n'
+                   '401200\tDoWork\t30\n402000\tCEff::~CEff\t40\n'
+                   '402100\tFreeStr\t10\n403000\tSmall::G\t30\n'
+                   '401300\tUnwind@401300\t10\n401400\tthunk_FUN_00401400\t5\n')
+        self.write(self.exports, 'callgraph.tsv',
+                   '401000\t401100\t401200\n401100\n401200\n402000\t402100\n'
+                   '402100\n403000\t401100\n401300\n401400\n')
+        self.write(self.repo, 'src/Foo.cpp',
+                   '// 0x401000\nCEff::CEff(int a)\n    : CObj(a)\n{\n}\n'
+                   '// 0x402000\nCEff::~CEff()\n{\n}\n'
+                   '// 0x403000\nvoid Small::G()\n{\n    field_342.Set(type);\n}\n')
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # 0x401000 kept (DoWork is no member op), 0x402000 kept (FreeStr);
+        # only the rule 2 one-liner is newly recovered
+        self.assertEqual(self.snap()['recovered'], {'functions': 1, 'bytes': 30})
+        self.assertIn('rule 2, any statement: 1', r.stderr)
+        self.assertIn('rule 3, empty and exe at most 16 bytes: 0', r.stderr)
+        self.assertIn('rule 4, empty ctor/dtor with base/member callees only: 0',
+                      r.stderr)
+        self.assertIn('rule 4 kept 0x401000  CEff::CEff  (exe 64 bytes)  callee DoWork',
+                      r.stderr)
+        self.assertIn('rule 4 kept 0x402000  CEff::~CEff  (exe 40 bytes)  callee FreeStr',
+                      r.stderr)
+
+    def test_compute_warns_when_the_callgraph_export_is_missing(self):
+        self.write(self.repo, 'src/Foo.cpp',
+                   '// 0x401000\nCEff::CEff(int a)\n    : CObj(a)\n{\n}\n')
+        r = self.run_tool('compute', '--exports', self.exports)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('no callgraph.tsv', r.stderr)
+        self.assertEqual(self.snap()['recovered']['functions'], 0)
 
     def test_header_inline_body_counts_and_name_mismatch_warns(self):
         self.write(self.repo, 'src/Foo.h',
