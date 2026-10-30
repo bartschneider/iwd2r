@@ -14,6 +14,7 @@
 #include "CScreenLoad.h"
 #include "CScreenMap.h"
 #include "CScreenSinglePlayer.h"
+#include "CScreenStore.h"
 #include "CScreenWorldMap.h"
 #include "CUIControlFactory.h"
 #include "CUIControlTextDisplay.h"
@@ -26,6 +27,7 @@ const LONG CScreenWorld::BORED_TIME = 3000;
 
 // 0x8F85BC
 int CScreenWorld::dword_8F85BC;
+BOOL CScreenWorld::bMultiplayerStore; // 0x8F85B8
 
 // 0x685610
 CScreenWorld::CScreenWorld()
@@ -3520,7 +3522,31 @@ void CScreenWorld::StartStore(const CAIObjectType& cAIProprietor, const CAIObjec
 // 0x691B50
 void CScreenWorld::StopStore()
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (m_bInControlOfStore == 1
+        && bMultiplayerStore
+        && pGame->m_multiplayerSettings.m_bRestrictStoreOption) {
+        CMessageExitStoreMode* pMessage = new CMessageExitStoreMode(CGameObjectArray::INVALID_INDEX,
+            CGameObjectArray::INVALID_INDEX);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
+
+    if (g_pChitin->cNetwork.m_bIsHost == 1) {
+        pGame->m_multiplayerSettings.m_bHostPermittedStore = FALSE;
+        pGame->m_multiplayerSettings.m_idHostPermittedStore = 0;
+    } else if (g_pChitin->cNetwork.m_nServiceProvider != CNetwork::SERV_PROV_NULL) {
+        // NOTE: A client of a multiplayer game releases the store permission the
+        // host granted here (0x436C00). Multiplayer is removed (ADR 0002).
+    }
+
+    if (!g_pChitin->cNetwork.m_bConnectionEstablished
+        || (bMultiplayerStore && pGame->m_multiplayerSettings.m_bRestrictStoreOption)) {
+        pGame->GetWorldTimer()->StartTime();
+        m_bPaused = FALSE;
+    }
+
+    g_pBaldurChitin->m_pEngineStore->StopStore();
 }
 
 // 0x691C70
