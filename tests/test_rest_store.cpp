@@ -1054,6 +1054,56 @@ TEST_CASE("import: ImportCharacter builds the sprite of a CHR with its name, bio
     CHECK(pGame->ImportCharacter(CString("NOSUCHCH"), 0) == 0);
 }
 
+// CScreenCreateChar::ImportCharacter (0x613B20) wraps the one above for the
+// create char screen. On the single-player full-import path (the settings'
+// bitfield forced to 7 when no network provider) the exe ends in
+// m_nCurrentStep = 6 (0x613cdb), m_nFirstStep = m_nCurrentStep (0x613ceb)
+// and field_1628 = 1 (0x613d13, the character is not re-exported on
+// Finish). Step 6 is what the main panel's UpdateMainPanel repaints from:
+// without it the panel stays in the fresh-character state after the import
+// popup closes.
+TEST_CASE("import: the create char screen enters the imported state after a CHR import", "[import][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    pGame->NewGame(FALSE, FALSE);
+
+    fs::path chr;
+    std::error_code ec;
+    for (const auto& folder : fs::directory_iterator(g_view, ec)) {
+        if (Lower(folder.path().filename().string()) != "characters") {
+            continue;
+        }
+        for (const auto& file : fs::directory_iterator(folder.path(), ec)) {
+            if (Lower(file.path().filename().string()) == "akchar1.chr") {
+                chr = file.path();
+            }
+        }
+    }
+    if (chr.empty()) {
+        SKIP("[iwd2r-skip] no AKCHAR1.CHR in the Characters folder");
+    }
+
+    CScreenCreateChar* pCreateChar = g_pBaldurChitin->m_pEngineCreateChar;
+    REQUIRE(pCreateChar != NULL);
+    // The fresh-character panel state an import is made from.
+    pCreateChar->m_nCurrentStep = 0;
+    pCreateChar->m_nFirstStep = 0;
+    pCreateChar->field_1628 = 0;
+    pCreateChar->ImportCharacter(CString("AKCHAR1"));
+
+    CHECK(pCreateChar->m_nCurrentStep == 6);
+    CHECK(pCreateChar->m_nFirstStep == 6);
+    CHECK(pCreateChar->field_1628 == 1);
+    CHECK(pCreateChar->GetSpriteId() != CGameObjectArray::INVALID_INDEX);
+}
+
 namespace {
 
 // The stock of an item's first line in a store, 0 when it has none.
