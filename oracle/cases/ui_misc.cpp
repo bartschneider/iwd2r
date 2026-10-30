@@ -283,10 +283,10 @@ void HpConBonus(CaseContext& ctx)
 // lines of the edit's font plus the padding either side clamped to the
 // mosaic's height, placed against the panel and the edit. It reads the mosaic
 // through CVidMosaic::GetSize, whose Demand/Release go through the chitin's
-// resource manager: the synthetic CResMosaic is flagged loaded (0x4|0x10)
-// with a high m_nID, so CDimm::InternalDemand hands back m_pData without a
-// file, and a 0x40-byte MOS blob (the magic, the version and the sizes Parse
-// reads) is all the resource needs. The original's static PADDING
+// resource manager: the synthetic CResMosaic is flagged in memory (see the
+// side-specific flags below) with a high m_nID, so CDimm::InternalDemand
+// hands back m_pData without a file, and a 0x40-byte MOS blob (the magic, the
+// version and the sizes Parse reads) is all the resource needs. The original's static PADDING
 // (0xA09FC0, 3/3, its startup's initializer at 0x7C2630) is written here:
 // the runner does not run the exe's static initializers.
 //
@@ -348,7 +348,13 @@ void CompositionWindowRect(CaseContext& ctx)
         std::memcpy(mosaic + kMosaicResOffset, &resPointer, 4);
         const uint32_t mosPointer = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mos));
         std::memcpy(res + kResDataOffset, &mosPointer, 4);
-        const uint32_t flags = 0x04 | 0x10;
+        // The original's InternalDemand (0x783EF9) takes its in-memory
+        // shortcut for (dwFlags & 0x04) && !(dwFlags & 0x10), and skips the
+        // OnResourceServiced vtable call when (dwFlags & 0x60) is set; our
+        // port (#guess) tests 0x10 the other way round (a pre-existing
+        // divergence, in the report), so each side gets the flags its own
+        // code wants for the same shortcut.
+        const uint32_t flags = 0x04 | 0x20;
         const uint32_t size = kMosSize;
         const uint32_t one = 1;
         const uint32_t id = 0xFF000000u;
