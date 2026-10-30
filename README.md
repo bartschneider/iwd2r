@@ -13,15 +13,17 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 
 ## Status
 
+Projects keep the numbers they were started with, which other documents refer to; the table lists them by state (done, in progress, not started in roadmap order).
+
 | # | Project | State |
 |---|---|---|
 | 1 | Portability foundation | Done |
 | 2 | Verification harness | Done |
-| 3 | Finish the simulation | In progress: milestones 1 to 3 done, each matched against the original (a new party enters the world; moves and interacts; wins its first fight). Milestone 4 (save, load and rest) is under way: the save and load screens match the original; resting's spell refill (action 96) is not ported yet. Character import is proven on the original (a druid 7 exported from it imports at its level and plays to the first fight); in ours the import loads the character but the creation screen does not yet move to its imported state, and that fix is in review. Milestone 5 (the remaining screens and rendering) follows |
 | 4 | Render API and classic renderer | Done (classic presenter default; SDL3 GPU presenter opt-in with nearest/sharp/smooth/FSR/NIS filters; the HD classic renderer is a later project) |
-| 5 | IEex native layer and Lua API | Not started |
-| 6 | Remaster renderer | Not started; waits for project 3. The plan, phase by phase, is in [docs/hd-plan.md](docs/hd-plan.md): built natively on the SDL3 GPU presenter (Vulkan through SDL3, never raw), with the IWD2EE OpenGL/HD work read for ideas only, since its author never finished it |
+| 3 | Finish the simulation | In progress: milestones 1 to 3 done, each matched against the original (a new party enters the world; moves and interacts; wins its first fight). Milestone 4 (save, load and rest) is under way: the save and load screens match the original; resting's spell refill (action 96) is not ported yet. Character import is proven on the original (a druid 7 exported from it imports at its level and plays to the first fight); in ours the import loads the character but the creation screen does not yet move to its imported state, and that fix is in review. Milestone 5 (the remaining screens and rendering) follows |
 | 7 | Cross-recovery with [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re) | In progress ([design](docs/superpowers/specs/2026-10-17-wso-integration-design.md), [summary](docs/wso/README.md)). Wave 1 done: the 558 functions both trees recovered differently are settled against the original (533 ours, 15 his, 10 neither; [tally](docs/wso/xrec-report.md)). Importing what only his tree has: 239 rows left, mostly `CProjectile.cpp` |
+| 6 | Remaster renderer | Not started; waits for project 3. The plan, phase by phase, is in [docs/hd-plan.md](docs/hd-plan.md): built natively on the SDL3 GPU presenter (Vulkan through SDL3, never raw), with the IWD2EE OpenGL/HD work read for ideas only, since its author never finished it |
+| 5 | IEex native layer and Lua API | Not started |
 
 Current numbers: five presets build (`macos-clang` too); 795 engine tests and 1,284 tool tests pass on Linux; 1,623 evidence files; the parity gate checks every changed function against the exe (callees, the strings it uses, vtable slots, class layout, member offsets); character generation matches the original field for field through party formation; 13 scenarios with recorded original state dumps match them at every checkpoint (190 of 190 on the first fight), on Linux and in Windows Sandbox; an outside contributor has landed 48 pull requests, most with oracle cases run against the original. The count is in the Recovery status block below. Not playable end to end yet.
 
