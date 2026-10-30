@@ -7589,12 +7589,13 @@
     "i050": {
       "assigned_at": "2026-10-27T05:44:47+00:00",
       "branch": "p3/wso-i050",
-      "closed_at": null,
+      "closed_at": "2026-10-30T19:30:11+00:00",
       "files": [
         "src/CScreenWorld.cpp",
         "src/CGameContainer.cpp",
         "src/CGameSprite.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -7644,6 +7645,53 @@
           "name": "CGameSprite::RemoveSpecialAbility",
           "our_len": 2,
           "their_len": 752
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i051": {
+      "assigned_at": "2026-10-27T06:16:12+00:00",
+      "branch": "p3/wso-i051",
+      "closed_at": null,
+      "files": [
+        "src/CAIGroup.cpp",
+        "src/CMessage.cpp",
+        "src/CGameAIBase.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x407280",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CAIGroup.cpp",
+          "name": "CAIGroup::GroupProtectPoint",
+          "our_len": 2,
+          "their_len": 5488
+        },
+        {
+          "address": "0x433950",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::WaitForSignal",
+          "our_len": 14,
+          "their_len": 2004
+        },
+        {
+          "address": "0x45F6D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::MoveCursor",
+          "our_len": 20,
+          "their_len": 1273
+        },
+        {
+          "address": "0x4337D0",
+          "category": "theirs_real_ours_stub",
+          "file": "src/CMessage.cpp",
+          "name": "CBaldurMessage::KickOutWaitingForSignal",
+          "our_len": 14,
+          "their_len": 1184
         }
       ],
       "status": "assigned",

@@ -5,6 +5,7 @@
 #include "CDeathSound.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
+#include "CIcon.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CScreenChapter.h"
@@ -14,7 +15,9 @@
 #include "CScreenLoad.h"
 #include "CScreenMap.h"
 #include "CScreenSinglePlayer.h"
+#include "CScreenStore.h"
 #include "CScreenWorldMap.h"
+#include "CStore.h"
 #include "CUIControlFactory.h"
 #include "CUIControlTextDisplay.h"
 #include "CUIPanel.h"
@@ -26,6 +29,7 @@ const LONG CScreenWorld::BORED_TIME = 3000;
 
 // 0x8F85BC
 int CScreenWorld::dword_8F85BC;
+BOOL CScreenWorld::bMultiplayerStore; // 0x8F85B8
 
 // 0x685610
 CScreenWorld::CScreenWorld()
@@ -3514,13 +3518,169 @@ void CScreenWorld::StopCommand()
 // 0x6913C0
 void CScreenWorld::StartStore(const CAIObjectType& cAIProprietor, const CAIObjectType& cAICustomer, CResRef cResStore, BOOLEAN bInitiate)
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    LONG nCustomerId = cAICustomer.m_nInstance;
+    bMultiplayerStore = g_pChitin->cNetwork.m_nServiceProvider != CNetwork::SERV_PROV_NULL;
+
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == 1) {
+        if (!g_pChitin->cNetwork.m_bIsHost) {
+            if (!g_pBaldurChitin->GetBaldurMessage()->DemandResourceFromServer(cResStore.GetResRefStr(),
+                    1014, TRUE, TRUE, TRUE)) {
+                g_pChitin->cNetwork.CloseSession(TRUE);
+                return;
+            }
+        } else {
+            pGame->DemandServerStore(cResStore, TRUE);
+        }
+    }
+
+    CStore* pStore = new CStore(cResStore);
+    // A bag is always driven locally, never handed to the session host.
+    if (pStore->m_header.m_nStoreType == CSTOREFILEHEADER_STORETYPE_BAG) {
+        bMultiplayerStore = FALSE;
+    }
+
+    if (!g_pChitin->cNetwork.m_bIsHost) {
+        CMessageStoreRelease* pMessage = new CMessageStoreRelease(pStore->m_resRef,
+            CGameObjectArray::INVALID_INDEX, CGameObjectArray::INVALID_INDEX);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    } else {
+        pGame->ReleaseServerStore(pStore->m_resRef);
+    }
+    delete pStore;
+
+    BOOLEAN bInControl;
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == 1) {
+        CGameObject* pCustomer;
+        BYTE rc;
+        do {
+            rc = pGame->GetObjectArray()->GetShare(nCustomerId,
+                CGameObjectArray::THREAD_ASYNCH, &pCustomer, INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            bInControl = pCustomer->m_remotePlayerID == g_pChitin->cNetwork.m_idLocalPlayer;
+            if (bInitiate == 1) {
+                INT nPlayer = g_pChitin->cNetwork.FindPlayerLocationByID(pCustomer->m_remotePlayerID, FALSE);
+                if (bMultiplayerStore) {
+                    if (!pGame->m_multiplayerSettings.GetPermission(nPlayer, CGamePermission::PURCHASING)) {
+                        g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(-1, 0x2A5F, 0xFF, 0xFF, -1,
+                            CGameObjectArray::INVALID_INDEX, CGameObjectArray::INVALID_INDEX);
+                        if (g_pChitin->cNetwork.m_bIsHost) {
+                            pGame->m_multiplayerSettings.m_bHostPermittedStore = FALSE;
+                            pGame->m_multiplayerSettings.m_idHostPermittedStore = 0;
+                        }
+                        pGame->GetObjectArray()->ReleaseShare(nCustomerId,
+                            CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                        return;
+                    }
+                    STRREF strError;
+                    if (bMultiplayerStore
+                        && pGame->m_multiplayerSettings.m_bRestrictStoreOption == 1
+                        && !pGame->CanEnterStore(strError)) {
+                        g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(-1, strError, 0xFF, 0xFF, -1,
+                            CGameObjectArray::INVALID_INDEX, CGameObjectArray::INVALID_INDEX);
+                        if (g_pChitin->cNetwork.m_bIsHost) {
+                            pGame->m_multiplayerSettings.m_bHostPermittedStore = FALSE;
+                            pGame->m_multiplayerSettings.m_idHostPermittedStore = 0;
+                        }
+                        pGame->GetObjectArray()->ReleaseShare(nCustomerId,
+                            CGameObjectArray::THREAD_ASYNCH, INFINITE);
+                        return;
+                    }
+                }
+            }
+            if (g_pChitin->cNetwork.m_bIsHost
+                && ((bMultiplayerStore && pGame->m_multiplayerSettings.m_bRestrictStoreOption)
+                    || bInControl)) {
+                pGame->m_multiplayerSettings.m_bHostPermittedStore = TRUE;
+                pGame->m_multiplayerSettings.m_idHostPermittedStore = pCustomer->m_remotePlayerID;
+            }
+            pGame->GetObjectArray()->ReleaseShare(nCustomerId,
+                CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        } else {
+            bInControl = FALSE;
+            if (bInitiate == 1) {
+                g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(-1, 0x2A5F, 0xFF, 0xFF, -1,
+                    CGameObjectArray::INVALID_INDEX, CGameObjectArray::INVALID_INDEX);
+                if (g_pChitin->cNetwork.m_bIsHost) {
+                    pGame->m_multiplayerSettings.m_bHostPermittedStore = FALSE;
+                    pGame->m_multiplayerSettings.m_idHostPermittedStore = 0;
+                }
+                return;
+            }
+            if (g_pChitin->cNetwork.m_bIsHost
+                && bMultiplayerStore
+                && pGame->m_multiplayerSettings.m_bRestrictStoreOption) {
+                pGame->m_multiplayerSettings.m_bHostPermittedStore = TRUE;
+                pGame->m_multiplayerSettings.m_idHostPermittedStore = 0;
+            }
+        }
+    } else {
+        bInControl = TRUE;
+    }
+
+    if (bInitiate == 1
+        && ((bMultiplayerStore && pGame->m_multiplayerSettings.m_bRestrictStoreOption)
+            || !bInControl)) {
+        CMessageEnterStoreMode* pMessage = new CMessageEnterStoreMode(cAIProprietor,
+            cAICustomer, cResStore, nCustomerId, nCustomerId);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
+
+    if ((bMultiplayerStore && pGame->m_multiplayerSettings.m_bRestrictStoreOption)
+        || bInControl) {
+        m_bInControlOfStore = bInControl;
+        if (!g_pChitin->cNetwork.m_bConnectionEstablished
+            || (bMultiplayerStore && pGame->m_multiplayerSettings.m_bRestrictStoreOption)) {
+            pGame->GetWorldTimer()->StopTime();
+            m_bPaused = TRUE;
+        }
+        CScreenStore* pScreenStore = g_pBaldurChitin->m_pEngineStore;
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 5914
+        UTIL_ASSERT(pScreenStore != NULL);
+        BOOLEAN bConnected = g_pChitin->cNetwork.m_bConnectionEstablished;
+        pScreenStore->StartStore(cAIProprietor, cAICustomer, cResStore);
+        if (bConnected == g_pChitin->cNetwork.m_bConnectionEstablished) {
+            DWORD dwPanelId = pScreenStore->GetDefaultMainPanel();
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+            // __LINE__: 5933
+            UTIL_ASSERT(dwPanelId != MAXDWORD);
+            pScreenStore->SwitchMainPanel(dwPanelId);
+            g_pBaldurChitin->GetActiveEngine()->SelectEngine(pScreenStore);
+        }
+    }
 }
 
 // 0x691B50
 void CScreenWorld::StopStore()
 {
-    // TODO: Incomplete.
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (m_bInControlOfStore == 1
+        && bMultiplayerStore
+        && pGame->m_multiplayerSettings.m_bRestrictStoreOption) {
+        CMessageExitStoreMode* pMessage = new CMessageExitStoreMode(CGameObjectArray::INVALID_INDEX,
+            CGameObjectArray::INVALID_INDEX);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
+
+    if (g_pChitin->cNetwork.m_bIsHost == 1) {
+        pGame->m_multiplayerSettings.m_bHostPermittedStore = FALSE;
+        pGame->m_multiplayerSettings.m_idHostPermittedStore = 0;
+    } else if (g_pChitin->cNetwork.m_nServiceProvider != CNetwork::SERV_PROV_NULL) {
+        // NOTE: A client of a multiplayer game releases the store permission the
+        // host granted here (0x436C00). Multiplayer is removed (ADR 0002).
+    }
+
+    if (!g_pChitin->cNetwork.m_bConnectionEstablished
+        || (bMultiplayerStore && pGame->m_multiplayerSettings.m_bRestrictStoreOption)) {
+        pGame->GetWorldTimer()->StartTime();
+        m_bPaused = FALSE;
+    }
+
+    g_pBaldurChitin->m_pEngineStore->StopStore();
 }
 
 // 0x691C70
@@ -5160,15 +5320,396 @@ CUIControlButtonWorldContainerSlot::~CUIControlButtonWorldContainerSlot()
 // 0x6957E0
 void CUIControlButtonWorldContainerSlot::OnLButtonClick(CPoint pt)
 {
-    // TODO: Incomplete.
+    CScreenInventory* pInventory = g_pBaldurChitin->m_pEngineInventory;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10270
+    UTIL_ASSERT(pInventory != NULL);
+
+    CResRef cResIcon;
+    CResRef cResItem;
+
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10299
+    UTIL_ASSERT(pWorld != NULL);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10301
+    UTIL_ASSERT(pGame != NULL);
+
+    LONG nContainer = pGame->m_iContainer;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10304
+    UTIL_ASSERT(nContainer != CGameObjectArray::INVALID_INDEX);
+
+    LONG nLooterId = pGame->m_iContainerSprite;
+    SHORT nPortrait = static_cast<SHORT>(pGame->GetCharacterPortraitNum(nLooterId));
+
+    // Only the controlling player may loot with this character (MP gate; always
+    // true in single-player, where the session is not hosting).
+    CGameSprite* pLooter;
+    BYTE rc;
+    do {
+        rc = pGame->GetObjectArray()->GetShare(nLooterId, CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pLooter), INFINITE);
+    } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+    if (rc != CGameObjectArray::SUCCESS) {
+        return;
+    }
+    BOOL bInControl = pLooter->InControl();
+    pGame->GetObjectArray()->ReleaseShare(nLooterId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    if (!bInControl) {
+        return;
+    }
+
+    switch (m_nID) {
+    case 0: case 1: case 2: case 3: case 4:
+    case 5: case 6: case 7: case 8: case 9: {
+        SHORT nGroundSlot = static_cast<SHORT>(pWorld->m_nTopContainerRow * 5 + m_nID);
+
+        // Re-share to confirm the looter still has room for this item.
+        do {
+            rc = pGame->GetObjectArray()->GetShare(nLooterId, CGameObjectArray::THREAD_ASYNCH,
+                reinterpret_cast<CGameObject**>(&pLooter), INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+        if (rc != CGameObjectArray::SUCCESS) {
+            return;
+        }
+        BOOL bCanTake = pGame->CanTakeContainerItem(nContainer, nGroundSlot, pLooter, nPortrait);
+        pGame->GetObjectArray()->ReleaseShare(nLooterId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        if (!bCanTake) {
+            return;
+        }
+
+        CItem* pItem = NULL;
+        STRREF errorCode;
+        if (pGame->SwapItemGround(nContainer, nGroundSlot, pItem, errorCode, 0xFFFF, FALSE) && pItem != NULL) {
+            pInventory->PlaySwapSound(NULL, pItem);
+
+            if (pItem->GetResRef() != "MISC07") {
+                // Find the first free backpack slot (18 .. 18 + PERSONAL_INVENTORY_SIZE).
+                CItem* pScan;
+                STRREF description;
+                WORD wCount;
+                SHORT nDestSlot = 18;
+                do {
+                    pGame->InventoryInfoPersonal(nPortrait, nDestSlot, pScan, description, cResIcon, cResItem, wCount, TRUE);
+                    if (cResIcon != "") {
+                        nDestSlot++;
+                    }
+                } while (cResIcon != "" && nDestSlot < CScreenInventory::PERSONAL_INVENTORY_SIZE + 18);
+
+                if (nDestSlot >= CScreenInventory::PERSONAL_INVENTORY_SIZE + 18) {
+                    // No room after all -- return the item to the container.
+                    if ((!pGame->SwapItemGround(nContainer, nGroundSlot, pItem, errorCode, 0xFFFF, FALSE) || pItem != NULL)
+                        && !pGame->SwapItemGround(nContainer, SHORT_MAX, pItem, errorCode, 0xFFFF, FALSE)) {
+                        pGame->PutBackItem(pItem, nLooterId);
+                    }
+                    m_pPanel->InvalidateRect(NULL);
+                    break;
+                }
+
+                // Scroll the personal view so the destination slot is visible.
+                INT nGroupBase = pWorld->m_nTopGroupRow * 2;
+                INT nRel = nDestSlot - 18;
+                if (nRel < nGroupBase || nGroupBase + 3 < nRel) {
+                    INT nNewTop = nRel / 2;
+                    INT nMaxTop = (CScreenInventory::PERSONAL_INVENTORY_SIZE + 1) / 2 - 2;
+                    if (nMaxTop <= nNewTop) {
+                        nNewTop = nMaxTop;
+                    }
+                    if (nNewTop != pWorld->m_nTopGroupRow) {
+                        pWorld->m_nTopGroupRow = nNewTop;
+                        static_cast<CUIControlScrollBarWorldContainer*>(m_pPanel->GetControl(0x35))->UpdateScrollBar();
+                    }
+                }
+
+                if (!pGame->SwapItemPersonalInventory(nPortrait, pItem, nDestSlot, errorCode, 0xFFFF, FALSE, TRUE)) {
+                    // Placement failed -- return the item to the container.
+                    if ((!pGame->SwapItemGround(nContainer, nGroundSlot, pItem, errorCode, 0xFFFF, FALSE) || pItem != NULL)
+                        && !pGame->SwapItemGround(nContainer, SHORT_MAX, pItem, errorCode, 0xFFFF, FALSE)) {
+                        pGame->PutBackItem(pItem, nLooterId);
+                    }
+                    m_pPanel->InvalidateRect(NULL);
+                    break;
+                }
+            } else {
+                // Gold merges into the party total; the item object is discarded.
+                pGame->AddPartyGold(pItem->GetUsageCount(0));
+                pGame->AddDisposableItem(pItem);
+                pItem = NULL;
+            }
+
+            // Resync / compress the container (MP echo; an empty item makes the
+            // receiver's Run() compress only, which is the correct SP cleanup).
+            CMessageContainerAddItem* pMessage = new CMessageContainerAddItem(CItem(),
+                SHORT_MAX,
+                TRUE,
+                nContainer,
+                nContainer);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+            m_pPanel->InvalidateRect(NULL);
+        }
+        break;
+    }
+    case 10: case 11: case 12: case 13: {
+        CItem* pItem = NULL;
+        STRREF errorCode;
+        SHORT nPersonalSlot = static_cast<SHORT>(pWorld->m_nTopGroupRow * 2 + m_nID + 8);
+
+        if (pGame->SwapItemPersonalInventory(nPortrait, pItem, nPersonalSlot, errorCode, 0xFFFF, FALSE, TRUE) && pItem != NULL) {
+            CItem* pSwapSoundItem = pItem;
+
+            // Find the first free container slot.
+            CItem* pScan;
+            STRREF description;
+            WORD wCount;
+            SHORT nDestSlot = 0;
+            do {
+                pGame->InventoryInfoGround(nContainer, nDestSlot, pScan, description, cResIcon, cResItem, wCount);
+                if (cResIcon != "") {
+                    nDestSlot++;
+                }
+            } while (cResIcon != "");
+
+            // Scroll the container view so the destination slot is visible.
+            INT nContainerBase = 5 * pWorld->m_nTopContainerRow;
+            if (nDestSlot < nContainerBase || nContainerBase + 9 < nDestSlot) {
+                pWorld->m_nTopContainerRow = nDestSlot / 5;
+                static_cast<CUIControlScrollBarWorldContainer*>(m_pPanel->GetControl(0x34))->UpdateScrollBar();
+            }
+
+            if (!pGame->SwapItemGround(nContainer, nDestSlot, pItem, errorCode, 0xFFFF, FALSE) || pItem != NULL) {
+                // Chosen slot failed/bounced -- try any slot, then back to the looter.
+                if (!pGame->SwapItemGround(nContainer, SHORT_MAX, pItem, errorCode, 0xFFFF, FALSE)
+                    && !pGame->SwapItemPersonalInventory(nPortrait, pItem, nPersonalSlot, errorCode, 0xFFFF, FALSE, TRUE)) {
+                    pGame->PutBackItem(pItem, nLooterId);
+                    m_pPanel->InvalidateRect(NULL);
+                } else {
+                    pInventory->PlaySwapSound(pSwapSoundItem, NULL);
+                    m_pPanel->InvalidateRect(NULL);
+                }
+            } else {
+                pInventory->PlaySwapSound(pSwapSoundItem, NULL);
+                m_pPanel->InvalidateRect(NULL);
+            }
+        }
+        break;
+    }
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 10534
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    // Refresh the looter's encumbrance/volume and the party-gold readout; the
+    // original inlines UpdateContainerEncumbrance here after every loot
+    // transfer (ConfigureContainer holds the open path's copy of this block).
+    CUIControlEncumbrance* pEncumbrance =
+        static_cast<CUIControlEncumbrance*>(m_pPanel->GetControl(0x36));
+    INT nWeight = static_cast<INT>(pLooter->GetCarriedWeight());
+    CDerivedStats* pDStats = pLooter->GetActiveStats();
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10556
+    UTIL_ASSERT(pDStats != NULL);
+    SHORT nStr = pDStats->m_nSTR;
+    INT nMaxWeight = static_cast<INT>(
+        static_cast<float>(pGame->GetRuleTables().GetEncumbranceMod(pLooter)) / 100.0f
+        * static_cast<float>(atol(pGame->GetRuleTables().m_tStrengthMod.GetAt(CPoint(3, nStr)))));
+    INT nUsedSlots;
+    INT nTotalSlots;
+    pLooter->GetNumInventoryPersonalSlots(nUsedSlots, nTotalSlots);
+    pEncumbrance->SetVolume(nUsedSlots, nTotalSlots);
+    pEncumbrance->SetEncumbrance(nWeight, nMaxWeight);
+    pGame->GetObjectArray()->ReleaseShare(nLooterId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    CBaldurEngine::UpdateLabel(m_pPanel, 0x10000036, "%d", pGame->GetGameSave()->m_nPartyGold);
 }
 
 // 0x696140
 BOOL CUIControlButtonWorldContainerSlot::Render(BOOL bForce)
 {
-    // TODO: Incomplete.
+    CResRef cResIcon;
+    CResRef cResItem;
 
-    return FALSE;
+    if (!m_bActive && !m_bInactiveRender) {
+        return FALSE;
+    }
+
+    if (m_nRenderCount == 0 && !bForce) {
+        return FALSE;
+    }
+
+    if (!CUIControlButton::Render(bForce)) {
+        return FALSE;
+    }
+
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10646
+    UTIL_ASSERT(pWorld != NULL);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10648
+    UTIL_ASSERT(pGame != NULL);
+
+    SHORT nPortrait = pGame->GetCharacterPortraitNum(pGame->m_iContainerSprite);
+
+    CItem* pItem = NULL;
+    STRREF description = -1;
+    WORD wCount = 0;
+    BOOL bHasIcon = FALSE;
+
+    switch (m_nID) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+    {
+        LONG nContainer = pGame->m_iContainer;
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 10673
+        UTIL_ASSERT(nContainer != CGameObjectArray::INVALID_INDEX);
+
+        // 5 = ground container columns per row (0x85a1f4).
+        SHORT nSlot = static_cast<SHORT>(pWorld->m_nTopContainerRow * 5 + m_nID);
+        pGame->InventoryInfoGround(nContainer,
+            nSlot,
+            pItem,
+            description,
+            cResIcon,
+            cResItem,
+            wCount);
+        bHasIcon = cResIcon != "";
+        break;
+    }
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    {
+        // 2 = personal columns per row (0x85a1fc); +8 maps button ids 10-13
+        // onto backpack slots (the looter's equipment occupies slots 0-17).
+        SHORT nSlot = static_cast<SHORT>(pWorld->m_nTopGroupRow * 2 + m_nID + 8);
+        pGame->InventoryInfoPersonal(nPortrait,
+            nSlot,
+            pItem,
+            description,
+            cResIcon,
+            cResItem,
+            wCount,
+            TRUE);
+        bHasIcon = cResIcon != "";
+        break;
+    }
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 10709
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    if (bHasIcon) {
+        CRect rControlFrame(m_pPanel->m_ptOrigin + m_ptOrigin, m_size);
+        CRect rClip;
+        rClip.IntersectRect(rControlFrame, m_rDirty);
+
+        CIcon::RenderIcon(0,
+            rControlFrame.TopLeft(),
+            m_size,
+            rClip,
+            cResIcon,
+            m_pPanel->m_pManager->m_bDoubleSize,
+            0,
+            wCount,
+            FALSE,
+            0,
+            FALSE,
+            0);
+
+        if (pItem != NULL) {
+            CPoint pos = rControlFrame.TopLeft();
+            BOOL bDoubleSize = m_pPanel->m_pManager->m_bDoubleSize;
+            DWORD dwItemFlags = pItem->m_flags;
+            STRREF errorCode = -1;
+
+            if ((dwItemFlags & 0x1) == 0) {
+                CVidCell cState(CResRef("STORTIN2"), bDoubleSize);
+                cState.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+            } else if (pGame->CheckIfPlayerInPortraitSlotCanUseItem(nPortrait,
+                    pItem,
+                    &errorCode,
+                    FALSE)
+                    == 0) {
+                CVidCell cState(CResRef("STORTINT"), bDoubleSize);
+                cState.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+            } else {
+                SHORT nSelected = static_cast<SHORT>(pWorld->GetSelectedCharacter());
+                LONG nLooterId = CGameObjectArray::INVALID_INDEX;
+
+                if (nSelected < pGame->m_nCharacters) {
+                    nLooterId = pGame->m_characterPortraits[nSelected];
+                }
+
+                if (nLooterId != CGameObjectArray::INVALID_INDEX) {
+                    CGameSprite* pLooter;
+                    BYTE share;
+                    do {
+                        pLooter = NULL;
+                        share = pGame->GetObjectArray()->GetShare(nLooterId,
+                            CGameObjectArray::THREAD_ASYNCH,
+                            reinterpret_cast<CGameObject**>(&pLooter),
+                            INFINITE);
+                    } while (share == CGameObjectArray::SHARED
+                        || share == CGameObjectArray::DENIED);
+
+                    if (share == CGameObjectArray::SUCCESS) {
+                        INT nUsable = pGame->CheckItemUsable(pLooter, pItem);
+                        CResRef cStateOverlay;
+
+                        if (nUsable == 2) {
+                            cStateOverlay = CResRef("STORTIN4");
+                        } else if (nUsable == 0) {
+                            cStateOverlay = CResRef("STORTINT");
+                        }
+
+                        if (cStateOverlay != "") {
+                            CVidCell cTint(cStateOverlay, bDoubleSize);
+                            cTint.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+                        }
+
+                        pGame->GetObjectArray()->ReleaseShare(nLooterId,
+                            CGameObjectArray::THREAD_ASYNCH,
+                            INFINITE);
+                    }
+                }
+            }
+
+            if ((dwItemFlags & 0x8) != 0 && (dwItemFlags & 0x1) != 0) {
+                CVidCell cState(CResRef("STORTIN3"), bDoubleSize);
+                cState.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+            }
+        }
+    }
+
+    SetToolTipStrRef(description, -1, -1);
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------

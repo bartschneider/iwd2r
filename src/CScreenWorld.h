@@ -23,6 +23,7 @@ class CScreenWorld : public CBaldurEngine {
 public:
     static const LONG BORED_TIME;
     static int dword_8F85BC;
+    static BOOL bMultiplayerStore;
 
     CScreenWorld();
     /* 0004 */ ~CScreenWorld() override;
