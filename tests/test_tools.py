@@ -26081,6 +26081,29 @@ class ReStatusTest(unittest.TestCase):
         self.assertFalse(got['0x401100'])  # array_destruct + eh vector iterator
         self.assertTrue(got['0x401600'])   # FreeStr is still not a member op
 
+    def test_rule4_dtor_real_when_its_extra_callees_are_the_base_dtors(self):
+        rs = load_tool('re_status')
+        table = {'401000': ('CButton::~CButton', 96),
+                 '401100': ('operator_delete', 6),
+                 '401200': ('array_destruct', 104),
+                 '401300': ('CVidFont::~CVidFont', 30),
+                 '402000': ('CButtonDone::~CButtonDone', 40),
+                 '403000': ('CBare::~CBare', 40)}
+        graph = {'401000': ['401100', '401200', '401300'],
+                 '402000': ['401100', '401200', '401300'],
+                 '403000': ['401100']}
+        bases = {'CButtonDone': ['CButton']}  # CBare has no base declaration
+        dtors = {'CButton': '401000'}
+        src = ('// 0x402000\nCButtonDone::~CButtonDone()\n{\n}\n'
+               '// 0x403000\nCBare::~CBare()\n{\n}\n')
+        got = {a: s for a, n, s in rs.markers(src, table, graph,
+                                              bases=bases, dtors=dtors)}
+        # 0x402000's only non-member callee, operator_delete, is the base
+        # destructor's: the base deletes, so the empty derived body is real.
+        self.assertFalse(got['0x402000'])
+        # CBare's operator_delete has no base destructor behind it: a stub.
+        self.assertTrue(got['0x403000'])
+
     def test_compute_applies_the_rules_and_lists_what_rule4_keeps(self):
         self.write(self.exports, 'functions.tsv',
                    '401000\tCEff::CEff\t64\n401100\tCObj::CObj\t20\n'

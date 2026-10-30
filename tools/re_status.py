@@ -22,7 +22,13 @@ is real when every callee (callgraph.tsv) is a constructor, destructor,
 `operator new`/`operator delete`, a `_Construct`/`_Destruct`-style helper or
 one of the compiler's member-array helpers (`construct_array`,
 `array_destruct`, the `eh vector` constructor/destructor iterators) of
-a base or member class. The rest stay stubs; rule 4's leftovers are the
+a base or member class. A destructor may additionally call what the exe
+destructor of one of its base classes calls (its inlined base destructor:
+the base from our class declaration in src/*.h, the base destructor's
+address from our `// 0xADDR` marker above it, up the chain); `operator
+delete` and `array_destruct` never count on their own for that path, and a
+constructor still keeps `operator new` (a member allocation our empty body
+would miss). The rest stay stubs; rule 4's leftovers are the
 porting queue compute prints. Verified: recovered
 and the evidence file's kind is oracle, replay or trace. A scenario counts as
 matched when scenarios/<name>.txt has a <name>.expect.json beside it, the
@@ -90,6 +96,7 @@ OPERATOR = re.compile(r'operator\s*(?:\(\)|[-+*/%^&|!<>=\[\]~,]+)')
 INIT = re.compile(r'(?<!:)[:,]\s*[\w:<>]+\s*$')
 ASSIGN = re.compile(r'[^=!<>]=[^=]')
 CTOR = re.compile(r'(\w+)::(~?)\1$')
+CLASSDECL = re.compile(r'^class\s+(\w+)\s*:\s*(.+)$')
 
 
 def _mask(text):
@@ -131,13 +138,65 @@ def _member_op(name):
             or name.endswith(('_Construct', '_Destruct')))
 
 
-def classify(body, name='', address=None, table=None, graph=None, ours=None):
+def _bases(text):
+    """{class: [base class, ...]} from our `class X : public A, public B`
+    declarations (one line each, comments masked first). Template bases
+    (`CResHelper<CResBitmap, 1>`) count as their template's name; their
+    destructor has no marker, so the chain simply stops there."""
+    out = {}
+    for ln in _mask(text).split('\n'):
+        m = CLASSDECL.match(ln.strip())
+        if not m:
+            continue
+        heads = []
+        for b in m.group(2).strip().rstrip('{ \t').split(','):
+            b = re.sub(r'^(?:virtual\s+)?(?:public|protected|private)\s+',
+                       '', b.strip()).split('<')[0].strip()
+            if re.fullmatch(r'\w+', b):
+                heads.append(b)
+        if heads:
+            out[m.group(1)] = heads
+    return out
+
+
+def _dtor_class(name):
+    """The class of a destructor name ('CButton::~CButton' -> 'CButton',
+    '~CButton' -> 'CButton'), None for a constructor or anything else."""
+    m = CTOR.search(name)
+    if m and m.group(2):
+        return m.group(1)
+    if name.startswith('~'):
+        return name[1:].split('::')[0]
+    return None
+
+
+def _base_callees(cls, bases, dtors, graph, seen=frozenset()):
+    """Every callee of the exe destructors of cls's bases, transitively up
+    the chain: the addresses a derived destructor may call because its base
+    destructor's body is inlined into it (`dtors` maps a class to the
+    address of our destructor marker for it)."""
+    out = set()
+    for base in bases.get(cls, ()):
+        addr = dtors.get(base)
+        if addr is None or addr in seen:
+            continue
+        seen = seen | {addr}
+        out |= set(graph.get(addr, ()))
+        out |= _base_callees(base, bases, dtors, graph, seen)
+    return out
+
+
+def classify(body, name='', address=None, table=None, graph=None, ours=None,
+             bases=None, dtors=None):
     """(stub, why) for one masked, whitespace-free body, by the four rules of
     the 2026-10-30 census, in order; a body that matches none stays a stub.
     `name` is our name for the definition, `address` the marker's; `table`
     maps a normalised address to (name, size) in functions.tsv and `graph` a
     caller to its callee addresses in callgraph.tsv. Rules 3 and 4 need the
-    exports, so with no table an empty body stays a stub."""
+    exports, so with no table an empty body stays a stub. A destructor may
+    additionally call what the exe destructor of one of its base classes
+    calls (`bases` maps a class to its base classes, `dtors` a class to the
+    address of our destructor marker for it): the inlined base destructor."""
     if ('TODO' in body or 'NotImplemented' in body
             or 'assert(false' in body.replace(' ', '')):
         return True, 'todo'
@@ -152,8 +211,13 @@ def classify(body, name='', address=None, table=None, graph=None, ours=None):
     if CTOR.search(name) or name.startswith('~'):
         if graph is None:
             return True, 'ctor-nograph'
-        callee = next((c for c in graph.get(address, [])
-                       if not _member_op(_callee_name(c, table, ours))), None)
+        allowed = ()
+        cls = _dtor_class(name)
+        if cls and bases and dtors:  # the base path is for destructors only;
+            allowed = _base_callees(cls, bases, dtors, graph)  # a ctor keeps
+        callee = next((c for c in graph.get(address, [])  # its operator_new
+                       if not (_member_op(_callee_name(c, table, ours))
+                               or c in allowed)), None)
         if callee is None:  # rule 4: only base/member construction/destruction
             return False, 'ctor-callees'
         return True, 'ctor-callee:' + (_callee_name(callee, table, ours)
@@ -242,10 +306,11 @@ def _bodies(text):
     return out
 
 
-def markers(text, table=None, graph=None, ours=None):
+def markers(text, table=None, graph=None, ours=None, bases=None, dtors=None):
     """[(address, our name, stub?)] for every marker _bodies finds, judged by
     classify."""
-    return [(a, name, classify(body, name, _norm(a), table, graph, ours)[0])
+    return [(a, name, classify(body, name, _norm(a), table, graph, ours,
+                               bases, dtors)[0])
             for a, name, body in _bodies(text)]
 
 
@@ -260,14 +325,23 @@ def scan(repo, table=None, graph=None):
     that is not a base/member constructor, destructor, operator new/delete
     or member-array helper — the porting queue."""
     bodies = []
+    bases = {}
     for ext in ('cpp', 'h'):
         for path in sorted(glob.glob(os.path.join(repo, 'src', '**', '*.' + ext),
                                      recursive=True)):
             with open(path, encoding='utf-8', errors='replace') as f:
-                bodies.extend(_bodies(f.read()))
+                text = f.read()
+            if ext == 'h':
+                bases.update(_bases(text))
+            bodies.extend(_bodies(text))
     ours = {}
     for a, name, _ in bodies:
         ours.setdefault(_norm(a), name)
+    dtors = {}
+    for a, name in ours.items():
+        cls = _dtor_class(name)
+        if cls and cls not in dtors:  # first marker wins, like ours above
+            dtors[cls] = a
     old_real = {_norm(a) for a, _, body in bodies if not _was_stub(body)}
     real = {}
     added = {'statement': 0, 'size': 0, 'ctor-callees': 0}
@@ -277,7 +351,7 @@ def scan(repo, table=None, graph=None):
         if a in seen:  # two markers for one address: the first one wins
             continue
         seen.add(a)
-        stub, why = classify(body, name, a, table, graph, ours)
+        stub, why = classify(body, name, a, table, graph, ours, bases, dtors)
         if not stub:
             real.setdefault(a, name)
             if a not in old_real:
@@ -394,7 +468,7 @@ def render(s):
         f"SEH funclets and {ex['thunks']:,} thunks. |",
         f"| Functions recovered | **{_pct(r['functions'], g['functions'])}** "
         f"({r['functions']:,} / {g['functions']:,}) | By count, same "
-        "denominator; a function counts once its body is more than a stub: TODO, NotImplemented or assert(false) bodies stay stubs, any statement counts, and an empty body counts when the exe's function is at most 16 bytes or is a constructor/destructor calling only base/member constructors, destructors and the compiler's member construction/destruction helpers (`operator new`/`operator delete`, `construct_array`, `array_destruct`, the `eh vector` iterators). |",
+        "denominator; a function counts once its body is more than a stub: TODO, NotImplemented or assert(false) bodies stay stubs, any statement counts, and an empty body counts when the exe's function is at most 16 bytes or is a constructor/destructor calling only base/member constructors, destructors and the compiler's member construction/destruction helpers (`operator new`/`operator delete`, `construct_array`, `array_destruct`, the `eh vector` iterators); a destructor may also call what the exe destructor of its base classes calls (the inlined base destructor). |",
         f"| Verified against the original | "
         f"**{_pct(v['functions'], g['functions'])}** ({v['functions']:,} / "
         f"{g['functions']:,}; {v['bytes']:,} bytes) | Recovered functions whose "
