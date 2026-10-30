@@ -1126,7 +1126,50 @@ void CGameContainer::SetItem(SHORT nSlotNum, CItem* pItem)
 // 0x480480
 void CGameContainer::sub_480480(SHORT nSlotNum, CItem* pItem)
 {
-    // TODO: Incomplete.
+    // 0x8D3968
+    static const CResRef RESREF_60HEART("60HEART");
+    // 0x8D3990
+    static const CString HC_SLOT_NAME("HCx");
+
+    CItem* pHeartItem = pItem;
+    if (pHeartItem == NULL) {
+        POSITION pos = m_lstItems.FindIndex(nSlotNum);
+        if (pos == NULL) {
+            return;
+        }
+        pHeartItem = m_lstItems.GetAt(pos);
+        if (pHeartItem == NULL) {
+            return;
+        }
+    }
+
+    BYTE resRef[RESREF_SIZE];
+    pHeartItem->cResRef.GetResRef(resRef);
+    BYTE cHeartIndex = resRef[RESREF_SIZE - 1];
+    resRef[RESREF_SIZE - 1] = '\0';
+    if (CResRef(resRef) != RESREF_60HEART) {
+        return;
+    }
+
+    CString sName(HC_SLOT_NAME);
+    sName.SetAt(sName.GetLength() - 1, cHeartIndex);
+
+    CNamedCreatureVariableHash* pNamedCreatures = m_pArea->GetNamedCreatures();
+    CVariable* pVariable = pNamedCreatures->FindKey(sName);
+    if (pItem == NULL) {
+        if (pVariable != NULL && pVariable->m_intValue == m_id) {
+            pNamedCreatures->RemoveKey(sName, FALSE, 0);
+        }
+    } else {
+        if (pVariable != NULL) {
+            pVariable->m_intValue = m_id;
+        } else {
+            CVariable variable;
+            variable.SetName(sName);
+            variable.m_intValue = m_id;
+            pNamedCreatures->AddKey(variable);
+        }
+    }
 }
 
 // 0x480760
