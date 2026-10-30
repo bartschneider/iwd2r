@@ -14,8 +14,22 @@ compute   reads the Ghidra function table (<exports>/functions.tsv, tab
 
 Denominator: the table minus `Unwind@`, `Catch@`, `Finally@` funclets and
 `thunk_` thunks. Recovered: a standalone // 0xADDR marker in src/*.cpp or *.h
-precedes a definition whose body is not a stub (xrec.stubby, with one-line
-return/assignment bodies counted as real). Verified: recovered
+precedes a definition whose body is real by four rules, in order (classify):
+TODO, NotImplemented or assert(false) anywhere is a stub; any statement after
+masking comments is real; an empty body is real when the exe's function
+(functions.tsv) is at most 16 bytes; an empty constructor or destructor body
+is real when every callee (callgraph.tsv) is a constructor, destructor,
+`operator new`/`operator delete`, a `_Construct`/`_Destruct`-style helper or
+one of the compiler's member-array helpers (`construct_array`,
+`array_destruct`, the `eh vector` constructor/destructor iterators) of
+a base or member class. A destructor may additionally call what the exe
+destructor of one of its base classes calls (its inlined base destructor:
+the base from our class declaration in src/*.h, the base destructor's
+address from our `// 0xADDR` marker above it, up the chain); `operator
+delete` and `array_destruct` never count on their own for that path, and a
+constructor still keeps `operator new` (a member allocation our empty body
+would miss). The rest stay stubs; rule 4's leftovers are the
+porting queue compute prints. Verified: recovered
 and the evidence file's kind is oracle, replay or trace. A scenario counts as
 matched when scenarios/<name>.txt has a <name>.expect.json beside it, the
 checkpoints of the original's state dumps (scenarios/pending/ is not counted).
@@ -65,10 +79,24 @@ def read_table(path):
     return rows
 
 
+def read_graph(path):
+    """{normalised caller: [normalised callee, ...]} from callgraph.tsv, one
+    line per function: the caller, then each callee address."""
+    graph = {}
+    with open(path, encoding='utf-8', errors='replace') as f:
+        for line in f:
+            parts = line.rstrip('\n').split('\t')
+            if parts and parts[0]:
+                graph[_norm(parts[0])] = [_norm(p) for p in parts[1:] if p]
+    return graph
+
+
 MARKER = re.compile(r'^\s*//\s*(0x[0-9A-Fa-f]+)\s*$')
 OPERATOR = re.compile(r'operator\s*(?:\(\)|[-+*/%^&|!<>=\[\]~,]+)')
 INIT = re.compile(r'(?<!:)[:,]\s*[\w:<>]+\s*$')
 ASSIGN = re.compile(r'[^=!<>]=[^=]')
+CTOR = re.compile(r'(\w+)::(~?)\1$')
+CLASSDECL = re.compile(r'^class\s+(\w+)\s*:\s*(.+)$')
 
 
 def _mask(text):
@@ -77,11 +105,131 @@ def _mask(text):
     return pat.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
 
 
-def is_stub(body, stubby):
-    """xrec's rule, except that a body under 40 characters holding a return or
-    an assignment is a real one-liner (TODO, NotImplemented and assert(false
-    still make a stub whatever the length)."""
-    if not stubby(body):
+def _callee_name(address, table, ours):
+    """A callee's name: functions.tsv's, else our marker's, else None."""
+    row = table.get(address) if table else None
+    if row and row[0]:
+        return row[0]
+    return (ours or {}).get(address)
+
+
+def _member_op(name):
+    """True for a callee that only constructs or destroys a base or member:
+    a constructor, destructor, `operator new`/`operator delete`, a
+    `_Construct`/`_Destruct`-style helper or one of the compiler's
+    member-array helpers (`construct_array`, `array_destruct`, the `eh
+    vector` constructor/destructor iterators), judged by its name (Ghidra's
+    or our marker's); thunk_ and j_ thunks count as their target."""
+    if not name:
+        return False
+    while name.startswith(('thunk_', 'j_')):
+        name = name[name.index('_') + 1:]
+    if name.startswith(('??0', '??1')):
+        return True
+    if re.search(r'operator\s*(?:new|delete)\b', name):
+        return True
+    if name in ('construct_array', 'array_destruct'):
+        return True
+    lowered = name.lower()
+    if 'eh vector' in lowered and ('construct' in lowered
+                                   or 'destruct' in lowered):
+        return True
+    return (bool(CTOR.search(name)) or name.startswith('~')
+            or name.endswith(('_Construct', '_Destruct')))
+
+
+def _bases(text):
+    """{class: [base class, ...]} from our `class X : public A, public B`
+    declarations (one line each, comments masked first). Template bases
+    (`CResHelper<CResBitmap, 1>`) count as their template's name; their
+    destructor has no marker, so the chain simply stops there."""
+    out = {}
+    for ln in _mask(text).split('\n'):
+        m = CLASSDECL.match(ln.strip())
+        if not m:
+            continue
+        heads = []
+        for b in m.group(2).strip().rstrip('{ \t').split(','):
+            b = re.sub(r'^(?:virtual\s+)?(?:public|protected|private)\s+',
+                       '', b.strip()).split('<')[0].strip()
+            if re.fullmatch(r'\w+', b):
+                heads.append(b)
+        if heads:
+            out[m.group(1)] = heads
+    return out
+
+
+def _dtor_class(name):
+    """The class of a destructor name ('CButton::~CButton' -> 'CButton',
+    '~CButton' -> 'CButton'), None for a constructor or anything else."""
+    m = CTOR.search(name)
+    if m and m.group(2):
+        return m.group(1)
+    if name.startswith('~'):
+        return name[1:].split('::')[0]
+    return None
+
+
+def _base_callees(cls, bases, dtors, graph, seen=frozenset()):
+    """Every callee of the exe destructors of cls's bases, transitively up
+    the chain: the addresses a derived destructor may call because its base
+    destructor's body is inlined into it (`dtors` maps a class to the
+    address of our destructor marker for it)."""
+    out = set()
+    for base in bases.get(cls, ()):
+        addr = dtors.get(base)
+        if addr is None or addr in seen:
+            continue
+        seen = seen | {addr}
+        out |= set(graph.get(addr, ()))
+        out |= _base_callees(base, bases, dtors, graph, seen)
+    return out
+
+
+def classify(body, name='', address=None, table=None, graph=None, ours=None,
+             bases=None, dtors=None):
+    """(stub, why) for one masked, whitespace-free body, by the four rules of
+    the 2026-10-30 census, in order; a body that matches none stays a stub.
+    `name` is our name for the definition, `address` the marker's; `table`
+    maps a normalised address to (name, size) in functions.tsv and `graph` a
+    caller to its callee addresses in callgraph.tsv. Rules 3 and 4 need the
+    exports, so with no table an empty body stays a stub. A destructor may
+    additionally call what the exe destructor of one of its base classes
+    calls (`bases` maps a class to its base classes, `dtors` a class to the
+    address of our destructor marker for it): the inlined base destructor."""
+    if ('TODO' in body or 'NotImplemented' in body
+            or 'assert(false' in body.replace(' ', '')):
+        return True, 'todo'
+    inner = body[1:-1] if body[:1] == '{' and body[-1:] == '}' else body
+    if inner:  # rule 2: any statement at all, comments masked out
+        return False, 'statement'
+    if table is None or address is None:
+        return True, 'empty'
+    row = table.get(address)
+    if row and row[1] <= 16:  # rule 3: the exe's function is as empty as ours
+        return False, 'size'
+    if CTOR.search(name) or name.startswith('~'):
+        if graph is None:
+            return True, 'ctor-nograph'
+        allowed = ()
+        cls = _dtor_class(name)
+        if cls and bases and dtors:  # the base path is for destructors only;
+            allowed = _base_callees(cls, bases, dtors, graph)  # a ctor keeps
+        callee = next((c for c in graph.get(address, [])  # its operator_new
+                       if not (_member_op(_callee_name(c, table, ours))
+                               or c in allowed)), None)
+        if callee is None:  # rule 4: only base/member construction/destruction
+            return False, 'ctor-callees'
+        return True, 'ctor-callee:' + (_callee_name(callee, table, ours)
+                                       or '0x' + callee)
+    return True, 'empty'
+
+
+def _was_stub(body):
+    """The pre-Task-55 judgement, kept only so compute can report what the
+    new rules add or demote."""
+    if not (len(body) < 40 or 'TODO' in body or 'NotImplemented' in body
+            or 'assert(false' in body.replace(' ', '')):
         return False
     if ('TODO' in body or 'NotImplemented' in body
             or 'assert(false' in body.replace(' ', '')):
@@ -96,10 +244,11 @@ def _name(head):
     return m.group(1).replace(' ', '') if m else ''
 
 
-def markers(text, stubby):
-    """[(address, our name, stub?)] for every standalone // 0xADDR marker that
+def _bodies(text):
+    """[(address, our name, body)] for every standalone // 0xADDR marker that
     precedes a function definition. A marker followed by another marker, or by
-    a declaration or data definition (`;` or `=` before any body), is none."""
+    a declaration or data definition (`;` or `=` before any body), is none.
+    The body is the masked, whitespace-free text between the braces."""
     lines = text.split('\n')
     masked = _mask(text)
     starts = []
@@ -153,23 +302,72 @@ def markers(text, stubby):
                     break
             e += 1
         body = re.sub(r'\s+', '', masked[k:e + 1])
-        out.append((m.group(1), _name(masked[starts[j]:k]), is_stub(body, stubby)))
+        out.append((m.group(1), _name(masked[starts[j]:k]), body))
     return out
 
 
-def recovered_functions(repo):
-    """{normalised address: our name} of every marker with a non-stub body."""
-    stubby = _load('xrec').stubby
-    out = {}
+def markers(text, table=None, graph=None, ours=None, bases=None, dtors=None):
+    """[(address, our name, stub?)] for every marker _bodies finds, judged by
+    classify."""
+    return [(a, name, classify(body, name, _norm(a), table, graph, ours,
+                               bases, dtors)[0])
+            for a, name, body in _bodies(text)]
+
+
+def scan(repo, table=None, graph=None):
+    """(real, added, demoted, kept) over every marker in src/**/*.{cpp,h}.
+    `real` maps a normalised address to our name when classify calls the body
+    real; `added` counts, per rule, the addresses no marker of theirs was real
+    under the pre-Task-55 rule; `demoted` counts the reverse (addresses only
+    their comments made look long); `kept` lists [(address, name, exe size,
+    callee)] of empty
+    constructors and destructors rule 4 left as stubs, with the first callee
+    that is not a base/member constructor, destructor, operator new/delete
+    or member-array helper — the porting queue."""
+    bodies = []
+    bases = {}
     for ext in ('cpp', 'h'):
         for path in sorted(glob.glob(os.path.join(repo, 'src', '**', '*.' + ext),
                                      recursive=True)):
             with open(path, encoding='utf-8', errors='replace') as f:
                 text = f.read()
-            for address, name, stub in markers(text, stubby):
-                if not stub:
-                    out.setdefault(_norm(address), name)
-    return out
+            if ext == 'h':
+                bases.update(_bases(text))
+            bodies.extend(_bodies(text))
+    ours = {}
+    for a, name, _ in bodies:
+        ours.setdefault(_norm(a), name)
+    dtors = {}
+    for a, name in ours.items():
+        cls = _dtor_class(name)
+        if cls and cls not in dtors:  # first marker wins, like ours above
+            dtors[cls] = a
+    old_real = {_norm(a) for a, _, body in bodies if not _was_stub(body)}
+    real = {}
+    added = {'statement': 0, 'size': 0, 'ctor-callees': 0}
+    demoted, kept, seen = 0, [], set()
+    for a, name, body in bodies:
+        a = _norm(a)
+        if a in seen:  # two markers for one address: the first one wins
+            continue
+        seen.add(a)
+        stub, why = classify(body, name, a, table, graph, ours, bases, dtors)
+        if not stub:
+            real.setdefault(a, name)
+            if a not in old_real:
+                added[why] += 1
+        elif a in old_real:
+            demoted += 1
+        elif why.startswith('ctor-callee'):
+            row = (table or {}).get(a)
+            kept.append((a, name, row[1] if row else None,
+                         why[len('ctor-callee:'):]))
+    return real, added, demoted, kept
+
+
+def recovered_functions(repo, table=None, graph=None):
+    """{normalised address: our name} of every marker with a real body."""
+    return scan(repo, table, graph)[0]
 
 
 def evidence_kinds(repo):
@@ -203,7 +401,13 @@ def compute(repo, exports):
                  if n.startswith('thunk_') and not n.startswith(FUNCLETS))
     den = [(a, s) for a, n, s in rows
            if not n.startswith(FUNCLETS) and not n.startswith('thunk_')]
-    recfn = recovered_functions(repo)
+    table = {a: (n, s) for a, n, s in rows}
+    graph_path = os.path.join(exports, 'callgraph.tsv')
+    graph = read_graph(graph_path) if os.path.isfile(graph_path) else None
+    if graph is None:
+        print('warning: no callgraph.tsv next to functions.tsv; rule 4 keeps '
+              'every empty constructor and destructor a stub', file=sys.stderr)
+    recfn, added, demoted, kept = scan(repo, table, graph)
     rec = set(recfn)
     names = {a: n for a, n, _ in rows}
     mismatched = sorted(
@@ -220,6 +424,16 @@ def compute(repo, exports):
     recovered = [(a, s) for a, s in den if a in rec]
     verified = [(a, s) for a, s in recovered if kinds.get(a) in KINDS]
     by_kind = {k: sum(1 for a, _ in verified if kinds[a] == k) for k in KINDS}
+    print('re_status: the rules recovered %d more than the old count '
+          '(rule 2, any statement: %d; rule 3, empty and exe at most 16 '
+          'bytes: %d; rule 4, empty ctor/dtor with base/member callees only: '
+          '%d) and demoted %d addresses only their comments made look long; '
+          'rule 4 kept %d empty constructors/destructors as stubs:'
+          % (sum(added.values()) - demoted, added['statement'], added['size'],
+             added['ctor-callees'], demoted, len(kept)), file=sys.stderr)
+    for a, name, size, callee in kept:
+        print(f'  rule 4 kept 0x{a}  {name}  (exe {size if size is not None else "?"} '
+              f'bytes)  callee {callee}', file=sys.stderr)
     return {
         'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d'),
         'ghidra': {'functions': len(den), 'bytes': sum(s for _, s in den),
@@ -254,7 +468,7 @@ def render(s):
         f"SEH funclets and {ex['thunks']:,} thunks. |",
         f"| Functions recovered | **{_pct(r['functions'], g['functions'])}** "
         f"({r['functions']:,} / {g['functions']:,}) | By count, same "
-        "denominator; a function counts once its body is more than a stub (a TODO, an empty or assert(false) body); a one-line body with a return or an assignment counts. |",
+        "denominator; a function counts once its body is more than a stub: TODO, NotImplemented or assert(false) bodies stay stubs, any statement counts, and an empty body counts when the exe's function is at most 16 bytes or is a constructor/destructor calling only base/member constructors, destructors and the compiler's member construction/destruction helpers (`operator new`/`operator delete`, `construct_array`, `array_destruct`, the `eh vector` iterators); a destructor may also call what the exe destructor of its base classes calls (the inlined base destructor). |",
         f"| Verified against the original | "
         f"**{_pct(v['functions'], g['functions'])}** ({v['functions']:,} / "
         f"{g['functions']:,}; {v['bytes']:,} bytes) | Recovered functions whose "

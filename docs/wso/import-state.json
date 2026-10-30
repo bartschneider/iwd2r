@@ -7696,6 +7696,115 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "i052": {
+      "assigned_at": "2026-10-30T19:31:25+00:00",
+      "branch": "p3/wso-i052",
+      "closed_at": null,
+      "files": [
+        "src/CProjectile.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x52DD60",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExploding::AIUpdate",
+          "our_len": 0,
+          "their_len": 2075
+        },
+        {
+          "address": "0x57D700",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileReboundingBolt::Fire",
+          "our_len": 0,
+          "their_len": 2017
+        },
+        {
+          "address": "0x57C7B0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileChainLightning::DeliverEffects",
+          "our_len": 0,
+          "their_len": 1554
+        },
+        {
+          "address": "0x57C1D0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::Strike",
+          "our_len": 0,
+          "their_len": 1419
+        },
+        {
+          "address": "0x7A2590",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::FrameSend",
+          "our_len": 0,
+          "their_len": 1294
+        },
+        {
+          "address": "0x75E630",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::StartStore",
+          "our_len": 0,
+          "their_len": 1253
+        },
+        {
+          "address": "0x52F9E0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSkullTrap::AIUpdate",
+          "our_len": 0,
+          "their_len": 1237
+        },
+        {
+          "address": "0x5329A0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSPFLMARR::AIUpdate",
+          "our_len": 0,
+          "their_len": 1073
+        }
+      ],
+      "status": "assigned",
+      "verdicts": {}
+    },
+    "i053": {
+      "assigned_at": "2026-10-30T20:04:13+00:00",
+      "branch": "p3/wso-i053",
+      "closed_at": "2026-10-30T21:07:53+00:00",
+      "files": [
+        "src/IcewindCGameEffects.cpp"
+      ],
+      "gate": "full",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x55FA10",
+          "category": "only_theirs",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectSummon::AddSummonVisualHit",
+          "our_len": 0,
+          "their_len": 558
+        },
+        {
+          "address": "0x55F930",
+          "category": "only_theirs",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectSummon::PlayGroupVFX",
+          "our_len": 0,
+          "their_len": 482
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
