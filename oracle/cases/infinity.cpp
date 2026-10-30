@@ -762,7 +762,7 @@ constexpr uintptr_t kScrollingCancelRequestRect = 0x5CD3C0;
 // (including outside the map), states 1-8 and a1 bytes, with the tiles'
 // request counts high enough that no cancellation reaches the floor. Compares
 // the WED, the untouched rect/state fields and all 64 tiles' counts/flags.
-void ScrollingCancelRequestRect(CaseContext& ctx)
+void CaseScrollingCancelRequestRect(CaseContext& ctx)
 {
     uint8_t* wedData = nullptr;
     uint8_t* resWed = nullptr;
@@ -939,4 +939,4 @@ void ScrollingCancelRequestRect(CaseContext& ctx)
 
 ORACLE_CASE("infinity/check_tile_state", CheckTileState);
 ORACLE_CASE("infinity/scrolling_request_rect", ScrollingRequestRect);
-ORACLE_CASE("infinity/scrolling_cancel_request_rect", ScrollingCancelRequestRect);
+ORACLE_CASE("infinity/scrolling_cancel_request_rect", CaseScrollingCancelRequestRect);
