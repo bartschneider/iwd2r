@@ -255,7 +255,11 @@ void CheckTileState(CaseContext& ctx)
         const uint16_t wedIndex = static_cast<uint16_t>(picks.Between(0, 2) == 0 ? 0xFFFF : 0);
         const uint16_t aiState = static_cast<uint16_t>(picks.Between(0, 1) == 0 ? 1 : 2);
         const uint16_t renderState = picks.Between(0, 4) == 0 ? aiState : static_cast<uint16_t>(aiState == 1 ? 2 : 1);
-        const uint16_t refCount = static_cast<uint16_t>(picks.Between(2, 4));
+        // Above the number of swaps one input can make (the object tiles may
+        // repeat the same image), so DetachFromVRam never empties the pool
+        // entry: EmptyTile/AssociateTile would need real surfaces and are not
+        // part of CheckTileState's contract here.
+        const uint16_t refCount = static_cast<uint16_t>(numTiles + picks.Between(4, 8));
 
         // The tiled object and the object tile list.
         Put16(image, kTiledObjectsOffset + 0x0A, static_cast<uint16_t>(startingTile));
