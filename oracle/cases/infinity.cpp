@@ -513,7 +513,10 @@ void BuildScrollImage(std::vector<uint8_t>& image)
         pTileData->nStartingTile = 0;
         pTileData->nNumTiles = 1;
         pTileData->nSecondary = static_cast<uint16_t>(i);
-        pTileData->bFlags = 0;
+        // bFlags 0x02 names a second layer the fixture does not have, so the
+        // layer walk is a no-op on both sides and the trailing secondary
+        // request runs (RequestTile reaches it only after the layer block).
+        pTileData->bFlags = 0x2;
         pTileData->wFlags = 2; // CTiledObject::STATE_SECONDARY_TILE
     }
 }

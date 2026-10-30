@@ -382,7 +382,10 @@ struct ScrollFixture {
             pTileData->nStartingTile = 0;
             pTileData->nNumTiles = 1;
             pTileData->nSecondary = static_cast<WORD>(i);
-            pTileData->bFlags = 0;
+            // A second layer the fixture does not have (the WED has one
+            // layer), so the layer walk is a no-op in both and the trailing
+            // secondary request runs.
+            pTileData->bFlags = 0x2;
             pTileData->wFlags = CTiledObject::STATE_SECONDARY_TILE;
 
             Put16(image, kScrollTileListOffset + 2 * i, static_cast<WORD>(i));
