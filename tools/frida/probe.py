@@ -430,6 +430,7 @@ def run(ns):
     host_python, venv_win, box_python = venv_python()
     script = oracle.scenario_path(ns.scenario)
     cheats = realinput.load_header_cheats(script)
+    fixtures = realinput.load_header_fixtures(script)
     timeout = oracle.replay_timeout(ns.timeout, script)
     ns.post_load = resolve_post_load(ns.post_load, script)
     if timeout <= TRACE_GRACE:
@@ -497,6 +498,7 @@ def run(ns):
     rc = 2
     prior_cheats = None
     prior_console = None
+    prior_fixtures = []
     try:
         if not dry and cheats:
             prior_cheats = oracle.prepare_cheats_ini(game, cheats)
@@ -505,6 +507,11 @@ def run(ns):
             # [Lua Edit] String0 (the last submitted line, any session's),
             # so a console run's typed command would append to it.
             prior_console = oracle.prepare_console_ini(game)
+        if not dry and fixtures:
+            # Both probe targets read the copy's Characters folder (ours
+            # through IWD2_DATA), so the scenarios-root fixtures land there
+            # for the run and come out after it.
+            prior_fixtures = oracle.prepare_character_fixtures(game, fixtures)
         with filelock.hold(oracle.REPLAY_LOCK, 'replay'), \
                 filelock.hold(winsandbox.SANDBOX_LOCK, 'sandbox'), \
                 saves_of_its_own(game, out_dir, dry):
@@ -517,6 +524,8 @@ def run(ns):
     finally:
         if not dry and cheats:
             oracle.restore_cheats_ini(game, prior_cheats)
+        if not dry and prior_fixtures:
+            oracle.restore_character_fixtures(game, prior_fixtures)
         if not dry and ns.target == 'original':
             oracle.restore_console_ini(game, prior_console)
         if not dry:

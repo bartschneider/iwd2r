@@ -1744,6 +1744,61 @@ def restore_console_ini(game, prior, install=INSTALL):
         print('restored [Lua Edit] in %s' % path)
 
 
+def prepare_character_fixtures(game, fixtures, install=INSTALL,
+                               reparse=windows_reparse):
+    """Copy a scenario's character fixtures (load_header_fixtures' [(source,
+    name)] list) into the copy's Characters folder for the run, so the
+    original and ours read them through their own roots; returns the
+    [(name, prior bytes or None)] list restore_character_fixtures wants.
+    None means the copy had no file of that name, so the restore removes
+    the staged one -- and a file the run itself exported under that name
+    with it."""
+    reason = unsafe_target(game, install, ORACLE_DIR, reparse=reparse)
+    if reason:
+        sys.exit('oracle: refusing to stage characters: %s' % reason)
+    folder = os.path.join(game, 'Characters')
+    os.makedirs(folder, exist_ok=True)
+    prior = []
+    for source, name in fixtures:
+        path = os.path.join(folder, name)
+        old = None
+        if os.path.exists(path):
+            with open(path, 'rb') as f:
+                old = f.read()
+        shutil.copyfile(source, path)
+        print('staged %s as %s' % (source, path))
+        prior.append((name, old))
+    return prior
+
+
+def restore_character_fixtures(game, prior, install=INSTALL,
+                               reparse=windows_reparse):
+    """Put the copy's Characters folder back after prepare_character_fixtures:
+    each staged name gets its prior bytes back, or is removed when the copy
+    had none (whatever the run left there)."""
+    reason = unsafe_target(game, install, ORACLE_DIR, reparse=reparse)
+    if reason:
+        sys.exit('oracle: refusing to restore characters: %s' % reason)
+    folder = os.path.join(game, 'Characters')
+    for name, old in prior:
+        path = os.path.join(folder, name)
+        if old is None:
+            if os.path.exists(path):
+                os.remove(path)
+                print('removed %s' % path)
+            continue
+        if not os.path.exists(path):
+            with open(path, 'wb') as f:
+                f.write(old)
+            print('restored %s' % path)
+            continue
+        with open(path, 'rb') as f:
+            if f.read() != old:
+                with open(path, 'wb') as f:
+                    f.write(old)
+                print('restored %s' % path)
+
+
 def prepare_replay_ini(game, install=INSTALL):
     """Set the copy's icewind2.ini up for a recording (replay_ini); only the
     copy is written, after the same guard as every write to it."""
