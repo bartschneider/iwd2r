@@ -458,31 +458,6 @@ void CChitin::OnDisplayChange()
     // TODO: Incomplete.
 }
 
-// The value step of CChitin::ParseCommandLine (0x7917F0): after an option word
-// the value is either "quoted" or the next space-delimited word. The original
-// drops the option when the closing quote is missing (the second quote test at
-// 0x7919C6, 0x791BCC, 0x792108, 0x7922E1, 0x7924CA). sCommandLine is left as
-// the remainder for the next iteration.
-static BOOL TakeCommandLineValue(CString& sCommandLine, CString& sValue)
-{
-    if (!sCommandLine.IsEmpty() && sCommandLine[0] == '"') {
-        // Drop the opening quote (0x79190F), take the value up to the closing
-        // quote (0x79194A), then require it (0x7919C6) and drop it (0x7919D3).
-        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
-        sValue = sCommandLine.SpanExcluding("\"");
-        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
-        if (sCommandLine.IsEmpty() || sCommandLine[0] != '"') {
-            return FALSE;
-        }
-        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
-        return TRUE;
-    }
-
-    sValue = sCommandLine.SpanExcluding(" ");
-    sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
-    return TRUE;
-}
-
 // 0x7917F0
 void CChitin::ParseCommandLine()
 {
@@ -490,7 +465,11 @@ void CChitin::ParseCommandLine()
     // copy: each loop trims, takes the next space-delimited word, matches it
     // against the options below (strcmp, so case-sensitive) and finally writes
     // the words it did not recognise back into m_sCommandLine, each with a
-    // leading space (0x7925BA-0x79262A).
+    // leading space (0x7925BA-0x79262A). Every option repeats its value step
+    // inline, exactly as the original does: a "quoted" value runs to the
+    // closing quote, which must exist or the option is dropped (the second
+    // quote test at 0x7919C6, 0x791BCC, 0x792108, 0x7922E1, 0x7924CA), and
+    // otherwise the value is the next space-delimited word.
     CString sCommandLine(m_sCommandLine);
     CString sUnused;
 
@@ -510,7 +489,24 @@ void CChitin::ParseCommandLine()
             sCommandLine.TrimLeft();
 
             CString sValue;
-            if (TakeCommandLineValue(sCommandLine, sValue) && !m_bStartUpConnect) {
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x79190F), take the value up to the
+                // closing quote (0x79194A), then require it (0x7919C6) and
+                // drop it (0x7919D3).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x791A35).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            if (!m_bStartUpConnect) {
                 field_110 = 1;
                 field_11C = sValue;
             }
@@ -521,7 +517,24 @@ void CChitin::ParseCommandLine()
             sCommandLine.TrimLeft();
 
             CString sValue;
-            if (TakeCommandLineValue(sCommandLine, sValue) && field_110 == 0) {
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x791B18), take the value up to the
+                // closing quote (0x791B49), then require it (0x791BCC) and
+                // drop it (0x791BD9).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x791CC1).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            if (field_110 == 0) {
                 CString sAddress = sValue.SpanExcluding(":");
                 m_bStartUpConnect = TRUE;
                 m_sStartUpAddress = sAddress;
@@ -531,9 +544,24 @@ void CChitin::ParseCommandLine()
             sCommandLine.TrimLeft();
 
             CString sValue;
-            if (TakeCommandLineValue(sCommandLine, sValue)) {
-                m_sStartUpPlayer = sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x791E27), take the value up to the
+                // closing quote (0x791E62), then require it (0x792108) and
+                // drop it (0x792115).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x791F35).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
             }
+
+            m_sStartUpPlayer = sValue;
         } else if (sOption == "+newgame") { // 0x8BA1B8
             // "+newgame" wins over "+loadgame" whichever comes first
             // (0x791FD6/0x792009).
@@ -549,7 +577,24 @@ void CChitin::ParseCommandLine()
             sCommandLine.TrimLeft();
 
             CString sValue;
-            if (TakeCommandLineValue(sCommandLine, sValue) && field_110 != 0) {
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x79205D), take the value up to the
+                // closing quote (0x79208B), then require it (0x792108) and
+                // drop it (0x792115).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x792166).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            if (field_110 != 0) {
                 m_sStartUpSession = sValue;
             }
         } else if (sOption == "+location") { // 0x8BA194
@@ -558,19 +603,49 @@ void CChitin::ParseCommandLine()
             sCommandLine.TrimLeft();
 
             CString sValue;
-            if (TakeCommandLineValue(sCommandLine, sValue)) {
-                field_131 = 1;
-                m_sStartUpGameSpyLocation = sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x792236), take the value up to the
+                // closing quote (0x792268), then require it (0x7922E1) and
+                // drop it (0x7922EE).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x792338).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
             }
+
+            field_131 = 1;
+            m_sStartUpGameSpyLocation = sValue;
         } else if (sOption == "+maxclients") { // 0x8BA188
             // ToNumberWrapper(0x7E7B8E), i.e. VC6 atol (iwd2r_atol); the
             // original stores whatever it returns (0x7925A1-0x7925B5).
             sCommandLine.TrimLeft();
 
             CString sValue;
-            if (TakeCommandLineValue(sCommandLine, sValue)) {
-                field_136 = iwd2r_atol(sValue.GetBuffer(0x80));
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x79240D), take the value up to the
+                // closing quote (0x792441), then require it (0x7924CA) and
+                // drop it (0x7924D3).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x792508).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
             }
+
+            field_136 = iwd2r_atol(sValue.GetBuffer(0x80));
         } else {
             sUnused += " ";
             sUnused += sOption;
