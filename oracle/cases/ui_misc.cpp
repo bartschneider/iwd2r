@@ -290,11 +290,15 @@ void HpConBonus(CaseContext& ctx)
 // (0xA09FC0, 3/3, its startup's initializer at 0x7C2630) is written here:
 // the runner does not run the exe's static initializers.
 //
-// The CRect return travels by hidden pointer, which __thiscall puts first on
-// the stack as the original expects; the int-returning cases' __fastcall
-// shape would put it in edx instead.
-using CompositionWindowRectFn = CRect(__thiscall*)(void* self, const CPoint* ptPanel, const CSize* panelSize,
-    const CPoint* ptEdit, const CSize* editSize, int16_t nFontHeight);
+// The original is __thiscall with its CRect return by hidden pointer: `this`
+// in ecx and the pointer first on the stack ([ebp+4], then the five
+// arguments). A __thiscall function-pointer type cannot express that - MSVC's
+// own struct-return ABI for it puts the pointer in ecx and `this` on the
+// stack, as the built oracle's call site showed - so the call keeps the
+// house __fastcall shape (this in ecx, edx unused) with the rect pointer as
+// an explicit stack argument, which reproduces the original's layout.
+using CompositionWindowRectFn = void(__fastcall*)(void* self, void* edx, CRect* pRect, const CPoint* ptPanel,
+    const CSize* panelSize, const CPoint* ptEdit, const CSize* editSize, int16_t nFontHeight);
 constexpr uintptr_t kCompositionWindowRect = 0x7C3020;
 constexpr uintptr_t kPadding = 0xA09FC0;
 constexpr size_t kImmBlockSize = 0x140;
@@ -406,8 +410,8 @@ void CompositionWindowRect(CaseContext& ctx)
         CRect originalRect;
         ctx.CallOriginal([&] {
             PutMosaicSize(mos, mosaicWidth, mosaicHeight);
-            originalRect = reinterpret_cast<CompositionWindowRectFn>(kCompositionWindowRect)(imm, &ptPanel, &panelSize,
-                &ptEdit, &editSize, nFontHeight);
+            reinterpret_cast<CompositionWindowRectFn>(kCompositionWindowRect)(
+                imm, nullptr, &originalRect, &ptPanel, &panelSize, &ptEdit, &editSize, nFontHeight);
         });
         PutMosaicSize(oursMos.data(), mosaicWidth, mosaicHeight);
         const CRect oursRect = oursImmPtr->sub_7C3020(ptPanel, panelSize, ptEdit, editSize, nFontHeight);
