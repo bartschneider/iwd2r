@@ -524,9 +524,9 @@ void BuildScrollImage(std::vector<uint8_t>& image)
 // ScrollingRequestRect over an 8x8 map: random rects (including ones outside
 // the map, which the clamps cut), scroll states 1-8, all four combinations of
 // the day/night and rain area bits, a random day/night code and rain level, a
-// random previous rect (cancelled first; field_196 stays 0 so the unported
-// ScrollingCancelRequestRect is not reached) and random request counts on the
-// tiles before the call. Compares the WED, the rect/flags/state fields and all
+// random previous rect (cancelled first; field_196 stays 0, so
+// ScrollingCancelRequestRect, which has its own case, is not reached) and
+// random request counts on the tiles before the call. Compares the WED, the rect/flags/state fields and all
 // 64 tiles' request count and flags.
 void ScrollingRequestRect(CaseContext& ctx)
 {
