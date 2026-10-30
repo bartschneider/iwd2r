@@ -484,6 +484,13 @@ constexpr uintptr_t kOriginalChitinGlobal = 0x8CF6D8;
 constexpr size_t kOriginalChitinSize = 0x2000;
 constexpr size_t kOriginalChitinCriticalSection = 0x2FC;
 
+// CDimm::CDimm (0x781E60): __thiscall, no arguments. The original's CDimm the
+// request path enters is at chitin + 0x542; its constructor is what gives its
+// request lists their MFC fixed-allocator state (a zeroed CObList crashes the
+// original's AddTail).
+using DimmCtorFn = void(__fastcall*)(void* self, void* edx);
+constexpr uintptr_t kDimmCtor = 0x781E60;
+
 // CInfinity::ScrollingRequestRect: __thiscall, `ret 0x14`. The original's
 // CDimm the request path enters is at chitin + 0x542.
 using ScrollingRequestRectFn = int32_t(__fastcall*)(void* self, void* edx, int32_t x1, int32_t y1,
@@ -626,9 +633,11 @@ void ScrollingRequestRect(CaseContext& ctx)
             }
             Put<int32_t>(infinity, kInfinityRainLevel, rainLevel);
 
-            // The chitin and its critical section: the original's SetPriority/
-            // Request enter kernel32's, so this one is native.
+            // The chitin, its CDimm and its critical section: the original's
+            // SetPriority/Request enter the CDimm's MFC lists and kernel32's
+            // critical section, so both need their real constructors.
             uint8_t* chitin = static_cast<uint8_t*>(OriginalBlock(kOriginalChitinSize));
+            reinterpret_cast<DimmCtorFn>(kDimmCtor)(chitin + 0x542, nullptr);
             InitializeOriginalCriticalSection(chitin + kOriginalChitinCriticalSection);
             *reinterpret_cast<uint32_t*>(kOriginalChitinGlobal) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(chitin));
 
