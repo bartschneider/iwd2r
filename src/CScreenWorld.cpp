@@ -5214,7 +5214,6 @@ void CUIControlButtonDialog::OnLButtonClick(CPoint pt)
 CUIControlScrollBarWorldContainer::CUIControlScrollBarWorldContainer(CUIPanel* panel, UI_CONTROL_SCROLLBAR* controlInfo)
     : CUIControlScrollBar(panel, controlInfo)
 {
-    // TODO: Incomplete.
 }
 
 // 0x632C00
