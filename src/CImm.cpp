@@ -450,7 +450,8 @@ void CImm::sub_7C3140(const CRect& a1, CRect a2, CVidFont* pVidFont, BOOL bDeman
         if (sComposition == "") {
             sComposition = sSuggestion;
         } else {
-            sComposition = sComposition + " " + sSuggestion;
+            // The exe's separator (0x8BDA54) is " :  ", two trailing spaces.
+            sComposition = sComposition + " :  " + sSuggestion;
         }
     }
 
