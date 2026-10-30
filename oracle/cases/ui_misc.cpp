@@ -370,9 +370,9 @@ void CompositionWindowRect(CaseContext& ctx)
     std::unique_ptr<unsigned char[]> immStorage(new unsigned char[sizeof(CImm)]());
     std::unique_ptr<unsigned char[]> mosaicStorage(new unsigned char[sizeof(CVidMosaic)]());
     std::unique_ptr<unsigned char[]> resStorage(new unsigned char[sizeof(CResMosaic)]());
-    auto* oursImmPtr = reinterpret_cast<CImm*>(&*immStorage);
-    auto* oursMosaic = reinterpret_cast<CVidMosaic*>(&*mosaicStorage);
-    auto* oursRes = reinterpret_cast<CResMosaic*>(&*resStorage);
+    auto* oursImmPtr = reinterpret_cast<CImm*>(immStorage.get());
+    auto* oursMosaic = reinterpret_cast<CVidMosaic*>(mosaicStorage.get());
+    auto* oursRes = reinterpret_cast<CResMosaic*>(resStorage.get());
     std::vector<uint8_t> oursMos(kMosSize, 0);
     std::memcpy(oursMos.data(), "MOS ", 4);
     std::memcpy(oursMos.data() + 4, "V1  ", 4);
@@ -391,7 +391,7 @@ void CompositionWindowRect(CaseContext& ctx)
     oursMosaic->m_bDoubleSize = FALSE;
     oursImmPtr->field_13C = oursMosaic;
     CChitin* savedChitin = g_pChitin;
-    g_pChitin = reinterpret_cast<CChitin*>(&*chitinStorage);
+    g_pChitin = reinterpret_cast<CChitin*>(chitinStorage.get());
 
     uint64_t state = ctx.seed ^ 0x7C3020ull;
     auto next = [&]() { return static_cast<uint32_t>(oracle::SplitMix64(&state)); };
