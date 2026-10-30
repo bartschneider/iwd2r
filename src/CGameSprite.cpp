@@ -10677,7 +10677,33 @@ void CGameSprite::AddSpecialAbility(const CResRef& cResInnateSpell, BOOL feedBac
 // 0x71BC60
 void CGameSprite::RemoveSpecialAbility(const CResRef& cResInnateSpell)
 {
-    // TODO: Incomplete.
+    CString name;
+    cResInnateSpell.CopyToString(name);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    UINT nID = 0;
+    unsigned nMaximum = 0;
+    unsigned nCurrent = 0;
+    if (pGame->GetMasterSongLookup().Find(cResInnateSpell, nID) == TRUE) {
+        nID = 0;
+        if (pGame->GetMasterSongLookup().Find(cResInnateSpell, nID) == TRUE) {
+            m_songs.Remove(nID, TRUE, nMaximum, nCurrent);
+        }
+    } else if (pGame->GetShapeshifts()->Find(cResInnateSpell, nID) == TRUE) {
+        nID = 0;
+        if (pGame->GetShapeshifts()->Find(cResInnateSpell, nID) == TRUE) {
+            m_shapeshifts.Remove(nID, TRUE, nMaximum, nCurrent);
+        }
+    } else if (pGame->GetInnateSpells()->Find(cResInnateSpell, nID) == TRUE) {
+        nID = 0;
+        if (pGame->GetInnateSpells()->Find(cResInnateSpell, nID) == TRUE) {
+            m_innateSpells.Remove(nID, TRUE, nMaximum, nCurrent);
+        }
+    }
+
+    CAbilityId ability;
+    ability.m_itemType = 1;
+    ability.m_res = name;
+    CheckQuickLists(&ability, -1, FALSE, FALSE);
 }
 
 // 0x71BE80
