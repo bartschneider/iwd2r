@@ -560,9 +560,9 @@ BOOL CGameAreaNotes::DeleteANote(DWORD id)
 
     // The same message pair Add sends: the client asks the host, the host
     // announces it. An empty text with flags 0 and STRREF -1 is the "remove"
-    // the receiver's Add (0x47B150) understands. A client inside an
-    // announcement returns without touching the UI: the announce handler owns
-    // the removal.
+    // the receiver's Add (0x47B150) understands. A client outside an
+    // announcement only asks the host and returns (0x47BDA0); the removal runs
+    // when the host's announcement comes back, inside m_bInOnAreaMapNoteAnnounce.
     if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
         CString sEmptyText;
 

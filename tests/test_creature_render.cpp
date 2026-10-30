@@ -12,6 +12,7 @@
 #include "CGameAnimationTypeMonsterIcewindNew.h"
 #include "CGameAnimationTypeMonsterLarge.h"
 #include "CGameAnimationTypeMonsterLarge16.h"
+#include "CGameAnimationTypeMonsterLayeredSpell.h"
 #include "CGameAnimationTypeMonsterMulti.h"
 #include "CGameAnimationTypeMonsterOld.h"
 #include "CGameAnimationTypeMonsterQuadrant.h"
@@ -389,6 +390,39 @@ TEST_CASE("creature render: MonsterIcewindNew keeps the exe's death sound by fam
         REQUIRE(pMonster != nullptr);
         CHECK(std::string(pMonster->GetSndDeath()) == family.pSndDeath);
     }
+}
+
+// CGameAnimationTypeMonsterLayeredSpell::~CGameAnimationTypeMonsterLayeredSpell
+// (0x6C00D0): 285 bytes of compiler-generated destruction - m_weaponResRef[2]
+// (+0xB42), m_weaponPalette (+0xB0E), the four weapon CVidCells
+// (+0xA34/+0x95A/+0x880/+0x7A6), m_charPalette (+0x776), the four body
+// CVidCells (+0x69C/+0x5C2/+0x4E8/+0x40E), m_resRef (+0x3FE), the base vtable
+// and the base's m_combatRounds[5] CVidBitmap array (+0x42) - in reverse
+// declaration order. The port's body is that destruction, so the test builds
+// the animation the ctor (0x6BF560) makes and destroys it: a member whose
+// destructor were missing or doubled would show here (the CStrings and the
+// CVidCells own memory), and the members the ctor set are checked before the
+// object goes.
+TEST_CASE("creature render: MonsterLayeredSpell's destructor tears the whole animation down", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    BYTE colors[16] = {};
+    // 0x200 is the ctor's own family case (m_resRef MOGM, weapon S1), and the
+    // class needs no frame data to be built or destroyed.
+    auto* pAnimation = new CGameAnimationTypeMonsterLayeredSpell(0x200, colors, 0);
+    CHECK(pAnimation->m_animationID == 0x200);
+    CHECK(pAnimation->m_resRef == "MOGM");
+    CHECK(pAnimation->m_weaponResRef[0] == "S1");
+    CHECK(pAnimation->m_weaponResRef[1] == "");
+    CHECK(pAnimation->m_bDualAttack == TRUE);
+    CHECK(pAnimation->m_personalSpace == 5);
+    CHECK(pAnimation->m_charPalette.m_nType == CVidPalette::TYPE_RANGE);
+    CHECK(pAnimation->m_weaponPalette.m_nType == CVidPalette::TYPE_RANGE);
+
+    delete pAnimation;
 }
 
 // The white wyvern (0x1001, MWYV in four quadrant BAMs, 50WYRWH and six
