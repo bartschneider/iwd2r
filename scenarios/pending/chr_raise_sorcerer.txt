@@ -12,8 +12,10 @@
 # and SPWI226 Ray of Enfeeblement (cell 13 = (336,266)); the level-4
 # popup's +1 L2 pick SPWI217 Agannazzar's Scorcher (L2 list cell 0 =
 # (279,96)); the level-12 popup's single +1 L6 pick SPWI603 Chain
-# Lightning (L6 cell 4 = (451,96)); every other popup takes button 0
-# ((279,96) = the top-left cell of every spell grid).
+# Lightning (L6 cell 4 = (451,96)).  The other popup-8 picks fill the
+# SPLSRCKN badge with the first pickable LISTSPLL SOR spell per tab
+# (GUIREC panel 8 verified from the CHU: row-1 grid button centers are
+# (279/322/365/408/451, 96), forward Done = (722,394)).
 #
 # Druid lessons applied from the start (task-49-report.md):
 # - the console only opens on the world screen and the line stays in the
@@ -45,8 +47,15 @@
 #   directly, without the overwrite popup.
 # - CHECK marks what could not be taken from the druid scenario or the
 #   plan (the sorcerer rows in the two class lists, the chargen spell
-#   screen, the popup-56 spend for a sorcerer, the per-level SPLSRCKN
-#   gains) instead of researching it.
+#   screen, the popup-56 spend for a sorcerer) instead of researching
+#   it.  RESOLVED by attempt 2 launch 1 (runs/20261030-173126): popup 8
+#   opens one tab per pending SPLSRCKN spell level, ascending, each
+#   needing exactly one pick — the Done click is gated on
+#   m_nExtraMageSpells == 0 and ignored while a pick is owed, so a
+#   missed pick strands the tab (that launch died at level 7).  The
+#   pick cells below are the first pickable LISTSPLL SOR spell per
+#   tab in list order (known spells occupy cells but SetEnabled(FALSE),
+#   so clicking them no-ops).
 
 wait 60
 checkpoint menu
@@ -281,16 +290,9 @@ click 477 207
 wait 15
 click 722 394
 wait 30
-# Popup 8 (known spells): button 0 = the top-left grid cell (279,96).
-# CHECK: SPLSRCKN per-level gains unverified — every walk 2..12 is
-# assumed to open exactly one one-pick popup 8; a gainless walk
-# leaves these clicks no-oping on the already-wrapped chain, a
-# two-pick walk needs a second pick + Done round (Step B reads the
-# checkpoints).
-click 279 96
-wait 15
-click 722 394
-wait 30
+# Popup 8: level 2 grants no picks (SPLSRCKN row 2 == row 1), so no
+# spell tab opens here; the chain commits right after popup 55's
+# Done — nothing to click.
 wait 60
 checkpoint sor_l2_leveled
 key ESCAPE
@@ -421,7 +423,9 @@ click 477 352
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
+# Popup 8: SPLSRCKN row 3 - row 2 = +1 L1, ONE tab.  Pick the first
+# pickable L1 cell in LISTSPLL order: cell 0 SPWI103 (279,96); Done
+# (722,394) commits (a Done while the pick badge is up is ignored).
 click 279 96
 wait 15
 click 722 394
@@ -542,8 +546,9 @@ click 477 207
 wait 15
 click 722 394
 wait 30
-# Popup 8: the +1 L2 pick = SPWI217 Agannazzar's Scorcher, L2 list
-# cell 0 (279,96) — the plan as written (button 0 coordinate).
+# Popup 8: SPLSRCKN row 4 = +1 L2, ONE tab.  The pick = SPWI217
+# Agannazzar's Scorcher, L2 list cell 0 (279,96) — a target spell;
+# Done (722,394) commits.
 click 279 96
 wait 15
 click 722 394
@@ -658,8 +663,15 @@ click 477 207
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
-click 279 96
+# Popup 8: SPLSRCKN row 5 - row 4 = +1 L1 +1 L2, TWO tabs ascending.
+# L1: SPWI104 (cell 1 — cell 0 SPWI103 is already known) at (322,96).
+# Done summons L2: SPWI222 (cell 1 — SPWI217 known) at (322,96);
+# the second Done commits.
+click 322 96
+wait 15
+click 722 394
+wait 30
+click 322 96
 wait 15
 click 722 394
 wait 30
@@ -791,7 +803,8 @@ click 477 352
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
+# Popup 8: SPLSRCKN row 6 = +1 L3, ONE tab.  SPWI323, L3 cell 0
+# (279,96); Done commits.
 click 279 96
 wait 15
 click 722 394
@@ -905,8 +918,20 @@ click 477 207
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
-click 279 96
+# Popup 8: SPLSRCKN row 7 - row 6 = +1 L1 +1 L2 +1 L3, THREE tabs.
+# L1: SPWI117 (cell 2 — cells 0/1 plus the chargen pair known) at
+# (365,96).  L2: SPWI201 (cell 2 — SPWI217/SPWI222 known) at
+# (365,96).  L3: SPWI316 (cell 1 — SPWI323 known) at (322,96).
+# Done after each pick summons the next tab; the last Done commits.
+click 365 96
+wait 15
+click 722 394
+wait 30
+click 365 96
+wait 15
+click 722 394
+wait 30
+click 322 96
 wait 15
 click 722 394
 wait 30
@@ -1024,7 +1049,8 @@ click 477 207
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
+# Popup 8: SPLSRCKN row 8 = +1 L4, ONE tab.  SPWI417, L4 cell 0
+# (279,96); Done commits.
 click 279 96
 wait 15
 click 722 394
@@ -1158,8 +1184,20 @@ click 477 352
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
-click 279 96
+# Popup 8: SPLSRCKN row 9 - row 8 = +1 L2 +1 L3 +1 L4, THREE tabs.
+# L2: SPWI214 (cell 3 — cells 0-2 known) at (408,96).  L3: SPWI302
+# (cell 2 — cells 0/1 known) at (365,96).  L4: SPWI401 (cell 2 —
+# SPWI417 known) at (365,96).  Done after each pick; the last
+# Done commits.
+click 408 96
+wait 15
+click 722 394
+wait 30
+click 365 96
+wait 15
+click 722 394
+wait 30
+click 365 96
 wait 15
 click 722 394
 wait 30
@@ -1272,7 +1310,8 @@ click 477 207
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
+# Popup 8: SPLSRCKN row 10 = +1 L5, ONE tab.  SPWI501, L5 cell 0
+# (279,96); Done commits.
 click 279 96
 wait 15
 click 722 394
@@ -1386,8 +1425,25 @@ click 477 207
 wait 15
 click 722 394
 wait 30
-# Popup 8: every other popup takes button 0 (279,96).
-click 279 96
+# Popup 8: SPLSRCKN row 11 - row 10 = +1 L2 +1 L3 +1 L4 +1 L5, FOUR
+# tabs.  L2: SPWI223 (cell 4 — cells 0-3 known) at (451,96).  L3:
+# SPWI304 (cell 3 — cells 0-2 known) at (408,96).  L4: SPWI425
+# (cell 3 — SPWI417/SPWI401 known) at (408,96).  L5: SPWI525
+# (cell 1 — SPWI501 known) at (322,96).  Done after each pick; the
+# last Done commits.
+click 451 96
+wait 15
+click 722 394
+wait 30
+click 408 96
+wait 15
+click 722 394
+wait 30
+click 408 96
+wait 15
+click 722 394
+wait 30
+click 322 96
 wait 15
 click 722 394
 wait 30
@@ -1524,8 +1580,9 @@ click 477 352
 wait 15
 click 722 394
 wait 30
-# Popup 8: the single +1 L6 pick = SPWI603 Chain Lightning, L6
-# list cell 4 (451,96) — the plan as written.
+# Popup 8: SPLSRCKN row 12 = +1 L6, ONE tab.  The pick = SPWI603
+# Chain Lightning, L6 list cell 4 (451,96) — a target spell; Done
+# commits level 12.
 click 451 96
 wait 15
 click 722 394
