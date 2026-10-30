@@ -48,10 +48,12 @@ wait 150
 click 530 100
 wait 150
 checkpoint chargen
-# CHECK: the import button is chargen panel 13 ctrl 13 at (400,562) on
-# the chargen main menu; the click must open the import popup (panel
-# 20), not fall through to Next or a panel button.
-click 400 562
+# CHECK (corrected by original run 20261030-122826: its shot showed the
+# cursor on Back at (400,562) and no popup): on the chargen main menu
+# the bottom bar reads Biography | Import | Back | Finish | Cancel, so
+# Import is the second button, centred (260,562); the click must open
+# the import popup (panel 20), not fall through to a panel button.
+click 260 562
 wait 30
 checkpoint import_popup
 shot import_popup
@@ -66,7 +68,10 @@ shot imported_chargen
 # CHECK: the popup's Done leaves the chargen main menu with the druid
 # loaded, so one Next (536,562) returns to Party Formation; if Done
 # already left chargen, this click lands on Party Formation and must
-# go.
+# go. (Run 20261030-122826, popup never open, showed the main menu's
+# fourth bottom-bar button is Finish at (537,562) -- the same slot;
+# with an imported druid loaded that is the leave-chargen button
+# either way, so this click stands at (536,562).)
 click 536 562
 wait 60
 checkpoint party_formation
