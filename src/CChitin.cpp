@@ -546,8 +546,8 @@ void CChitin::ParseCommandLine()
             CString sValue;
             if (sCommandLine[0] == '"') {
                 // Drop the opening quote (0x791E27), take the value up to the
-                // closing quote (0x791E62), then require it (0x792108) and
-                // drop it (0x792115).
+                // closing quote (0x791E62), then require it (0x791EE5) and
+                // drop it (0x791EF2).
                 sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
                 sValue = sCommandLine.SpanExcluding("\"");
                 sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
@@ -563,8 +563,8 @@ void CChitin::ParseCommandLine()
 
             m_sStartUpPlayer = sValue;
         } else if (sOption == "+newgame") { // 0x8BA1B8
-            // "+newgame" wins over "+loadgame" whichever comes first
-            // (0x791FD6/0x792009).
+            // "+newgame" and "+loadgame" exclude each other: the first one
+            // given wins (0x791FD6/0x792009).
             if (field_128 == 0) {
                 field_124 = 1;
             }
