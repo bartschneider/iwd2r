@@ -7,12 +7,15 @@ definition) in src/**/*.cpp whose lines changed since --base -- the same rule
 tools/check_evidence.py enforces evidence for. For each one this prints a row
 of the table
 
-    address | name | asm | vtable | layout | offsets | markers | lints
+    address | name | asm | strings | vtable | layout | offsets | markers | lints
 
 where the columns are:
 
     asm      the binary's callees (callgraph.tsv) are all named in the
              recovered body (asm_verify.py)
+    strings  the string literals the binary's body references are all written
+             in the recovered body (annotate.py's rule; YELLOW-only -- the
+             noise is measured before this ever goes RED)
     vtable   the class's vtable overrides match the source declarations
              (vtable_audit.py)
     layout   the class's /* 0xNNN */ member offsets are laid out in order
@@ -38,8 +41,8 @@ Skips (exit 0, never a failure): no vanilla exe at oracle.VANILLA_EXE, a
 base that cannot be diffed, or missing exports (run
 tools/ghidra/ExportCallGraph.java once to produce them).
 
-Needs no third-party packages for asm/markers/lints; vtable/layout/offsets
-additionally use pefile and capstone (tools/parity/setup.sh).
+Needs no third-party packages for asm/markers/lints; vtable/layout/offsets/
+strings additionally use pefile and capstone (tools/parity/setup.sh).
 """
 from __future__ import annotations
 
@@ -70,15 +73,16 @@ GREEN, YELLOW, RED = 'GREEN', 'YELLOW', 'RED'
 SKIP, WARNING, ERROR = 'SKIP', 'WARNING', 'ERROR'
 FAILING = (RED, ERROR)
 
-COLUMNS = ('asm', 'vtable', 'layout', 'offsets', 'markers', 'lints')
+COLUMNS = ('asm', 'strings', 'vtable', 'layout', 'offsets', 'markers', 'lints')
 LINT_NAMES = ('re_lint', 'lint_extend_cells', 'lint_infinite_loop',
               'lint_pragma_pack_balance', 'lint_stuck_loop_index',
               'lint_twin_symmetry', 'lint_uninit_member')
 
 # The columns a RED is re-run against --base for (the _delegated checks plus
 # markers/lints). asm is excluded: its RED is about the changed body itself
-# and keeps the human `parity_waiver` path.
-DELEGATED_COLUMNS = frozenset(COLUMNS[1:])
+# and keeps the human `parity_waiver` path. strings is excluded too: it is
+# YELLOW-only in this first version, so it has no RED to re-run.
+DELEGATED_COLUMNS = frozenset(COLUMNS[1:]) - {'strings'}
 
 # The delegated columns whose finding is about the row's class, not the
 # function that names it: vtable_audit.check and struct_layout_audit.check
@@ -242,6 +246,117 @@ def markers_check(address, name, ctx):
                     for f in undefined] or ['no function defined here']
 
 
+# ---- the strings column ------------------------------------------------------
+# The column PR #47 needed: the exe's separator at 0x8BDA54 is " :  " while
+# the body wrote " ", and the asm column (callees only) never said so.
+
+# CUtil::UtilAssert: the address UTIL_ASSERT's four pushes feed. The macro's
+# own arguments -- the file path and the expression text -- are strings the
+# exe pushes but the source never writes, so the column excuses them.
+UTIL_ASSERT = 0x780C00
+
+_MARKER_CACHE: dict = {}  # src root -> annotate.marker_names' pair
+
+# The C string literals in a span: quote to quote on one line, backslash
+# escapes included, comment text not excluded (noise the column measures).
+LITERAL_RE = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
+
+_SIMPLE_ESCAPES = {'t': '\t', 'n': '\n', 'r': '\r', '\\': '\\', '"': '"',
+                   "'": "'", 'a': '\a', 'b': '\b', 'f': '\f', 'v': '\v',
+                   '?': '?'}
+
+
+def decode_escapes(body):
+    """A C literal's contents, escapes decoded (\\xHH and octal included).
+
+    Octal is its own branch (\0 decodes to the NUL the exe's strings stop
+    at, so a source `\0` can never match one and decoding it faithfully is
+    what keeps the mismatch visible rather than silently equal).
+    """
+    out = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch != '\\':
+            out.append(ch)
+            i += 1
+            continue
+        i += 1
+        if i >= len(body):
+            break
+        ch = body[i]
+        if ch == 'x':
+            m = re.match(r'[0-9a-fA-F]{1,2}', body[i + 1:])
+            if m:
+                out.append(chr(int(m.group(), 16)))
+                i += 1 + len(m.group())
+            else:
+                out.append('x')
+                i += 1
+        elif ch in '01234567':
+            m = re.match(r'[0-7]{1,3}', body[i:])
+            out.append(chr(int(m.group(), 8) & 0xFF))
+            i += len(m.group())
+        else:
+            out.append(_SIMPLE_ESCAPES.get(ch, ch))
+            i += 1
+    return ''.join(out)
+
+
+def source_literals(text):
+    """The set of C string literals in a source span, escapes decoded.
+
+    The strings column's comparison set: every string the exe's body
+    references must be written here exactly. Adjacent literals are not
+    concatenated and comment text is not excluded -- both are noise this
+    column is measured on before it ever goes RED.
+    """
+    return {decode_escapes(m.group(1)) for m in LITERAL_RE.finditer(text)}
+
+
+def strings_check(address, name, ctx):
+    """The strings the exe's body references are literals in the recovered
+    body (annotate.referenced_strings's rule). YELLOW-only for now: the
+    noise is measured first, so this column never goes RED."""
+    mod = _module('annotate')
+    if mod is None or mod.capstone is None:
+        return SKIP, ['annotate not importable '
+                      '(pefile/capstone missing? tools/parity/setup.sh)']
+    exe = ctx['exe']
+    if not os.path.isfile(exe):
+        return SKIP, [f'no exe at {exe}']
+    end = address + ctx['exports'][1].get(address, 0)
+    if end <= address:
+        return SKIP, [f'no size for 0x{address:X} in functions.tsv']
+    root = os.path.join(ctx['repo'], 'src')
+    if root not in _MARKER_CACHE:
+        _MARKER_CACHE[root] = mod.marker_names(root)
+    fn_names, global_names = _MARKER_CACHE[root]
+    labels = {**global_names, **fn_names}
+    strings, labelled, pushed = mod.referenced_strings(address, end, exe,
+                                                       labels)
+    for va in pushed.get(UTIL_ASSERT, ()):  # a macro's own arguments
+        strings.pop(va, None)
+    span_text = ctx['span_text']
+    for va, label in labelled.items():  # used by name, not by literal
+        if label in span_text:
+            strings.pop(va, None)
+    literals = source_literals(span_text)
+    remaining = {va: text for va, text in strings.items()
+                 if text not in literals}
+    if not remaining:
+        return GREEN, [f'{len(strings)} exe string(s) referenced, '
+                       "all among the body's literals"]
+    by_text = {}
+    for va, text in remaining.items():
+        by_text[text] = min(by_text.get(text, va), va)
+    notes = [f'exe strings not in the body '
+             f'({len(by_text)} of {len(strings)} referenced):']
+    notes += [f'  "{mod.quote(mod.clipped(text))}" (0x{va:X})'
+              for text, va in sorted(by_text.items(), key=lambda kv: kv[1])]
+    return YELLOW, notes
+
+
 def lints_check(address, name, ctx):
     cache = ctx['lint_cache']
     rel = ctx['rel']
@@ -376,6 +491,7 @@ def run_row(item, repo, exports, exe, lints, lint_cache):
 
 CHECKS = (
     ('asm', asm_check),
+    ('strings', strings_check),
     ('vtable', _delegated('vtable_audit', 'vtable')),
     ('layout', _delegated('struct_layout_audit', 'layout')),
     ('offsets', _delegated('parity_offsets', 'offsets')),

@@ -80,13 +80,19 @@ EXECUTABLE = 0x20000000  # IMAGE_SCN_MEM_EXECUTE: code bytes, no literals
 GLOBAL_NAME_RE = re.compile(r"([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\s*(?:=|\[|;|\{)")
 
 
+_SECTIONS_CACHE: dict = {}
+
+
 def sections(exe):
     """{name: (lo, hi, bytes, executable)} -- the exe's sections as VAs.
 
     The way parity_offsets._secs reads them (pefile, fast_load, base +
     VirtualAddress .. + Misc_VirtualSize), plus each section's
-    IMAGE_SCN_MEM_EXECUTE flag.
+    IMAGE_SCN_MEM_EXECUTE flag. Memoized per path: run.py's strings column
+    reads the same exe once per row.
     """
+    if exe in _SECTIONS_CACHE:
+        return _SECTIONS_CACHE[exe]
     pe = pefile.PE(exe, fast_load=True)
     base = pe.OPTIONAL_HEADER.ImageBase
     out = {}
@@ -96,6 +102,7 @@ def sections(exe):
                      base + s.VirtualAddress + s.Misc_VirtualSize,
                      s.get_data(),
                      bool(s.Characteristics & EXECUTABLE))
+    _SECTIONS_CACHE[exe] = out
     return out
 
 
@@ -182,6 +189,25 @@ def marker_names(source_root):
     return functions, globals_
 
 
+def operand_addrs(ins):
+    """The data addresses an instruction's operands hold.
+
+    Immediates and memory displacements. A direct call/jmp's immediate is
+    control flow, not data (line_for names the target instead); an indirect
+    one's displacement is a data address like any other.
+    """
+    if ins.mnemonic in ('call', 'jmp') and ins.operands and \
+            ins.operands[0].type == capstone.x86.X86_OP_IMM:
+        return []
+    out = []
+    for op in ins.operands:
+        if op.type == capstone.x86.X86_OP_IMM:
+            out.append(op.imm & 0xFFFFFFFF)
+        elif op.type == capstone.x86.X86_OP_MEM:
+            out.append(op.mem.disp & 0xFFFFFFFF)
+    return out
+
+
 def line_for(ins, secs, fn_names, labels, export_names):
     """One disassembly line: address, mnemonic, operands, annotations."""
     text = f'0x{ins.address:x}:\t{ins.mnemonic}\t{ins.op_str}'
@@ -191,13 +217,7 @@ def line_for(ins, secs, fn_names, labels, export_names):
         target = ins.operands[0].imm & 0xFFFFFFFF
         notes.append(fn_names.get(target) or export_names.get(target) or '?')
     else:
-        for op in ins.operands:
-            if op.type == capstone.x86.X86_OP_IMM:
-                cand = op.imm & 0xFFFFFFFF
-            elif op.type == capstone.x86.X86_OP_MEM:
-                cand = op.mem.disp & 0xFFFFFFFF
-            else:
-                continue
+        for cand in operand_addrs(ins):
             label = labels.get(cand)
             if label:
                 notes.append(label)
@@ -208,6 +228,46 @@ def line_for(ins, secs, fn_names, labels, export_names):
     for note in notes:
         text += f'  ; {note}'
     return text
+
+
+def referenced_strings(address, end, exe, labels=None):
+    """({va: literal}, {va: label}, {call target: pushed string vas}).
+
+    One walk of [address, end) with line_for's operand rule: every
+    immediate or displacement that points at a printable NUL-terminated
+    string (`strings`), which of those addresses our tree labels
+    (`labelled`), and, per direct call target, the string vas among the
+    four immediate pushes before any call to it. That last one is how a
+    macro hides its own arguments: UTIL_ASSERT's caller pushes the file
+    path and the expression text the source never writes. `labels` is the
+    merged marker_names pair (run.py caches that scan across rows).
+    """
+    secs = sections(exe)
+    strings, labelled, pushed = {}, {}, {}
+    window = []  # the last four immediate pushes, in order
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    code = read_bytes(secs, address, end - address)
+    for ins in md.disasm(code, address):
+        if ins.address + ins.size > end:
+            break
+        for cand in operand_addrs(ins):
+            literal = string_at(secs, cand)
+            if literal:
+                strings.setdefault(cand, literal)
+                if cand in labels:
+                    labelled.setdefault(cand, labels[cand])
+        if ins.mnemonic == 'push' and ins.operands and \
+                ins.operands[0].type == capstone.x86.X86_OP_IMM:
+            window.append(ins.operands[0].imm & 0xFFFFFFFF)
+            del window[:-4]
+        elif ins.mnemonic == 'call' and ins.operands and \
+                ins.operands[0].type == capstone.x86.X86_OP_IMM:
+            target = ins.operands[0].imm & 0xFFFFFFFF
+            for va in window:
+                if va in strings:
+                    pushed.setdefault(target, set()).add(va)
+    return strings, labelled, pushed
 
 
 def annotate(address, end, exe, exports, source_root):
