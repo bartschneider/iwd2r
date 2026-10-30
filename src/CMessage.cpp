@@ -2702,17 +2702,163 @@ BOOLEAN CBaldurMessage::NonBlockingWaitForSignal(BYTE signalType, BYTE signalToW
 // 0x4337D0
 BYTE CBaldurMessage::KickOutWaitingForSignal(BYTE signalType, BYTE signalToWaitFor)
 {
-    // TODO: Incomplete.
+    CString sPlayerName;
+    BOOLEAN signalReceived[CNETWORK_MAX_PLAYERS + 2];
+    INT nHostPlayer;
+    BYTE nQueue;
+    INT nQueueChecked;
+    BOOLEAN bComplete;
 
-    return FALSE;
+    if (!g_pChitin->cNetwork.GetSessionOpen()) {
+        return -1;
+    }
+
+    // NOTE: Deviation. The original reads only the low byte of the host
+    // player number, which makes its `== -1` test dead, and a host of -1
+    // (0xFF) would then index past its eight-byte array and corrupt the
+    // stack. Ours reads the whole INT and maps -1 to 0.
+    nHostPlayer = g_pChitin->cNetwork.m_nHostPlayer;
+    if (nHostPlayer == -1) {
+        nHostPlayer = 0;
+    }
+
+    if (signalType == SIGNAL_SERVER) {
+        for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+            signalReceived[nPlayer] = FALSE;
+        }
+        signalReceived[nHostPlayer] = TRUE;
+    } else {
+        for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+            signalReceived[nPlayer] = TRUE;
+        }
+        signalReceived[nHostPlayer] = FALSE;
+    }
+
+    nQueue = m_nSignalQueueStart;
+    nQueueChecked = 0;
+    if (nQueue != m_nSignalQueueEnd) {
+        do {
+            if (nQueueChecked >= m_nSignalQueueSize) {
+                break;
+            }
+
+            if (m_pnSignalType[nQueue] == signalType
+                && m_pnSignalData[nQueue] == signalToWaitFor) {
+                signalReceived[m_pnSignalFrom[nQueue]] = TRUE;
+            }
+
+            nQueue = (nQueue + 1) % m_nSignalQueueSize;
+            nQueueChecked++;
+        } while (nQueue != m_nSignalQueueEnd);
+    }
+
+    bComplete = TRUE;
+    for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+        if (g_pChitin->cNetwork.GetPlayerID(nPlayer) != 0
+            && signalReceived[nPlayer] == FALSE
+            && bComplete == TRUE) {
+            bComplete = FALSE;
+            g_pChitin->cNetwork.GetPlayerName(nPlayer, sPlayerName);
+            KickPlayerRequest(sPlayerName);
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x433950
 BOOLEAN CBaldurMessage::WaitForSignal(BYTE signalType, BYTE signalToWaitFor)
 {
-    // TODO: Incomplete.
+    CString sPlayerName;
+    BOOLEAN signalReceived[CNETWORK_MAX_PLAYERS + 2];
+    DWORD dwSize;
+    BYTE* pMessage;
+    INT nHostPlayer;
+    BYTE nQueue;
+    INT nQueueChecked;
+    BOOLEAN bComplete;
 
-    return FALSE;
+    if (!g_pChitin->cNetwork.GetSessionOpen()) {
+        return FALSE;
+    }
+
+    // NOTE: Deviation. The original reads only the low byte of the host
+    // player number, which makes its `== -1` test dead, and a host of -1
+    // (0xFF) would then index past its eight-byte array and corrupt the
+    // stack. Ours reads the whole INT and maps -1 to 0.
+    nHostPlayer = g_pChitin->cNetwork.m_nHostPlayer;
+    if (nHostPlayer == -1) {
+        nHostPlayer = 0;
+    }
+
+    if (signalType == SIGNAL_SERVER) {
+        for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+            signalReceived[nPlayer] = FALSE;
+        }
+        signalReceived[nHostPlayer] = TRUE;
+    } else {
+        for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+            signalReceived[nPlayer] = TRUE;
+        }
+        signalReceived[nHostPlayer] = FALSE;
+    }
+
+    do {
+        nQueue = m_nSignalQueueStart;
+        nQueueChecked = 0;
+        if (nQueue != m_nSignalQueueEnd) {
+            do {
+                if (nQueueChecked >= m_nSignalQueueSize) {
+                    break;
+                }
+
+                if (m_pnSignalType[nQueue] == signalType
+                    && m_pnSignalData[nQueue] == signalToWaitFor) {
+                    signalReceived[m_pnSignalFrom[nQueue]] = TRUE;
+                }
+
+                nQueue = (nQueue + 1) % m_nSignalQueueSize;
+                nQueueChecked++;
+            } while (nQueue != m_nSignalQueueEnd);
+        }
+
+        bComplete = TRUE;
+        for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+            if (g_pChitin->cNetwork.GetPlayerID(nPlayer) != 0
+                && signalReceived[nPlayer] == FALSE
+                && bComplete == TRUE) {
+                bComplete = FALSE;
+                g_pChitin->cNetwork.GetPlayerName(nPlayer, sPlayerName);
+            }
+        }
+
+        if (bComplete != TRUE) {
+            if (g_pChitin->cNetwork.PeekSpecificMessage(sPlayerName, MSG_TYPE_SIGNAL, MSG_SUBTYPE_SIGNAL) == TRUE) {
+                pMessage = g_pChitin->cNetwork.FetchSpecificMessage(sPlayerName,
+                    MSG_TYPE_SIGNAL,
+                    MSG_SUBTYPE_SIGNAL,
+                    dwSize);
+
+                m_pnSignalFrom[m_nSignalQueueEnd] = static_cast<BYTE>(g_pChitin->cNetwork.FindPlayerLocationByName(sPlayerName, FALSE));
+                m_pnSignalType[m_nSignalQueueEnd] = pMessage[CNetwork::SPEC_MSG_HEADER_LENGTH];
+                m_pnSignalData[m_nSignalQueueEnd] = pMessage[CNetwork::SPEC_MSG_HEADER_LENGTH + sizeof(BYTE)];
+                m_nSignalQueueEnd = (m_nSignalQueueEnd + 1) % m_nSignalQueueSize;
+
+                delete pMessage;
+            } else {
+                g_pChitin->m_bDisplayStale = TRUE;
+                SleepEx(60, FALSE);
+            }
+        }
+
+        if (!g_pChitin->cNetwork.GetSessionOpen()) {
+            return FALSE;
+        }
+    } while (bComplete != TRUE);
+
+    RemoveSignalsFromQueue(signalType, signalToWaitFor);
+
+    return TRUE;
 }
 
 // 0x433BE0
