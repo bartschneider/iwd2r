@@ -4170,7 +4170,7 @@ BOOLEAN CBaldurMessage::AnnounceAreaMapNote(CString sArea, WORD nStartX, WORD nS
     *reinterpret_cast<STRREF*>(pByteMessage + cnt) = strRef;
     cnt += sizeof(STRREF);
 
-    g_pChitin->cNetwork.SendSpecificMessage(CString(""),
+    g_pChitin->cNetwork.SendSpecificMessage(CString(),
         CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
         MSG_TYPE_AREAMAPNOTE,
         MSG_SUBTYPE_AREAMAPNOTE_ANNOUNCE,

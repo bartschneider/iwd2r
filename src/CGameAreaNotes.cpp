@@ -385,22 +385,24 @@ BOOL CGameAreaNotes::DeleteANote(DWORD id)
 
     // The same message pair Add sends: the client asks the host, the host
     // announces it. An empty text with flags 0 and STRREF -1 is the "remove"
-    // the receiver's Add (sub_47B150) understands. A client inside an
+    // the receiver's Add (0x47B150) understands. A client inside an
     // announcement returns without touching the UI: the announce handler owns
     // the removal.
     if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        CString sEmptyText;
+
         if (g_pChitin->cNetwork.m_bIsHost == TRUE) {
             g_pBaldurChitin->GetBaldurMessage()->AnnounceAreaMapNote(m_rArea.GetResRefStr(),
                 pNote->m_startX,
                 pNote->m_startY,
-                CString(""),
+                sEmptyText,
                 0,
                 -1);
         } else if (g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce == FALSE) {
             g_pBaldurChitin->GetBaldurMessage()->SendAreaMapNoteToServer(m_rArea.GetResRefStr(),
                 pNote->m_startX,
                 pNote->m_startY,
-                CString(""),
+                sEmptyText,
                 0,
                 -1);
 
