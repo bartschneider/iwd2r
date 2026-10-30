@@ -135,6 +135,22 @@ def string_at(secs, va):
     return None
 
 
+def inside_string(secs, va):
+    """True when va lies strictly inside a longer string.
+
+    Step C's rule 2: the byte before va is a printable string byte rather
+    than NUL or a non-string byte, so a pointer to va reads a longer
+    literal's tail ("C" out of "BSC") -- not a string of its own. A
+    section start has no byte before it, and no data section holding va
+    has no string around it: neither counts as inside.
+    """
+    for lo, hi, data, executable in secs.values():
+        if executable or not lo <= va < hi:
+            continue
+        return va > lo and data[va - lo - 1] in STRING_CHARS
+    return False
+
+
 def quote(text):
     """Escaped for a C-style literal (the alphabet is already ASCII)."""
     for char, esc in (('\\', '\\\\'), ('"', '\\"'), ('\t', '\\t'),
@@ -233,11 +249,16 @@ def line_for(ins, secs, fn_names, labels, export_names):
 def referenced_strings(address, end, exe, labels=None):
     """({va: literal}, {va: label}, {call target: pushed string vas}).
 
-    One walk of [address, end) with line_for's operand rule: every
-    immediate or displacement that points at a printable NUL-terminated
-    string (`strings`), which of those addresses our tree labels
-    (`labelled`), and, per direct call target, the string vas among the
-    four immediate pushes before any call to it. That last one is how a
+    One walk of [address, end) collecting the strings the body points at,
+    narrowed by the two noise rules Step C measured in: only an
+    immediate operand counts -- Step B's noise arrived as the
+    displacement of a pointer load, which reads pointer-table bytes as
+    text -- and an address strictly inside a longer string never does (a
+    pointer to a literal's tail, "C" out of "BSC", is not a reference to
+    "C"; the annotate listing still annotates displacements, this
+    collection is the column's). `labelled` is which of those addresses
+    our tree names, and `pushed` maps a direct call target to the string
+    vas among the four immediate pushes before any call to it -- how a
     macro hides its own arguments: UTIL_ASSERT's caller pushes the file
     path and the expression text the source never writes. `labels` is the
     merged marker_names pair (run.py caches that scan across rows).
@@ -252,12 +273,20 @@ def referenced_strings(address, end, exe, labels=None):
     for ins in md.disasm(code, address):
         if ins.address + ins.size > end:
             break
-        for cand in operand_addrs(ins):
+        direct = ins.mnemonic in ('call', 'jmp') and ins.operands and \
+            ins.operands[0].type == capstone.x86.X86_OP_IMM
+        for op in ins.operands:
+            if op.type != capstone.x86.X86_OP_IMM:
+                continue  # rule 1: a displacement read is not a literal use
+            if direct and op is ins.operands[0]:
+                continue  # the call/jmp target is control flow, not data
+            cand = op.imm & 0xFFFFFFFF
             literal = string_at(secs, cand)
-            if literal:
-                strings.setdefault(cand, literal)
-                if cand in labels:
-                    labelled.setdefault(cand, labels[cand])
+            if not literal or inside_string(secs, cand):
+                continue  # rule 2: a pointer to a longer string's tail
+            strings.setdefault(cand, literal)
+            if cand in labels:
+                labelled.setdefault(cand, labels[cand])
         if ins.mnemonic == 'push' and ins.operands and \
                 ins.operands[0].type == capstone.x86.X86_OP_IMM:
             window.append(ins.operands[0].imm & 0xFFFFFFFF)

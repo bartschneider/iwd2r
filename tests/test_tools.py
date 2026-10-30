@@ -8514,6 +8514,38 @@ class StringsColumnTest(AnnotateTest):
             (run.YELLOW, ['exe strings not in the body (1 of 2 referenced):',
                           '  "Hello" (0x402000)']))
 
+    def test_strings_counts_immediates_only(self):
+        # Step C rule 1: Step B's noise arrived as the memory-displacement
+        # operand of a pointer load (pointer-table bytes read as "j=J"). A
+        # displacement is not a literal use; the same address pushed is.
+        run, annotate, pe, ctx = self.strings_case(
+            self.GREEN_SPAN.replace('"Plain"', '"Nope"'),
+            code=b'\xa1\x08\x20\x40\x00'   # 0x401000  mov eax,[0x402008]
+                 b'\xc3')                  # 0x401005  ret
+        strings, _, _ = annotate.referenced_strings(0x401000, 0x401005, pe)
+        self.assertEqual(strings, {})
+        # so the column stays GREEN though the span never writes the
+        # literal the displacement's bytes spell
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                         (run.GREEN, ["0 exe string(s) referenced, "
+                                      "all among the body's literals"]))
+
+    def test_strings_skips_mid_string_addresses(self):
+        # Step C rule 2: a pointer strictly inside a longer string -- "C"
+        # is the tail of "BSC" -- is not a reference to "C"; the string's
+        # first byte is.
+        run, annotate, pe, ctx = self.strings_case(
+            self.GREEN_SPAN.replace('"Plain"', '"BSC"'),
+            code=(b'\x68\x08\x20\x40\x00'   # 0x401000  push 0x402008 -> BSC
+                  b'\x68\x0a\x20\x40\x00'   # 0x401005  push 0x40200a -> C
+                  b'\xc3'),                 # 0x401007  ret
+            rdata=b'Hello\x00\x00\x00BSC\x00')
+        strings, _, _ = annotate.referenced_strings(0x401000, 0x401007, pe)
+        self.assertEqual(strings, {0x402008: 'BSC'})
+        # and the column is GREEN: "BSC" is written, "C" never collected
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx)[0],
+                         run.GREEN)
+
     def test_strings_skips_without_exe_or_size(self):
         run = load_parity_tool('run')
         annotate = load_parity_tool('annotate')
