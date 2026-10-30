@@ -1436,9 +1436,117 @@ BOOL CInfinity::CancelRequestRect(unsigned char a1)
 }
 
 // 0x5CD3C0
-void CInfinity::ScrollingCancelRequestRect(unsigned char a1)
+BOOL CInfinity::ScrollingCancelRequestRect(unsigned char a1)
 {
-    // TODO: Incomplete.
+    const int x1 = field_68;
+    const int y1 = field_6C;
+    const int x2 = field_70;
+    const int y2 = field_74;
+
+    // The interior, one tile in from the remembered edges.
+    for (int y = max(y1 + 1, 0); y < min(y2 - 1, nTilesY - 1); y++) {
+        for (int x = max(x1 + 1, 0); x < min(x2 - 1, nTilesX - 1); x++) {
+            CancelRequestTile(x, y, a1);
+        }
+    }
+
+    // The border the remembered scroll state entered.
+    switch (field_196) {
+    case 1:
+        // One row above the rect.
+        for (int y = max(y1 - 1, 0); y < max(y1, 0); y++) {
+            for (int x = max(x1, 0); x < min(x2, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    case 2:
+        // One row above, then the right column.
+        for (int y = max(y1 - 1, 0); y < max(y1, 0); y++) {
+            for (int x = max(x1, 0); x < min(x2 + 1, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = min(x2, nTilesX - 1); x < min(x2 + 1, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    case 3:
+        // The right column.
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = min(x2, nTilesX - 1); x < min(x2 + 1, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    case 4:
+        // One row below, then the right column.
+        for (int y = min(y2, nTilesY - 1); y < min(y2 + 1, nTilesY - 1); y++) {
+            for (int x = max(x1, 0); x < min(x2 + 1, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = min(x2, nTilesX - 1); x < min(x2 + 1, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    case 5:
+        // One row below.
+        for (int y = min(y2, nTilesY - 1); y < min(y2 + 1, nTilesY - 1); y++) {
+            for (int x = max(x1, 0); x < min(x2, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    case 6:
+        // One row below, then the left column.
+        for (int y = min(y2, nTilesY - 1); y < min(y2 + 1, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < min(x2, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < max(x1, 0); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    case 7:
+        // The left column.
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < max(x1, 0); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    case 8:
+        // One row above, then the left column.
+        for (int y = max(y1 - 1, 0); y < max(y1, 0); y++) {
+            for (int x = max(x1 - 1, 0); x < min(x2, nTilesX - 1); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < max(x1, 0); x++) {
+                CancelRequestTile(x, y, a1);
+            }
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\Infinity.cpp
+        // __LINE__: 2669
+        UTIL_ASSERT(FALSE);
+    }
+
+    return TRUE;
 }
 
 // 0x5CDA70

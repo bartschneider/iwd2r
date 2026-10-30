@@ -743,5 +743,200 @@ void ScrollingRequestRect(CaseContext& ctx)
     }
 }
 
+// CInfinity::ScrollingCancelRequestRect(unsigned char a1) (0x5CD3C0),
+// `ret 0x4` at 0x5CDA42 and `mov al, 1` before it (the original returns TRUE).
+// The mirror of ScrollingRequestRect: it reads the remembered rect from
+// field_68/6C/70/74 and the scroll state from field_196 (no arguments for
+// either), cancels the interior and the remembered border's cells with
+// CancelRequestTile (0x5D07B0), leaves the rect and state alone, and returns 1.
+// The fixture is the request case's: each cell's tile is its secondary one and
+// bFlags is 0x02, so CancelRequestTile cancels it in both its secondary block
+// and its trailing request (two decrements per visit). The tiles start well
+// above the per-input maximum, so CancelRequest only decrements them and the
+// chitin's lists and critical section are not entered (g_pChitin still has to
+// be a valid block for CancelRequest's tail).
+using ScrollingCancelRequestRectFn = int32_t(__fastcall*)(void* self, void* edx, uint8_t a1);
+constexpr uintptr_t kScrollingCancelRequestRect = 0x5CD3C0;
+
+// ScrollingCancelRequestRect over the 8x8 map: random remembered rects
+// (including outside the map), states 1-8 and a1 bytes, with the tiles'
+// request counts high enough that no cancellation reaches the floor. Compares
+// the WED, the untouched rect/state fields and all 64 tiles' counts/flags.
+void ScrollingCancelRequestRect(CaseContext& ctx)
+{
+    uint8_t* wedData = nullptr;
+    uint8_t* resWed = nullptr;
+    uint8_t* infinity = nullptr;
+    uint8_t* tileSet = nullptr;
+    uint8_t* tilePointers = nullptr;
+    uint8_t* tiles = nullptr;
+    ctx.SetInputs("building the original's blocks");
+    ctx.CallOriginal([&] {
+        wedData = static_cast<uint8_t*>(OriginalBlock(kWEDSize));
+        resWed = static_cast<uint8_t*>(OriginalBlock(kResWedSize));
+        infinity = static_cast<uint8_t*>(OriginalBlock(kInfinitySize));
+        tileSet = static_cast<uint8_t*>(OriginalBlock(kTileSetSizeBytes));
+        tilePointers = static_cast<uint8_t*>(OriginalBlock(kScrollTiles * 4));
+        tiles = static_cast<uint8_t*>(OriginalBlock(kScrollTiles * kResInfTileSize));
+    });
+
+    std::vector<uint8_t> oursResWed(kResWedSize, 0);
+    std::vector<uint8_t> oursInfinity(sizeof(CInfinity), 0);
+    std::vector<uint8_t> oursTileSet(sizeof(CInfTileSet), 0);
+    std::vector<uint8_t> oursTiles(kScrollTiles * sizeof(CResInfTile), 0);
+    std::vector<CResInfTile*> oursTilePointers(kScrollTiles, nullptr);
+    std::vector<uint8_t> image;
+    std::vector<uint8_t> oursImage;
+
+    auto* ourResWed = reinterpret_cast<CResWED*>(oursResWed.data());
+    auto* ourInfinity = reinterpret_cast<CInfinity*>(oursInfinity.data());
+    auto* ourTileSet = reinterpret_cast<CInfTileSet*>(oursTileSet.data());
+    for (int i = 0; i < kScrollTiles; i++) {
+        oursTilePointers[i] = reinterpret_cast<CResInfTile*>(oursTiles.data() + i * sizeof(CResInfTile));
+    }
+
+    Picks picks(ctx.seed, 0x43616E63656C5200ull); // "CancelR"
+    const int count = 500 + ctx.iterations / 25;
+    for (int n = 0; n < count; ++n) {
+        BuildScrollImage(image);
+
+        const int32_t x1 = picks.Between(-3, 12);
+        const int32_t y1 = picks.Between(-3, 12);
+        const int32_t x2 = picks.Between(-3, 12);
+        const int32_t y2 = picks.Between(-3, 12);
+        const int32_t nScrollState = picks.Between(1, 8);
+        const uint8_t a1 = static_cast<uint8_t>(picks.Between(0, 255));
+
+        std::vector<uint8_t> requestCounts(kScrollTiles);
+        for (int i = 0; i < kScrollTiles; i++) {
+            requestCounts[i] = static_cast<uint8_t>(40 + picks.Between(0, 8));
+        }
+
+        char inputs[200];
+        std::snprintf(inputs, sizeof(inputs), "input %d: rect %d,%d-%d,%d state %d a1 0x%02X",
+            n, x1, y1, x2, y2, nScrollState, a1);
+        ctx.SetInputs(inputs);
+
+        oursImage = image;
+
+        ctx.CallOriginal([&] {
+            std::memset(resWed, 0, kResWedSize);
+            std::memset(infinity, 0, kInfinitySize);
+            std::memset(tileSet, 0, kTileSetSizeBytes);
+            std::memset(tilePointers, 0, kScrollTiles * 4);
+            std::memset(tiles, 0, kScrollTiles * kResInfTileSize);
+
+            std::memcpy(wedData, image.data(), kWEDSize);
+            reinterpret_cast<ParseWedFn>(kParseWed)(resWed, nullptr, wedData);
+
+            for (int i = 0; i < kScrollTiles; i++) {
+                uint8_t* pTile = tiles + i * kResInfTileSize;
+                Put<uint32_t>(tilePointers, i * 4, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pTile)));
+                Put<int32_t>(pTile, kResField44, requestCounts[i]);
+            }
+
+            Put<uint32_t>(tileSet, kTileSetResTiles, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(tilePointers)));
+            Put<int32_t>(tileSet, kTileSetNumTiles, kScrollTiles);
+
+            Put<uint32_t>(infinity, kInfinityTileSets, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(tileSet)));
+            Put<uint32_t>(infinity, kInfinityResWED, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resWed)));
+            Put<int32_t>(infinity, kInfinityTilesX, kTilesAcross);
+            Put<int32_t>(infinity, kInfinityTilesY, kTilesDown);
+            Put<int32_t>(infinity, kInfinityField68, x1);
+            Put<int32_t>(infinity, kInfinityField6C, y1);
+            Put<int32_t>(infinity, kInfinityField70, x2);
+            Put<int32_t>(infinity, kInfinityField74, y2);
+            Put<int32_t>(infinity, kInfinityField196, nScrollState);
+
+            // The chitin and its CDimm: CancelRequest reads g_pChitin and its
+            // tail; the counts stay positive so it does not take the lists.
+            uint8_t* chitin = static_cast<uint8_t*>(OriginalBlock(kOriginalChitinSize));
+            reinterpret_cast<DimmCtorFn>(kDimmCtor)(chitin + 0x542, nullptr);
+            InitializeOriginalCriticalSection(chitin + kOriginalChitinCriticalSection);
+            *reinterpret_cast<uint32_t*>(kOriginalChitinGlobal) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(chitin));
+
+            reinterpret_cast<ScrollingCancelRequestRectFn>(kScrollingCancelRequestRect)(infinity, nullptr, a1);
+        });
+
+        std::memset(oursResWed.data(), 0, kResWedSize);
+        std::memset(oursInfinity.data(), 0, oursInfinity.size());
+        std::memset(oursTileSet.data(), 0, oursTileSet.size());
+        std::memset(oursTiles.data(), 0, oursTiles.size());
+
+        if (!ourResWed->Parse(oursImage.data())) {
+            ctx.Fail(ctx.Inputs() + ", ours: WED parse failed", "1", "0");
+            continue;
+        }
+
+        std::vector<uint8_t> oursChitinStorage(sizeof(CChitin), 0);
+        auto* ourChitin = reinterpret_cast<CChitin*>(oursChitinStorage.data());
+        InitializeCriticalSection(&ourChitin->field_2FC);
+        g_pChitin = ourChitin;
+
+        for (int i = 0; i < kScrollTiles; i++) {
+            auto* pTile = oursTilePointers[i];
+            pTile->field_44 = requestCounts[i];
+            pTile->field_40 = 0;
+            pTile->dwFlags = 0;
+            pTile->m_pDualTileRes = NULL;
+        }
+
+        ourTileSet->m_pVRamPool = NULL;
+        ourTileSet->m_pResTiles = oursTilePointers.data();
+        ourTileSet->m_nTiles = kScrollTiles;
+        ourInfinity->pTileSets[0] = ourTileSet;
+        ourInfinity->pResWED = ourResWed;
+        ourInfinity->nTilesX = kTilesAcross;
+        ourInfinity->nTilesY = kTilesDown;
+        ourInfinity->field_68 = x1;
+        ourInfinity->field_6C = y1;
+        ourInfinity->field_70 = x2;
+        ourInfinity->field_74 = y2;
+        ourInfinity->field_196 = nScrollState;
+
+        ourInfinity->ScrollingCancelRequestRect(a1);
+        g_pChitin = nullptr;
+        ctx.CountInputs(1);
+
+        CompareArrays(ctx, reinterpret_cast<const uint32_t*>(wedData),
+            reinterpret_cast<const uint32_t*>(oursImage.data()), kWEDSize / 4);
+
+        const int32_t originalField[4] = {
+            Get<int32_t>(infinity, kInfinityField68),
+            Get<int32_t>(infinity, kInfinityField6C),
+            Get<int32_t>(infinity, kInfinityField70),
+            Get<int32_t>(infinity, kInfinityField74),
+        };
+        const int32_t ourField[4] = { ourInfinity->field_68, ourInfinity->field_6C, ourInfinity->field_70, ourInfinity->field_74 };
+        if (std::memcmp(originalField, ourField, sizeof(originalField)) != 0) {
+            ctx.Fail(ctx.Inputs() + ", rect",
+                std::to_string(originalField[0]) + "," + std::to_string(originalField[1]) + "-"
+                    + std::to_string(originalField[2]) + "," + std::to_string(originalField[3]),
+                std::to_string(ourField[0]) + "," + std::to_string(ourField[1]) + "-"
+                    + std::to_string(ourField[2]) + "," + std::to_string(ourField[3]));
+        }
+
+        if (Get<int32_t>(infinity, kInfinityField196) != ourInfinity->field_196) {
+            ctx.Fail(ctx.Inputs() + ", state", std::to_string(Get<int32_t>(infinity, kInfinityField196)),
+                std::to_string(ourInfinity->field_196));
+        }
+
+        for (int i = 0; i < kScrollTiles; i++) {
+            const uint8_t* pTile = tiles + i * kResInfTileSize;
+            const CResInfTile* pOurs = oursTilePointers[i];
+            const int32_t originalCount = Get<int32_t>(pTile, kResField44);
+            const uint32_t originalDwordFlags = Get<uint32_t>(pTile, kResFlags);
+            if (originalCount != pOurs->field_44 || originalDwordFlags != pOurs->dwFlags) {
+                char detail[96];
+                std::snprintf(detail, sizeof(detail), "tile %d requests %d flags %08X", i, originalCount, originalDwordFlags);
+                char oursDetail[96];
+                std::snprintf(oursDetail, sizeof(oursDetail), "tile %d requests %d flags %08X", i, pOurs->field_44, pOurs->dwFlags);
+                ctx.Fail(ctx.Inputs() + ", " + detail, detail, oursDetail);
+            }
+        }
+    }
+}
+
 ORACLE_CASE("infinity/check_tile_state", CheckTileState);
 ORACLE_CASE("infinity/scrolling_request_rect", ScrollingRequestRect);
+ORACLE_CASE("infinity/scrolling_cancel_request_rect", ScrollingCancelRequestRect);

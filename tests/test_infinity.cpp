@@ -661,3 +661,242 @@ TEST_CASE("infinity: ScrollingRequestRect clamps to the map and records the rect
         CHECK(fixture.m_pInfinity->field_15E == 0x6);
     }
 }
+
+// -----------------------------------------------------------------------------
+// CInfinity::ScrollingCancelRequestRect (0x5CD3C0)
+// -----------------------------------------------------------------------------
+
+namespace {
+
+// The cancel walk reads the rect from field_68/6C/70/74 and the scroll state
+// from field_196, and cancels exactly the cells the request walk of T86 visits;
+// a visited cell is cancelled twice (the secondary block and the trailing one).
+void SetCounts(ScrollFixture& fixture, int value)
+{
+    for (int i = 0; i < kScrollTiles; i++) {
+        fixture.m_pResTiles[i]->field_44 = value;
+    }
+}
+
+void CheckCancels(ScrollFixture& fixture, int nBefore,
+    const std::set<std::pair<int, int>>& cancelled)
+{
+    for (int y = 0; y < kScrollTilesDown; y++) {
+        for (int x = 0; x < kScrollTilesAcross; x++) {
+            const CResInfTile* pTile = fixture.TileAt(x, y);
+            const bool bCancelled = cancelled.count(std::make_pair(x, y)) != 0;
+            CHECK(pTile->field_44 == (bCancelled ? nBefore - 2 : nBefore));
+        }
+    }
+}
+
+}
+
+TEST_CASE("infinity: ScrollingCancelRequestRect cancels the interior and the remembered border", "[infinity]")
+{
+    using Border = std::set<std::pair<int, int>>;
+
+    ScrollFixture fixture;
+    SetCounts(fixture, 5);
+
+    SECTION("state 1: one row above")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 1;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 2, 1 }, { 3, 1 }, { 4, 1 }, { 5, 1 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+
+    SECTION("state 2: one row above and the right column")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 2;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 2, 1 }, { 3, 1 }, { 4, 1 }, { 5, 1 }, { 6, 1 }, { 6, 2 }, { 6, 3 }, { 6, 4 }, { 6, 5 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+
+    SECTION("state 3: the right column")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 3;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 6, 2 }, { 6, 3 }, { 6, 4 }, { 6, 5 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+
+    SECTION("state 4: the right column and one row below")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 4;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 2, 6 }, { 3, 6 }, { 4, 6 }, { 5, 6 }, { 6, 6 }, { 6, 2 }, { 6, 3 }, { 6, 4 }, { 6, 5 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+
+    SECTION("state 5: one row below")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 5;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 2, 6 }, { 3, 6 }, { 4, 6 }, { 5, 6 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+
+    SECTION("state 6: the left column and one row below")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 6;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 1, 6 }, { 2, 6 }, { 3, 6 }, { 4, 6 }, { 5, 6 }, { 1, 2 }, { 1, 3 }, { 1, 4 }, { 1, 5 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+
+    SECTION("state 7: the left column")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 7;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 1, 2 }, { 1, 3 }, { 1, 4 }, { 1, 5 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+
+    SECTION("state 8: one row above and the left column")
+    {
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 8;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        Border cancelled = kInterior;
+        cancelled.insert({ { 1, 1 }, { 2, 1 }, { 3, 1 }, { 4, 1 }, { 5, 1 }, { 1, 2 }, { 1, 3 }, { 1, 4 }, { 1, 5 } });
+        CheckCancels(fixture, 5, cancelled);
+    }
+}
+
+TEST_CASE("infinity: ScrollingCancelRequestRect's clamps, count floor and a1", "[infinity]")
+{
+    using Border = std::set<std::pair<int, int>>;
+
+    SECTION("the remembered rect is used as is and left alone")
+    {
+        ScrollFixture fixture;
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 7;
+
+        const BOOL bResult = fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+        CHECK(bResult);
+
+        CHECK(fixture.m_pInfinity->field_68 == 2);
+        CHECK(fixture.m_pInfinity->field_6C == 2);
+        CHECK(fixture.m_pInfinity->field_70 == 6);
+        CHECK(fixture.m_pInfinity->field_74 == 6);
+        CHECK(fixture.m_pInfinity->field_196 == 7);
+    }
+
+    SECTION("a rect wider than the map has no border")
+    {
+        Border discarded;
+        for (int y = 1; y <= 6; y++) {
+            for (int x = 1; x <= 6; x++) {
+                discarded.insert(std::make_pair(x, y));
+            }
+        }
+
+        ScrollFixture fixture;
+        SetCounts(fixture, 5);
+        fixture.m_pInfinity->field_68 = 0;
+        fixture.m_pInfinity->field_6C = 0;
+        fixture.m_pInfinity->field_70 = 8;
+        fixture.m_pInfinity->field_74 = 8;
+        fixture.m_pInfinity->field_196 = 3;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+        CheckCancels(fixture, 5, discarded);
+    }
+
+    SECTION("a rect wholly above and left cancels nothing")
+    {
+        ScrollFixture fixture;
+        fixture.m_pInfinity->field_68 = -3;
+        fixture.m_pInfinity->field_6C = -3;
+        fixture.m_pInfinity->field_70 = -1;
+        fixture.m_pInfinity->field_74 = -1;
+        fixture.m_pInfinity->field_196 = 8;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        for (int i = 0; i < kScrollTiles; i++) {
+            CHECK(fixture.m_pResTiles[i]->field_44 == 0);
+        }
+    }
+
+    SECTION("the count does not go below zero")
+    {
+        ScrollFixture fixture;
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 3;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(1);
+
+        for (int i = 0; i < kScrollTiles; i++) {
+            CHECK(fixture.m_pResTiles[i]->field_44 == 0);
+        }
+    }
+
+    SECTION("a1 without bit 0 cancels nothing")
+    {
+        ScrollFixture fixture;
+        fixture.m_pInfinity->field_68 = 2;
+        fixture.m_pInfinity->field_6C = 2;
+        fixture.m_pInfinity->field_70 = 6;
+        fixture.m_pInfinity->field_74 = 6;
+        fixture.m_pInfinity->field_196 = 3;
+        fixture.m_pInfinity->ScrollingCancelRequestRect(0);
+
+        for (int i = 0; i < kScrollTiles; i++) {
+            CHECK(fixture.m_pResTiles[i]->field_44 == 0);
+        }
+    }
+}
