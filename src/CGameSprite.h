@@ -659,6 +659,7 @@ public:
     SHORT EquipMostDamagingMelee();
     SHORT EquipRanged();
     SHORT GiveItem(CGameAIBase* pTarget);
+    SHORT StartStore(CGameSprite* pTarget);
     const CAIObjectType& GetLiveAIType();
     SHORT GetCasterLevel(CSpell* pSpell, BYTE nClass, DWORD nSpecialization);
     SHORT sub_75F240();

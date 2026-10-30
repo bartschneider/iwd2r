@@ -13923,9 +13923,20 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = EquipMostDamagingMelee();
         goto done;
     case 150:
-        // StartStore
-        // TODO: 0x72A546-0x72A56E not ported (0x75E630).
-        returnValue = ACTION_ERROR;
+        // StartStore (0x72A546-0x72A56E): resolve the targeted sprite, hand
+        // it to StartStore as the customer and release the share afterwards.
+        // Without this branch a dialog's StartStore action is dequeued and
+        // dropped, so the store screen never opens.
+        {
+            CGameObject* pObj = GetTargetShareType(CGameObject::TYPE_SPRITE);
+            returnValue = StartStore(static_cast<CGameSprite*>(pObj));
+            if (pObj != NULL) {
+                g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseShare(
+                    pObj->m_id,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+            }
+        }
         goto done;
     case 152:
         // ChangeAIType
@@ -25103,6 +25114,72 @@ SHORT CGameSprite::sub_75E330(CItem* pLauncher, BOOL bEquipMelee)
     }
 
     return CGameAIBase::ACTION_DONE;
+}
+
+// 0x75E630
+SHORT CGameSprite::StartStore(CGameSprite* pTarget)
+{
+    if (pTarget == NULL) {
+        return ACTION_ERROR;
+    }
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (g_pChitin->cNetwork.m_nServiceProvider != CNetwork::SERV_PROV_NULL) {
+        // In multiplayer the customer is whoever the dialog is running for,
+        // not the object the action targeted.
+        LONG nCustomerId = g_pBaldurChitin->m_pEngineWorld->m_internalLoadedDialog.m_characterIndex;
+
+        CGameObject* pCustomer;
+
+        BYTE rc;
+        do {
+            rc = pGame->GetObjectArray()->GetShare(nCustomerId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pCustomer,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc == CGameObjectArray::SUCCESS) {
+            if (pGame->GetCharacterPortraitNum(nCustomerId) == -1) {
+                g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(-1,
+                    7489, // "Familiars can not enter stores."
+                    0xFF,
+                    0xFF,
+                    -1,
+                    CGameObjectArray::INVALID_INDEX,
+                    CGameObjectArray::INVALID_INDEX);
+            } else {
+                g_pBaldurChitin->GetScreenWorld()->StartStore(m_liveTypeAI,
+                    pCustomer->GetAIType(),
+                    CResRef(m_curAction.GetString1()),
+                    TRUE);
+            }
+
+            pGame->GetObjectArray()->ReleaseShare(nCustomerId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+
+            return ACTION_DONE;
+        }
+    }
+
+    if (pGame->GetCharacterPortraitNum(pTarget->m_id) == -1) {
+        g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(-1,
+            7489, // "Familiars can not enter stores."
+            0xFF,
+            0xFF,
+            -1,
+            CGameObjectArray::INVALID_INDEX,
+            CGameObjectArray::INVALID_INDEX);
+    } else {
+        g_pBaldurChitin->GetScreenWorld()->StartStore(m_liveTypeAI,
+            pTarget->GetLiveAIType(),
+            CResRef(m_curAction.GetString1()),
+            TRUE);
+    }
+
+    return ACTION_DONE;
 }
 
 // 0x75E880
