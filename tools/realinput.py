@@ -533,9 +533,15 @@ def load_header_fixtures(path):
         entries = header_fixtures(text)
     except ScenarioError as e:
         raise ScenarioError('%s: %s' % (path, e)) from None
+    if not entries:
+        return []
     root = os.path.dirname(os.path.abspath(path))
-    while root and os.path.basename(root) != 'scenarios':
-        root = os.path.dirname(root)
+    while os.path.basename(root) != 'scenarios':
+        parent = os.path.dirname(root)
+        if parent == root:  # the filesystem root: no scenarios ancestor
+            root = ''
+            break
+        root = parent
     resolved = []
     for src, name in entries:
         source = os.path.join(root, src)

@@ -703,6 +703,24 @@ class ScenarioParseTest(unittest.TestCase):
                 os.path.join(pending, 'p.txt')
                 + ": fixtures path 'chr/nope.CHR' is no file under " + root)
 
+    def test_load_header_fixtures_outside_any_scenarios_folder(self):
+        # No 'scenarios' ancestor: the walk stops at the filesystem root
+        # instead of looping on '/' (dirname('/') is '/'), a scenario
+        # without the header needs no walk at all, and one with it names
+        # the root it gave up at.
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = os.path.join(tmp, 'plain.txt')
+            with open(plain, 'w') as f:
+                f.write('wait 1\n')
+            self.assertEqual(realinput.load_header_fixtures(plain), [])
+            staged = os.path.join(tmp, 'staged.txt')
+            with open(staged, 'w') as f:
+                f.write('# fixtures: chr/A.CHR\nwait 1\n')
+            with self.assertRaises(realinput.ScenarioError) as cm:
+                realinput.load_header_fixtures(staged)
+            self.assertTrue(str(cm.exception).endswith(
+                "fixtures path 'chr/A.CHR' is no file under " + os.sep))
+
     def test_header_timeout(self):
         t = realinput.header_timeout
         self.assertEqual(t('# timeout: 420\nwait 1\n'), 420)
