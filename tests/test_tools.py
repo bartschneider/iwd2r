@@ -625,6 +625,102 @@ class ScenarioParseTest(unittest.TestCase):
         self.assertEqual(realinput.parse_scenario('# cheats: 1\nquit\n'),
                          [{'op': 'quit', 'line': 2}])
 
+    def test_header_fixtures(self):
+        f = realinput.header_fixtures
+        self.assertEqual(f('wait 1\n'), [])
+        self.assertEqual(f('# About it.\nwait 1\n'), [])
+        self.assertEqual(f('# fixtures: chr/A.CHR\nwait 1\n'),
+                         [('chr/A.CHR', None)])
+        # An alias, spacing, commas, several lines, CRLF.
+        self.assertEqual(
+            f('# About it.\n'
+              '\n'
+              '#  Fixtures:  chr/A.CHR:0A.CHR , b/b.CHR\r\n'
+              '# fixtures: c.CHR\n'
+              'wait 1\n'),
+            [('chr/A.CHR', '0A.CHR'), ('b/b.CHR', None), ('c.CHR', None)])
+        # Only the header (the comment lines before the first command).
+        self.assertEqual(f('wait 1\n# fixtures: c.CHR\n'), [])
+        for text, message in (
+                ('# fixtures:\n', 'line 1: fixtures entry is empty'),
+                ('# fixtures: ,c.CHR\n', 'line 1: fixtures entry is empty'),
+                ('# fixtures: /abs/x.CHR\n',
+                 "line 1: fixtures path '/abs/x.CHR' must be relative to "
+                 "the scenarios root"),
+                ('# fixtures: ../x.CHR\n',
+                 "line 1: fixtures path '../x.CHR' must be relative to "
+                 "the scenarios root"),
+                ('# fixtures: a\\x.CHR\n',
+                 "line 1: fixtures path 'a\\\\x.CHR' must be relative to "
+                 "the scenarios root"),
+                ('# fixtures: :A.CHR\n',
+                 "line 1: fixtures path '' must be relative to the "
+                 "scenarios root"),
+                ('# fixtures: a.CHR:sub/A.CHR\n',
+                 "line 1: fixtures name 'sub/A.CHR' must be a bare file "
+                 "name"),
+                ('# fixtures: a.CHR:..\n',
+                 "line 1: fixtures name '..' must be a bare file name"),
+                ('# fixtures: a.CHR\n# fixtures: a.CHR\n',
+                 "line 2: fixtures stages 'a.CHR' twice (first on line 1)"),
+                ('# fixtures: a.CHR:0A.CHR, b/0A.CHR\n',
+                 "line 1: fixtures stages '0A.CHR' twice (first on line 1)")):
+            with self.assertRaises(realinput.ScenarioError, msg=text) as cm:
+                f(text)
+            self.assertEqual(str(cm.exception), message)
+        # The scenario parser takes the header for a comment.
+        self.assertEqual(realinput.parse_scenario('# fixtures: a.CHR\nquit\n'),
+                         [{'op': 'quit', 'line': 2}])
+
+    def test_load_header_fixtures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, 'scenarios')
+            os.makedirs(os.path.join(root, 'chr'))
+            with open(os.path.join(root, 'chr', 'A.CHR'), 'wb') as f:
+                f.write(b'CHR V2.2-x')
+            pending = os.path.join(root, 'pending')
+            os.makedirs(pending)
+            for name in ('s.txt', 'p.txt'):
+                with open(os.path.join(pending, name), 'w') as f:
+                    f.write('# fixtures: chr/A.CHR:0A.CHR\nwait 1\n')
+            # Both a pending and a plain scenario resolve from the
+            # scenarios root; the name defaults to the source's.
+            self.assertEqual(
+                realinput.load_header_fixtures(
+                    os.path.join(pending, 's.txt')),
+                [(os.path.join(root, 'chr', 'A.CHR'), '0A.CHR')])
+            with open(os.path.join(root, 'top.txt'), 'w') as f:
+                f.write('# fixtures: chr/A.CHR\nwait 1\n')
+            self.assertEqual(
+                realinput.load_header_fixtures(os.path.join(root, 'top.txt')),
+                [(os.path.join(root, 'chr', 'A.CHR'), 'A.CHR')])
+            with open(os.path.join(pending, 'p.txt'), 'w') as f:
+                f.write('# fixtures: chr/nope.CHR\nwait 1\n')
+            with self.assertRaises(realinput.ScenarioError) as cm:
+                realinput.load_header_fixtures(os.path.join(pending, 'p.txt'))
+            self.assertEqual(
+                str(cm.exception),
+                os.path.join(pending, 'p.txt')
+                + ": fixtures path 'chr/nope.CHR' is no file under " + root)
+
+    def test_load_header_fixtures_outside_any_scenarios_folder(self):
+        # No 'scenarios' ancestor: the walk stops at the filesystem root
+        # instead of looping on '/' (dirname('/') is '/'), a scenario
+        # without the header needs no walk at all, and one with it names
+        # the root it gave up at.
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = os.path.join(tmp, 'plain.txt')
+            with open(plain, 'w') as f:
+                f.write('wait 1\n')
+            self.assertEqual(realinput.load_header_fixtures(plain), [])
+            staged = os.path.join(tmp, 'staged.txt')
+            with open(staged, 'w') as f:
+                f.write('# fixtures: chr/A.CHR\nwait 1\n')
+            with self.assertRaises(realinput.ScenarioError) as cm:
+                realinput.load_header_fixtures(staged)
+            self.assertTrue(str(cm.exception).endswith(
+                "fixtures path 'chr/A.CHR' is no file under " + os.sep))
+
     def test_header_timeout(self):
         t = realinput.header_timeout
         self.assertEqual(t('# timeout: 420\nwait 1\n'), 420)
@@ -3768,6 +3864,84 @@ class OracleSafeTargetTest(unittest.TestCase):
     def test_missing_game_is_fine(self):
         os.rmdir(self.game)
         self.assertIsNone(self.why(self.game))
+
+
+class OracleCharacterFixturesTest(unittest.TestCase):
+    """tools/oracle.py prepare/restore_character_fixtures: a scenario's
+    fixtures copy into the run's Characters folder and come out after,
+    whatever the run itself left there."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = os.path.realpath(self.tmp.name)
+        self.oracle_dir = os.path.join(base, 'oracle')
+        self.install = os.path.join(base, 'Games', 'Icewind Dale II')
+        self.game = os.path.join(self.oracle_dir, 'game')
+        for path in (self.oracle_dir, self.install):
+            os.makedirs(path)
+        patcher = mock.patch.object(oracle, 'ORACLE_DIR', self.oracle_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self.tmp.cleanup)
+        # unsafe_target's reparse check fails closed off drvfs (Windows
+        # drive); these tests never touch one (OracleSafeTargetTest.why).
+        self.no_reparse = lambda path: None
+
+    def fixture(self, name, data):
+        source = os.path.join(self.tmp.name, 'chr', name)
+        os.makedirs(os.path.dirname(source), exist_ok=True)
+        with open(source, 'wb') as f:
+            f.write(data)
+        return source
+
+    def characters(self):
+        return os.path.join(self.game, 'Characters')
+
+    def test_stages_and_removes(self):
+        source = self.fixture('A.CHR', b'fixture-a')
+        # The copy starts without a Characters folder at all.
+        prior = oracle.prepare_character_fixtures(
+            self.game, [(source, '0A.CHR')], self.install,
+            reparse=self.no_reparse)
+        self.assertEqual(prior, [('0A.CHR', None)])
+        staged = os.path.join(self.characters(), '0A.CHR')
+        with open(staged, 'rb') as f:
+            self.assertEqual(f.read(), b'fixture-a')
+        # The run exports under the staged name; the restore removes that.
+        with open(staged, 'wb') as f:
+            f.write(b'exported')
+        oracle.restore_character_fixtures(self.game, prior, self.install,
+                                           reparse=self.no_reparse)
+        self.assertFalse(os.path.exists(staged))
+
+    def test_restores_a_replaced_character(self):
+        chars = self.characters()
+        os.makedirs(chars)
+        existing = os.path.join(chars, 'B.CHR')
+        with open(existing, 'wb') as f:
+            f.write(b'existing')
+        source = self.fixture('B.CHR', b'fixture-b')
+        prior = oracle.prepare_character_fixtures(
+            self.game, [(source, 'B.CHR')], self.install,
+            reparse=self.no_reparse)
+        self.assertEqual(prior, [('B.CHR', b'existing')])
+        with open(existing, 'rb') as f:
+            self.assertEqual(f.read(), b'fixture-b')
+        oracle.restore_character_fixtures(self.game, prior, self.install,
+                                           reparse=self.no_reparse)
+        with open(existing, 'rb') as f:
+            self.assertEqual(f.read(), b'existing')
+
+    def test_refuses_an_unsafe_target(self):
+        source = self.fixture('A.CHR', b'fixture-a')
+        with self.assertRaises(SystemExit):
+            oracle.prepare_character_fixtures(
+                self.install, [(source, 'A.CHR')], self.install,
+                reparse=self.no_reparse)
+        with self.assertRaises(SystemExit):
+            oracle.restore_character_fixtures(
+                self.install, [('A.CHR', None)], self.install,
+                reparse=self.no_reparse)
 
 
 def fake_cmd(returncode=0, stdout='', stderr='', raises=None):

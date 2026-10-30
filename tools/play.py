@@ -958,6 +958,20 @@ def desktop_refusal(headless, env):
             '--headless, --vm linux or --vm windows' % DESKTOP_OK)
 
 
+def stage_fixtures(view, fixtures):
+    """Copy a scenario's character fixtures (realinput.load_header_fixtures)
+    into the run's private data view, whose Characters folder both the Linux
+    and the local Windows run read; the view is per-run, so the copies leave
+    with it and no restore is needed."""
+    if not fixtures:
+        return
+    folder = os.path.join(view, 'Characters')
+    os.makedirs(folder, exist_ok=True)
+    for source, name in fixtures:
+        shutil.copyfile(source, os.path.join(folder, name))
+        log('staged fixture %s as Characters/%s' % (source, name))
+
+
 def main(argv):
     args = parse_args(argv)
     if args.vm:
@@ -975,6 +989,7 @@ def main(argv):
     script = os.path.abspath(args.script) if args.script else None
     if script and not os.path.isfile(script):
         sys.exit('play: no script %s' % script)
+    fixtures = realinput.load_header_fixtures(script) if script else []
     overrides = build_overrides(args.resolution, args.fullscreen, args.sets,
                                 args.scale)
 
@@ -1004,6 +1019,7 @@ def main(argv):
         with open(log_path, 'w') as log_file:
             if args.linux:
                 view = dataview.make_view(data, os.path.join(run_dir, 'data'))
+                stage_fixtures(view, fixtures)
                 env = child_env(os.environ, view, overrides, headless,
                                 args.frames, script, run_dir, args.sound,
                                 args.shot_presented)
@@ -1022,6 +1038,7 @@ def main(argv):
                     win_script = wslpath('-w', os.path.join(win_run, 'script.txt'))
                 # The view is on the Windows drive: junctions and hard links.
                 view = dataview.make_view(data, os.path.join(win_run, 'data'))
+                stage_fixtures(view, fixtures)
                 env_vars = child_env({}, wslpath('-w', view), overrides,
                                      headless, args.frames, win_script,
                                      wslpath('-w', win_run), args.sound,
