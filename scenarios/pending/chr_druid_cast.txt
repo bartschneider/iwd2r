@@ -155,15 +155,20 @@ shot level1_cleared
 # the only slot druid 7 has (run 20261030-140342's spells_memorized
 # shot: one slot, "Spell Slots Available 0"; the old slot-2 clicks at
 # (307,136) hit nothing). Spike Stones memorizes into this slot later,
-# after Flame Strike is cast.
+# after Flame Strike is cast. TIMING: run 20261030-140342 memorized
+# with 20-frame waits; run 20261030-141837 ran the identical clicks
+# and left the slot EMPTY ("Spell Slots Available 1") -- the known
+# list was not interactive yet, so the select click missed and the
+# rest no-oped (the stray Yes changed nothing, again). The only lever
+# is the waits: 60 after the tab switch, 40 around each click.
 click 761 198
-wait 20
+wait 60
 click 510 222
-wait 20
+wait 40
 click 307 94
-wait 20
+wait 40
 click 456 257
-wait 30
+wait 40
 checkpoint spells_memorized
 shot spells_memorized
 key ESCAPE
@@ -356,17 +361,17 @@ shot cast1_after
 key S
 wait 60
 click 761 198
-wait 20
+wait 60
 click 307 94
-wait 20
+wait 40
 click 456 257
-wait 20
+wait 40
 click 510 390
-wait 20
+wait 40
 click 307 94
-wait 20
+wait 40
 click 456 257
-wait 30
+wait 40
 key ESCAPE
 wait 60
 checkpoint cast2_before
@@ -374,7 +379,11 @@ checkpoint cast2_before
 # where Grease landed as a cast-at-point (action 95) in spell_showcase.
 # CHECK: Spike Stones' delivery -- if the ground click walks (SPPR512
 # creature- or self-targeted), F1 + Space alone is the cast; read
-# world.party x,y in cast2_after. The goblin is Flame Strike's kill by
+# world.party x,y in cast2_after. Run 20261030-141837 measured the
+# unarmed case: with nothing armed the ground click WALKS (party
+# (584,906) -> (608,846), north, matching the click) and an unarmed
+# creature click does nothing -- so a walk in cast2_after means the
+# arm failed, not the delivery. The goblin is Flame Strike's kill by
 # then, so the click must not aim at its corpse.
 key 1
 wait 10
