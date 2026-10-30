@@ -44,8 +44,8 @@
 #include "CInfGame.h"
 #include "CResMosaic.h"
 #include "CRuleTables.h"
-#include "CVidMosaic.h"
 #include "CUtil.h"
+#include "CVidMosaic.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
@@ -276,7 +276,6 @@ void HpConBonus(CaseContext& ctx)
         check(nClass & 0xFF, nCON & 0xFF);
     }
 }
-
 
 // CImm::sub_7C3020 (0x7C3020), the composition window's rect (report-T80.md
 // §2.10; WSO calls it GetCompositionWindowRect): the mosaic's size, three
