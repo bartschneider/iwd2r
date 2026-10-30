@@ -19,14 +19,17 @@
 # - the console only opens on the world screen and the line stays in the
 #   box after RETURN: every command after the first goes through
 #   close/reopen (CTRL+TAB) plus exact-count BACKSPACEs (32 for a 4-digit
-#   xp, 33 for 5-digit), and each walk ends ESC + a world checkpoint so
-#   the next console phase is never typed over an open record (launch 3
-#   lost l4/l6 that way).
+#   xp, 33 for 5-digit), and each walk ends ESC, wait 30, ESC, wait 30
+#   before its world checkpoint so the next console phase is never typed
+#   over an open record (launch 3 lost l4/l6 that way; launch 1 lost 8
+#   of 11 commands because a leveling walk leaves the record up and one
+#   ESC does not reach the world).
 # - the level-up chain commits itself only when every popup's gate opens
 #   (Done wraps back to panel 2 and LevelUp commits): popup 55's Done
 #   needs m_nExtraSkillPoints < 2 (a sorcerer at INT 10 gets 2 points per
-#   level = 2 + clicks on (477,93)/(477,130), the launch-3 proven
-#   single-level commit); popup 7 at levels 4/8/12 needs its ability
+#   level, drained onto Alchemy + (477,93) and Concentration + (477,207)
+#   — (477,130) is Animal Empathy, disabled for a sorcerer); popup 7 at
+#   levels 4/8/12 needs its ability
 #   point spent; popup 56 at levels 3/6/9/12 needs its feat point(s)
 #   spent; popup 8 (sorcerer known spells) needs the pick.  GUIREC
 #   panels 7/55/56 share the 18x35 +/- column pair, (477,y) = "+";
@@ -245,20 +248,33 @@ checkpoint sor_l2_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: the class list; pick the sorcerer row.
-# CHECK: popup-54 class rows — the druid runs proved only the druid
-# row (369,187); the sorcerer is assumed 6 rows lower on the 36 px
-# grid = (369,403) (397 if the list rows are 35 px).
-click 369 403
+# Popup 54: the class list; pick the sorcerer row (369,367).
+# CHECK: popup-54 class rows — launch 1 proved (369,403) is the wizard
+# slot (rows 0-8 are the nine standard classes, druid at 187 = row 3;
+# row 9 is the first specialist); (369,367) is one 36 px row up, the
+# ruling from the launch-1 shots.  The shot below shows the highlighted
+# row before Done commits it.
+click 369 367
 wait 10
+shot sor_l2_class
 click 722 394
 wait 30
-# Popup 55: 2 skill points (INT 10 pool) onto the + rows; Done
-# opens the gate (m_nExtraSkillPoints < 2) — the launch-3 proven
-# single-level commit.
+# Popup 55: drain the 2 skill points (INT 10 pool) onto cost-1
+# class skills — Alchemy + (477,93) x3, Concentration + (477,207)
+# x3 (extra clicks no-op once the pool is drained or the row is
+# capped; launch 1: (477,130) is Animal Empathy, disabled for a
+# sorcerer).  Done opens the gate (m_nExtraSkillPoints < 2).
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -275,7 +291,9 @@ wait 30
 wait 60
 checkpoint sor_l2_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l2_world
 
 # ---- Walk l3: SETCURRENTXP(3000) -> level 3 ----
@@ -359,15 +377,23 @@ checkpoint sor_l3_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -402,7 +428,9 @@ wait 30
 wait 60
 checkpoint sor_l3_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l3_world
 
 # ---- Walk l4: SETCURRENTXP(6000) -> level 4 ----
@@ -486,8 +514,8 @@ checkpoint sor_l4_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
@@ -500,10 +528,18 @@ click 477 93
 wait 15
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -517,7 +553,9 @@ wait 60
 checkpoint sor_l4_leveled
 shot sor_l4_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l4_world
 
 # ---- Walk l5: SETCURRENTXP(10000) -> level 5 ----
@@ -603,15 +641,23 @@ checkpoint sor_l5_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -623,7 +669,9 @@ wait 30
 wait 60
 checkpoint sor_l5_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l5_world
 
 # ---- Walk l6: SETCURRENTXP(15000) -> level 6 ----
@@ -709,15 +757,23 @@ checkpoint sor_l6_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -748,7 +804,9 @@ wait 30
 wait 60
 checkpoint sor_l6_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l6_world
 
 # ---- Walk l7: SETCURRENTXP(21000) -> level 7 ----
@@ -834,15 +892,23 @@ checkpoint sor_l7_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -854,7 +920,9 @@ wait 30
 wait 60
 checkpoint sor_l7_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l7_world
 
 # ---- Walk l8: SETCURRENTXP(28000) -> level 8 ----
@@ -940,8 +1008,8 @@ checkpoint sor_l8_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
@@ -950,10 +1018,18 @@ click 477 93
 wait 15
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -966,7 +1042,9 @@ wait 60
 checkpoint sor_l8_leveled
 shot sor_l8_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l8_world
 
 # ---- Walk l9: SETCURRENTXP(36000) -> level 9 ----
@@ -1052,15 +1130,23 @@ checkpoint sor_l9_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -1091,7 +1177,9 @@ wait 30
 wait 60
 checkpoint sor_l9_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l9_world
 
 # ---- Walk l10: SETCURRENTXP(45000) -> level 10 ----
@@ -1177,15 +1265,23 @@ checkpoint sor_l10_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -1197,7 +1293,9 @@ wait 30
 wait 60
 checkpoint sor_l10_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l10_world
 
 # ---- Walk l11: SETCURRENTXP(55000) -> level 11 ----
@@ -1283,15 +1381,23 @@ checkpoint sor_l11_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -1303,7 +1409,9 @@ wait 30
 wait 60
 checkpoint sor_l11_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l11_world
 
 # ---- Walk l12: SETCURRENTXP(66000) -> level 12 ----
@@ -1389,8 +1497,8 @@ checkpoint sor_l12_record
 # Level Up on the record.
 click 713 391
 wait 30
-# Popup 54: sorcerer row (369,403).
-click 369 403
+# Popup 54: sorcerer row (369,367).
+click 369 367
 wait 10
 click 722 394
 wait 30
@@ -1399,10 +1507,18 @@ click 477 93
 wait 15
 click 722 394
 wait 30
-# Popup 55: the 2 skill points onto the + rows, Done.
+# Popup 55: drain the 2 skill points on Alchemy + Concentration, Done.
 click 477 93
 wait 15
-click 477 130
+click 477 93
+wait 15
+click 477 93
+wait 15
+click 477 207
+wait 15
+click 477 207
+wait 15
+click 477 207
 wait 15
 click 722 394
 wait 30
@@ -1435,7 +1551,9 @@ wait 60
 checkpoint sor_l12_leveled
 shot sor_l12_leveled
 key ESCAPE
-wait 90
+wait 30
+key ESCAPE
+wait 30
 checkpoint sor_l12_world
 
 # All 11 walks done (66000 = the level-12 threshold).  Verify the level
