@@ -21,6 +21,7 @@ import importlib.util
 import io
 import json
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -41,6 +42,31 @@ import zlib
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN_MAP = os.path.join(ROOT, 'tools', 'gen_map.py')
 SHADERS_TOOL = os.path.join(ROOT, 'tools', 'shaders.py')
+
+# macOS's $TMPDIR is /var/folders/..., a symlink to /private/var/...: git and
+# os.path.realpath report the resolved form while tempfile hands out the
+# other, so a test's own path never equals the one a tool prints back.  Build
+# every temp tree under the resolved root instead (on Linux the temp root
+# already resolves to itself).
+tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
+
+
+def temp_is_case_sensitive():
+    """True when the temp directory tells `a.md` from `A.md`: APFS and NTFS
+    fold the case, so the two are one file there."""
+    with tempfile.TemporaryDirectory() as d:
+        open(os.path.join(d, 'a.md'), 'w').close()
+        return not os.path.exists(os.path.join(d, 'A.md'))
+
+
+CASE_SENSITIVE_TEMP = temp_is_case_sensitive()
+
+NO_CASE_SENSITIVE_TEMP = ('the temp directory folds file-name case (APFS, '
+                          'NTFS); this test needs a case-sensitive one')
+NO_WSLPATH = ('no WSL: wslpath is missing, so host paths cannot be mapped '
+              'into the sandbox')
+NO_FLOCK = ('needs util-linux flock; tools/gates.sh refuses to run without '
+            'the gate lock')
 
 
 class GenMapTest(unittest.TestCase):
@@ -131,6 +157,7 @@ truth = load_tool('truth')
 triage = load_tool('triage')
 driver = load_tool('driver')
 coverage = load_tool('coverage')
+shaders = load_tool('shaders')
 
 
 def load_ghidra_tool(name):
@@ -143,6 +170,7 @@ def load_ghidra_tool(name):
 
 labels = load_ghidra_tool('labels')
 export_decompiles = load_ghidra_tool('export_decompiles')
+export_callgraph = load_ghidra_tool('export_callgraph')
 
 
 def scenario_files():
@@ -273,7 +301,21 @@ class ShadersTest(unittest.TestCase):
         return subprocess.run([sys.executable, '-I', SHADERS_TOOL, '--check', *args],
                               capture_output=True, text=True)
 
+    def require_pinned_glslang(self):
+        """The pinned glslangValidator ships for linux-x86_64 and
+        windows-x86_64 only; anything else needs one on PATH at that
+        version, as tools/shaders.py itself demands."""
+        pin = shaders.pinned()
+        on_path = shutil.which('glslangValidator')
+        if (on_path and shaders.reports_version(on_path, pin['version'])) \
+                or shaders.host_key() in pin:
+            return
+        self.skipTest('no pinned glslang for %s %s; install glslang %s as '
+                      'glslangValidator on PATH'
+                      % (sys.platform, platform.machine(), pin['version']))
+
     def test_shaders_check_detects_stale_blob(self):
+        self.require_pinned_glslang()
         real = self.run_check()
         self.assertEqual(real.returncode, 0, real.stdout + real.stderr)
         src = os.path.join(ROOT, 'platform', 'shaders')
@@ -298,6 +340,7 @@ class ShadersTest(unittest.TestCase):
             self.assertIn('sharp.frag.spv is missing', missing.stdout)
 
     def test_shaders_check_covers_new_blobs(self):
+        self.require_pinned_glslang()
         src = os.path.join(ROOT, 'platform', 'shaders')
         new = ('fsr_easu.frag', 'fsr_rcas.frag', 'nis.frag')
         for name in new:
@@ -1773,6 +1816,17 @@ class LabelsTest(unittest.TestCase):
                           '0x401090 CResWED_Construct\r\n')
         self.assertEqual(labels.ieex(path), [(0x401090, 'CResWED_Construct')])
 
+    def test_ieex_missing_file_is_no_names_and_says_where(self):
+        # IEex is optional: no database is no IEex names, not a crash. One
+        # stderr line names the path so the summary's `ieex 0 of 0` is honest.
+        path = os.path.join(self.dir, 'function_names.db')
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(labels.ieex(path), [])
+        lines = err.getvalue().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertIn(path, lines[0])
+
     def test_extra_reads_names_and_skips_comments(self):
         path = self.write('extra_labels.txt',
                           '# how 0x547020 was identified\n'
@@ -2975,6 +3029,39 @@ INI = ('[Alias]\r\n'
        'Last Resolution=1366x768\r\n')
 
 
+class OracleVanillaExeHomeTest(unittest.TestCase):
+    """tools/oracle.py: the vanilla exe and the Linux mirror follow
+    IWD2R_HOME like the rest of the tools."""
+
+    def environ_without_home(self):
+        return {k: v for k, v in os.environ.items() if k != 'IWD2R_HOME'}
+
+    def load(self):
+        """oracle.py loaded again, so its paths come from this environment."""
+        return load_tool('oracle')
+
+    def test_iwd2r_home_moves_the_exe_and_the_mirror(self):
+        home = os.path.join(tempfile.gettempdir(), 'iwd2r-home')
+        environ = self.environ_without_home()
+        environ['IWD2R_HOME'] = home
+        with mock.patch.dict(os.environ, environ, clear=True):
+            loaded = self.load()
+        self.assertEqual(loaded.VANILLA_EXE,
+                         os.path.join(home, 'vanilla', 'iwd2.exe'))
+        self.assertEqual(loaded.MIRROR_DIR,
+                         os.path.join(home, 'vanilla-mirror'))
+
+    def test_the_default_is_the_documented_home(self):
+        default = os.path.expanduser('~/.local/share/iwd2r')
+        with mock.patch.dict(os.environ, self.environ_without_home(),
+                             clear=True):
+            loaded = self.load()
+        self.assertEqual(loaded.VANILLA_EXE,
+                         os.path.join(default, 'vanilla', 'iwd2.exe'))
+        self.assertEqual(loaded.MIRROR_DIR,
+                         os.path.join(default, 'vanilla-mirror'))
+
+
 class OracleVanillaTest(unittest.TestCase):
     """tools/oracle.py vanilla: the checks on the vanilla copy."""
 
@@ -3214,6 +3301,292 @@ class OracleVanillaTest(unittest.TestCase):
         with open(os.path.join(self.game, oracle.MARKER), 'w') as f:
             f.write('{}')
         self.assertEqual(self.verify(), [])
+
+
+class OracleVanillaGogTest(unittest.TestCase):
+    """tools/oracle.py vanilla-gog: the vanilla copy from GOG's installers,
+    on macOS or Linux."""
+
+    PKG_INI = ('[Alias]\r\n'
+               'HD0:=C:\\GOG Games\\Icewind Dale II\r\n'
+               'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\r\n'
+               'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\r\n'
+               '[Program Options]\r\n'
+               'Resolution=1366\r\n'
+               'Volume Music=100\r\n'
+               'Path Search Nodes=32000\r\n')
+    EXE_INI = ('[Alias]\r\n'
+               'HD0:=D:\\Program Files\\Black Isle\\Icewind Dale II\r\n'
+               'CD1:=D:\\Program Files\\Black Isle\\Icewind Dale II\\Data\\'
+               '\r\n'
+               'CD2:=D:\\Program Files\\Black Isle\\Icewind Dale II\\CD2\\;'
+               'G:\\CD2\\\r\n'
+               '\r\n'
+               '[Program Options]\r\n'
+               'Resolution=800\r\n'
+               'Path Search Nodes=400000\r\n')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = os.path.realpath(self.tmp.name)
+        self.game = os.path.join(self.base, 'game')
+
+    def write(self, root, rel, data):
+        _write(os.path.join(root, rel), data, 'wb')
+
+    def installer(self, name, magic):
+        path = os.path.join(self.base, name)
+        _write(path, magic + b' installer', 'wb')
+        return path
+
+    def make_pkg(self, exe=VANILLA_BYTES):
+        """The expanded .pkg tree pkgutil leaves: package.pkg/Scripts/..."""
+        root = os.path.join(self.base, 'pkg-tree', 'package.pkg', 'Scripts')
+        files = {'CHITIN.KEY': b'KEY V1  ',
+                 'IWD2.exe': exe,
+                 'icewind2.ini': self.PKG_INI.encode(),
+                 'Keymap.ini': b'[Keymap]\r\n',
+                 'Party.ini': b'[Party]\r\n',
+                 'binkw32.dll': b'MZ bink',
+                 'dialog.tlk': b'TLK',
+                 'Data/AR1000.bif': b'BIFF',
+                 'CD2/Data/AR2000.bif': b'BIFF',
+                 'Override/a.itm': b'ITM',
+                 'cache/data/AR1000.bif': b'cache',
+                 'temp/default.toh': b'',
+                 'tempsave/x.txt': b'x',
+                 'unins000.dat': b'uninstall',
+                 'goggame.dll': b'dll',
+                 'GameuxInstallHelper.dll': b'dll',
+                 'gog.ico': b'ico',
+                 'gfw_high.ico': b'ico'}
+        for rel, data in files.items():
+            self.write(os.path.join(root, *oracle.PKG_GAME), rel, data)
+        return root
+
+    def make_exe(self):
+        """An innoextract tree: the game at the root, its exe and INIs in
+        __support/app."""
+        root = os.path.join(self.base, 'exe-tree')
+        files = {'CHITIN.KEY': b'KEY V1  ',
+                 'binkw32.dll': b'MZ bink',
+                 'dialog.tlk': b'TLK',
+                 'Config.exe': b'MZ',
+                 'Language.ini': b'[Language]\r\n',
+                 'Patch.txt': b'2.01',
+                 'README.htm': b'<html>',
+                 'manual.pdf': b'%PDF',
+                 'webcache.zip': b'PK',
+                 'Data/AR1000.bif': b'BIFF',
+                 'CD2/Data/AR2000.bif': b'BIFF',
+                 'Override/a.itm': b'ITM',
+                 'goggame-1207658891.hashdb': b'h',
+                 'goggame-1207658891.info': b'i',
+                 'goggame-1207658891.script': b's',
+                 'app/goggame-1207658891.ico': b'ico',
+                 'app/webcache.zip': b'PK',
+                 '__support/app/IWD2.exe': VANILLA_BYTES,
+                 '__support/app/icewind2.ini': self.EXE_INI.encode(),
+                 '__support/app/Keymap.ini': b'[Keymap]\r\n',
+                 '__support/app/Party.ini': b'[Party]\r\n',
+                 '__support/app/setup-ddrawfix.exe': b'MZ',
+                 '__redist/dxsetup.exe': b'MZ',
+                 'commonappdata/GOG.com/uninstall.dll': b'dll',
+                 'tmp/x': b'x',
+                 'temp/default.tot': b''}
+        for rel, data in files.items():
+            self.write(root, rel, data)
+        return root
+
+    def copy_into(self, source):
+        """A stand-in for pkg_expand / inno_extract: workdir gets source."""
+        def run(installer, workdir):
+            shutil.copytree(source, workdir, dirs_exist_ok=True)
+            return workdir
+        return run
+
+    def build(self, installer, extract, pkg):
+        with mock.patch.object(oracle, 'pkg_expand' if pkg else 'inno_extract',
+                               extract), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return oracle.build_gog(self.game, installer,
+                                    md5=VANILLA_TEST_MD5)
+
+    def read(self, rel):
+        return _slurp(os.path.join(self.game, rel), 'rb')
+
+    def ini_lines(self):
+        return self.read('icewind2.ini').decode().split('\r\n')
+
+    def assert_vanilla_copy(self, installer):
+        self.assertEqual(oracle.verify_vanilla(self.game,
+                                               VANILLA_TEST_MD5), [])
+        self.assertTrue(oracle.marker_ok(self.game, VANILLA_TEST_MD5))
+        marker = json.loads(self.read(oracle.MARKER))
+        self.assertEqual(marker['md5'], VANILLA_TEST_MD5)
+        self.assertEqual(marker['installer'], os.path.basename(installer))
+        self.assertEqual(marker['sha256'],
+                         hashlib.sha256(_slurp(installer, 'rb')).hexdigest())
+        self.assertIn('built', marker)
+        lines = self.ini_lines()
+        start = lines.index('[Alias]') + 1
+        self.assertEqual(lines[start:start + 3], [
+            key + '=' + value for key, value in oracle.GOG_ALIASES])
+        self.assertIn('Resolution=800', lines)
+        # The engine's own folders and the installer's files are gone.
+        for rel in ('cache', 'temp', 'tempsave', 'unins000.dat', 'goggame.dll',
+                    'GameuxInstallHelper.dll', 'gog.ico', 'gfw_high.ico',
+                    '__redist', '__support', 'app', 'commonappdata', 'tmp',
+                    'goggame-1207658891.info', 'manual.pdf', 'webcache.zip'):
+            self.assertFalse(os.path.exists(os.path.join(self.game, rel)), rel)
+
+    def test_pkg_build(self):
+        self.make_pkg()
+        installer = self.installer('gog.pkg', b'xar!')
+        self.assertEqual(self.build(installer, self.copy_into(
+            os.path.join(self.base, 'pkg-tree')), pkg=True), self.game)
+        self.assert_vanilla_copy(installer)
+        self.assertEqual(self.read('iwd2.exe'), VANILLA_BYTES)
+        self.assertNotIn('IWD2.exe', os.listdir(self.game))
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+        self.assertEqual(self.read('CD2/Data/AR2000.bif'), b'BIFF')
+        self.assertEqual(self.read('Override/a.itm'), b'ITM')
+        self.assertEqual(self.read('Keymap.ini'), b'[Keymap]\r\n')
+        # Only the [Alias] paths and Resolution change.
+        self.assertIn('Path Search Nodes=32000', self.ini_lines())
+        self.assertIn('Volume Music=100', self.ini_lines())
+
+    def test_exe_build(self):
+        self.make_exe()
+        installer = self.installer('setup.exe', b'MZ')
+        self.assertEqual(self.build(installer, self.copy_into(
+            os.path.join(self.base, 'exe-tree')), pkg=False), self.game)
+        self.assert_vanilla_copy(installer)
+        self.assertEqual(self.read('iwd2.exe'), VANILLA_BYTES)
+        self.assertNotIn('IWD2.exe', os.listdir(self.game))
+        self.assertEqual(self.read('Keymap.ini'), b'[Keymap]\r\n')
+        self.assertEqual(self.read('Party.ini'), b'[Party]\r\n')
+        self.assertEqual(self.read('Patch.txt'), b'2.01')
+        self.assertEqual(self.read('Data/AR1000.bif'), b'BIFF')
+
+    def test_gog_ini_sets_missing_keys(self):
+        text = ('[Alias]\r\n'
+                'HD0:=D:\\old\r\n'
+                'CD1:=D:\\old\\data\\\r\n'
+                'CD2:=D:\\old\\CD2\\\r\n'
+                '[Program Options]\r\n'
+                'Resolution=1024\r\n')
+        self.assertEqual(oracle.gog_ini(text), (
+            '[Alias]\r\n'
+            'HD0:=C:\\GOG Games\\Icewind Dale II\\\r\n'
+            'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\r\n'
+            'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\r\n'
+            '[Program Options]\r\n'
+            'Resolution=800\r\n'))
+        # Keys that are missing are added below [Alias]; LF text stays LF.
+        text = '[Alias]\nHD0:=x\n[Program Options]\nResolution=1366\n'
+        self.assertEqual(oracle.gog_ini(text), (
+            '[Alias]\n'
+            'HD0:=C:\\GOG Games\\Icewind Dale II\\\n'
+            'CD1:=C:\\GOG Games\\Icewind Dale II\\data\\\n'
+            'CD2:=C:\\GOG Games\\Icewind Dale II\\cd2\\\n'
+            '[Program Options]\n'
+            'Resolution=800\n'))
+        with self.assertRaises(ValueError):
+            oracle.gog_ini('[Program Options]\nResolution=800\n')
+
+    def test_pkg_game_finds_both_expansions(self):
+        expected = os.path.join(*oracle.PKG_GAME)
+        pkgutil = os.path.join(self.base, 'a', 'package.pkg', 'Scripts',
+                               expected)
+        xar = os.path.join(self.base, 'b', expected)
+        for game in (pkgutil, xar):
+            _write(os.path.join(game, 'CHITIN.KEY'), b'KEY', 'wb')
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'a')),
+                         pkgutil)
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'b')), xar)
+        # A .pkg that unpacks somewhere else still finds its game folder.
+        other = os.path.join(self.base, 'c', 'Wineskin', 'game')
+        _write(os.path.join(other, 'CHITIN.KEY'), b'KEY', 'wb')
+        self.assertEqual(oracle.pkg_game(os.path.join(self.base, 'c')), other)
+        self.assertIsNone(oracle.pkg_game(os.path.join(self.base, 'd')))
+
+    def test_wrong_exe_md5_is_refused(self):
+        self.make_pkg(exe=b'MZ patched by IWD2EE')
+        installer = self.installer('gog.pkg', b'xar!')
+        with self.assertRaises(SystemExit) as e:
+            self.build(installer, self.copy_into(
+                os.path.join(self.base, 'pkg-tree')), pkg=True)
+        self.assertIn('not the vanilla', str(e.exception))
+        self.assertFalse(os.path.exists(self.game))
+
+    def test_missing_innoextract_says_how_to_install_it(self):
+        installer = self.installer('setup.exe', b'MZ')
+        with mock.patch.object(oracle.shutil, 'which', lambda name: None):
+            with self.assertRaises(SystemExit) as e:
+                oracle.inno_extract(installer, self.base)
+        self.assertIn('brew install innoextract', str(e.exception))
+        self.assertIn('apt install innoextract', str(e.exception))
+
+    def test_missing_pkg_tool_says_how_to_install_it(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        with mock.patch.object(oracle.shutil, 'which', lambda name: None):
+            with self.assertRaises(SystemExit) as e:
+                oracle.pkg_expand(installer, os.path.join(self.base, 'x'))
+        self.assertIn('brew install xar cpio', str(e.exception))
+        self.assertIn('apt install xar cpio', str(e.exception))
+
+    def test_a_file_that_is_not_an_installer_is_refused(self):
+        installer = self.installer('readme.txt', b'hello')
+        with mock.patch.object(oracle.shutil, 'which',
+                               lambda name: '/usr/bin/' + name):
+            with self.assertRaises(SystemExit) as e:
+                oracle.build_gog(self.game, installer, md5=VANILLA_TEST_MD5)
+        self.assertIn('neither a GOG .pkg', str(e.exception))
+        self.assertFalse(os.path.exists(self.game))
+
+    def test_refuses_to_replace_a_folder_that_is_not_a_game(self):
+        _write(os.path.join(self.game, 'notes.txt'), 'mine')
+        with self.assertRaises(SystemExit) as e:
+            oracle.build_gog(self.game, self.installer('gog.pkg', b'xar!'),
+                             md5=VANILLA_TEST_MD5)
+        self.assertIn('not a game copy', str(e.exception))
+        self.assertEqual(os.listdir(self.game), ['notes.txt'])
+
+    def test_default_game_is_the_linux_copy(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        home = os.path.join(self.base, 'home')
+        calls = []
+        with mock.patch.dict(os.environ, {'IWD2R_HOME': home}), \
+                mock.patch.object(oracle, 'build_gog',
+                                  lambda game, inst: calls.append(game)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(oracle.main(['vanilla-gog', installer]), 0)
+        self.assertEqual(calls, [os.path.join(home, 'game')])
+
+    def test_a_marked_copy_is_not_built_again(self):
+        installer = self.installer('gog.pkg', b'xar!')
+        os.makedirs(self.game)
+        oracle.write_marker(self.game, {'md5': oracle.vanilla_md5()})
+        calls = []
+        with mock.patch.object(oracle, 'build_gog',
+                               lambda game, inst: calls.append(game)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                oracle.main(['vanilla-gog', installer, '--game', self.game])
+                oracle.main(['vanilla-gog', installer, '--game', self.game,
+                             '--rebuild'])
+        self.assertEqual(calls, [self.game])
+
+    def test_a_rebuilt_copy_drops_stale_files(self):
+        self.make_pkg()
+        installer = self.installer('gog.pkg', b'xar!')
+        extract = self.copy_into(os.path.join(self.base, 'pkg-tree'))
+        self.build(installer, extract, pkg=True)
+        self.write(self.game, 'stale.txt', b'old')
+        self.build(installer, extract, pkg=True)
+        self.assertFalse(os.path.exists(os.path.join(self.game, 'stale.txt')))
+        self.assert_vanilla_copy(installer)
 
 
 class OracleMirrorTest(unittest.TestCase):
@@ -6801,6 +7174,49 @@ class GhidraCloneTest(unittest.TestCase):
         self.assertEqual(self.read(clone, 'iwd2.gpr'), 'gpr')
 
 
+class GhidraJdkTest(unittest.TestCase):
+    """make_project.jdk_path: JAVA_HOME, the Debian path, then java on PATH."""
+
+    def setUp(self):
+        self.mp = load_ghidra_tool('make_project')
+
+    def jdk_from(self, java_home, dirs, which):
+        env = {k: v for k, v in os.environ.items() if k != 'JAVA_HOME'}
+        if java_home is not None:
+            env['JAVA_HOME'] = java_home
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(self.mp.os.path, 'isdir',
+                                  lambda p: p in dirs), \
+                mock.patch.object(self.mp.shutil, 'which', lambda name: which):
+            return self.mp.jdk_path()
+
+    def test_java_home_wins(self):
+        self.assertEqual(self.jdk_from('/opt/jdk-21',
+                                       {'/opt/jdk-21',
+                                        self.mp.DEBIAN_JDK},
+                                       '/usr/lib/jvm/java-21-openjdk/bin/java'),
+                         '/opt/jdk-21')
+
+    def test_the_debian_path_is_next(self):
+        self.assertEqual(self.jdk_from(None, {self.mp.DEBIAN_JDK},
+                                       '/usr/bin/java'),
+                         self.mp.DEBIAN_JDK)
+
+    def test_java_on_path_is_the_last_resort(self):
+        self.assertEqual(self.jdk_from(
+            None, set(), '/usr/lib/jvm/java-21-openjdk/bin/java'),
+            '/usr/lib/jvm/java-21-openjdk')
+
+    def test_a_java_home_that_is_not_a_directory_is_skipped(self):
+        self.assertEqual(self.jdk_from(
+            '/opt/gone', set(), '/usr/lib/jvm/java-21-openjdk/bin/java'),
+            '/usr/lib/jvm/java-21-openjdk')
+
+    def test_no_java_anywhere_keeps_the_debian_path(self):
+        self.assertEqual(self.jdk_from(None, set(), None),
+                         self.mp.DEBIAN_JDK)
+
+
 class MakeDllProjectTest(unittest.TestCase):
     """make_dll_project: one analysed Ghidra project per DLL under
     ghidra-projects/<name>, imported under make_project's lock."""
@@ -7224,6 +7640,8 @@ class ProbePlanTest(unittest.TestCase):
             'C:\\Users\\thier\\iwd2r-vm\\replays\\s\\tools')
 
     def test_mapped_host_paths_are_windows_paths(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         for target in ('original', 'ours'):
             for host, box, _ro in self.plan(target):
                 self.assertFalse(host.startswith('/'), (target, host, box))
@@ -7490,6 +7908,8 @@ class FridaProbeTest(unittest.TestCase):
                                   out, probe_json, 1, 0, dry)
 
     def test_original_driver_shutdown_is_off(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         with tempfile.TemporaryDirectory() as d:
             host_run = os.path.join(d, 'run')
             self.stage(host_run)
@@ -7536,6 +7956,8 @@ class FridaProbeTest(unittest.TestCase):
         return calls
 
     def test_original_host_waits_for_result_before_close(self):
+        if not shutil.which('wslpath'):
+            self.skipTest(NO_WSLPATH)
         calls = self.run_live('original')
         self.assertEqual([c if isinstance(c, str) else c[0] for c in calls],
                          ['start', 'wait_done', 'host_wait', 'close'])
@@ -7796,6 +8218,9 @@ class ParityTest(unittest.TestCase):
                        + '---\n\n## Notes\n')
 
         parity_run = load_parity_tool('run')
+        if not os.path.isfile(parity_run.oracle.VANILLA_EXE):
+            self.skipTest('no vanilla exe at %s: structural parity skips the '
+                          'asm check' % parity_run.oracle.VANILLA_EXE)
         evidence(None)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -7822,6 +8247,344 @@ class ParityTest(unittest.TestCase):
         found = parity_run.touched(self.repo, base)
         self.assertEqual({address for _, address, _ in found},
                          {0x401000, 0x401040})
+
+
+class AnnotateTest(ParityTest):
+    """tools/parity/annotate.py -- annotated disassembly for reviews."""
+
+    def make_pe(self, path, code=None, rdata=None):
+        """A tiny PE32: .text with the fixture code, .rdata with literals.
+
+        ImageBase 0x400000; .text at 0x401000 (executable), .rdata at
+        0x402000. Default code: push &g_hello, push "Plain", mov
+        eax,[&"Plain"], call B::g, jmp +0 (in-function, nameless). Default
+        .rdata: "Hello\\0" at 0x402000, "Plain\\0" at 0x402008. The
+        strings-column tests swap one or both: a custom rdata re-places the
+        literal at 0x402008, a custom code feeds UTIL_ASSERT's pushes.
+        """
+        code = code or (b'\x68\x00\x20\x40\x00'   # 0x401000  push 0x402000
+                        b'\x68\x08\x20\x40\x00'   # 0x401005  push 0x402008
+                        b'\xa1\x08\x20\x40\x00'   # 0x40100a  mov eax,[0x402008]
+                        b'\xe8\x0c\x00\x00\x00'   # 0x40100f  call 0x401020
+                        b'\xe9\x00\x00\x00\x00'   # 0x401014  jmp 0x401019
+                        b'\xc3'                   # 0x401019  ret
+                        b'\xcc\xcc\xcc\xcc\xcc'   # 0x40101a  padding
+                        b'\xc3')                  # 0x401020  ret (B::g)
+        rdata = rdata or (b'Hello\x00\x00\x00'
+                          b'Plain\x00')
+        assert len(code) <= 0x200 and len(rdata) <= 0x400  # section raw sizes
+
+        sections = [
+            (b'.text', len(code), 0x1000, 0x200, 0x200, 0x60000020),
+            (b'.rdata', len(rdata), 0x2000, 0x400, 0x400, 0x40000040),
+        ]
+        opt = struct.pack(
+            '<HBBIIIIIIIIIHHHHHHIIIIHHIIIIII128x',
+            0x10b,                      # PE32
+            1, 0,                       # linker version
+            len(code), len(rdata), 0,   # code / initialized / uninitialized
+            0x1000, 0x1000, 0x2000,     # entry, BaseOfCode, BaseOfData
+            0x400000,                   # ImageBase
+            0x1000, 0x200,              # section / file alignment
+            4, 0, 0, 0, 4, 0,           # OS / image / subsystem versions
+            0, 0x3000, 0x200, 0,        # Win32Ver, SizeOfImage, hdrs, checksum
+            2, 0,                       # GUI subsystem, DllCharacteristics
+            0x100000, 0x1000, 0x100000, 0x1000,  # stack / heap
+            0, 16)                      # LoaderFlags, NumberOfRvaAndSizes
+        assert len(opt) == 0xE0
+
+        dos = bytearray(0x40)
+        dos[:2] = b'MZ'
+        struct.pack_into('<I', dos, 0x3C, 0x40)
+        fh = struct.pack('<HHIIIHH', 0x14C, len(sections), 0, 0, 0,
+                         len(opt), 0x0102)
+        table = bytearray()
+        image = bytearray(0x600)
+        image[:0x40] = dos
+        image[0x40:0x44] = b'PE\x00\x00'
+        image[0x44:0x58] = fh + opt
+        off = 0x58 + len(opt)
+        for name, vsize, rva, raw, ptr, flags in sections:
+            table += struct.pack('<8sIIII12xI', name, vsize, rva, raw, ptr,
+                                 flags)
+            image[ptr:ptr + len(code if name == b'.text' else rdata)] = (
+                code if name == b'.text' else rdata)
+        image[off:off + len(table)] = table
+        with open(path, 'wb') as f:
+            f.write(image)
+        return path
+
+    def fixture(self, with_source=True):
+        """The PE + exports + (optionally) the labelled src/; annotate path."""
+        annotate = load_parity_tool('annotate')
+        if annotate.pefile is None or annotate.capstone is None:
+            self.skipTest('pefile/capstone missing: annotate skips')
+        # main() derives the marker scan's root from the tool's own repo;
+        # point it at the fixture repo for the run.
+        self.addCleanup(setattr, annotate, 'REPO', annotate.REPO)
+        annotate.REPO = self.repo
+        pe = self.make_pe(os.path.join(self.home, 'iwd2.exe'))
+        self.exports('401000\tFUN_00401000\t32\n'
+                     '401020\tFUN_00401020\t4\n',
+                     '401000\t401020\n')
+        # The export names deliberately differ from the tree's markers, so
+        # the marker-first rule is observable: B::g, not FUN_00401020.
+        if with_source:
+            self.write('src/a.cpp',
+                       '// 0x401000\n'
+                       'int A::f(int x)\n'
+                       '{\n'
+                       '    return x;\n'
+                       '}\n'
+                       '\n'
+                       '// 0x401020\n'
+                       'int B::g(int x)\n'
+                       '{\n'
+                       '    return x;\n'
+                       '}\n'
+                       '\n'
+                       '// 0x402000\n'
+                       'const char g_hello[] = "Hello";\n')
+        return annotate, pe
+
+    def test_annotate_names_calls_strings_and_jmps(self):
+        annotate, pe = self.fixture()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = annotate.main(['0x401000', '--exe', pe])
+        self.assertEqual(code, 0)
+        lines = out.getvalue().splitlines()
+        # The header names the function per functions.tsv and the end.
+        self.assertEqual(lines[0],
+                         '== 0x401000 FUN_00401000 (end 0x401020)')
+        body = {line.split(':', 1)[0]: line for line in lines[1:]}
+        # The tree's `// 0x401020` marker names the call target, ahead of
+        # functions.tsv's FUN_00401020.
+        self.assertTrue(body['0x40100f'].endswith('call\t0x401020  ; B::g'),
+                        body['0x40100f'])
+        # The string push: the annotation is the literal, escaped.
+        self.assertTrue(body['0x401005'].endswith('push\t0x402008  ; "Plain"'),
+                        body['0x401005'])
+        # A displacement into the data gets the literal too.
+        self.assertTrue(
+            body['0x40100a'].endswith('mov\teax, dword ptr [0x402008]'
+                                      '  ; "Plain"'),
+            body['0x40100a'])
+        # A labelled global names the address instead of its literal.
+        self.assertTrue(body['0x401000'].endswith('push\t0x402000  ; g_hello'),
+                        body['0x401000'])
+        # An in-function jmp has no name anywhere: `?`.
+        self.assertTrue(body['0x401014'].endswith('jmp\t0x401019  ; ?'),
+                        body['0x401014'])
+        # The functions.tsv size ends the listing: B::g's ret is not in it.
+        self.assertNotIn('0x401020', body)
+
+    def test_annotate_falls_back_to_export_names(self):
+        annotate, pe = self.fixture(with_source=False)
+        lines = annotate.annotate(0x401000, 0x401020, pe,
+                                  annotate.parity_run.load_exports(),
+                                  os.path.join(self.repo, 'src'))
+        joined = '\n'.join(lines)
+        # No tree markers: the call reads the functions.tsv name and the
+        # pushed address reads as its literal.
+        self.assertIn('call\t0x401020  ; FUN_00401020', joined)
+        self.assertIn('push\t0x402000  ; "Hello"', joined)
+
+    def test_annotate_quote_escapes(self):
+        annotate = load_parity_tool('annotate')
+        self.assertEqual(annotate.quote(r'a "b" \c'), r'a \"b\" \\c')
+        self.assertEqual(annotate.quote('tab\there'), r'tab\there')
+
+    def test_annotate_skips_without_exe(self):
+        annotate, _ = self.fixture()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = annotate.main(['0x401000', '--exe',
+                                  os.path.join(self.home, 'no-such.exe')])
+        self.assertEqual(code, 0)
+        self.assertIn('skipped', out.getvalue())
+
+    def test_annotate_skips_without_exports(self):
+        annotate, pe = self.fixture()
+        os.remove(os.path.join(self.home, 'ghidra-exports', 'callgraph.tsv'))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = annotate.main(['0x401000', '--exe', pe])
+        self.assertEqual(code, 0)
+        self.assertIn('skipped', out.getvalue())
+        self.assertIn('functions.tsv', out.getvalue())
+
+
+class StringsColumnTest(AnnotateTest):
+    """run.py's strings column -- the exe's literals are in the body."""
+
+    # The default PE's body shape: g_hello's label in the span excuses
+    # "Hello", "Plain" must be written in the body.
+    GREEN_SPAN = ('// 0x401000\n'
+                  'int A::f(int x)\n'
+                  '{\n'
+                  '    A::say("Plain");\n'
+                  '    return g_hello[0] + x;\n'
+                  '}\n'
+                  '\n'
+                  '// 0x402000\n'
+                  'const char g_hello[] = "Hello";\n')
+
+    def strings_case(self, src_a, code=None, rdata=None):
+        """(run, annotate, pe, ctx) for the column's cell on A::f.
+
+        The PE and exports stay the AnnotateTest fixture's (0x401000, size
+        32, ending at B::g); src/a.cpp and either PE section are the case's.
+        """
+        run = load_parity_tool('run')
+        annotate = load_parity_tool('annotate')
+        if annotate.pefile is None or annotate.capstone is None:
+            self.skipTest('pefile/capstone missing: strings skips')
+        pe = self.make_pe(os.path.join(self.home, 'iwd2.exe'),
+                          code=code, rdata=rdata)
+        self.exports('401000\tFUN_00401000\t32\n'
+                     '401020\tFUN_00401020\t4\n',
+                     '401000\t401020\n')
+        self.write('src/a.cpp', src_a)
+        exports = run.load_exports()
+        lines = run.read_lines(self.repo, 'src/a.cpp')
+        first, last = run.locate(lines, 0x401000)
+        item = ('src/a.cpp', 0x401000, 'A::f', lines, first, last)
+        ctx = run.make_ctx(item, self.repo, exports, pe, [], {})
+        return run, annotate, pe, ctx
+
+    def test_strings_green_when_literal_present(self):
+        run, _, _, ctx = self.strings_case(self.GREEN_SPAN)
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.GREEN, ["1 exe string(s) referenced, all among the "
+                         "body's literals"]))
+
+    def test_strings_yellow_names_the_missing(self):
+        # PR #47's bug: the body writes " " where the exe's data holds
+        # " :  " -- YELLOW naming the exact literal and address, never RED.
+        run, _, _, ctx = self.strings_case(
+            self.GREEN_SPAN.replace('"Plain"', '" "'),
+            rdata=b'Hello\x00\x00\x00 :  \x00')
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.YELLOW, ['exe strings not in the body (1 of 1 referenced):',
+                          '  " :  " (0x402008)']))
+
+    def test_strings_excludes_assert_arguments(self):
+        # UTIL_ASSERT hides its own arguments: the caller pushes the file
+        # path and the expression text the source never writes.
+        run, annotate, pe, ctx = self.strings_case(
+            '// 0x401000\n'
+            'int A::f(int x)\n'
+            '{\n'
+            '    UTIL_ASSERT(x > 0);\n'
+            '    return x;\n'
+            '}\n',
+            code=(b'\x68\x00\x20\x40\x00'   # 0x401000  push 0x402000
+                  b'\x68\x08\x20\x40\x00'   # 0x401005  push 0x402008
+                  b'\xe8\xf1\xfb\x37\x00'   # 0x40100a  call 0x780C00
+                  b'\xc3'))                 # 0x40100f  ret
+        # the collector does see both pushes -- the column's assert rule,
+        # not a blind spot, is what excises them
+        strings, labelled, pushed = annotate.referenced_strings(
+            0x401000, 0x401020, pe)
+        self.assertEqual(pushed.get(0x780C00), {0x402000, 0x402008})
+        self.assertEqual(strings, {0x402000: 'Hello', 0x402008: 'Plain'})
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.GREEN, ["0 exe string(s) referenced, all among the "
+                         "body's literals"]))
+
+    def test_strings_excludes_labelled_global_used_by_name(self):
+        # The same exe, two bodies: naming g_hello excuses "Hello" (the
+        # source uses the name, not the literal); not naming it does not.
+        run, _, _, ctx = self.strings_case(self.GREEN_SPAN)
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx)[0],
+                         run.GREEN)
+        _, _, _, ctx = self.strings_case(
+            '// 0x401000\n'
+            'int A::f(int x)\n'
+            '{\n'
+            '    A::say("Plain");\n'
+            '    return x;\n'
+            '}\n')
+        self.assertEqual(
+            run.strings_check(0x401000, 'A::f', ctx),
+            (run.YELLOW, ['exe strings not in the body (1 of 2 referenced):',
+                          '  "Hello" (0x402000)']))
+
+    def test_strings_counts_immediates_only(self):
+        # Step C rule 1: Step B's noise arrived as the memory-displacement
+        # operand of a pointer load (pointer-table bytes read as "j=J"). A
+        # displacement is not a literal use; the same address pushed is.
+        run, annotate, pe, ctx = self.strings_case(
+            self.GREEN_SPAN.replace('"Plain"', '"Nope"'),
+            code=b'\xa1\x08\x20\x40\x00'   # 0x401000  mov eax,[0x402008]
+                 b'\xc3')                  # 0x401005  ret
+        strings, _, _ = annotate.referenced_strings(0x401000, 0x401005, pe)
+        self.assertEqual(strings, {})
+        # so the column stays GREEN though the span never writes the
+        # literal the displacement's bytes spell
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                         (run.GREEN, ["0 exe string(s) referenced, "
+                                      "all among the body's literals"]))
+
+    def test_strings_skips_mid_string_addresses(self):
+        # Step C rule 2: a pointer strictly inside a longer string -- "C"
+        # is the tail of "BSC" -- is not a reference to "C"; the string's
+        # first byte is.
+        run, annotate, pe, ctx = self.strings_case(
+            self.GREEN_SPAN.replace('"Plain"', '"BSC"'),
+            code=(b'\x68\x08\x20\x40\x00'   # 0x401000  push 0x402008 -> BSC
+                  b'\x68\x0a\x20\x40\x00'   # 0x401005  push 0x40200a -> C
+                  b'\xc3'),                 # 0x401007  ret
+            rdata=b'Hello\x00\x00\x00BSC\x00')
+        strings, _, _ = annotate.referenced_strings(0x401000, 0x401007, pe)
+        self.assertEqual(strings, {0x402008: 'BSC'})
+        # and the column is GREEN: "BSC" is written, "C" never collected
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx)[0],
+                         run.GREEN)
+
+    def test_strings_skips_without_exe_or_size(self):
+        run = load_parity_tool('run')
+        annotate = load_parity_tool('annotate')
+        exports = ({0x401000: 'FUN_00401000'}, {0x401000: 32}, {})
+        exe = os.path.join(self.home, 'no-such.exe')
+        ctx = {'repo': self.repo, 'rel': 'src/a.cpp', 'exports': exports,
+               'exe': exe, 'span_text': '', 'first': 0, 'last': 0}
+        # the import branch of the SKIP contract fires first, so the exe
+        # and size reasons are only observable where annotate imports
+        if annotate.pefile is not None and annotate.capstone is not None:
+            self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                             (run.SKIP, [f'no exe at {exe}']))
+            # a labelled function with no functions.tsv size cannot be walked
+            ctx['exe'] = self.make_pe(os.path.join(self.home, 'iwd2.exe'))
+            ctx['exports'] = ({0x401000: 'FUN_00401000'}, {}, {})
+            self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                             (run.SKIP,
+                              ['no size for 0x401000 in functions.tsv']))
+        # and the SKIP contract holds without pefile/capstone too
+        run._module = lambda name: None
+        self.assertEqual(run.strings_check(0x401000, 'A::f', ctx),
+                         (run.SKIP, ['annotate not importable '
+                                     '(pefile/capstone missing? '
+                                     'tools/parity/setup.sh)']))
+
+    def test_strings_column_in_the_table(self):
+        run = load_parity_tool('run')
+        self.assertEqual(run.COLUMNS[1], 'strings')
+        self.assertNotIn('strings', run.DELEGATED_COLUMNS)
+        row = {col: ((run.YELLOW, ['exe strings not in the body'])
+                     if col == 'strings' else (run.GREEN, []))
+               for col in run.COLUMNS}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            run.print_table('base', 'x.exe', [(0x401000, 'A::f', row)])
+        header = out.getvalue().splitlines()[1].split()
+        self.assertEqual(header[header.index('asm') + 1], 'strings')
+        self.assertEqual(header[header.index('strings') + 1], 'vtable')
+        self.assertIn('[strings] yellow', out.getvalue())
 
 
 class FnDigestTest(unittest.TestCase):
@@ -7923,9 +8686,9 @@ _DECOMP = '''int CGameSprite::Render(int nFrame)
 '''
 
 
-def _write(path, text):
+def _write(path, text, mode='w'):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, mode) as f:
         f.write(text)
 
 
@@ -7961,6 +8724,78 @@ class SrcFindTest(unittest.TestCase):
         self.assertEqual(src_find.find('0x401000', root=self.root),
                          [('CInfGame.cpp', 2, 'int CInfGame::GetDice(int nSides)')])
         self.assertEqual(src_find.find('NoSuch::Thing', root=self.root), [])
+
+
+class ExportCallgraphTest(unittest.TestCase):
+    """tools/ghidra/export_callgraph -- the two files tools/parity/run.py
+    reads, from one read-only headless run of ExportCallGraph.java."""
+
+    FUNCTIONS = '401000\tA::f\t16\n401010\tA::g\t8\n'
+    CALLGRAPH = '401000\t401010\n401010\n'
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.exports = os.path.join(tmp.name, 'exports')
+        self.calls = []
+        self.rc = 0
+        self.empty = None
+        self.mp = export_callgraph.mp
+        saved = self.mp.headless
+        self.addCleanup(setattr, self.mp, 'headless', saved)
+        self.mp.headless = self.fake_headless
+
+    def fake_headless(self, args, log, read_only=False, **kw):
+        self.assertTrue(read_only)
+        self.assertIn('-readOnly', args)
+        i = args.index('ExportCallGraph.java')
+        out = args[i + 1]
+        self.calls.append(out)
+        if self.rc == 0:
+            for name, text in (('functions.tsv', self.FUNCTIONS),
+                               ('callgraph.tsv', self.CALLGRAPH)):
+                _write(os.path.join(out, name),
+                       '' if name == self.empty else text)
+        return types.SimpleNamespace(
+            returncode=self.rc,
+            stdout=(f'EXPORTCALLGRAPH\t2 functions\t1 direct edges\t'
+                    f'{out}/functions.tsv  (GhidraScript)\n'),
+            stderr='')
+
+    def test_writes_both_files_and_makes_the_dir(self):
+        out = io.StringIO()
+        paths = export_callgraph.export(self.exports, out=out)
+        self.assertEqual(paths, [os.path.join(self.exports, 'functions.tsv'),
+                                 os.path.join(self.exports, 'callgraph.tsv')])
+        self.assertEqual(self.calls, [self.exports])
+        with open(paths[0]) as f:
+            self.assertEqual(f.read(), self.FUNCTIONS)
+        with open(paths[1]) as f:
+            self.assertEqual(f.read(), self.CALLGRAPH)
+        # The script's own counts are echoed, not parsed.
+        self.assertIn('2 functions\t1 direct edges', out.getvalue())
+
+    def test_an_empty_export_is_a_failure(self):
+        # An empty callgraph reads as "no callees": parity would call every
+        # asm column vacuously green, so it must not pass silently.
+        self.empty = 'callgraph.tsv'
+        with self.assertRaisesRegex(SystemExit, 'callgraph.tsv'):
+            export_callgraph.export(self.exports, out=io.StringIO())
+
+    def test_a_failed_headless_run_exits_nonzero(self):
+        self.rc = 1
+        with self.assertRaisesRegex(SystemExit, 'analyzeHeadless failed'):
+            export_callgraph.export(self.exports, out=io.StringIO())
+
+    def test_main_needs_the_project_and_takes_exports_dir(self):
+        with mock.patch.object(self.mp, 'project_exists', lambda: False):
+            with self.assertRaisesRegex(SystemExit, 'no project'):
+                export_callgraph.main(['--exports', self.exports])
+        with mock.patch.object(self.mp, 'project_exists', lambda: True):
+            self.assertEqual(export_callgraph.main(['--exports',
+                                                    self.exports]), 0)
+        self.assertTrue(os.path.isfile(os.path.join(self.exports,
+                                                    'functions.tsv')))
 
 
 class ExportDecompilesTest(unittest.TestCase):
@@ -14696,6 +15531,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(self._head_subject(), tip)
 
     def test_driver_check_renames_lower_case_and_mixed_case_in_one_commit(self):
+        if not CASE_SENSITIVE_TEMP:
+            self.skipTest(NO_CASE_SENSITIVE_TEMP)
         d, batch = self._kept_without_evidence_at_the_merge_base()
         self.git('mv', 'docs/evidence/404000.md', 'docs/evidence/0X404000.MD', cwd=self.wt)
         self._add_kept_row(d, '0x40ABCD', '0x40abcd.md')
@@ -14776,6 +15613,8 @@ class DriverTest(unittest.TestCase):
         self.assertIn('?? docs/stray.txt', st)
 
     def test_driver_check_three_evidence_files_wording(self):
+        if not CASE_SENSITIVE_TEMP:
+            self.skipTest(NO_CASE_SENSITIVE_TEMP)
         d, batch = self._kept_without_evidence_at_the_merge_base()
         _write(os.path.join(self.wt, 'docs', 'evidence', '0x404000.md'), self.T_EVIDENCE)
         _write(os.path.join(self.wt, 'docs', 'evidence', '0X404000.md'), self.T_EVIDENCE)
@@ -23901,6 +24740,8 @@ class ClaimsTest(unittest.TestCase):
         self.assert_full(self.run_gate(root, '--base', 'no-such-rev'), 'no-such-rev')
 
     def test_gate_lock_serializes(self):
+        if not shutil.which('flock'):
+            self.skipTest(NO_FLOCK)
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
         fd = self.hold_lock(root)
@@ -23926,6 +24767,8 @@ class ClaimsTest(unittest.TestCase):
         self.assertEqual(b.returncode, 0, err)
 
     def test_gate_lock_not_inherited_by_children(self):
+        if not shutil.which('flock'):
+            self.skipTest(NO_FLOCK)
         root = self.lock_repo()
         gates = os.path.join(root, 'tools', 'gates.sh')
         holder = subprocess.Popen(['bash', gates, '--dry-lock', '30'],
@@ -25021,6 +25864,15 @@ class ReStatusTest(unittest.TestCase):
         self.assertLess(gates.index('step "subsystem map"'),
                         gates.index('step "recovery status"'))
 
+    def test_gate_runs_the_shader_check_whether_the_file_is_executable(self):
+        # tools/shaders.py is committed 0644, so an `[ -x ]` guard skipped the
+        # step that CI runs unconditionally; the guard's intent was existence.
+        with open(os.path.join(ROOT, 'tools', 'gates.sh')) as f:
+            gates = f.read()
+        self.assertIn('[ -f tools/shaders.py ] && step "shader blobs" '
+                      'python3 -I tools/shaders.py --check', gates)
+        self.assertNotIn('-x tools/shaders.py', gates)
+
 
 class ImportSecondSourceTest(unittest.TestCase):
     """Task 16: `next --queue import` draws stubs first, then the base-body
@@ -25373,6 +26225,37 @@ class ImportSecondSourceTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('imports: stubs 1 imported / 0 kept / 1 parked; base-body 2 imported / 0 kept / 1 parked',
                       _slurp(report))
+
+
+class ChrFixtureTest(unittest.TestCase):
+    """scenarios/chr/RYSDRD7C.CHR — the Task 49 console-raised druid 7 export.
+
+    Run 20261027-012948 raised the chargen druid with one
+    CTRLALTDELETE:SETCURRENTXP(21000) and one level-up walk committed with
+    the record's Done (an earlier run that left with ESC exported level 1:
+    the raise lived only in the uncommitted level-up session, and
+    CGameSprite::Marshal memcpy's m_baseStats into the CRE).  Its world_end
+    checkpoint reads level 7 back in the world.  Offsets: CHR = 0x224-byte
+    header + CRE, baseStats at CRE+8 (src/CInfGame.cpp:3049,
+    src/CGameSprite.cpp:7928).
+    """
+
+    def test_raised_druid_export(self):
+        with open(os.path.join(ROOT, 'scenarios', 'chr', 'RYSDRD7C.CHR'),
+                  'rb') as f:
+            d = f.read()
+        self.assertEqual(len(d), 3606)
+        self.assertEqual(d[:8], b'CHR V2.2')
+        self.assertEqual(d[8:40].split(b'\0')[0], b'Rysdrd7')
+        self.assertEqual(struct.unpack_from('<I', d, 0x23C)[0], 21000)  # xp
+        self.assertEqual(struct.unpack_from('<hh', d, 0x248), (56, 56))  # hp
+        self.assertEqual(d[0x2AE], 7)  # characterLevel
+        self.assertEqual(d[0x2AF + 3], 7)  # classLevels[druid]
+        # STR INT WIS DEX CON CHA: STR raised once at the level-4 abilities step
+        self.assertEqual([d[0x48A + i] for i in range(6)],
+                         [11, 10, 12, 12, 8, 10])
+        self.assertEqual({i: v for i, v in enumerate(d[0x43C:0x43C + 64])
+                          if v}, {0: 1, 1: 5, 2: 1, 3: 5, 4: 1, 5: 1, 6: 1})
 
 
 if __name__ == '__main__':

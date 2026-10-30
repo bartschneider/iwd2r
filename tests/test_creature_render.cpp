@@ -9,8 +9,10 @@
 #include "CGameAnimationTypeMonster.h"
 #include "CGameAnimationTypeMonsterAnkheg.h"
 #include "CGameAnimationTypeMonsterIcewind.h"
+#include "CGameAnimationTypeMonsterIcewindNew.h"
 #include "CGameAnimationTypeMonsterLarge.h"
 #include "CGameAnimationTypeMonsterLarge16.h"
+#include "CGameAnimationTypeMonsterLayeredSpell.h"
 #include "CGameAnimationTypeMonsterMulti.h"
 #include "CGameAnimationTypeMonsterOld.h"
 #include "CGameAnimationTypeMonsterQuadrant.h"
@@ -210,7 +212,8 @@ TEST_CASE("creature render: CGameAnimationTypeMonster draws a mind flayer", "[re
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 0, 12 }) {
+    const WORD facings[] = { 0, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x7F01, colors, facing));
         REQUIRE(dynamic_cast<CGameAnimationTypeMonster*>(pAnimation.get()) != nullptr);
@@ -229,7 +232,8 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterOld draws a wolf", "[render
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 0, 12 }) {
+    const WORD facings[] = { 0, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x7B00, colors, facing));
         REQUIRE(dynamic_cast<CGameAnimationTypeMonsterOld*>(pAnimation.get()) != nullptr);
@@ -350,6 +354,77 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterMulti draws the black drago
     CheckQuadrants(scope, pDragon, pDragon->m_currentVidCell, pDragon->m_nQuadrants, CPoint(320, 330), "dragon_0_quadrants");
 }
 
+// The death sound by animation family (0x6E8180). The constructor's switch on
+// `animationID & 0xF00` writes m_pSndDeath at six sites; the exe's are all the
+// same instruction, `mov dword ptr [esi+0x1e], <literal>`, and there are two
+// literals: 0x8B63D0 "FAL_01B" at 0x6E86FE (family 0x200), 0x6E8967 (0x300)
+// and 0x6E8A29 (0x700); 0x8B6400 "FAL_03B" at 0x6E87FB (0x000), 0x6E8BB2
+// (0x500) and 0x6E8C84 (0x400). Family 0x100 sets none and keeps the base
+// class's. The factory picks this class for `animationID & 0xF000 == 0xF000`;
+// family 0x700 accepts only the low nibbles 0x70, 0x80 and 0x90 (its default
+// asserts).
+TEST_CASE("creature render: MonsterIcewindNew keeps the exe's death sound by family", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    BYTE colors[16] = {};
+    struct Family {
+        USHORT nAnimationID; // 0xF000 | family | low nibble
+        const char* pSndDeath;
+    };
+    const Family families[] = {
+        { 0xF000, "FAL_03B" },
+        { 0xF200, "FAL_01B" },
+        { 0xF300, "FAL_01B" },
+        { 0xF400, "FAL_03B" },
+        { 0xF500, "FAL_03B" },
+        { 0xF770, "FAL_01B" },
+    };
+    for (const Family& family : families) {
+        INFO("animation id 0x" << std::hex << family.nAnimationID);
+        std::unique_ptr<CGameAnimationType> pAnimation(
+            CGameAnimationType::SetAnimationType(family.nAnimationID, colors, 0));
+        auto* pMonster = dynamic_cast<CGameAnimationTypeMonsterIcewindNew*>(pAnimation.get());
+        REQUIRE(pMonster != nullptr);
+        CHECK(std::string(pMonster->GetSndDeath()) == family.pSndDeath);
+    }
+}
+
+// CGameAnimationTypeMonsterLayeredSpell::~CGameAnimationTypeMonsterLayeredSpell
+// (0x6C00D0): 285 bytes of compiler-generated destruction - m_weaponResRef[2]
+// (+0xB42), m_weaponPalette (+0xB0E), the four weapon CVidCells
+// (+0xA34/+0x95A/+0x880/+0x7A6), m_charPalette (+0x776), the four body
+// CVidCells (+0x69C/+0x5C2/+0x4E8/+0x40E), m_resRef (+0x3FE), the base vtable
+// and the base's m_combatRounds[5] CVidBitmap array (+0x42) - in reverse
+// declaration order. The port's body is that destruction, so the test builds
+// the animation the ctor (0x6BF560) makes and destroys it: a member whose
+// destructor were missing or doubled would show here (the CStrings and the
+// CVidCells own memory), and the members the ctor set are checked before the
+// object goes.
+TEST_CASE("creature render: MonsterLayeredSpell's destructor tears the whole animation down", "[render][data]")
+{
+    std::string why;
+    if (!Begin(why)) {
+        SKIP("[iwd2r-skip] " + why);
+    }
+    BYTE colors[16] = {};
+    // 0x200 is the ctor's own family case (m_resRef MOGM, weapon S1), and the
+    // class needs no frame data to be built or destroyed.
+    auto* pAnimation = new CGameAnimationTypeMonsterLayeredSpell(0x200, colors, 0);
+    CHECK(pAnimation->m_animationID == 0x200);
+    CHECK(pAnimation->m_resRef == "MOGM");
+    CHECK(pAnimation->m_weaponResRef[0] == "S1");
+    CHECK(pAnimation->m_weaponResRef[1] == "");
+    CHECK(pAnimation->m_bDualAttack == TRUE);
+    CHECK(pAnimation->m_personalSpace == 5);
+    CHECK(pAnimation->m_charPalette.m_nType == CVidPalette::TYPE_RANGE);
+    CHECK(pAnimation->m_weaponPalette.m_nType == CVidPalette::TYPE_RANGE);
+
+    delete pAnimation;
+}
+
 // The white wyvern (0x1001, MWYV in four quadrant BAMs, 50WYRWH and six
 // other CRE files): CGameAnimationTypeMonsterQuadrant::Render (0x6BC5F0)
 // draws each quadrant from its own cell, m_currentVidCell + quad * 0xDA
@@ -365,7 +440,8 @@ TEST_CASE("creature render: CGameAnimationTypeMonsterQuadrant draws each quadran
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 0, 12 }) {
+    const WORD facings[] = { 0, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x1001, colors, facing));
         auto* pWyvern = dynamic_cast<CGameAnimationTypeMonsterQuadrant*>(pAnimation.get());
@@ -1308,7 +1384,8 @@ TEST_CASE("creature render: a character's weapon goes behind its body unless its
     RenderScope scope;
     REQUIRE(scope.Ok());
     BYTE colors[16] = {};
-    for (WORD facing : { 3, 4, 6, 12 }) {
+    const WORD facings[] = { 3, 4, 6, 12 };
+    for (WORD facing : facings) {
         INFO("facing " << facing);
         std::unique_ptr<CGameAnimationType> pAnimation(CGameAnimationType::SetAnimationType(0x6100, colors, facing));
         auto* pCharacter = dynamic_cast<CGameAnimationTypeCharacter*>(pAnimation.get());

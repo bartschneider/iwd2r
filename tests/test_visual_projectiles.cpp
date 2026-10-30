@@ -1096,7 +1096,7 @@ TEST_CASE("visual projectiles: Shatter tints the creature and throws ice or ston
         CHECK(pGoblin->m_posZDelta == (RandAt(seed, 1) % 3 + 1) * pGoblin->m_doBounce);
         CHECK(pGoblin->m_baseStats.m_animationType == 0);
         REQUIRE(pGoblin->m_derivedStats.m_appliedColorRanges.GetCount() == nRanges + 8);
-        POSITION posRange = pGoblin->m_derivedStats.m_appliedColorRanges.FindIndex(nRanges);
+        POSITION posRange = pGoblin->m_derivedStats.m_appliedColorRanges.FindIndex(static_cast<int>(nRanges));
         for (int nRange = 0; nRange < 8; nRange++) {
             CColorRange* pColorRange = pGoblin->m_derivedStats.m_appliedColorRanges.GetNext(posRange);
             CHECK(pColorRange->m_range == nRange);
@@ -1774,7 +1774,7 @@ TEST_CASE("visual projectiles: the area spells decode to their area projectiles"
         CHECK(pArea->m_nDuration == spec.nDuration);
         CHECK(pArea->m_nTriggerInterval == spec.nInterval);
         CHECK(pArea->m_nHitModulus == 10);
-        CHECK(pArea->m_bTravels == (spec.nType == 270));
+        CHECK(pArea->m_bTravels == (spec.nType == 270 ? TRUE : FALSE));
         if (spec.nEnemyAlly != 0) {
             CHECK(pArea->m_targetType.m_nEnemyAlly == spec.nEnemyAlly);
         } else {
@@ -2013,7 +2013,7 @@ TEST_CASE("visual projectiles: Turn Undead turns the undead that fit the rolls",
     // -1" guard reads the level through GetAtOffset's class-level byte
     // (0x4471c3, zero-extended), so it can never fire for a real sprite and
     // only the entry whose share fails is dropped.
-    const int levels[] = { 0, 1, 1, 1, 4, 50 };
+    const BYTE levels[] = { 0, 1, 1, 1, 4, 50 };
     std::list<LONG> targets;
     targets.push_back(CGameObjectArray::INVALID_INDEX);
     for (size_t n = 0; n < goblins.size(); n++) {

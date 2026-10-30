@@ -198,7 +198,7 @@ CGameSprite* MakeSprite(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -249,6 +249,29 @@ private:
     BOOL m_saved;
 };
 
+// How many objects the area's lists hold, the waiting-to-be-added ones
+// included (as tests/test_gam.cpp counts them).
+int ObjectsInArea(CGameArea* pArea)
+{
+    int count = 0;
+    CTypedPtrList<CPtrList, int*>* lists[] = { &pArea->m_lVertSort, &pArea->m_lVertSortBack, &pArea->m_lVertSortFlight,
+        &pArea->m_lVertSortAdd, &pArea->m_lVertSortBackAdd, &pArea->m_lVertSortFlightAdd };
+    for (CTypedPtrList<CPtrList, int*>* list : lists) {
+        count += static_cast<int>(list->GetCount());
+    }
+    return count;
+}
+
+// Drops the messages waiting in the global handler, so a test can count the
+// ones its own call adds (the pattern tests/test_ai.cpp uses).
+void ClearMessages()
+{
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    while (!handler.m_messageList.IsEmpty()) {
+        delete handler.m_messageList.RemoveHead();
+    }
+}
+
 BOOL HasQueuedAction(CGameSprite* pSprite, SHORT actionID)
 {
     if (pSprite->m_curAction.m_actionID == actionID) {
@@ -283,7 +306,7 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     REQUIRE(pArea != NULL);
     REQUIRE(party[1]->GetArea() == pArea);
 
-    STRREF strError = -1;
+    STRREF strError = static_cast<STRREF>(-1);
     // AR1000's header forbids resting (flag 0x2): "You may not rest at
     // this time."
     const DWORD flags = pArea->m_header.m_flags;
@@ -303,13 +326,13 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     const CPoint home = party[1]->m_pos;
     party[1]->m_pos.x = party[0]->m_pos.x + 600;
     party[1]->m_pos.y = party[0]->m_pos.y;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 16457);
 
     // Just inside: 511^2 + 0 <= 0x40000.
     party[1]->m_pos.x = party[0]->m_pos.x + 511;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
 
     // Vertically 384 is in range (384^2 * 16 / 9 == 0x40000), 385 is not.
@@ -323,14 +346,14 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     // The third argument answers TRUE for any gathered party, before the
     // save checks; a scattered one goes on to them.
     party[1]->m_pos = home;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, TRUE, FALSE) == TRUE);
     CHECK(strError == 10309);
 
     // The no-rest flag is ignored when the party rents a room (the second
     // argument) or with the fourth argument.
     pArea->m_header.m_flags |= 0x2;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 10309);
     CHECK(pGame->CanRestParty(strError, TRUE, FALSE, FALSE) == TRUE);
@@ -349,11 +372,60 @@ TEST_CASE("rest: CanRestParty asks to rest a gathered party and refuses a scatte
     const DWORD state1 = party[1]->m_derivedStats.m_generalState;
     party[0]->m_derivedStats.m_generalState |= STATE_DEAD;
     party[1]->m_derivedStats.m_generalState |= STATE_DEAD;
-    strError = -1;
+    strError = static_cast<STRREF>(-1);
     CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
     CHECK(strError == 10309);
     party[0]->m_derivedStats.m_generalState = state0;
     party[1]->m_derivedStats.m_generalState = state1;
+    pArea->m_header.m_flags = flags;
+}
+
+TEST_CASE("rest: CanRestParty refuses while a party member has Mold Touch or Shroud of Flame", "[rest][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(2);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = party[0]->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // AR1000's header forbids resting; take that out so that only the spell
+    // states can refuse it.
+    const DWORD flags = pArea->m_header.m_flags;
+    pArea->m_header.m_flags = flags & ~0x2;
+
+    STRREF strError = static_cast<STRREF>(-1);
+    REQUIRE(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
+    REQUIRE(strError == 15358);
+
+    // CGameObjectArray 0x5C9300: SPLSTATE_MOLD_TOUCH on any sprite refuses
+    // the rest: "You may not rest at this time."
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, true);
+    strError = static_cast<STRREF>(-1);
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
+    CHECK(strError == 10309);
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_MOLD_TOUCH, false);
+
+    // The same for SPLSTATE_SHROUD_OF_FLAME.
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, true);
+    strError = static_cast<STRREF>(-1);
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == FALSE);
+    CHECK(strError == 10309);
+    party[0]->m_derivedStats.m_spellStates.set(SPLSTATE_SHROUD_OF_FLAME, false);
+
+    // Cleared: the normal answer.
+    strError = static_cast<STRREF>(-1);
+    CHECK(pGame->CanRestParty(strError, FALSE, FALSE, FALSE) == TRUE);
+    CHECK(strError == 15358);
+
     pArea->m_header.m_flags = flags;
 }
 
@@ -372,6 +444,10 @@ TEST_CASE("rest: RestParty passes the rest time and queues the heal, the Rest ac
     }
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
+
+    // AR1000's own rest encounter (activated, a 10% chance an hour) would
+    // interrupt the rest this test measures.
+    party[0]->GetArea()->m_headerRestEncounter.m_activated = 0;
 
     HealOnRestGuard guard(FALSE);
 
@@ -424,6 +500,10 @@ TEST_CASE("rest: with healing on rest the clock runs by the party's wounds and t
     }
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
+
+    // AR1000's own rest encounter (activated, a 10% chance an hour) would
+    // interrupt the rest this test measures.
+    party[0]->GetArea()->m_headerRestEncounter.m_activated = 0;
 
     HealOnRestGuard guard(TRUE);
 
@@ -505,6 +585,100 @@ uint32_t Dword(const std::vector<char>& d, size_t at)
     return value;
 }
 
+}
+
+// Reputation: CInfGame::ReputationAdjustment (0x5BDC00). REPUTATI.2DA gives
+// the delta for the reputation the test sets and HAPPY.2DA the happiness of
+// the new one, so the numbers below are the shipped tables' cells.
+TEST_CASE("reputation: ChangeReputation moves the party and posts one happiness and one 0x6C effect per member", "[reputation][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+
+    std::vector<CGameSprite*> party = NewGameWithParty(2);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    REQUIRE(party.size() == 2);
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CMessageHandler* pHandler = g_pBaldurChitin->GetMessageHandler();
+    pHandler->AsynchronousUpdate();
+
+    // HAPPY.2DA's columns: neutral 1, evil 2, anything else good 0.
+    party[0]->m_typeAI.m_nAlignment = 2;
+    party[1]->m_typeAI.m_nAlignment = 3;
+
+    // Two different starting reputations, so the effect's SET is visible.
+    party[0]->GetBaseStats()->m_reputation = 100;
+    party[1]->GetBaseStats()->m_reputation = 30;
+
+    // REPUTATI.2DA row 10 (reputation 100): KILL_INNOCENT is -40.
+    pGame->m_nReputation = 100;
+    pGame->ChangeReputation(0);
+    CHECK(pGame->m_nReputation == 60);
+
+    int nHappiness = 0;
+    int nEffect = 0;
+    for (POSITION pos = pHandler->m_messageList.GetHeadPosition(); pos != NULL;) {
+        CMessage* pMessage = pHandler->m_messageList.GetNext(pos);
+        if (pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_HAPPINESS) {
+            nHappiness++;
+        } else if (pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_EFFECT) {
+            nEffect++;
+        }
+    }
+    CHECK(nHappiness == 2);
+    CHECK(nEffect == 2);
+
+    pHandler->AsynchronousUpdate();
+
+    // HAPPY.2DA row 6 (reputation 60): neutral 0, evil 80.
+    CHECK(party[0]->m_nHappiness == 0);
+    CHECK(party[1]->m_nHappiness == 80);
+
+    // The effect is opcode 0x6C, amount the new reputation, duration type 1.
+    // The 0x6C effect is applied immediately (dwFlags 1, duration type 1):
+    // it SETS the member's base reputation to the party's, so a member at
+    // 100 and one at 30 both end at 60 and neither was added to.
+    CHECK(party[0]->GetBaseStats()->m_reputation == 60);
+    CHECK(party[1]->GetBaseStats()->m_reputation == 60);
+
+    // Clamped to reputation 1 (10 stored) and "set to 100" travels as a delta.
+    pGame->ReputationAdjustment(-200, FALSE);
+    CHECK(pGame->m_nReputation == 10);
+    pGame->ReputationAdjustment(100, TRUE);
+    CHECK(pGame->m_nReputation == 100);
+    pHandler->AsynchronousUpdate();
+
+    // A member another player controls gets neither message.
+    const INT nServiceProvider = g_pChitin->cNetwork.m_nServiceProvider;
+    const PLAYER_ID nLocalPlayer = g_pChitin->cNetwork.m_idLocalPlayer;
+    g_pChitin->cNetwork.m_nServiceProvider = 1;
+    g_pChitin->cNetwork.m_idLocalPlayer = 1;
+    party[0]->m_remotePlayerID = 2;
+    party[1]->m_remotePlayerID = 1;
+    pGame->m_nReputation = 100;
+    pGame->ChangeReputation(0);
+    int nLocalMessages = 0;
+    for (POSITION pos = pHandler->m_messageList.GetHeadPosition(); pos != NULL;) {
+        CMessage* pMessage = pHandler->m_messageList.GetNext(pos);
+        if (pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_SET_HAPPINESS
+            || pMessage->GetMsgSubType() == CBaldurMessage::MSG_SUBTYPE_CMESSAGE_ADD_EFFECT) {
+            nLocalMessages++;
+        }
+    }
+    CHECK(g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL);
+    CHECK(nLocalMessages == 2); // one of each, for the member this player controls
+    g_pChitin->cNetwork.m_nServiceProvider = nServiceProvider;
+    g_pChitin->cNetwork.m_idLocalPlayer = nLocalPlayer;
+    party[0]->m_remotePlayerID = 0;
+    party[1]->m_remotePlayerID = 0;
+    pHandler->AsynchronousUpdate();
 }
 
 TEST_CASE("store: Marshal writes the store SetResRef read, without its sold-out items", "[store][data]")
@@ -1057,4 +1231,206 @@ TEST_CASE("store: InvalidateStore cuts the temp copy of a store to an empty STOO
     CStore after(CResRef("11DEIRD"));
     CHECK(std::memcmp(after.m_pVersion, "STOOV9.0", 8) == 0);
     CHECK(after.m_lInventory.GetCount() == 0);
+}
+
+// 0x46FEA0: the area's rest encounter. One chance roll (a miss returns FALSE;
+// the binary's retry counter never takes its back edge), then the rest's random
+// delay; then a rarity roll, the creature entry and the count jitter. The delay
+// is drawn before the square search, so the clock's jump pins the first two
+// draws against the same libc; the search's tie-breaks and the spawn placement
+// come after and cannot move them.
+//
+// NOT asserted here (implemented from the disassembly only): the rarity 0 path
+// (GetNearestOpenSquare + rand() % 2 per creature instead of the formation
+// offsets), the search's rand() % 7 tie-breaks, and AddCurrentTime's <= 900
+// branch (the seeds chosen always give a delay above it).
+TEST_CASE("rest: a rest encounter interrupts the rest with its rolled delay and creatures", "[rest][data]")
+{
+    if (DataDir() == nullptr) {
+        SKIP("[iwd2r-skip] IWD2_DATA unset");
+    }
+    std::string error;
+    REQUIRE(StartEngine(error));
+    INFO(error);
+    FramePump pump;
+    std::vector<CGameSprite*> party = NewGameWithParty(2);
+    if (party.empty()) {
+        SKIP("[iwd2r-skip] no CHR V2.2 file in the Characters folder");
+    }
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+    CGameArea* pArea = party[0]->GetArea();
+    REQUIRE(pArea != NULL);
+
+    // An encounter of our own: a goblin, one at a time, always.
+    CAreaFileRestEncounter& rest = pArea->m_headerRestEncounter;
+    INFO("AR1000's own encounter: activated " << rest.m_activated
+                                              << ", chance " << rest.m_probDay << "/" << rest.m_probNight);
+    rest = CAreaFileRestEncounter();
+    rest.m_activated = 1;
+    rest.m_probDay = 100;
+    rest.m_probNight = 100;
+    rest.m_randomCreatureNum = 1;
+    rest.m_maxTypeNum = 1;
+    std::memcpy(rest.m_randomCreature[0], "00GOB", 6);
+    rest.m_randomCreatureString[0] = 1000;
+
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+
+    // A chance of 100 always hits (the compare is <=), so the seed only has
+    // to give a delay the clock acts on: AddCurrentTime ignores <= 900.
+    int nHitSeed = 0;
+    ULONG nDelay = 0;
+    for (int n = 1; n < 1000 && nHitSeed == 0; n++) {
+        srand(n);
+        rand();
+        const ULONG nDrawn = rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR;
+        if (nDrawn > 900) {
+            nHitSeed = n;
+            nDelay = nDrawn;
+        }
+    }
+    REQUIRE(nHitSeed != 0);
+
+    srand(nHitSeed);
+    ClearMessages();
+    const ULONG nBefore = pGame->m_worldTime.m_gameTime;
+    const int nObjects = ObjectsInArea(pArea);
+
+    // The count is maxTypeNum plus the jitter (rand() % 5 - 2), clamped at
+    // one; the draws before it are the chance, the delay, the rarity
+    // (rand() % 10) and the entry (rand() % 1).
+    srand(nHitSeed);
+    rand();
+    rand();
+    rand();
+    rand();
+    const int nExpected = std::max(1, 1 + rand() % 5 - 2);
+
+    srand(nHitSeed);
+    CHECK(pArea->CheckRestEncounter() == TRUE);
+    CHECK(pGame->m_worldTime.m_gameTime == nBefore + nDelay);
+    CHECK(ObjectsInArea(pArea) == nObjects + nExpected);
+
+    // The encounter's text, last after the creatures' own messages: the
+    // area's string ref, no name, the last party member as both caller and
+    // target (the original's quirk).
+    CMessage* pLast = handler.m_messageList.IsEmpty() ? NULL : handler.m_messageList.GetTail();
+    auto* pText = dynamic_cast<CMessageDisplayTextRef*>(pLast);
+    REQUIRE(pText != nullptr);
+    CHECK(pText->m_name == static_cast<STRREF>(-1));
+    CHECK(pText->m_text == 1000);
+    CHECK(pText->m_sourceId == pGame->GetCharacterId(1));
+    CHECK(pText->m_targetId == pGame->GetCharacterId(1));
+
+    // The same seed draws the chance and then the delay: the order the two
+    // draws are in.
+    srand(nHitSeed);
+    CHECK(rand() % 100 <= 100);
+    CHECK(static_cast<ULONG>(rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR) == nDelay);
+
+    // No chance: the one roll happens and misses (a 0 chance still hits on a
+    // 0 draw, so the seed is chosen to draw non-zero), so nothing changes.
+    rest.m_probDay = 0;
+    rest.m_probNight = 0;
+
+    int nMissSeed = 0;
+    for (int n = 1; n < 1000 && nMissSeed == 0; n++) {
+        srand(n);
+        if (rand() % 100 != 0) {
+            nMissSeed = n;
+        }
+    }
+    REQUIRE(nMissSeed != 0);
+
+    srand(nMissSeed);
+    ClearMessages();
+    const ULONG nBeforeMiss = pGame->m_worldTime.m_gameTime;
+    const int nObjectsMiss = ObjectsInArea(pArea);
+
+    CHECK(pArea->CheckRestEncounter() == FALSE);
+    CHECK(pGame->m_worldTime.m_gameTime == nBeforeMiss);
+    CHECK(ObjectsInArea(pArea) == nObjectsMiss);
+    CHECK(handler.m_messageList.IsEmpty());
+
+    // The count: maxTypeNum plus the jitter (rand() % 5 - 2), clamped at one.
+    // The draws before it are the chance, the delay, the rarity
+    // (rand() % 10) and the entry (rand() % 1).
+    rest.m_probDay = 100;
+    rest.m_maxTypeNum = 3;
+
+    srand(nHitSeed);
+    rand();
+    rand();
+    rand();
+    rand();
+    const int nExpectedCount = std::max(1, 3 + rand() % 5 - 2);
+
+    srand(nHitSeed);
+    ClearMessages();
+    const int nObjectsCount = ObjectsInArea(pArea);
+    CHECK(pArea->CheckRestEncounter() == TRUE);
+    CHECK(ObjectsInArea(pArea) == nObjectsCount + nExpectedCount);
+
+    // Through RestPartyPrivate (the hook): the encounter ends the rest before
+    // the heal, the Rest action and the rest trigger.
+    rest.m_maxTypeNum = 1;
+    srand(nHitSeed);
+    for (CGameSprite* pSprite : party) {
+        pSprite->m_queuedActions.RemoveAll();
+        pSprite->m_pendingTriggers.RemoveAll();
+        pSprite->m_baseStats.m_hitPoints = 1;
+    }
+    g_pBaldurChitin->pActiveEngine = g_pBaldurChitin->m_pEngineWorld;
+    HealOnRestGuard guard(FALSE);
+
+    CHECK(pGame->RestParty(7, FALSE) == FALSE);
+    for (CGameSprite* pSprite : party) {
+        CHECK(HasQueuedAction(pSprite, 96) == FALSE);
+        CHECK(pSprite->m_baseStats.m_hitPoints == 1);
+    }
+
+    // Without the encounter the same rest heals and queues the Rest action.
+    rest.m_probDay = 0;
+    rest.m_probNight = 0;
+    srand(nMissSeed);
+    for (CGameSprite* pSprite : party) {
+        pSprite->m_queuedActions.RemoveAll();
+        pSprite->m_pendingTriggers.RemoveAll();
+        pSprite->m_baseStats.m_hitPoints = 1;
+    }
+
+    CHECK(pGame->RestParty(7, FALSE) == FALSE);
+    g_pBaldurChitin->GetMessageHandler()->AsynchronousUpdate();
+    CHECK(HasQueuedAction(party[0], 96));
+    CHECK(party[0]->m_baseStats.m_hitPoints > 1);
+
+    // The dawn tick is day: the binary's band is TIME_DAWN <= t < TIME_NIGHT
+    // (`div` then `cmp [0x84EC34] 99000; jae night` / `cmp [0x84EC1C] 27000;
+    // jae day` at 0x46FEE7-0x46FEFB). At exactly 27000 with the day chance 100
+    // and the night chance 0 the day roll is the one taken; the night roll of
+    // the old `>` port missed on every seed but a 1-in-100.
+    pGame->m_worldTime.m_gameTime = CTimerWorld::TIME_DAWN;
+    rest.m_probDay = 100;
+    rest.m_probNight = 0;
+
+    // The seed's first draw (the chance) must not be 0 - the night roll would
+    // then hit on it - and its second (the delay) must be above 900, or the
+    // clock's own minimum swallows the jump.
+    int nEdgeSeed = 0;
+    for (int n = 1; n < 1000 && nEdgeSeed == 0; n++) {
+        srand(n);
+        if (rand() % 100 == 0) {
+            continue;
+        }
+        if (rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR > 900) {
+            nEdgeSeed = n;
+        }
+    }
+    REQUIRE(nEdgeSeed != 0);
+
+    srand(nEdgeSeed);
+    ClearMessages();
+    const ULONG nBeforeEdge = pGame->m_worldTime.m_gameTime;
+    CHECK(pArea->CheckRestEncounter() == TRUE);
+    CHECK(pGame->m_worldTime.m_gameTime > nBeforeEdge);
 }

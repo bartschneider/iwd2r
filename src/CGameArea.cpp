@@ -2638,6 +2638,326 @@ void CGameArea::ClearInput()
     m_selectSquare.bottom = -1;
 }
 
+// 0x46FEA0
+BOOL CGameArea::CheckRestEncounter()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (m_headerRestEncounter.m_activated == 0) {
+        return FALSE;
+    }
+
+    // One chance, at the hour the rest starts: the day chance in the
+    // dawn-to-night band of the 108000 ms day (27000 <= t < 99000: the dawn
+    // tick is day, the `jae` against TIME_DAWN at 0x46FEF5-0x46FEFB), the night
+    // chance otherwise. A miss returns FALSE - the retry counter starts at 0
+    // and the back edge (`inc bl; cmp bl,1; jb` at 0x46FF39-0x46FF3E) is never
+    // taken, so the +TIMESCALE_MSEC_PER_HOUR second roll below never happens
+    // and only the binary's shape remains of it.
+    INT nDelay = 0;
+    BYTE nTries = 0;
+
+    do {
+        UINT nTime = (pGame->m_worldTime.m_gameTime + nDelay) % CTimerWorld::TIMESCALE_MSEC_PER_DAY;
+        if (nTime >= CTimerWorld::TIME_DAWN && nTime < CTimerWorld::TIME_NIGHT) {
+            if (rand() % 100 <= m_headerRestEncounter.m_probDay) {
+                break;
+            }
+        } else {
+            if (rand() % 100 <= m_headerRestEncounter.m_probNight) {
+                break;
+            }
+        }
+
+        nDelay += CTimerWorld::TIMESCALE_MSEC_PER_HOUR;
+        nTries++;
+    } while (nTries == 0);
+
+    if (nTries == 1) {
+        return FALSE;
+    }
+
+    if (m_headerRestEncounter.m_randomCreatureNum == 0) {
+        return FALSE;
+    }
+
+    if (m_headerRestEncounter.m_maxTypeNum == 0) {
+        return FALSE;
+    }
+
+    // NOTE: The original draws only when the hour's length is not zero.
+    if (CTimerWorld::TIMESCALE_MSEC_PER_HOUR != 0) {
+        nDelay += rand() % CTimerWorld::TIMESCALE_MSEC_PER_HOUR;
+    }
+
+    pGame->m_worldTime.AddCurrentTime(nDelay);
+    pGame->FeedBack(CInfGame::FEEDBACK_TIMEPASSEDREST, nDelay, TRUE);
+
+    CCreatureFile creatureFile;
+
+    LONG nProtagonist = pGame->GetProtagonist();
+
+    // The protagonist's position. NOTE: The original stops at nothing, so the
+    // last party member's id is what the message below names (the scan never
+    // breaks when it finds the protagonist), and a party with no protagonist
+    // reads an unset stack point; ours starts at (0, 0).
+    CPoint ptProtagonist(0, 0);
+    LONG nSpeaker = CGameObjectArray::INVALID_INDEX;
+
+    for (SHORT nSlot = 0; nSlot < pGame->m_nCharacters; nSlot++) {
+        LONG nId = pGame->m_characterPortraits[nSlot];
+
+        CGameSprite* pSprite;
+
+        BYTE rc = pGame->GetObjectArray()->GetShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            reinterpret_cast<CGameObject**>(&pSprite),
+            INFINITE);
+        if (rc == CGameObjectArray::SUCCESS) {
+            if (pSprite->m_id == nProtagonist) {
+                ptProtagonist = pSprite->GetPos();
+            }
+
+            pGame->GetObjectArray()->ReleaseShare(nId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+
+        nSpeaker = nId;
+    }
+
+    // Nine rays of up to m_visibility.field_E search squares out of the
+    // protagonist's square (ray 4 is the square itself: skipped). A cell is a
+    // candidate when it has line of sight and is visible; the farthest one
+    // wins, and a tie needs a one-in-seven draw. The best ray is the index
+    // into the group's formation offsets later.
+    INT nRadius = m_visibility.field_E;
+    INT nBaseX = ptProtagonist.x / CPathSearch::GRID_SQUARE_SIZEX;
+    INT nBaseY = ptProtagonist.y / CPathSearch::GRID_SQUARE_SIZEY;
+
+    INT nBestSteps = 0;
+    INT nBestX = nBaseX;
+    INT nBestY = nBaseY;
+    BYTE nBestRay = 0;
+
+    for (INT nRay = 0; nRay < 9; nRay++) {
+        if (nRay == 4) {
+            continue;
+        }
+
+        INT nDirX = nRay % 3 - 1;
+        INT nDirY = nRay / 3 - 1;
+        INT nX = nBaseX;
+        INT nY = nBaseY;
+        INT nSteps = 0;
+
+        if (nRadius > 0) {
+            do {
+                nX += nDirX;
+                nY += nDirY;
+
+                if (nX < 0 || nX >= m_search.m_GridSquareDimensions.cx
+                    || nY < 0 || nY >= m_search.m_GridSquareDimensions.cy) {
+                    // Out of the search grid: the cell before this one is the
+                    // candidate, and it counts one step less.
+                    nX += 1 - nDirX;
+                    nY += 1 - nDirY;
+                    nSteps--;
+                } else {
+                    SHORT nTableIndex;
+                    if (m_search.GetLOSCost(CPoint(nX, nY),
+                            CGameObject::DEFAULT_VISIBLE_TERRAIN_TABLE,
+                            nTableIndex,
+                            FALSE)
+                        == CPathSearch::COST_IMPASSABLE) {
+                        // NOTE: The original tests the byte as -1.
+                    } else if (!m_visibility.IsTileVisible(m_visibility.PointToTile(
+                                   CPoint(nX * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2,
+                                       nY * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2)))) {
+                        // Not visible: the cell before this one is the candidate.
+                    } else {
+                        nSteps++;
+                        continue;
+                    }
+                }
+
+                // A candidate: farther than the best so far wins, an equal one
+                // needs a one-in-seven draw. Either way the ray ends here.
+                BOOL bTake = FALSE;
+                if (nSteps > nBestSteps) {
+                    bTake = TRUE;
+                } else if (nSteps == nBestSteps) {
+                    bTake = rand() % 7 == 0;
+                }
+
+                if (bTake) {
+                    nBestSteps = nSteps;
+                    nBestX = nX;
+                    nBestY = nY;
+                    nBestRay = static_cast<BYTE>(nRay);
+                }
+
+                break;
+            } while (nSteps < nRadius);
+        }
+
+        if (nSteps == nRadius) {
+            // The whole ray was walked: its last cell is a candidate too.
+            BOOL bTake = FALSE;
+            if (nSteps > nBestSteps) {
+                bTake = TRUE;
+            } else if (nSteps == nBestSteps) {
+                bTake = rand() % 7 == 0;
+            }
+
+            if (bTake) {
+                nBestSteps = nSteps;
+                nBestX = nX;
+                nBestY = nY;
+                nBestRay = static_cast<BYTE>(nRay);
+            }
+        }
+    }
+
+    INT nMode = rand() % 10;
+
+    LONG nCreatureIndex = 0;
+    if (m_headerRestEncounter.m_randomCreatureNum != 0) {
+        nCreatureIndex = rand() % m_headerRestEncounter.m_randomCreatureNum;
+    }
+
+    INT nCount = m_headerRestEncounter.m_maxTypeNum + rand() % 5 - 2;
+    if (nCount < 1) {
+        nCount = 1;
+    }
+
+    if (pGame->m_cOptions.m_nNightmareMode == 1) {
+        nCount++;
+    }
+
+    CPoint* pOffsets = NULL;
+
+    for (INT nCreature = 0; nCreature < nCount; nCreature++) {
+        CResRef resRef(reinterpret_cast<const char*>(m_headerRestEncounter.m_randomCreature[nCreatureIndex]));
+
+        // NOTE: Uninline.
+        creatureFile.SetResRef(resRef, TRUE, TRUE);
+
+        DWORD nSize = creatureFile.GetDataSize();
+        BYTE* pData = creatureFile.GetData();
+
+        CGameSprite* pSprite = new CGameSprite(pData,
+            nSize,
+            0,
+            1,
+            m_headerRestEncounter.m_lifeSpan * CTimerWorld::TIMESCALE_MSEC_PER_SEC + pGame->m_worldTime.m_gameTime,
+            m_headerRestEncounter.m_huntingRange,
+            m_headerRestEncounter.m_followRange,
+            0x7FFFFFFF,
+            ptProtagonist,
+            0);
+
+        // NOTE: Uninline.
+        pSprite->SetResRef(CResRef(creatureFile.GetResRef().GetResRefStr()));
+
+        creatureFile.ReleaseData();
+
+        if (pSprite == NULL) {
+            // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameArea.cpp
+            // __LINE__: 3611
+            UTIL_ASSERT(FALSE);
+        } else {
+            pSprite->SetResRef(resRef);
+
+            // Up to five tries at a free, visible square. NOTE: The original
+            // formats "Spawned creatures dropped due to invalid positions: %d
+            // of %d" into a 200-byte buffer and frees it without printing
+            // (0x4708D7-0x4708F3); not ported.
+            BOOL bPlaced = FALSE;
+            CPoint ptSpawn;
+
+            for (INT nTry = 0; nTry < 5 && !bPlaced; nTry++) {
+                INT nSquareX;
+                INT nSquareY;
+
+                if (nMode != 0) {
+                    if (nCreature == 0) {
+                        // NOTE: The original calls rand before GetDirection.
+                        INT nFormation = rand() % 9 + 1;
+                        SHORT nDirection = static_cast<SHORT>(pSprite->GetDirection(ptProtagonist) * 360 / 16 % 360);
+                        pOffsets = pGame->m_group.GetOffsets(static_cast<SHORT>(nFormation), nDirection, TRUE);
+                    }
+
+                    // NOTE: The original indexes the offsets with
+                    // `nBestRay % FORMATION_MAX_SIZE` but GetOffsets gave it
+                    // max(members, 6) of them, so a party of six or fewer reads
+                    // past the heap block; bounded as CGameSpawning::Spawn.
+                    INT nMembers = pGame->m_group.m_memberList.GetCount();
+                    INT nOffsets = nMembers < 7 ? 6 : static_cast<BYTE>(nMembers);
+                    INT nOffset = nBestRay % CAIGROUP_FORMATION_MAX_SIZE;
+                    CPoint ptOffset(0, 0);
+                    if (nOffset < nOffsets) {
+                        ptOffset = pOffsets[nOffset];
+                    }
+
+                    CPoint ptStart(ptOffset.x / CAIGroup::OFFSET_MULTIPLIER + nBestX,
+                        ptOffset.y / CAIGroup::OFFSET_MULTIPLIER + nBestY);
+
+                    CPoint ptSquare = m_search.GetNearestOpenSquare(ptStart,
+                        pSprite->GetTerrainTable(),
+                        pSprite->m_animation.GetPersonalSpace(),
+                        -1);
+
+                    nSquareX = ptSquare.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2;
+                    nSquareY = ptSquare.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2;
+                } else {
+                    // The rare path: the best square itself, nudged back
+                    // towards the protagonist's square half the time.
+                    CPoint ptSquare = m_search.GetNearestOpenSquare(CPoint(nBestX, nBestY),
+                        pSprite->GetTerrainTable(),
+                        pSprite->m_animation.GetPersonalSpace(),
+                        -1);
+
+                    nSquareX = ptSquare.x * CPathSearch::GRID_SQUARE_SIZEX + CPathSearch::GRID_SQUARE_SIZEX / 2;
+                    nSquareY = ptSquare.y * CPathSearch::GRID_SQUARE_SIZEY + CPathSearch::GRID_SQUARE_SIZEY / 2;
+
+                    if (rand() % 2 == 0) {
+                        nBestX += 1 - nBestRay % 3;
+                        nBestY += 1 - nBestRay / 3;
+                    }
+                }
+
+                ptSpawn = CPoint(nSquareX, nSquareY);
+
+                if (m_visibility.PointToTile(ptSpawn) >= m_visibility.m_nWidth * m_visibility.m_nHeight) {
+                    // Off the visibility map: try again.
+                    continue;
+                }
+
+                // NOTE: The original asserts the animation here (0x826).
+                pSprite->AddToArea(this, ptSpawn, 0, pSprite->m_animation.GetListType());
+                pSprite->SetFacing(pSprite->GetDirection(ptProtagonist));
+
+                bPlaced = TRUE;
+            }
+        }
+    }
+
+    if (pOffsets != NULL) {
+        // NOTE: The original frees it with scalar operator delete; ours
+        // matches GetOffsets' `new[]`.
+        delete[] pOffsets;
+    }
+
+    g_pBaldurChitin->GetBaldurMessage()->DisplayTextRef(-1,
+        m_headerRestEncounter.m_randomCreatureString[nCreatureIndex],
+        0,
+        0x590A5,
+        -1,
+        nSpeaker,
+        nSpeaker);
+
+    return TRUE;
+}
+
 // 0x470960
 void CGameArea::ClearMarshal()
 {
@@ -2972,9 +3292,10 @@ void CGameArea::Marshal(BYTE** pArea, DWORD* nArea, BOOLEAN bProgressBarInPlace)
     field_AAA.RemoveAll();
 
     if (g_pBaldurChitin->GetObjectGame()->m_pGameAreaMaster == this) {
-        // TODO: Incomplete. The original calls 0x5170F0 on the game's
-        // `m_cMoveList` and `m_cLimboList` with this area (it re-applies an
-        // effect to each listed sprite); CMoveList does not have it yet.
+        // The original fills this area's list again right after emptying it,
+        // so the sprites of pending moves go into this area's creature list.
+        g_pBaldurChitin->GetObjectGame()->m_cMoveList.Marshal(this);
+        g_pBaldurChitin->GetObjectGame()->m_cLimboList.Marshal(this);
     }
 
     if (bProgressBarInPlace == TRUE) {

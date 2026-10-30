@@ -450,6 +450,15 @@ const BYTE CBaldurMessage::MSG_SUBTYPE_BIOGRAPHY_CHANGE = 99;
 // 0x84CF6D
 const BYTE CBaldurMessage::MSG_SUBTYPE_BIOGRAPHY_CHANGE_ANNOUNCE = 67;
 
+// 0x84CF61
+const BYTE CBaldurMessage::MSG_TYPE_AREAMAPNOTE = 65;
+
+// 0x84CF62
+const BYTE CBaldurMessage::MSG_SUBTYPE_AREAMAPNOTE_SEND = 110;
+
+// 0x84CF63
+const BYTE CBaldurMessage::MSG_SUBTYPE_AREAMAPNOTE_ANNOUNCE = 97;
+
 // 0x84CF72
 const BYTE CBaldurMessage::MSG_TYPE_DELETEAREA = 107;
 
@@ -4159,6 +4168,162 @@ BOOLEAN CBaldurMessage::OnAnnounceJournalEntryChange(INT nMsgFrom, BYTE* pByteMe
         nChapter,
         nCharacter);
     m_bInOnJournalAnnounce = FALSE;
+
+    return TRUE;
+}
+
+// The area-map-note message pair: the client sends the note to the host, the
+// host announces it to everyone, and the receivers run the same `Add` the
+// local UI does (0x43A470/0x43A7C0, not ported yet - they call the Add stub at
+// 0x47B330). Payload, after the fixed message header: a BYTE-length area
+// resref, its bytes, the note's start X and Y as WORDs, a DWORD-length note
+// text, its bytes, the note's DWORD flags and its STRREF. DeleteANote sends an
+// empty text with flags 0 and STRREF -1, which `sub_47B150` reads as "remove".
+//
+// 0x43A210
+BOOLEAN CBaldurMessage::SendAreaMapNoteToServer(CString sArea, WORD nStartX, WORD nStartY, CString sNote, DWORD dwFlags, STRREF strRef)
+{
+    CString sHostName;
+    BYTE* pByteMessage;
+    DWORD dwSize;
+    DWORD cnt;
+    DWORD nAreaLength;
+    DWORD nNoteLength;
+
+    if (!g_pChitin->cNetwork.GetSessionOpen()
+        || g_pChitin->cNetwork.GetSessionHosting() == TRUE) {
+        return FALSE;
+    }
+
+    // NOTE: The original reads the host player's name straight out of the
+    // session (name array chitin+0x1088 indexed by chitin+0x10E0), the same
+    // GetHostPlayerName the neighbouring senders use.
+    g_pChitin->cNetwork.GetHostPlayerName(sHostName);
+
+    if (sHostName == "") {
+        return FALSE;
+    }
+
+    nAreaLength = sArea.GetLength();
+    nNoteLength = sNote.GetLength();
+
+    dwSize = sizeof(BYTE)
+        + nAreaLength
+        + sizeof(WORD)
+        + sizeof(WORD)
+        + sizeof(DWORD)
+        + nNoteLength
+        + sizeof(DWORD)
+        + sizeof(STRREF);
+
+    pByteMessage = CreateBuffer(dwSize);
+    if (pByteMessage == NULL) {
+        return FALSE;
+    }
+
+    cnt = 0;
+
+    *reinterpret_cast<BYTE*>(pByteMessage + cnt) = static_cast<BYTE>(nAreaLength);
+    cnt += sizeof(BYTE);
+
+    memcpy(pByteMessage + cnt, sArea.GetBuffer(nAreaLength), nAreaLength);
+    cnt += nAreaLength;
+
+    *reinterpret_cast<WORD*>(pByteMessage + cnt) = nStartX;
+    cnt += sizeof(WORD);
+
+    *reinterpret_cast<WORD*>(pByteMessage + cnt) = nStartY;
+    cnt += sizeof(WORD);
+
+    *reinterpret_cast<DWORD*>(pByteMessage + cnt) = nNoteLength;
+    cnt += sizeof(DWORD);
+
+    memcpy(pByteMessage + cnt, sNote.GetBuffer(nNoteLength), nNoteLength);
+    cnt += nNoteLength;
+
+    *reinterpret_cast<DWORD*>(pByteMessage + cnt) = dwFlags;
+    cnt += sizeof(DWORD);
+
+    *reinterpret_cast<STRREF*>(pByteMessage + cnt) = strRef;
+    cnt += sizeof(STRREF);
+
+    g_pChitin->cNetwork.SendSpecificMessage(sHostName,
+        CNetwork::SEND_GUARANTEED,
+        MSG_TYPE_AREAMAPNOTE,
+        MSG_SUBTYPE_AREAMAPNOTE_SEND,
+        pByteMessage,
+        dwSize);
+
+    DestroyBuffer(pByteMessage);
+
+    return TRUE;
+}
+
+// 0x43A5C0
+BOOLEAN CBaldurMessage::AnnounceAreaMapNote(CString sArea, WORD nStartX, WORD nStartY, CString sNote, DWORD dwFlags, STRREF strRef)
+{
+    BYTE* pByteMessage;
+    DWORD dwSize;
+    DWORD cnt;
+    DWORD nAreaLength;
+    DWORD nNoteLength;
+
+    if (!g_pChitin->cNetwork.GetSessionOpen()
+        || !g_pChitin->cNetwork.GetSessionHosting()) {
+        return FALSE;
+    }
+
+    nAreaLength = sArea.GetLength();
+    nNoteLength = sNote.GetLength();
+
+    dwSize = sizeof(BYTE)
+        + nAreaLength
+        + sizeof(WORD)
+        + sizeof(WORD)
+        + sizeof(DWORD)
+        + nNoteLength
+        + sizeof(DWORD)
+        + sizeof(STRREF);
+
+    pByteMessage = CreateBuffer(dwSize);
+    if (pByteMessage == NULL) {
+        return FALSE;
+    }
+
+    cnt = 0;
+
+    *reinterpret_cast<BYTE*>(pByteMessage + cnt) = static_cast<BYTE>(nAreaLength);
+    cnt += sizeof(BYTE);
+
+    memcpy(pByteMessage + cnt, sArea.GetBuffer(nAreaLength), nAreaLength);
+    cnt += nAreaLength;
+
+    *reinterpret_cast<WORD*>(pByteMessage + cnt) = nStartX;
+    cnt += sizeof(WORD);
+
+    *reinterpret_cast<WORD*>(pByteMessage + cnt) = nStartY;
+    cnt += sizeof(WORD);
+
+    *reinterpret_cast<DWORD*>(pByteMessage + cnt) = nNoteLength;
+    cnt += sizeof(DWORD);
+
+    memcpy(pByteMessage + cnt, sNote.GetBuffer(nNoteLength), nNoteLength);
+    cnt += nNoteLength;
+
+    *reinterpret_cast<DWORD*>(pByteMessage + cnt) = dwFlags;
+    cnt += sizeof(DWORD);
+
+    *reinterpret_cast<STRREF*>(pByteMessage + cnt) = strRef;
+    cnt += sizeof(STRREF);
+
+    g_pChitin->cNetwork.SendSpecificMessage(CString(),
+        CNetwork::SEND_GUARANTEED | CNetwork::SEND_ALL_PLAYERS,
+        MSG_TYPE_AREAMAPNOTE,
+        MSG_SUBTYPE_AREAMAPNOTE_ANNOUNCE,
+        pByteMessage,
+        dwSize);
+
+    DestroyBuffer(pByteMessage);
 
     return TRUE;
 }

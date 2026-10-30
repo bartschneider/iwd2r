@@ -177,24 +177,20 @@ private:
     std::thread m_thread;
 };
 
-std::vector<BYTE> FinishedCharacter()
+// The CRE of the named pregenerated character (Characters/<name>.chr), as
+// tests/test_spellbook_screen.cpp does. The fixture names it because the
+// first file in an install's Characters folder is whatever that install
+// holds (a played one collects exported characters), and these tests pin
+// hit points.
+std::vector<BYTE> NamedCharacter(const std::string& name)
 {
-    std::vector<fs::path> files;
-    std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(Child(g_view, "Characters"), ec)) {
-        if (Lower(entry.path().extension().string()) == ".chr")
-            files.push_back(entry.path());
-    }
-    std::sort(files.begin(), files.end());
-    for (const fs::path& file : files) {
-        std::ifstream in(file, std::ios::binary);
-        const std::string chr((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
-            const uint32_t offset = Le32(chr, 0x28);
-            const uint32_t size = Le32(chr, 0x2C);
-            if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
-                return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
-        }
+    std::ifstream in(Child(Child(g_view, "Characters"), name + ".chr"), std::ios::binary);
+    const std::string chr((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (chr.size() > 0x224 && chr.compare(0, 8, "CHR V2.2") == 0) {
+        const uint32_t offset = Le32(chr, 0x28);
+        const uint32_t size = Le32(chr, 0x2C);
+        if (offset + size <= chr.size() && chr.compare(offset, 8, "CRE V2.2") == 0)
+            return std::vector<BYTE>(chr.begin() + offset, chr.begin() + offset + size);
     }
     return std::vector<BYTE>();
 }
@@ -210,7 +206,7 @@ CGameSprite* NewGameInStartArea(std::vector<BYTE>& bytes)
         static_cast<LONG>(bytes.size()),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -247,7 +243,7 @@ CGameSprite* AddCreature(CGameArea* pArea, const char* resRef, const CPoint& pos
         creatureData.GetDataSize(),
         0,
         0,
-        -1,
+        static_cast<DWORD>(-1),
         0,
         0,
         INT_MAX,
@@ -327,9 +323,9 @@ bool SetUpFight(Fight& fight, std::string& why)
         why = error;
         return false;
     }
-    std::vector<BYTE> cre = FinishedCharacter();
+    std::vector<BYTE> cre = NamedCharacter("wrchar3");
     if (cre.empty()) {
-        why = "no CHR V2.2 file in the Characters folder";
+        why = "Characters/wrchar3.chr not found or not CHR V2.2";
         return false;
     }
     // The engine seeds rand() from the clock (`srand(time)` in
@@ -539,7 +535,7 @@ TEST_CASE("combat: DropInventory puts a goblin's droppable items and gold on its
 
     LONG nPile = g_pBaldurChitin->GetObjectGame()->GetGroundPile(pGoblin->GetId());
     REQUIRE(nPile != CGameObjectArray::INVALID_INDEX);
-    CGameContainer* pPile;
+    CGameContainer* pPile = nullptr;
     REQUIRE(g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetShare(nPile, CGameObjectArray::THREAD_ASYNCH,
                 reinterpret_cast<CGameObject**>(&pPile), INFINITE)
         == CGameObjectArray::SUCCESS);
@@ -2476,10 +2472,10 @@ TEST_CASE("combat: the area tints a point with its light map", "[combat][data]")
     // changes the colour.
     INT nCellX = -1;
     INT nCellY = -1;
-    RGBQUAD d00;
-    RGBQUAD d10;
-    RGBQUAD d01;
-    RGBQUAD d11;
+    RGBQUAD d00 = {};
+    RGBQUAD d10 = {};
+    RGBQUAD d01 = {};
+    RGBQUAD d11 = {};
     for (INT y = 0; y < 200 && nCellX == -1; y++) {
         for (INT x = 0; x < 300; x++) {
             if (!pArea->m_bmLum.GetPixelColor(d00, x, y, FALSE)

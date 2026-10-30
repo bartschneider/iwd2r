@@ -13,6 +13,7 @@
 #include "CUtil.h"
 #include "CVidFont.h"
 #include "CWarp.h"
+#include "msvc_atol.h"
 
 #include <atomic>
 
@@ -454,13 +455,258 @@ BOOL CChitin::InitializeServices(HWND hWnd)
 // 0x791610
 void CChitin::OnDisplayChange()
 {
-    // TODO: Incomplete.
+    // The original reads the fullscreen flag through the global chitin
+    // (0x8CF6D8) rather than `this`, and returns when it is set (0x79162D).
+    if (g_pChitin->m_bFullscreen) {
+        return;
+    }
+
+    RECT rect;
+    GetWindowRect(cWnd.GetSafeHwnd(), &rect);
+    m_ptScreen.x = rect.left;
+    m_ptScreen.y = rect.top;
+
+    field_F8 = 1;
+    m_bReInitializing = TRUE;
+
+    if (pActiveEngine != NULL) {
+        pActiveEngine->EngineDeactivated();
+    }
+
+    INT nCurrentSong = cSoundMixer.m_nCurrentSong;
+    cSoundMixer.StopMusic(TRUE);
+
+    CVidMode* pCurrentVidMode = cVideo.m_pCurrentVidMode;
+    field_142 = 0;
+
+    cSoundMixer.CleanUp();
+    cVideo.CleanUp();
+
+    int nBpp = CUtil::GetCurrentBitsPerPixels();
+    if (nBpp != 16 && nBpp != 24 && nBpp != 32) {
+        CString s;
+        s.LoadStringA(GetIDSInvalidVideoMode());
+        MessageBoxA(NULL, s, m_sGameName, 0);
+        ShutDown(-1, NULL, NULL);
+        return;
+    }
+
+    cVideo.m_pCurrentVidMode = pCurrentVidMode;
+    if (!InitializeServices(cWnd.GetSafeHwnd())) {
+        ShutDown(-1, NULL, NULL);
+        return;
+    }
+
+    SetSoundVolumes();
+    cSoundMixer.StartSong(nCurrentSong, 1);
+
+    if (cDimm.m_bCDSwitchActivated) {
+        SetCDSwitchActivateEngine(TRUE);
+    } else if (cProgressBar.m_bProgressBarActivated) {
+        SetProgressBarActivateEngine(TRUE);
+    } else {
+        if (pActiveEngine != NULL) {
+            pActiveEngine->EngineActivated();
+        }
+    }
+
+    Resume();
+    field_F8 = 0;
 }
 
 // 0x7917F0
 void CChitin::ParseCommandLine()
 {
-    // TODO: Incomplete.
+    // The original copies m_sCommandLine (this+0xDC, 0x79183A) and consumes the
+    // copy: each loop trims, takes the next space-delimited word, matches it
+    // against the options below (strcmp, so case-sensitive) and finally writes
+    // the words it did not recognise back into m_sCommandLine, each with a
+    // leading space (0x7925BA-0x79262A). Every option repeats its value step
+    // inline, exactly as the original does: a "quoted" value runs to the
+    // closing quote, which must exist or the option is dropped (the second
+    // quote test at 0x7919C6, 0x791BCC, 0x792108, 0x7922E1, 0x7924CA), and
+    // otherwise the value is the next space-delimited word.
+    CString sCommandLine(m_sCommandLine);
+    CString sUnused;
+
+    while (TRUE) {
+        sCommandLine.TrimLeft();
+        if (sCommandLine.IsEmpty()) {
+            m_sCommandLine = sUnused;
+            return;
+        }
+
+        CString sOption = sCommandLine.SpanExcluding(" ");
+        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sOption.GetLength());
+
+        if (sOption == "+host") { // 0x8BA1D8
+            // The host name goes to field_11C, only when "+connect" did not
+            // come first (0x791A08).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x79190F), take the value up to the
+                // closing quote (0x79194A), then require it (0x7919C6) and
+                // drop it (0x7919D3).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x791A35).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            if (!m_bStartUpConnect) {
+                field_110 = 1;
+                field_11C = sValue;
+            }
+        } else if (sOption == "+connect") { // 0x8BA1CC
+            // "address:port" is split on ':' (0x791C07): the address goes to
+            // m_sStartUpAddress, the port to field_11C; only when "+host" did
+            // not come first (0x791C84).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x791B18), take the value up to the
+                // closing quote (0x791B49), then require it (0x791BCC) and
+                // drop it (0x791BD9).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x791CC1).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            if (field_110 == 0) {
+                CString sAddress = sValue.SpanExcluding(":");
+                m_bStartUpConnect = TRUE;
+                m_sStartUpAddress = sAddress;
+                field_11C = sValue.Right(sValue.GetLength() - sAddress.GetLength() - 1);
+            }
+        } else if (sOption == "+name") { // 0x8BA1C4
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x791E27), take the value up to the
+                // closing quote (0x791E62), then require it (0x791EE5) and
+                // drop it (0x791EF2).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x791F35).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            m_sStartUpPlayer = sValue;
+        } else if (sOption == "+newgame") { // 0x8BA1B8
+            // "+newgame" and "+loadgame" exclude each other: the first one
+            // given wins (0x791FD6/0x792009).
+            if (field_128 == 0) {
+                field_124 = 1;
+            }
+        } else if (sOption == "+loadgame") { // 0x8BA1AC
+            if (field_124 == 0) {
+                field_128 = 1;
+            }
+        } else if (sOption == "+hostname") { // 0x8BA1A0
+            // The session name, only when "+host" came first (0x792143).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x79205D), take the value up to the
+                // closing quote (0x79208B), then require it (0x792108) and
+                // drop it (0x792115).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x792166).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            if (field_110 != 0) {
+                m_sStartUpSession = sValue;
+            }
+        } else if (sOption == "+location") { // 0x8BA194
+            // The GameSpy location; field_131 says one was given (0x792327/
+            // 0x7923BE).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x792236), take the value up to the
+                // closing quote (0x792268), then require it (0x7922E1) and
+                // drop it (0x7922EE).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x792338).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            field_131 = 1;
+            m_sStartUpGameSpyLocation = sValue;
+        } else if (sOption == "+maxclients") { // 0x8BA188
+            // ToNumberWrapper(0x7E7B8E), i.e. VC6 atol (iwd2r_atol); the
+            // original stores whatever it returns (0x7925A1-0x7925B5).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (sCommandLine[0] == '"') {
+                // Drop the opening quote (0x79240D), take the value up to the
+                // closing quote (0x792441), then require it (0x7924CA) and
+                // drop it (0x7924D3).
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+                sValue = sCommandLine.SpanExcluding("\"");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+                if (sCommandLine[0] != '"') {
+                    continue;
+                }
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+            } else {
+                // The next word (0x792508).
+                sValue = sCommandLine.SpanExcluding(" ");
+                sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+            }
+
+            field_136 = iwd2r_atol(sValue.GetBuffer(0x80));
+        } else {
+            sUnused += " ";
+            sUnused += sOption;
+        }
+    }
 }
 
 // 0x7926B0
