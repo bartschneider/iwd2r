@@ -78,9 +78,10 @@ void CTiledObject::CheckTileState(CInfinity& cInfinity)
             WED_TILEDATA* pTileData = m_pResWed->GetTileData(0, pTiledObjectList[i]);
             pTileData->wFlags = m_wRenderState;
 
-            // Swap the tile's primary image for its secondary one (detach
-            // the primary, attach the secondary; 0x54E750-0x54E7A3).
-            cInfinity.SwapVRamTiles(pTileList[pTileData->nStartingTile], pTileData->nSecondary);
+            // Swap the tile's secondary image out for its primary one
+            // (detach the secondary, attach the primary; 0x54E790-0x54E79A:
+            // nSecondary is the last push, i.e. the first argument).
+            cInfinity.SwapVRamTiles(pTileData->nSecondary, pTileList[pTileData->nStartingTile]);
         }
 
         TogglePolys(pTiledObject->nOffsetToPrimaryPolys, pTiledObject->nNumPrimaryPolys, false);
@@ -98,9 +99,10 @@ void CTiledObject::CheckTileState(CInfinity& cInfinity)
             WED_TILEDATA* pTileData = m_pResWed->GetTileData(0, pTiledObjectList[i]);
             pTileData->wFlags = m_wRenderState;
 
-            // The reverse swap (detach the secondary, attach the primary;
-            // 0x54E674-0x54E6C9).
-            cInfinity.SwapVRamTiles(pTileData->nSecondary, pTileList[pTileData->nStartingTile]);
+            // The reverse swap (detach the primary, attach the secondary;
+            // 0x54E6B4-0x54E6BC: the tile list's value is the last push, i.e.
+            // the first argument).
+            cInfinity.SwapVRamTiles(pTileList[pTileData->nStartingTile], pTileData->nSecondary);
         }
 
         TogglePolys(pTiledObject->nOffsetToPrimaryPolys, pTiledObject->nNumPrimaryPolys, true);

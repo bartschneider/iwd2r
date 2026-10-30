@@ -219,10 +219,10 @@ TEST_CASE("infinity: CheckTileState swaps the tile images and the poly types", "
             const WED_TILEDATA* pTileData = fixture.TileData(i);
             CHECK(pTileData->wFlags == CTiledObject::STATE_PRIMARY_TILE);
 
-            // The swap detached tileList[nStartingTile] and attached
-            // nSecondary, so the secondary tile carries the primary's code.
-            CHECK(fixture.m_pResTiles[pTileData->nSecondary]->m_renderCode.tileNW
-                == static_cast<BYTE>(0x10 + pTileData->nStartingTile));
+            // The swap detached nSecondary and attached tileList[nStartingTile],
+            // so the primary tile carries the secondary's code.
+            CHECK(fixture.m_pResTiles[pTileData->nStartingTile]->m_renderCode.tileNW
+                == static_cast<BYTE>(0x10 + pTileData->nSecondary));
         }
 
         CHECK((fixture.PolyType(0) & 0x2) == 0); // primary poly: cleared
@@ -246,9 +246,9 @@ TEST_CASE("infinity: CheckTileState swaps the tile images and the poly types", "
             const WED_TILEDATA* pTileData = fixture.TileData(i);
             CHECK(pTileData->wFlags == CTiledObject::STATE_SECONDARY_TILE);
 
-            // The reverse swap: the primary image gets the secondary's code.
-            CHECK(fixture.m_pResTiles[pTileData->nStartingTile]->m_renderCode.tileNW
-                == static_cast<BYTE>(0x10 + pTileData->nSecondary));
+            // The reverse swap: the secondary image gets the primary's code.
+            CHECK(fixture.m_pResTiles[pTileData->nSecondary]->m_renderCode.tileNW
+                == static_cast<BYTE>(0x10 + pTileData->nStartingTile));
         }
 
         CHECK((fixture.PolyType(0) & 0x2) != 0); // primary poly: set

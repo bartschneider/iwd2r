@@ -141,6 +141,13 @@ std::string Hex(uint32_t value)
     return text;
 }
 
+std::string Hex16(uint16_t value)
+{
+    char text[16];
+    std::snprintf(text, sizeof(text), "0x%04X", value);
+    return text;
+}
+
 void Put16(std::vector<uint8_t>& image, int at, uint16_t value)
 {
     std::memcpy(image.data() + at, &value, sizeof(value));
@@ -391,10 +398,11 @@ void CheckTileState(CaseContext& ctx)
             kWEDSize / 4);
 
         // The object's state, the pool entry and every tile's VRAM fields.
+        const uint16_t originalRender = Get<uint16_t>(object, kTiledObjectRenderState);
         if (Get<int32_t>(object, kTiledObjectWedIndex) != static_cast<int32_t>(ourObject->m_nWedIndex)
             || Get<uint16_t>(object, kTiledObjectAIState) != ourObject->m_wAIState
-            || Get<uint16_t>(object, kTiledObjectRenderState) != ourObject->m_wRenderState) {
-            ctx.Fail(ctx.Inputs() + ", object state", "different", "different");
+            || originalRender != ourObject->m_wRenderState) {
+            ctx.Fail(ctx.Inputs() + ", object state", Hex16(originalRender), Hex16(ourObject->m_wRenderState));
         }
 
         if (Get<int32_t>(defs, kTileDefinitionTile) != oursDef.nTile
@@ -409,12 +417,18 @@ void CheckTileState(CaseContext& ctx)
             const CResInfTile* pOurs = oursTilePointers[i];
             const uint8_t oursCode[4] = { pOurs->m_renderCode.tileNW, pOurs->m_renderCode.tileNE,
                 pOurs->m_renderCode.tileSW, pOurs->m_renderCode.tileSE };
+            char originalDetail[64];
+            char oursDetail[64];
+            std::snprintf(originalDetail, sizeof(originalDetail), "nvram %d code %02X%02X%02X%02X flags %02X",
+                Get<int32_t>(pTile, kResInfTileVRamTile), pTile[kResInfTileRenderCode],
+                pTile[kResInfTileRenderCode + 1], pTile[kResInfTileRenderCode + 2], pTile[kResInfTileRenderCode + 3],
+                Get<uint8_t>(pTile, kResInfTileVRamFlags));
+            std::snprintf(oursDetail, sizeof(oursDetail), "nvram %d code %02X%02X%02X%02X flags %02X",
+                pOurs->m_nVRamTile, oursCode[0], oursCode[1], oursCode[2], oursCode[3], pOurs->m_nVRamFlags);
             if (Get<int32_t>(pTile, kResInfTileVRamTile) != pOurs->m_nVRamTile
                 || std::memcmp(pTile + kResInfTileRenderCode, oursCode, 4) != 0
                 || Get<uint8_t>(pTile, kResInfTileVRamFlags) != pOurs->m_nVRamFlags) {
-                char detail[64];
-                std::snprintf(detail, sizeof(detail), "tile %d", i);
-                ctx.Fail(ctx.Inputs() + ", " + detail, "different", "different");
+                ctx.Fail(ctx.Inputs() + ", tile " + std::to_string(i), originalDetail, oursDetail);
             }
         }
     }
