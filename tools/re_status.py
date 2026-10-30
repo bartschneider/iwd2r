@@ -242,9 +242,10 @@ def markers(text, table=None, graph=None, ours=None):
 def scan(repo, table=None, graph=None):
     """(real, added, demoted, kept) over every marker in src/**/*.{cpp,h}.
     `real` maps a normalised address to our name when classify calls the body
-    real; `added` counts, per rule, the bodies the pre-Task-55 rule called a
-    stub; `demoted` counts the reverse (bodies only their comments made look
-    long); `kept` lists [(address, name, exe size, callee)] of empty
+    real; `added` counts, per rule, the addresses no marker of theirs was real
+    under the pre-Task-55 rule; `demoted` counts the reverse (addresses only
+    their comments made look long); `kept` lists [(address, name, exe size,
+    callee)] of empty
     constructors and destructors rule 4 left as stubs, with the first callee
     that is not a base/member constructor, destructor or operator
     new/delete — the porting queue."""
@@ -257,6 +258,7 @@ def scan(repo, table=None, graph=None):
     ours = {}
     for a, name, _ in bodies:
         ours.setdefault(_norm(a), name)
+    old_real = {_norm(a) for a, _, body in bodies if not _was_stub(body)}
     real = {}
     added = {'statement': 0, 'size': 0, 'ctor-callees': 0}
     demoted, kept, seen = 0, [], set()
@@ -268,15 +270,14 @@ def scan(repo, table=None, graph=None):
         stub, why = classify(body, name, a, table, graph, ours)
         if not stub:
             real.setdefault(a, name)
+            if a not in old_real:
+                added[why] += 1
+        elif a in old_real:
+            demoted += 1
         elif why.startswith('ctor-callee'):
             row = (table or {}).get(a)
             kept.append((a, name, row[1] if row else None,
                          why[len('ctor-callee:'):]))
-        old = _was_stub(body)
-        if old and not stub:
-            added[why] += 1
-        elif not old and stub:
-            demoted += 1
     return real, added, demoted, kept
 
 
@@ -342,7 +343,7 @@ def compute(repo, exports):
     print('re_status: the rules recovered %d more than the old count '
           '(rule 2, any statement: %d; rule 3, empty and exe at most 16 '
           'bytes: %d; rule 4, empty ctor/dtor with base/member callees only: '
-          '%d) and demoted %d bodies only their comments made look long; '
+          '%d) and demoted %d addresses only their comments made look long; '
           'rule 4 kept %d empty constructors/destructors as stubs:'
           % (sum(added.values()) - demoted, added['statement'], added['size'],
              added['ctor-callees'], demoted, len(kept)), file=sys.stderr)
