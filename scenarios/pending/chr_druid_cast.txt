@@ -65,18 +65,23 @@ click 536 562
 wait 60
 checkpoint imported_chargen
 shot imported_chargen
-# CHECK (run 20261030-124258 disproved the old claim that this click
-# leaves chargen after an import): with the druid imported, (536,562) is
-# Finish on the chargen main menu (bar: Biography | Import | Back |
-# Finish | Start Over), Finish renders dim, and the click does nothing
-# -- the game stayed on that menu to the end of the run (screen
-# create_char, members [] at every later checkpoint). The proven chargen
-# exit (first tree run 20261023-105435, original engine) clicked this
-# same slot only after the Name panel's Done: type a name, Done
-# (458,268), then (536,562) reaches Party Formation (screen
-# single_player, load 2). An import does not set that finished flag.
-# Next attempt: visit Name (400,373) and its Done (458,268) before this
-# click -- UNCONFIRMED, both launches of 20261030 were spent.
+# CHECK (run 20261030-125821 re-proved run 20261030-124258): with the
+# druid imported, the direct (536,562) click does nothing -- Finish is
+# dim on the chargen main menu (bar: Biography | Import | Back | Finish
+# | Start Over) until the Name panel's Done; every later checkpoint of
+# that run stayed screen create_char, members []. So visit Name
+# (400,373), type a name, Done (458,268) -- the proven chargen exit
+# (first tree run 20261023-105435, original engine) reached Party
+# Formation (screen single_player) only through that sequence -- then
+# Finish (536,562).
+click 400 373
+wait 30
+type Probe
+wait 15
+click 458 268
+wait 30
+checkpoint named
+shot named
 click 536 562
 wait 60
 checkpoint party_formation
