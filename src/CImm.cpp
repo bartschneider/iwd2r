@@ -3,6 +3,7 @@
 #include "CChitin.h"
 #include "CUtil.h"
 #include "CVidFont.h"
+#include "CVidInf.h"
 #include "CVidMosaic.h"
 #include "CWarp.h"
 
@@ -428,9 +429,70 @@ CRect CImm::sub_7C3020(const CPoint& ptPanel, const CSize& panelSize, const CPoi
 }
 
 // 0x7C3140
-void CImm::sub_7C3140(const CRect& a1, const CRect& a2, CVidFont* pVidFont, BOOL bDemanded)
+void CImm::sub_7C3140(const CRect& a1, CRect a2, CVidFont* pVidFont, BOOL bDemanded)
 {
-    // TODO: Incomplete.
+    // WSO calls this DrawCompositionWindow (report-T80.md §2.10); the export has
+    // no name for it, so the stub's name stays. `a2` is by value in the
+    // original (`ret 0x1C`): the padding is applied to the copy below.
+    // The exe reads pActiveEngine->pVidMode and calls the CVidInf methods on
+    // it (the house cast, as in CCacheStatus.cpp): the engine's mode is the
+    // CVidInf the 2D path was built on.
+    CVidInf* pVidInf = g_pChitin->pActiveEngine != NULL
+        ? static_cast<CVidInf*>(g_pChitin->pActiveEngine->pVidMode)
+        : NULL;
+
+    field_13C->Render(0, a1.left, a1.top, CRect(0, 0, a1.Width(), a1.Height()), a2, 0, 0);
+
+    HWND hWnd = g_pChitin->GetWnd() != NULL ? g_pChitin->GetWnd()->m_hWnd : NULL;
+    CString sComposition = sub_7C2ED0(hWnd);
+    CString sSuggestion = sub_7C34D0();
+    if (sSuggestion != "") {
+        if (sComposition == "") {
+            sComposition = sSuggestion;
+        } else {
+            sComposition = sComposition + " " + sSuggestion;
+        }
+    }
+
+    a2.left += PADDING.cx;
+    a2.right -= PADDING.cx;
+    a2.top += PADDING.cy;
+    a2.bottom -= PADDING.cy;
+
+    if (pVidInf->BKLock(a2)) {
+        OffsetRect(&a2, -a2.left, -a2.top);
+
+        if (!bDemanded && pVidFont->pRes->Demand() == NULL) {
+            pVidInf->BKUnlock();
+            return;
+        }
+
+        COLORREF rgbForegroundColor = pVidFont->m_rgbForegroundColor;
+        COLORREF rgbBackgroundColor = pVidFont->m_rgbBackgroundColor;
+
+        pVidFont->SetColor(0xFFFFFF, 0, FALSE);
+        SHORT nBaseLine = pVidFont->GetBaseLineHeight(TRUE);
+        pVidInf->BKTextOut(pVidFont, sComposition, 0, nBaseLine, a2, 0, TRUE);
+
+        CString sStrings[2];
+        CUtil::SplitString(pVidFont, sub_7C34A0(), a2.Width(), 2, sStrings, FALSE, TRUE, 0xFFFF, 0xFFFF);
+
+        for (BYTE i = 0; i < 2; i++) {
+            if (sStrings[i] == "") {
+                break;
+            }
+
+            pVidInf->BKTextOut(pVidFont, sStrings[i], 0,
+                pVidFont->GetFontHeight(TRUE) * (i + 1) + nBaseLine, a2, 0, TRUE);
+        }
+
+        pVidFont->SetColor(rgbForegroundColor, rgbBackgroundColor, FALSE);
+        if (!bDemanded) {
+            pVidFont->pRes->Release();
+        }
+
+        pVidInf->BKUnlock();
+    }
 }
 
 // 0x7C34A0
