@@ -13,6 +13,7 @@
 #include "CUtil.h"
 #include "CVidFont.h"
 #include "CWarp.h"
+#include "msvc_atol.h"
 
 #include <atomic>
 
@@ -457,10 +458,124 @@ void CChitin::OnDisplayChange()
     // TODO: Incomplete.
 }
 
+// The value step of CChitin::ParseCommandLine (0x7917F0): after an option word
+// the value is either "quoted" or the next space-delimited word. The original
+// drops the option when the closing quote is missing (the second quote test at
+// 0x7919C6, 0x791BCC, 0x792108, 0x7922E1, 0x7924CA). sCommandLine is left as
+// the remainder for the next iteration.
+static BOOL TakeCommandLineValue(CString& sCommandLine, CString& sValue)
+{
+    if (!sCommandLine.IsEmpty() && sCommandLine[0] == '"') {
+        // Drop the opening quote (0x79190F), take the value up to the closing
+        // quote (0x79194A), then require it (0x7919C6) and drop it (0x7919D3).
+        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+        sValue = sCommandLine.SpanExcluding("\"");
+        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+        if (sCommandLine.IsEmpty() || sCommandLine[0] != '"') {
+            return FALSE;
+        }
+        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - 1);
+        return TRUE;
+    }
+
+    sValue = sCommandLine.SpanExcluding(" ");
+    sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sValue.GetLength());
+    return TRUE;
+}
+
 // 0x7917F0
 void CChitin::ParseCommandLine()
 {
-    // TODO: Incomplete.
+    // The original copies m_sCommandLine (this+0xDC, 0x79183A) and consumes the
+    // copy: each loop trims, takes the next space-delimited word, matches it
+    // against the options below (strcmp, so case-sensitive) and finally writes
+    // the words it did not recognise back into m_sCommandLine, each with a
+    // leading space (0x7925BA-0x79262A).
+    CString sCommandLine(m_sCommandLine);
+    CString sUnused;
+
+    while (TRUE) {
+        sCommandLine.TrimLeft();
+        if (sCommandLine.IsEmpty()) {
+            m_sCommandLine = sUnused;
+            return;
+        }
+
+        CString sOption = sCommandLine.SpanExcluding(" ");
+        sCommandLine = sCommandLine.Right(sCommandLine.GetLength() - sOption.GetLength());
+
+        if (sOption == "+host") { // 0x8BA1D8
+            // The host name goes to field_11C, only when "+connect" did not
+            // come first (0x791A08).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (TakeCommandLineValue(sCommandLine, sValue) && !m_bStartUpConnect) {
+                field_110 = 1;
+                field_11C = sValue;
+            }
+        } else if (sOption == "+connect") { // 0x8BA1CC
+            // "address:port" is split on ':' (0x791C07): the address goes to
+            // m_sStartUpAddress, the port to field_11C; only when "+host" did
+            // not come first (0x791C84).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (TakeCommandLineValue(sCommandLine, sValue) && field_110 == 0) {
+                CString sAddress = sValue.SpanExcluding(":");
+                m_bStartUpConnect = TRUE;
+                m_sStartUpAddress = sAddress;
+                field_11C = sValue.Right(sValue.GetLength() - sAddress.GetLength() - 1);
+            }
+        } else if (sOption == "+name") { // 0x8BA1C4
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (TakeCommandLineValue(sCommandLine, sValue)) {
+                m_sStartUpPlayer = sValue;
+            }
+        } else if (sOption == "+newgame") { // 0x8BA1B8
+            // "+newgame" wins over "+loadgame" whichever comes first
+            // (0x791FD6/0x792009).
+            if (field_128 == 0) {
+                field_124 = 1;
+            }
+        } else if (sOption == "+loadgame") { // 0x8BA1AC
+            if (field_124 == 0) {
+                field_128 = 1;
+            }
+        } else if (sOption == "+hostname") { // 0x8BA1A0
+            // The session name, only when "+host" came first (0x792143).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (TakeCommandLineValue(sCommandLine, sValue) && field_110 != 0) {
+                m_sStartUpSession = sValue;
+            }
+        } else if (sOption == "+location") { // 0x8BA194
+            // The GameSpy location; field_131 says one was given (0x792327/
+            // 0x7923BE).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (TakeCommandLineValue(sCommandLine, sValue)) {
+                field_131 = 1;
+                m_sStartUpGameSpyLocation = sValue;
+            }
+        } else if (sOption == "+maxclients") { // 0x8BA188
+            // ToNumberWrapper(0x7E7B8E), i.e. VC6 atol (iwd2r_atol); the
+            // original stores whatever it returns (0x7925A1-0x7925B5).
+            sCommandLine.TrimLeft();
+
+            CString sValue;
+            if (TakeCommandLineValue(sCommandLine, sValue)) {
+                field_136 = iwd2r_atol(sValue.GetBuffer(0x80));
+            }
+        } else {
+            sUnused += " ";
+            sUnused += sOption;
+        }
+    }
 }
 
 // 0x7926B0
