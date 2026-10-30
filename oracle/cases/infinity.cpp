@@ -304,11 +304,19 @@ void CheckTileState(CaseContext& ctx)
             renderCodes[i] = static_cast<uint8_t>(0x10 + i * 3);
         }
 
-        char inputs[220];
-        std::snprintf(inputs, sizeof(inputs),
-            "input %d: %dx%d from %d, polys %u/%u at %d/%d, wed %u, state %u->%u, refs %u", n,
-            startingTile, numTiles, startingTile, numPrimary, numSecondary, primaryPoly, secondaryPoly, wedIndex,
+        char inputs[400];
+        int used = std::snprintf(inputs, sizeof(inputs),
+            "input %d: %dx%d, polys %u/%u at %d/%d, wed %u, state %u->%u, refs %u, tiles ", n,
+            startingTile, numTiles, numPrimary, numSecondary, primaryPoly, secondaryPoly, wedIndex,
             renderState, aiState, refCount);
+        for (int i = 0; i < startingTile + numTiles && used < static_cast<int>(sizeof(inputs)); i++) {
+            const int index = Get<uint16_t>(image.data(), kObjectTileListOffset + 2 * i);
+            used += std::snprintf(inputs + used, sizeof(inputs) - used, "%d:%d/%d ", index,
+                image[kTileDataOffset + index * sizeof(WED_TILEDATA) + 0]
+                    | (image[kTileDataOffset + index * sizeof(WED_TILEDATA) + 1] << 8),
+                image[kTileDataOffset + index * sizeof(WED_TILEDATA) + 4]
+                    | (image[kTileDataOffset + index * sizeof(WED_TILEDATA) + 5] << 8));
+        }
         ctx.SetInputs(inputs);
 
         oursImage = image;
