@@ -65,13 +65,18 @@ click 536 562
 wait 60
 checkpoint imported_chargen
 shot imported_chargen
-# CHECK: the popup's Done leaves the chargen main menu with the druid
-# loaded, so one Next (536,562) returns to Party Formation; if Done
-# already left chargen, this click lands on Party Formation and must
-# go. (Run 20261030-122826, popup never open, showed the main menu's
-# fourth bottom-bar button is Finish at (537,562) -- the same slot;
-# with an imported druid loaded that is the leave-chargen button
-# either way, so this click stands at (536,562).)
+# CHECK (run 20261030-124258 disproved the old claim that this click
+# leaves chargen after an import): with the druid imported, (536,562) is
+# Finish on the chargen main menu (bar: Biography | Import | Back |
+# Finish | Start Over), Finish renders dim, and the click does nothing
+# -- the game stayed on that menu to the end of the run (screen
+# create_char, members [] at every later checkpoint). The proven chargen
+# exit (first tree run 20261023-105435, original engine) clicked this
+# same slot only after the Name panel's Done: type a name, Done
+# (458,268), then (536,562) reaches Party Formation (screen
+# single_player, load 2). An import does not set that finished flag.
+# Next attempt: visit Name (400,373) and its Done (458,268) before this
+# click -- UNCONFIRMED, both launches of 20261030 were spent.
 click 536 562
 wait 60
 checkpoint party_formation
