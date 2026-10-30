@@ -19,11 +19,11 @@
 # - the console only opens on the world screen and the line stays in the
 #   box after RETURN: every command after the first goes through
 #   close/reopen (CTRL+TAB) plus exact-count BACKSPACEs (32 for a 4-digit
-#   xp, 33 for 5-digit), and each walk ends ESC, wait 30, ESC, wait 30
-#   before its world checkpoint so the next console phase is never typed
-#   over an open record (launch 3 lost l4/l6 that way; launch 1 lost 8
-#   of 11 commands because a leveling walk leaves the record up and one
-#   ESC does not reach the world).
+#   xp, 33 for 5-digit), and each walk ends ESC, wait 30 before its world
+#   checkpoint: with the skill points drained the level-up popup closes on
+#   its own Done, so ONE ESC closes the record and returns to the world
+#   (a second ESC opened the Options screen and desynced every later
+#   console command - attempt 1 launch 2).
 # - the level-up chain commits itself only when every popup's gate opens
 #   (Done wraps back to panel 2 and LevelUp commits): popup 55's Done
 #   needs m_nExtraSkillPoints < 2 (a sorcerer at INT 10 gets 2 points per
@@ -35,11 +35,14 @@
 #   panels 7/55/56 share the 18x35 +/- column pair, (477,y) = "+";
 #   disabled/capped rows no-op.
 # - export only after a world checkpoint that must read level 12; popup
-#   13's name edit PRE-FILLS with the character's name, so 8x BACK clears
-#   the 7-char fill before typing the export name Ryssc12C (druid name+C
-#   pattern, dodges the collision auto-rename); Done (467,465) writes
-#   into the oracle game copy's Characters\ (CInfGame::CharacterExport,
-#   src/CInfGame.cpp:3049).
+#   13's name edit PRE-FILLS with the 7-char character name Ryssc12
+#   (launch 1 wrote RYSSC12.CHR mid-run with the unmodified fill), so 8x
+#   BACK clears it before typing the export name Ryssc12C; Done (467,465)
+#   writes into the oracle game copy's Characters\ (CInfGame::
+#   CharacterExport, src/CInfGame.cpp:3049).  The mixed-case typed name
+#   never matches the upper-cased on-disk export list
+#   (IsNameOnExportList, strcmp), so a stale RYSSC12C.CHR is overwritten
+#   directly, without the overwrite popup.
 # - CHECK marks what could not be taken from the druid scenario or the
 #   plan (the sorcerer rows in the two class lists, the chargen spell
 #   screen, the popup-56 spend for a sorcerer, the per-level SPLSRCKN
@@ -292,8 +295,6 @@ wait 60
 checkpoint sor_l2_leveled
 key ESCAPE
 wait 30
-key ESCAPE
-wait 30
 checkpoint sor_l2_world
 
 # ---- Walk l3: SETCURRENTXP(3000) -> level 3 ----
@@ -429,8 +430,6 @@ wait 60
 checkpoint sor_l3_leveled
 key ESCAPE
 wait 30
-key ESCAPE
-wait 30
 checkpoint sor_l3_world
 
 # ---- Walk l4: SETCURRENTXP(6000) -> level 4 ----
@@ -554,8 +553,6 @@ checkpoint sor_l4_leveled
 shot sor_l4_leveled
 key ESCAPE
 wait 30
-key ESCAPE
-wait 30
 checkpoint sor_l4_world
 
 # ---- Walk l5: SETCURRENTXP(10000) -> level 5 ----
@@ -668,8 +665,6 @@ click 722 394
 wait 30
 wait 60
 checkpoint sor_l5_leveled
-key ESCAPE
-wait 30
 key ESCAPE
 wait 30
 checkpoint sor_l5_world
@@ -805,8 +800,6 @@ wait 60
 checkpoint sor_l6_leveled
 key ESCAPE
 wait 30
-key ESCAPE
-wait 30
 checkpoint sor_l6_world
 
 # ---- Walk l7: SETCURRENTXP(21000) -> level 7 ----
@@ -919,8 +912,6 @@ click 722 394
 wait 30
 wait 60
 checkpoint sor_l7_leveled
-key ESCAPE
-wait 30
 key ESCAPE
 wait 30
 checkpoint sor_l7_world
@@ -1041,8 +1032,6 @@ wait 30
 wait 60
 checkpoint sor_l8_leveled
 shot sor_l8_leveled
-key ESCAPE
-wait 30
 key ESCAPE
 wait 30
 checkpoint sor_l8_world
@@ -1178,8 +1167,6 @@ wait 60
 checkpoint sor_l9_leveled
 key ESCAPE
 wait 30
-key ESCAPE
-wait 30
 checkpoint sor_l9_world
 
 # ---- Walk l10: SETCURRENTXP(45000) -> level 10 ----
@@ -1294,8 +1281,6 @@ wait 60
 checkpoint sor_l10_leveled
 key ESCAPE
 wait 30
-key ESCAPE
-wait 30
 checkpoint sor_l10_world
 
 # ---- Walk l11: SETCURRENTXP(55000) -> level 11 ----
@@ -1408,8 +1393,6 @@ click 722 394
 wait 30
 wait 60
 checkpoint sor_l11_leveled
-key ESCAPE
-wait 30
 key ESCAPE
 wait 30
 checkpoint sor_l11_world
@@ -1552,8 +1535,6 @@ checkpoint sor_l12_leveled
 shot sor_l12_leveled
 key ESCAPE
 wait 30
-key ESCAPE
-wait 30
 checkpoint sor_l12_world
 
 # All 11 walks done (66000 = the level-12 threshold).  Verify the level
@@ -1562,13 +1543,16 @@ key R
 wait 60
 checkpoint sor_level_check
 # Export (314,373) -> popup 13.  The name edit (397,283) PRE-FILLS with
-# the character name; 8x BACK clears the 7-char fill, then Ryssc12C
-# (druid name+C pattern, dodges the collision auto-rename).  Done
+# the 7-char character name Ryssc12 (launch 1 wrote RYSSC12.CHR with the
+# unmodified fill); 8x BACK clears it, then Ryssc12C.  The mixed-case
+# typed name never matches the upper-cased on-disk export list, so a
+# stale RYSSC12C.CHR is overwritten directly (no overwrite popup).  Done
 # (467,465) writes RYSSC12C.CHR into the oracle game copy Characters
 # folder (CInfGame::CharacterExport, src/CInfGame.cpp:3049).
 click 314 373
 wait 30
 checkpoint export_popup
+shot export_popup
 click 397 283
 wait 30
 key BACK
