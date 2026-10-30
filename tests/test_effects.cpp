@@ -242,6 +242,79 @@ TEST_CASE("stat modifier effects follow the original's modes", "[effects][data]"
     delete pSprite;
 }
 
+TEST_CASE("wizard spell slots (42) add known spells for the flagged level", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // The effect indexes the game's spell table by the memorised entry's id.
+    REQUIRE(pGame->m_spells.m_nCount >= 2);
+
+    // One memorised spell at level 0 with a slot (field_4 = 1), and one
+    // without any slot (field_4 = 0), which the original skips.
+    CGameSpriteGroupedSpellList* pSpells = pSprite->m_derivedStats.sub_447B00(CAIObjectType::C_BARD);
+    pSpells->Add(0, 0, 1, 1, 0);
+    pSpells->Add(1, 0, 0, 0, 0);
+    REQUIRE(pSpells->m_nHighestLevel == 1);
+
+    // The class walks test the AI type's class mask (one bit per class id).
+    new (&pSprite->m_typeAI) CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1 << (CAIObjectType::C_WIZARD - 1));
+
+    CGameSpriteSpellList* pKnown = pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_WIZARD)].GetSpellsAtLevel(0);
+
+    // Nothing flagged: nothing is added, and the original does not set m_done.
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMORIZATIONMAGE, 0, 2, 0) == FALSE);
+    CHECK(pKnown->m_List.size() == 0);
+
+    // Level 0 flagged: two extra slots per memorised spell, skipping the
+    // slotless entry.
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMORIZATIONMAGE, 1, 2, 0) == FALSE);
+
+    CHECK(pKnown->m_List.size() == 1);
+    CHECK(pKnown->m_List[0].m_nID == 0);
+    CHECK(pKnown->m_List[0].field_4 == 2);
+    CHECK(pKnown->m_List[0].field_8 == 2);
+    CHECK(pKnown->field_10 == 2);
+
+    // The other classes of the group are gated by the same mask.
+    CHECK(pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_SORCERER)].m_lists[0].m_List.size() == 0);
+}
+
+TEST_CASE("priest spell slots (62) add known spells for the flagged level", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    REQUIRE(pGame->m_spells.m_nCount >= 2);
+
+    // The priest effect reads the cleric's list (the group's lowest class).
+    CGameSpriteGroupedSpellList* pSpells = pSprite->m_derivedStats.sub_447B00(CAIObjectType::C_CLERIC);
+    pSpells->Add(0, 0, 1, 1, 0);
+    pSpells->Add(1, 0, 0, 0, 0);
+    REQUIRE(pSpells->m_nHighestLevel == 1);
+
+    new (&pSprite->m_typeAI) CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1 << (CAIObjectType::C_CLERIC - 1));
+
+    CGameSpriteSpellList* pKnown = pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_CLERIC)].GetSpellsAtLevel(0);
+
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMOIZATIONCLERIC, 0, 2, 0) == FALSE);
+    CHECK(pKnown->m_List.size() == 0);
+
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMOIZATIONCLERIC, 1, 2, 0) == FALSE);
+
+    CHECK(pKnown->m_List.size() == 1);
+    CHECK(pKnown->m_List[0].m_nID == 0);
+    CHECK(pKnown->m_List[0].field_4 == 2);
+    CHECK(pKnown->m_List[0].field_8 == 2);
+    CHECK(pKnown->field_10 == 2);
+
+    CHECK(pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_DRUID)].m_lists[0].m_List.size() == 0);
+}
+
 TEST_CASE("maximum hit point effects (18)", "[effects][data]")
 {
     REQUIRE_ENGINE();
