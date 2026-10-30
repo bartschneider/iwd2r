@@ -7653,12 +7653,13 @@
     "i051": {
       "assigned_at": "2026-10-27T06:16:12+00:00",
       "branch": "p3/wso-i051",
-      "closed_at": null,
+      "closed_at": "2026-10-30T22:17:43+00:00",
       "files": [
         "src/CAIGroup.cpp",
         "src/CMessage.cpp",
         "src/CGameAIBase.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -7694,7 +7695,7 @@
           "their_len": 1184
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i052": {
@@ -7805,6 +7806,85 @@
         }
       ],
       "status": "closed",
+      "verdicts": {}
+    },
+    "i054": {
+      "assigned_at": "2026-10-30T22:11:59+00:00",
+      "branch": "p3/wso-i054",
+      "closed_at": null,
+      "files": [
+        "src/CProjectile.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x533600",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSPBRNHND::SpawnSpray",
+          "our_len": 0,
+          "their_len": 994
+        },
+        {
+          "address": "0x7A3DF0",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::TimeoutCall",
+          "our_len": 0,
+          "their_len": 954
+        },
+        {
+          "address": "0x75A4B0",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Berserk",
+          "our_len": 0,
+          "their_len": 952
+        },
+        {
+          "address": "0x533F40",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileFollowUp::Fire",
+          "our_len": 0,
+          "their_len": 934
+        },
+        {
+          "address": "0x57BE80",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::GatherTargets",
+          "our_len": 0,
+          "their_len": 907
+        },
+        {
+          "address": "0x7A7670",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::SlidingWindowReceive",
+          "our_len": 0,
+          "their_len": 857
+        },
+        {
+          "address": "0x57BBC0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::InitializeOffsets",
+          "our_len": 0,
+          "their_len": 717
+        },
+        {
+          "address": "0x7A77D0",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::SlidingWindowTimeouts",
+          "our_len": 0,
+          "their_len": 581
+        }
+      ],
+      "status": "assigned",
       "verdicts": {}
     }
   }
