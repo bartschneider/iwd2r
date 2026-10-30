@@ -358,9 +358,86 @@ void CGameAreaNotes::Marshal(BYTE**& pArea, DWORD& cnt)
 // 0x47BBD0
 BOOL CGameAreaNotes::DeleteANote(DWORD id)
 {
-    // TODO: Incomplete.
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAreaNotes.cpp
+    // __LINE__: 1308
+    UTIL_ASSERT(m_bInitialized);
 
-    return FALSE;
+    if (m_areaNoteList.GetCount() == 0) {
+        return FALSE;
+    }
+
+    CAreaUserNote* pNote = NULL;
+    POSITION posNote = NULL;
+    POSITION pos = m_areaNoteList.GetHeadPosition();
+    while (pos != NULL) {
+        POSITION posCurrent = pos;
+        CAreaUserNote* pCurrent = m_areaNoteList.GetNext(pos);
+        if (pCurrent->m_id == id) {
+            pNote = pCurrent;
+            posNote = posCurrent;
+            break;
+        }
+    }
+
+    if (pNote == NULL) {
+        return FALSE;
+    }
+
+    // The same message pair Add sends: the client asks the host, the host
+    // announces it. An empty text with flags 0 and STRREF -1 is the "remove"
+    // the receiver's Add (sub_47B150) understands. A client inside an
+    // announcement returns without touching the UI: the announce handler owns
+    // the removal.
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE) {
+        if (g_pChitin->cNetwork.m_bIsHost == TRUE) {
+            g_pBaldurChitin->GetBaldurMessage()->AnnounceAreaMapNote(m_rArea.GetResRefStr(),
+                pNote->m_startX,
+                pNote->m_startY,
+                CString(""),
+                0,
+                -1);
+        } else if (g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce == FALSE) {
+            g_pBaldurChitin->GetBaldurMessage()->SendAreaMapNoteToServer(m_rArea.GetResRefStr(),
+                pNote->m_startX,
+                pNote->m_startY,
+                CString(""),
+                0,
+                -1);
+
+            return TRUE;
+        }
+    }
+
+    CUIPanel* pPanel = g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2);
+    CUIControlButtonMapAreaMap* pMapControl = static_cast<CUIControlButtonMapAreaMap*>(pPanel->GetControl(2));
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\CGameAreaNotes.cpp
+    // __LINE__: 1354
+    UTIL_ASSERT_MSG(pMapControl != NULL, "Invalid map control");
+
+    pMapControl->RemoveNote(id);
+
+    pPanel = g_pBaldurChitin->m_pEngineMap->GetManager()->GetPanel(2);
+    pPanel->RemoveControl(id);
+
+    g_pBaldurChitin->GetTlkTable().m_override.Remove(pNote->m_note);
+
+    CPoint sq;
+    GetGridSquare(CPoint(pNote->m_startX, pNote->m_startY), sq, TRUE);
+    m_areaNoteGrid[sq.x][sq.y] = -1;
+
+    delete pNote;
+    m_areaNoteList.RemoveAt(posNote);
+
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+        && g_pBaldurChitin->pActiveEngine == g_pBaldurChitin->m_pEngineMap) {
+        if (g_pBaldurChitin->m_pEngineMap->GetTopPopup() == NULL) {
+            pMapControl->field_7BC = TRUE;
+            pMapControl->InvalidateRect();
+        }
+    }
+
+    return TRUE;
 }
 
 // 0x47BE80
