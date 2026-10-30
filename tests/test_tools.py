@@ -8249,6 +8249,170 @@ class ParityTest(unittest.TestCase):
                          {0x401000, 0x401040})
 
 
+class AnnotateTest(ParityTest):
+    """tools/parity/annotate.py -- annotated disassembly for reviews."""
+
+    def make_pe(self, path):
+        """A tiny PE32: .text with the fixture code, .rdata with literals.
+
+        ImageBase 0x400000; .text at 0x401000 (executable), .rdata at
+        0x402000. Code: push &g_hello, push "Plain", mov eax,[&"Plain"],
+        call B::g, jmp +0 (in-function, nameless). .rdata: "Hello\\0" at
+        0x402000, "Plain\\0" at 0x402008.
+        """
+        code = (b'\x68\x00\x20\x40\x00'   # 0x401000  push 0x402000
+                b'\x68\x08\x20\x40\x00'   # 0x401005  push 0x402008
+                b'\xa1\x08\x20\x40\x00'   # 0x40100a  mov eax,[0x402008]
+                b'\xe8\x0c\x00\x00\x00'   # 0x40100f  call 0x401020
+                b'\xe9\x00\x00\x00\x00'   # 0x401014  jmp 0x401019
+                b'\xc3'                   # 0x401019  ret
+                b'\xcc\xcc\xcc\xcc\xcc'   # 0x40101a  padding
+                b'\xc3')                  # 0x401020  ret (B::g)
+        rdata = (b'Hello\x00\x00\x00'
+                 b'Plain\x00')
+        assert len(code) == 32
+
+        sections = [
+            (b'.text', len(code), 0x1000, 0x200, 0x200, 0x60000020),
+            (b'.rdata', len(rdata), 0x2000, 0x400, 0x400, 0x40000040),
+        ]
+        opt = struct.pack(
+            '<HBBIIIIIIIIIHHHHHHIIIIHHIIIIII128x',
+            0x10b,                      # PE32
+            1, 0,                       # linker version
+            len(code), len(rdata), 0,   # code / initialized / uninitialized
+            0x1000, 0x1000, 0x2000,     # entry, BaseOfCode, BaseOfData
+            0x400000,                   # ImageBase
+            0x1000, 0x200,              # section / file alignment
+            4, 0, 0, 0, 4, 0,           # OS / image / subsystem versions
+            0, 0x3000, 0x200, 0,        # Win32Ver, SizeOfImage, hdrs, checksum
+            2, 0,                       # GUI subsystem, DllCharacteristics
+            0x100000, 0x1000, 0x100000, 0x1000,  # stack / heap
+            0, 16)                      # LoaderFlags, NumberOfRvaAndSizes
+        assert len(opt) == 0xE0
+
+        dos = bytearray(0x40)
+        dos[:2] = b'MZ'
+        struct.pack_into('<I', dos, 0x3C, 0x40)
+        fh = struct.pack('<HHIIIHH', 0x14C, len(sections), 0, 0, 0,
+                         len(opt), 0x0102)
+        table = bytearray()
+        image = bytearray(0x600)
+        image[:0x40] = dos
+        image[0x40:0x44] = b'PE\x00\x00'
+        image[0x44:0x58] = fh + opt
+        off = 0x58 + len(opt)
+        for name, vsize, rva, raw, ptr, flags in sections:
+            table += struct.pack('<8sIIII12xI', name, vsize, rva, raw, ptr,
+                                 flags)
+            image[ptr:ptr + len(code if name == b'.text' else rdata)] = (
+                code if name == b'.text' else rdata)
+        image[off:off + len(table)] = table
+        with open(path, 'wb') as f:
+            f.write(image)
+        return path
+
+    def fixture(self, with_source=True):
+        """The PE + exports + (optionally) the labelled src/; annotate path."""
+        annotate = load_parity_tool('annotate')
+        if annotate.pefile is None or annotate.capstone is None:
+            self.skipTest('pefile/capstone missing: annotate skips')
+        # main() derives the marker scan's root from the tool's own repo;
+        # point it at the fixture repo for the run.
+        self.addCleanup(setattr, annotate, 'REPO', annotate.REPO)
+        annotate.REPO = self.repo
+        pe = self.make_pe(os.path.join(self.home, 'iwd2.exe'))
+        self.exports('401000\tFUN_00401000\t32\n'
+                     '401020\tFUN_00401020\t4\n',
+                     '401000\t401020\n')
+        # The export names deliberately differ from the tree's markers, so
+        # the marker-first rule is observable: B::g, not FUN_00401020.
+        if with_source:
+            self.write('src/a.cpp',
+                       '// 0x401000\n'
+                       'int A::f(int x)\n'
+                       '{\n'
+                       '    return x;\n'
+                       '}\n'
+                       '\n'
+                       '// 0x401020\n'
+                       'int B::g(int x)\n'
+                       '{\n'
+                       '    return x;\n'
+                       '}\n'
+                       '\n'
+                       '// 0x402000\n'
+                       'const char g_hello[] = "Hello";\n')
+        return annotate, pe
+
+    def test_annotate_names_calls_strings_and_jmps(self):
+        annotate, pe = self.fixture()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = annotate.main(['0x401000', '--exe', pe])
+        self.assertEqual(code, 0)
+        lines = out.getvalue().splitlines()
+        # The header names the function per functions.tsv and the end.
+        self.assertEqual(lines[0],
+                         '== 0x401000 FUN_00401000 (end 0x401020)')
+        body = {line.split(':', 1)[0]: line for line in lines[1:]}
+        # The tree's `// 0x401020` marker names the call target, ahead of
+        # functions.tsv's FUN_00401020.
+        self.assertTrue(body['0x40100f'].endswith('call\t0x401020  ; B::g'),
+                        body['0x40100f'])
+        # The string push: the annotation is the literal, escaped.
+        self.assertTrue(body['0x401005'].endswith('push\t0x402008  ; "Plain"'),
+                        body['0x401005'])
+        # A displacement into the data gets the literal too.
+        self.assertTrue(
+            body['0x40100a'].endswith('mov\teax, dword ptr [0x402008]'
+                                      '  ; "Plain"'),
+            body['0x40100a'])
+        # A labelled global names the address instead of its literal.
+        self.assertTrue(body['0x401000'].endswith('push\t0x402000  ; g_hello'),
+                        body['0x401000'])
+        # An in-function jmp has no name anywhere: `?`.
+        self.assertTrue(body['0x401014'].endswith('jmp\t0x401019  ; ?'),
+                        body['0x401014'])
+        # The functions.tsv size ends the listing: B::g's ret is not in it.
+        self.assertNotIn('0x401020', body)
+
+    def test_annotate_falls_back_to_export_names(self):
+        annotate, pe = self.fixture(with_source=False)
+        lines = annotate.annotate(0x401000, 0x401020, pe,
+                                  annotate.parity_run.load_exports(),
+                                  os.path.join(self.repo, 'src'))
+        joined = '\n'.join(lines)
+        # No tree markers: the call reads the functions.tsv name and the
+        # pushed address reads as its literal.
+        self.assertIn('call\t0x401020  ; FUN_00401020', joined)
+        self.assertIn('push\t0x402000  ; "Hello"', joined)
+
+    def test_annotate_quote_escapes(self):
+        annotate = load_parity_tool('annotate')
+        self.assertEqual(annotate.quote(r'a "b" \c'), r'a \"b\" \\c')
+        self.assertEqual(annotate.quote('tab\there'), r'tab\there')
+
+    def test_annotate_skips_without_exe(self):
+        annotate, _ = self.fixture()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = annotate.main(['0x401000', '--exe',
+                                  os.path.join(self.home, 'no-such.exe')])
+        self.assertEqual(code, 0)
+        self.assertIn('skipped', out.getvalue())
+
+    def test_annotate_skips_without_exports(self):
+        annotate, pe = self.fixture()
+        os.remove(os.path.join(self.home, 'ghidra-exports', 'callgraph.tsv'))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = annotate.main(['0x401000', '--exe', pe])
+        self.assertEqual(code, 0)
+        self.assertIn('skipped', out.getvalue())
+        self.assertIn('functions.tsv', out.getvalue())
+
+
 class FnDigestTest(unittest.TestCase):
     """tools/fn_digest.digest -- a <=30-line brief of a decompile."""
 
