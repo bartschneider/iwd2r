@@ -136,7 +136,6 @@ CGameAnimationTypeMonsterLayeredSpell::CGameAnimationTypeMonsterLayeredSpell(USH
 // 0x6C00D0
 CGameAnimationTypeMonsterLayeredSpell::~CGameAnimationTypeMonsterLayeredSpell()
 {
-    // TODO: Incomplete.
 }
 
 // 0x6BFF00
