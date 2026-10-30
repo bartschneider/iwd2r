@@ -9,6 +9,7 @@
 #include "CChitin.h"
 #include "CDerivedStats.h"
 #include "CGameArea.h"
+#include "CGameAreaNotes.h"
 #include "CGameContainer.h"
 #include "CGameObjectArray.h"
 #include "CGameSprite.h"
@@ -2559,4 +2560,95 @@ TEST_CASE("text display: a new string ends the scroll still to run", "[uimisc][t
     CHECK(pDisplay->field_5A == 2);
 
     pDisplay->RemoveAll();
+}
+
+// CGameAreaNotes::DeleteANote (0x47BBD0): the list half the harness can reach
+// honestly, without the map screen. An empty list and a missing id answer
+// FALSE and leave the list alone; a connected client takes the message branch
+// and returns before the UI, deferring the removal to the host's announce; the
+// removal DeleteANote performs (delete the note, RemoveAt its node) is the same
+// one sub_47B150 takes on an empty text, reached here through that helper.
+// The host branch and the local removal need the live map panel (GetPanel(2),
+// RemoveControl, RemoveNote) and the note's TLK override, which no honest
+// harness here provides.
+TEST_CASE("notes: DeleteANote's list walk and the removal helper", "[uimisc][notes]")
+{
+    // sub_47B150 constructs a STR_RES (a CSound), whose constructor takes the
+    // chitin's mixer; a zeroed chitin stands in when no engine is running
+    // (the same pattern as the FindOneOf case above).
+    CChitin* pSaved = g_pChitin;
+    std::unique_ptr<unsigned char[]> chitin;
+    if (g_pChitin == NULL) {
+        chitin.reset(new unsigned char[sizeof(CChitin)]());
+        g_pChitin = reinterpret_cast<CChitin*>(chitin.get());
+    }
+    struct Restore {
+        CChitin* pChitin;
+        ~Restore() { g_pChitin = pChitin; }
+    } restore { pSaved };
+
+    // Raw storage: the destructor walks the map screen's controls.
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CGameAreaNotes)));
+    std::memset(storage, 0, sizeof(CGameAreaNotes));
+    auto* notes = reinterpret_cast<CGameAreaNotes*>(storage);
+    notes->m_bInitialized = TRUE;
+
+    CHECK(notes->DeleteANote(7) == FALSE); // empty list
+
+    CAreaUserNote first = {};
+    first.m_startX = 3;
+    first.m_startY = 5;
+    first.m_note = 100;
+    first.m_id = 11;
+    notes->AddANote(first);
+
+    CAreaUserNote second = {};
+    second.m_startX = 8;
+    second.m_startY = 2;
+    second.m_note = 200;
+    second.m_id = 22;
+    notes->AddANote(second);
+
+    // Not in the list: FALSE and both notes stay, in order.
+    CHECK(notes->DeleteANote(33) == FALSE);
+    CHECK(notes->GetNoteButtonText(11) == 100);
+    CHECK(notes->GetNoteButtonText(22) == 200);
+
+    // A connected client with no announce in progress finds the note, takes
+    // the message branch and returns TRUE without touching the list: the
+    // host's announce handler owns the removal. A zeroed chitin has no
+    // session, so SendAreaMapNoteToServer itself stops at its first guard
+    // (and its Boolean is ignored here, as in the original).
+    {
+        CBaldurChitin* pSavedBaldur = g_pBaldurChitin;
+        std::unique_ptr<unsigned char[]> baldur(new unsigned char[sizeof(CBaldurChitin)]());
+        g_pBaldurChitin = reinterpret_cast<CBaldurChitin*>(baldur.get());
+        g_pChitin->cNetwork.m_bConnectionEstablished = TRUE;
+        g_pChitin->cNetwork.m_bIsHost = FALSE;
+        g_pChitin->cNetwork.m_nHostPlayer = -1; // no host name, so the send stops at its name guard
+        g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce = FALSE;
+
+        CHECK(notes->DeleteANote(11) == TRUE);
+        CHECK(notes->GetNoteButtonText(11) == 100); // still listed
+
+        g_pChitin->cNetwork.m_bConnectionEstablished = FALSE;
+        g_pBaldurChitin = pSavedBaldur;
+    }
+
+    // The removal primitive: sub_47B150 with no text deletes the note whose
+    // square matches and takes its node out of the list.
+    CHECK(notes->sub_47B150(8, 2, CString(""), 0, -1) == TRUE);
+    CHECK(notes->GetNoteButtonText(22) == static_cast<STRREF>(-1));
+    CHECK(notes->GetNoteButtonText(11) == 100);
+
+    // A second call for the same square finds nothing left to remove.
+    CHECK(notes->sub_47B150(8, 2, CString(""), 0, -1) == FALSE);
+
+    // The list's ownership, without the destructor's map-screen path.
+    POSITION pos = notes->m_areaNoteList.GetHeadPosition();
+    while (pos != NULL) {
+        delete notes->m_areaNoteList.GetNext(pos);
+    }
+    notes->m_areaNoteList.RemoveAll();
+    ::operator delete(storage);
 }
