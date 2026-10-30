@@ -65,15 +65,23 @@ click 536 562
 wait 60
 checkpoint imported_chargen
 shot imported_chargen
-# CHECK (run 20261030-125821 re-proved run 20261030-124258): with the
-# druid imported, the direct (536,562) click does nothing -- Finish is
-# dim on the chargen main menu (bar: Biography | Import | Back | Finish
-# | Start Over) until the Name panel's Done; every later checkpoint of
-# that run stayed screen create_char, members []. So visit Name
-# (400,373), type a name, Done (458,268) -- the proven chargen exit
-# (first tree run 20261023-105435, original engine) reached Party
-# Formation (screen single_player) only through that sequence -- then
-# Finish (536,562).
+# CHECK (run 20261030-130344 DISPROVED the Name-panel candidate that run
+# 20261030-125821 had left UNCONFIRMED): with the druid imported, the
+# chargen main menu's Finish (536,562) is dim and stays dim through the
+# Name-panel visit below -- named.bmp (frame 878) still shows the main
+# menu, the Finish button's pixels are unchanged, and every later
+# checkpoint stayed screen create_char, members []. So an import alone
+# does not enable Finish, and the fresh-character chargen exit (first
+# tree run 20261023-105435: Name (400,373), type a name, Done (458,268),
+# then Finish reaches Party Formation) does not transfer to the imported
+# case. The dumps cannot tell whether the Name click opened the panel at
+# all (the chargen struct has no name field, globals none) -- next
+# attempt's candidates, all UNCONFIRMED: click into the name edit box
+# before typing (the panel may not focus a prefilled field), visit
+# Appearance (400,327) too (the other unlocked step), or accept that an
+# imported character has no in-chargen path to Party Formation and
+# record it as an engine difference. Clicks unchanged: both launches of
+# 20261030 attempt 2 were spent after this run.
 click 400 373
 wait 30
 type Probe
