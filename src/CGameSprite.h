@@ -564,6 +564,7 @@ public:
     SHORT RemoveTraps(CGameAIBase* pTarget);
     void sub_71D0B0();
     void sub_72FBF0();
+    SHORT Berserk();
     void CheckSequence(BYTE& sequence);
     void sub_7204C0();
     void sub_720B50(CMemINIValue* a1, CMemINIValue* a2);
