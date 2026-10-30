@@ -1,24 +1,24 @@
 {
-  "at": "2026-10-24",
+  "at": "2026-10-30",
   "ghidra": {
-    "functions": 11728,
-    "bytes": 3953190,
+    "functions": 11740,
+    "bytes": 3959733,
     "excluded": {
       "seh_funclets": 19632,
       "thunks": 7
     }
   },
   "recovered": {
-    "functions": 6534,
-    "bytes": 3168415
+    "functions": 6583,
+    "bytes": 3227953
   },
   "verified": {
-    "functions": 336,
-    "bytes": 478145,
+    "functions": 554,
+    "bytes": 604082,
     "by_kind": {
-      "oracle": 178,
-      "replay": 153,
-      "trace": 5
+      "oracle": 202,
+      "replay": 149,
+      "trace": 203
     }
   },
   "scenarios": [
@@ -29,6 +29,7 @@
     "first_fight",
     "inventory",
     "level_up",
+    "record_tour",
     "replay_click",
     "save_load_screens",
     "walk_and_talk",
