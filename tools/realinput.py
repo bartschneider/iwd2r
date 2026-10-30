@@ -78,6 +78,14 @@ TIMEOUT_LINE = re.compile(r'#\s*timeout\s*:(.*)$', re.IGNORECASE)
 # The whole tail is captured, like TIMEOUT_LINE, so header_cheats refuses
 # junk ("# cheats: 1 (note)") instead of silently reading cheats off.
 CHEATS_LINE = re.compile(r'#\s*cheats\s*:(.*)$', re.IGNORECASE)
+# The header line that names fixture files to copy into the run's
+# Characters folder for the run and remove after: "# fixtures:
+# chr/X.CHR:0X.CHR". An entry is a path relative to the scenarios root,
+# optionally ":NAME" to stage the copy under a different file name — the
+# import list orders characters by file name, so a name that sorts ahead
+# of the install's picks a row both engines agree on. Entries are comma
+# separated; several fixtures lines append.
+FIXTURES_LINE = re.compile(r'#\s*fixtures\s*:(.*)$', re.IGNORECASE)
 
 # The virtual-key names platform/script_core.cpp accepts (kNamedKeys), with
 # their Win32 VK codes. Letters and digits are handled in vk_for_name.
@@ -466,6 +474,82 @@ def load_header_cheats(path):
         return header_cheats(text)
     except ScenarioError as e:
         raise ScenarioError('%s: %s' % (path, e)) from None
+
+
+def header_fixtures(text):
+    """The fixture files a scenario's header stages into the run's
+    Characters folder, as a list of (source, name) with the source a path
+    relative to the scenarios root and name the staged file name or None
+    to keep the source's. A line "# fixtures: ENTRY,ENTRY" appends
+    entries; an entry is "path" or "path:NAME" (see FIXTURES_LINE). Read
+    like header_timeout: only the header's comment lines. Raises
+    ScenarioError for a path that is not scenarios-relative, a NAME that
+    is not a bare file name, or two entries staged under one name."""
+    entries = []
+    seen = {}
+    for number, raw in enumerate(text.split('\n'), 1):
+        line = raw.rstrip('\r').strip()
+        if not line:
+            continue
+        if not line.startswith('#'):
+            break
+        m = FIXTURES_LINE.match(line)
+        if not m:
+            continue
+        for item in m.group(1).split(','):
+            item = item.strip()
+            if not item:
+                raise ScenarioError('line %d: fixtures entry is empty'
+                                    % number)
+            src, _, name = item.partition(':')
+            name = name.strip() or None
+            if not src or os.path.isabs(src) or '\\' in src \
+                    or '..' in src.split('/'):
+                raise ScenarioError('line %d: fixtures path %r must be '
+                                    'relative to the scenarios root'
+                                    % (number, src))
+            if name is not None and ('/' in name or '\\' in name
+                                     or name in ('.', '..')):
+                raise ScenarioError('line %d: fixtures name %r must be a '
+                                    'bare file name' % (number, name))
+            staged = name or src.rsplit('/', 1)[-1]
+            if staged in seen:
+                raise ScenarioError('line %d: fixtures stages %r twice '
+                                    '(first on line %d)'
+                                    % (number, staged, seen[staged]))
+            seen[staged] = number
+            entries.append((src, name))
+    return entries
+
+
+def load_header_fixtures(path):
+    """header_fixtures of the scenario file at path, with each source
+    resolved to a file under the nearest ancestor directory named
+    "scenarios" (scenarios/pending/x.txt reads like scenarios/x.txt).
+    Raises ScenarioError for a source that is no file there."""
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    try:
+        entries = header_fixtures(text)
+    except ScenarioError as e:
+        raise ScenarioError('%s: %s' % (path, e)) from None
+    if not entries:
+        return []
+    root = os.path.dirname(os.path.abspath(path))
+    while os.path.basename(root) != 'scenarios':
+        parent = os.path.dirname(root)
+        if parent == root:  # the filesystem root: no scenarios ancestor
+            root = ''
+            break
+        root = parent
+    resolved = []
+    for src, name in entries:
+        source = os.path.join(root, src)
+        if not os.path.isfile(source):
+            raise ScenarioError('%s: fixtures path %r is no file under %s'
+                                % (path, src, root or os.sep))
+        resolved.append((source, name or os.path.basename(src)))
+    return resolved
 
 
 # ---------------------------------------------------------------------------
