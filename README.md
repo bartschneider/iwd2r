@@ -1,6 +1,6 @@
 # iwd2r
 
-iwd2r (Icewind Dale 2 Resurrected) is a cross-platform port of the decompiled Icewind Dale II engine from [alexbatalov/iwd2-re](https://github.com/alexbatalov/iwd2-re). It builds natively on Linux, Windows and macOS (Apple silicon), runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and the IWD2EE mod built in. iwd2r is a modified version of iwd2-re.
+iwd2r (Icewind Dale 2 Resurrected) is a cross-platform decompilation project of the Icewind Dale II engine. It builds natively on Linux, Windows and macOS (Apple silicon), runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and the IWD2EE mod built in.
 
 **Want to help?** The recovery runs as batches of functions measured against the original game; [Contributing: running the recovery pipeline](#contributing-running-the-recovery-pipeline) lists what you need (a Windows 11 PC with the game, WSL2, and Claude Code for the workers, on an Anthropic subscription or on Z.ai's cheaper GLM plan), how a batch is cut, checked and landed, and the house rules. Readings of single functions, oracle cases for the rows no scenario reaches, and new game scenarios are the easiest places to start.
 
