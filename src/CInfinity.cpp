@@ -2645,7 +2645,130 @@ BOOL CInfinity::RequestRect(int x1, int y1, int x2, int y2)
 // 0x5D00C0
 BOOL CInfinity::ScrollingRequestRect(int x1, int y1, int x2, int y2, INT nScrollState)
 {
-    // TODO: Incomplete.
+    CancelRequestRect(field_15E);
+
+    BYTE flags;
+    if ((m_areaType & 0x40) != 0) {
+        flags = m_requestDayNightCode;
+    } else {
+        flags = 1;
+    }
+
+    if ((m_areaType & 0x4) != 0 && nCurrentRainLevel != 0) {
+        flags |= 0x4;
+    }
+
+    field_15E = flags;
+
+    // The interior, one tile in from the edges, at the high priority.
+    for (int y = max(y1 + 1, 0); y < min(y2 - 1, nTilesY - 1); y++) {
+        for (int x = max(x1 + 1, 0); x < min(x2 - 1, nTilesX - 1); x++) {
+            RequestTile(x, y, flags, CDimm::PRIORITY_HIGH);
+        }
+    }
+
+    // The border the scroll direction enters, one tile at a time, at the
+    // medium priority.
+    switch (nScrollState) {
+    case 1:
+        // One row above the rect.
+        for (int y = max(y1 - 1, 0); y < max(y1, 0); y++) {
+            for (int x = max(x1, 0); x < min(x2, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    case 2:
+        // One row above, then the right column.
+        for (int y = max(y1 - 1, 0); y < max(y1, 0); y++) {
+            for (int x = max(x1, 0); x < min(x2 + 1, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = min(x2, nTilesX - 1); x < min(x2 + 1, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    case 3:
+        // The right column.
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = min(x2, nTilesX - 1); x < min(x2 + 1, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    case 4:
+        // One row below, then the right column.
+        for (int y = min(y2, nTilesY - 1); y < min(y2 + 1, nTilesY - 1); y++) {
+            for (int x = max(x1, 0); x < min(x2 + 1, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = min(x2, nTilesX - 1); x < min(x2 + 1, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    case 5:
+        // One row below.
+        for (int y = min(y2, nTilesY - 1); y < min(y2 + 1, nTilesY - 1); y++) {
+            for (int x = max(x1, 0); x < min(x2, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    case 6:
+        // One row below, then the left column.
+        for (int y = min(y2, nTilesY - 1); y < min(y2 + 1, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < min(x2, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < max(x1, 0); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    case 7:
+        // The left column.
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < max(x1, 0); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    case 8:
+        // One row above, then the left column.
+        for (int y = max(y1 - 1, 0); y < max(y1, 0); y++) {
+            for (int x = max(x1 - 1, 0); x < min(x2, nTilesX - 1); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+
+        for (int y = max(y1, 0); y < min(y2, nTilesY - 1); y++) {
+            for (int x = max(x1 - 1, 0); x < max(x1, 0); x++) {
+                RequestTile(x, y, flags, CDimm::PRIORITY_MEDIUM);
+            }
+        }
+        break;
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\Infinity.cpp
+        // __LINE__: 5161
+        UTIL_ASSERT(FALSE);
+    }
+
+    field_196 = nScrollState;
+    field_68 = x1;
+    field_6C = y1;
+    field_70 = x2;
+    field_74 = y2;
 
     return TRUE;
 }

@@ -24,6 +24,7 @@
 #pragma warning(push)
 #pragma warning(disable : 4121 4201)
 #endif
+#include "CChitin.h"
 #include "CInfinity.h"
 #include "CResWED.h"
 #include "CTiledObject.h"
@@ -448,4 +449,299 @@ void CheckTileState(CaseContext& ctx)
 
 }
 
+// CInfinity::ScrollingRequestRect(int x1, int y1, int x2, int y2, INT
+// nScrollState) (0x5D00C0), `ret 0x14` at 0x5D078D. Its observable work is the
+// RequestTile calls it makes, so the fixture maps every grid cell to its own
+// CResInfTile and compares the request count (the CRes's field_44) and the
+// last priority (dwFlags & 3) of all 64 tiles. RequestTile reaches them through
+// CRes::SetPriority/Request (0x77E670/0x77E610) and g_pChitin->cDimm
+// (CDimm::SetNewPriority/Request, 0x788BE0/0x787F20), so the original needs a
+// chitin at 0x8CF6D8 whose field_2FC is a real kernel32 critical section (that
+// is InitializeOriginalCriticalSection in the runner) while ours is a zeroed
+// CChitin with the engine's shim section. The fixture's CResInfTile blocks are
+// zeroed but for the request count and flags, and their m_pDualTileRes is NULL.
+//
+// The cell's tile is the *secondary* one (wFlags 2, nSecondary = cell index):
+// RequestTile then requests it in its first block and again in its last one, so
+// a visited cell gets two requests. The primary tile-list branch is not
+// exercised here.
+constexpr int kScrollTiles = kTilesAcross * kTilesDown;
+constexpr size_t kInfinityTilesX = 0x38;
+constexpr size_t kInfinityTilesY = 0x3C;
+constexpr size_t kInfinityField68 = 0x68;
+constexpr size_t kInfinityField6C = 0x6C;
+constexpr size_t kInfinityField70 = 0x70;
+constexpr size_t kInfinityField74 = 0x74;
+constexpr size_t kInfinityRainLevel = 0x128;
+constexpr size_t kInfinityAreaType = 0x158;
+constexpr size_t kInfinityRequestDayNightCode = 0x15D;
+constexpr size_t kInfinityField15E = 0x15E;
+constexpr size_t kInfinityField196 = 0x196;
+constexpr size_t kResFlags = 0x4;
+constexpr size_t kResField44 = 0x44;
+
+constexpr uintptr_t kOriginalChitinGlobal = 0x8CF6D8;
+constexpr size_t kOriginalChitinSize = 0x2000;
+constexpr size_t kOriginalChitinCriticalSection = 0x2FC;
+
+// CDimm::CDimm (0x781E60): __thiscall, no arguments. The original's CDimm the
+// request path enters is at chitin + 0x542; its constructor is what gives its
+// request lists their MFC fixed-allocator state (a zeroed CObList crashes the
+// original's AddTail).
+using DimmCtorFn = void(__fastcall*)(void* self, void* edx);
+constexpr uintptr_t kDimmCtor = 0x781E60;
+
+// CInfinity::ScrollingRequestRect: __thiscall, `ret 0x14`. The original's
+// CDimm the request path enters is at chitin + 0x542.
+using ScrollingRequestRectFn = int32_t(__fastcall*)(void* self, void* edx, int32_t x1, int32_t y1,
+    int32_t x2, int32_t y2, int32_t nScrollState);
+constexpr uintptr_t kScrollingRequestRect = 0x5D00C0;
+
+// The scroll fixture's WED: the 8x8 tile grid with an identity tile list (a
+// tile-list entry of 64 entries fits exactly in the 0x380..0x400 tail; the
+// unused poly header has no polys).
+void BuildScrollImage(std::vector<uint8_t>& image)
+{
+    BuildEmptyImage(image);
+    Put32(image, 0x0C, 0); // nTiledObjects
+    Put32(image, kPolyHeaderOffset + 0x00, 0);
+
+    for (int i = 0; i < kScrollTiles; i++) {
+        Put16(image, kTileListOffset + 2 * i, static_cast<uint16_t>(i));
+
+        auto* pTileData = reinterpret_cast<WED_TILEDATA*>(image.data() + kTileDataOffset + i * sizeof(WED_TILEDATA));
+        pTileData->nStartingTile = 0;
+        pTileData->nNumTiles = 1;
+        pTileData->nSecondary = static_cast<uint16_t>(i);
+        // bFlags 0x02 names a second layer the fixture does not have, so the
+        // layer walk is a no-op on both sides and the trailing secondary
+        // request runs (RequestTile reaches it only after the layer block).
+        pTileData->bFlags = 0x2;
+        pTileData->wFlags = 2; // CTiledObject::STATE_SECONDARY_TILE
+    }
+}
+
+// ScrollingRequestRect over an 8x8 map: random rects (including ones outside
+// the map, which the clamps cut), scroll states 1-8, all four combinations of
+// the day/night and rain area bits, a random day/night code and rain level, a
+// random previous rect (cancelled first; field_196 stays 0 so the unported
+// ScrollingCancelRequestRect is not reached) and random request counts on the
+// tiles before the call. Compares the WED, the rect/flags/state fields and all
+// 64 tiles' request count and flags.
+void ScrollingRequestRect(CaseContext& ctx)
+{
+    uint8_t* wedData = nullptr;
+    uint8_t* resWed = nullptr;
+    uint8_t* infinity = nullptr;
+    uint8_t* tileSet = nullptr;
+    uint8_t* tilePointers = nullptr;
+    uint8_t* tiles = nullptr;
+    ctx.SetInputs("building the original's blocks");
+    ctx.CallOriginal([&] {
+        wedData = static_cast<uint8_t*>(OriginalBlock(kWEDSize));
+        resWed = static_cast<uint8_t*>(OriginalBlock(kResWedSize));
+        infinity = static_cast<uint8_t*>(OriginalBlock(kInfinitySize));
+        tileSet = static_cast<uint8_t*>(OriginalBlock(kTileSetSizeBytes));
+        tilePointers = static_cast<uint8_t*>(OriginalBlock(kScrollTiles * 4));
+        tiles = static_cast<uint8_t*>(OriginalBlock(kScrollTiles * kResInfTileSize));
+    });
+
+    std::vector<uint8_t> oursResWed(kResWedSize, 0);
+    std::vector<uint8_t> oursInfinity(sizeof(CInfinity), 0);
+    std::vector<uint8_t> oursTileSet(sizeof(CInfTileSet), 0);
+    std::vector<uint8_t> oursTiles(kScrollTiles * sizeof(CResInfTile), 0);
+    std::vector<CResInfTile*> oursTilePointers(kScrollTiles, nullptr);
+    std::vector<uint8_t> image;
+    std::vector<uint8_t> oursImage;
+
+    auto* ourResWed = reinterpret_cast<CResWED*>(oursResWed.data());
+    auto* ourInfinity = reinterpret_cast<CInfinity*>(oursInfinity.data());
+    auto* ourTileSet = reinterpret_cast<CInfTileSet*>(oursTileSet.data());
+    for (int i = 0; i < kScrollTiles; i++) {
+        oursTilePointers[i] = reinterpret_cast<CResInfTile*>(oursTiles.data() + i * sizeof(CResInfTile));
+    }
+
+    Picks picks(ctx.seed, 0x5363726F6C6C5200ull); // "ScrollR"
+    const int count = 500 + ctx.iterations / 25;
+    for (int n = 0; n < count; ++n) {
+        BuildScrollImage(image);
+
+        const int32_t x1 = picks.Between(-3, 12);
+        const int32_t y1 = picks.Between(-3, 12);
+        const int32_t x2 = picks.Between(-3, 12);
+        const int32_t y2 = picks.Between(-3, 12);
+        const int32_t nScrollState = picks.Between(1, 8);
+        const uint16_t areaTypes[4] = { 0, 0x40, 0x04, 0x44 };
+        const uint16_t areaType = areaTypes[picks.Between(0, 3)];
+        const uint8_t dayNightCode = static_cast<uint8_t>(picks.Between(0, 255));
+        const int32_t rainLevel = picks.Between(0, 3);
+        const uint8_t oldFlags = static_cast<uint8_t>(picks.Between(0, 255));
+        const bool bOldRect = picks.Between(0, 2) != 0;
+        const int32_t oldX1 = picks.Between(-3, 10);
+        const int32_t oldY1 = picks.Between(-3, 10);
+        const int32_t oldX2 = picks.Between(-3, 10);
+        const int32_t oldY2 = picks.Between(-3, 10);
+
+        std::vector<uint8_t> requestCounts(kScrollTiles);
+        for (int i = 0; i < kScrollTiles; i++) {
+            requestCounts[i] = static_cast<uint8_t>(picks.Between(0, 2));
+        }
+
+        char inputs[240];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d: rect %d,%d-%d,%d state %d area 0x%02X day %u rain %d old 0x%02X %s%d,%d-%d,%d",
+            n, x1, y1, x2, y2, nScrollState, areaType, dayNightCode, rainLevel, oldFlags,
+            bOldRect ? "" : "none ", oldX1, oldY1, oldX2, oldY2);
+        ctx.SetInputs(inputs);
+
+        oursImage = image;
+
+        ctx.CallOriginal([&] {
+            std::memset(resWed, 0, kResWedSize);
+            std::memset(infinity, 0, kInfinitySize);
+            std::memset(tileSet, 0, kTileSetSizeBytes);
+            std::memset(tilePointers, 0, kScrollTiles * 4);
+            std::memset(tiles, 0, kScrollTiles * kResInfTileSize);
+
+            std::memcpy(wedData, image.data(), kWEDSize);
+            reinterpret_cast<ParseWedFn>(kParseWed)(resWed, nullptr, wedData);
+
+            for (int i = 0; i < kScrollTiles; i++) {
+                uint8_t* pTile = tiles + i * kResInfTileSize;
+                Put<uint32_t>(tilePointers, i * 4, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pTile)));
+                Put<int32_t>(pTile, kResField44, requestCounts[i]);
+            }
+
+            Put<uint32_t>(tileSet, kTileSetResTiles, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(tilePointers)));
+            Put<int32_t>(tileSet, kTileSetNumTiles, kScrollTiles);
+
+            Put<uint32_t>(infinity, kInfinityTileSets, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(tileSet)));
+            Put<uint32_t>(infinity, kInfinityResWED, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resWed)));
+            Put<int32_t>(infinity, kInfinityTilesX, kTilesAcross);
+            Put<int32_t>(infinity, kInfinityTilesY, kTilesDown);
+            Put<uint16_t>(infinity, kInfinityAreaType, areaType);
+            Put<uint8_t>(infinity, kInfinityRequestDayNightCode, dayNightCode);
+            Put<uint8_t>(infinity, kInfinityField15E, oldFlags);
+            Put<int32_t>(infinity, kInfinityField196, 0);
+            if (bOldRect) {
+                Put<int32_t>(infinity, kInfinityField68, oldX1);
+                Put<int32_t>(infinity, kInfinityField6C, oldY1);
+                Put<int32_t>(infinity, kInfinityField70, oldX2);
+                Put<int32_t>(infinity, kInfinityField74, oldY2);
+            } else {
+                Put<int32_t>(infinity, kInfinityField68, -1);
+                Put<int32_t>(infinity, kInfinityField6C, -1);
+                Put<int32_t>(infinity, kInfinityField70, -1);
+                Put<int32_t>(infinity, kInfinityField74, -1);
+            }
+            Put<int32_t>(infinity, kInfinityRainLevel, rainLevel);
+
+            // The chitin, its CDimm and its critical section: the original's
+            // SetPriority/Request enter the CDimm's MFC lists and kernel32's
+            // critical section, so both need their real constructors.
+            uint8_t* chitin = static_cast<uint8_t*>(OriginalBlock(kOriginalChitinSize));
+            reinterpret_cast<DimmCtorFn>(kDimmCtor)(chitin + 0x542, nullptr);
+            InitializeOriginalCriticalSection(chitin + kOriginalChitinCriticalSection);
+            *reinterpret_cast<uint32_t*>(kOriginalChitinGlobal) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(chitin));
+
+            reinterpret_cast<ScrollingRequestRectFn>(kScrollingRequestRect)(
+                infinity, nullptr, x1, y1, x2, y2, nScrollState);
+        });
+
+        std::memset(oursResWed.data(), 0, kResWedSize);
+        std::memset(oursInfinity.data(), 0, oursInfinity.size());
+        std::memset(oursTileSet.data(), 0, oursTileSet.size());
+        std::memset(oursTiles.data(), 0, oursTiles.size());
+
+        if (!ourResWed->Parse(oursImage.data())) {
+            ctx.Fail(ctx.Inputs() + ", ours: WED parse failed", "1", "0");
+            continue;
+        }
+
+        std::vector<uint8_t> oursChitinStorage(sizeof(CChitin), 0);
+        auto* ourChitin = reinterpret_cast<CChitin*>(oursChitinStorage.data());
+        InitializeCriticalSection(&ourChitin->field_2FC);
+        g_pChitin = ourChitin;
+
+        for (int i = 0; i < kScrollTiles; i++) {
+            auto* pTile = oursTilePointers[i];
+            pTile->field_44 = requestCounts[i];
+            pTile->field_40 = 0;
+            pTile->dwFlags = 0;
+            pTile->m_pDualTileRes = NULL;
+        }
+
+        ourTileSet->m_pVRamPool = NULL;
+        ourTileSet->m_pResTiles = oursTilePointers.data();
+        ourTileSet->m_nTiles = kScrollTiles;
+        ourInfinity->pTileSets[0] = ourTileSet;
+        ourInfinity->pResWED = ourResWed;
+        ourInfinity->nTilesX = kTilesAcross;
+        ourInfinity->nTilesY = kTilesDown;
+        ourInfinity->m_areaType = areaType;
+        ourInfinity->m_requestDayNightCode = dayNightCode;
+        ourInfinity->field_15E = oldFlags;
+        ourInfinity->field_196 = 0;
+        ourInfinity->nCurrentRainLevel = rainLevel;
+        if (bOldRect) {
+            ourInfinity->field_68 = oldX1;
+            ourInfinity->field_6C = oldY1;
+            ourInfinity->field_70 = oldX2;
+            ourInfinity->field_74 = oldY2;
+        } else {
+            ourInfinity->field_68 = -1;
+            ourInfinity->field_6C = -1;
+            ourInfinity->field_70 = -1;
+            ourInfinity->field_74 = -1;
+        }
+
+        ourInfinity->ScrollingRequestRect(x1, y1, x2, y2, nScrollState);
+        g_pChitin = nullptr;
+        ctx.CountInputs(1);
+
+        CompareArrays(ctx, reinterpret_cast<const uint32_t*>(wedData),
+            reinterpret_cast<const uint32_t*>(oursImage.data()), kWEDSize / 4);
+
+        const uint8_t originalFlags = Get<uint8_t>(infinity, kInfinityField15E);
+        if (originalFlags != ourInfinity->field_15E) {
+            ctx.Fail(ctx.Inputs() + ", flags", Hex16(originalFlags), Hex16(ourInfinity->field_15E));
+        }
+
+        const int32_t originalField[4] = {
+            Get<int32_t>(infinity, kInfinityField68),
+            Get<int32_t>(infinity, kInfinityField6C),
+            Get<int32_t>(infinity, kInfinityField70),
+            Get<int32_t>(infinity, kInfinityField74),
+        };
+        const int32_t ourField[4] = { ourInfinity->field_68, ourInfinity->field_6C, ourInfinity->field_70, ourInfinity->field_74 };
+        if (std::memcmp(originalField, ourField, sizeof(originalField)) != 0) {
+            ctx.Fail(ctx.Inputs() + ", rect",
+                std::to_string(originalField[0]) + "," + std::to_string(originalField[1]) + "-"
+                    + std::to_string(originalField[2]) + "," + std::to_string(originalField[3]),
+                std::to_string(ourField[0]) + "," + std::to_string(ourField[1]) + "-"
+                    + std::to_string(ourField[2]) + "," + std::to_string(ourField[3]));
+        }
+
+        if (Get<int32_t>(infinity, kInfinityField196) != ourInfinity->field_196) {
+            ctx.Fail(ctx.Inputs() + ", state", std::to_string(Get<int32_t>(infinity, kInfinityField196)),
+                std::to_string(ourInfinity->field_196));
+        }
+
+        for (int i = 0; i < kScrollTiles; i++) {
+            const uint8_t* pTile = tiles + i * kResInfTileSize;
+            const CResInfTile* pOurs = oursTilePointers[i];
+            const int32_t originalCount = Get<int32_t>(pTile, kResField44);
+            const uint32_t originalDwordFlags = Get<uint32_t>(pTile, kResFlags);
+            if (originalCount != pOurs->field_44 || originalDwordFlags != pOurs->dwFlags) {
+                char detail[96];
+                std::snprintf(detail, sizeof(detail), "tile %d requests %d flags %08X", i, originalCount, originalDwordFlags);
+                char oursDetail[96];
+                std::snprintf(oursDetail, sizeof(oursDetail), "tile %d requests %d flags %08X", i, pOurs->field_44, pOurs->dwFlags);
+                ctx.Fail(ctx.Inputs() + ", " + detail, detail, oursDetail);
+            }
+        }
+    }
+}
+
 ORACLE_CASE("infinity/check_tile_state", CheckTileState);
+ORACLE_CASE("infinity/scrolling_request_rect", ScrollingRequestRect);
