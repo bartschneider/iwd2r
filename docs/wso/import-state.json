@@ -7700,12 +7700,13 @@
     "i052": {
       "assigned_at": "2026-10-30T19:31:25+00:00",
       "branch": "p3/wso-i052",
-      "closed_at": null,
+      "closed_at": "2026-10-30T21:51:47+00:00",
       "files": [
         "src/CProjectile.cpp",
         "src/CNetwork.cpp",
         "src/CGameSprite.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -7773,7 +7774,7 @@
           "their_len": 1073
         }
       ],
-      "status": "assigned",
+      "status": "closed",
       "verdicts": {}
     },
     "i053": {
