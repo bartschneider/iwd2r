@@ -19,6 +19,7 @@ public:
     static const SHORT DIALOGUE;
     static const SHORT MOVETOPOINT;
     static const SHORT PICKPOCKETS;
+    static const SHORT PROTECTPOINT;
     static const SHORT SPELL;
     static const SHORT USEITEM;
     static const SHORT CONTINUE;
