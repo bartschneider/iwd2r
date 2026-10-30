@@ -300,7 +300,7 @@ BOOL CGameAreaNotes::sub_47B150(WORD startX, WORD startY, CString szNote, DWORD 
 // the label moved here and the wrapper keeps its own.
 //
 // It creates (or updates) a note: a multiplayer send under the connection
-// flags, the list update through sub_47B150 (the TLK override included), a new
+// flags, the list update through 0x47B150 (the TLK override included), a new
 // CAreaUserNote in m_areaNoteList, and - on the live map screen - the button
 // through AddButton, the grid square and the control's sequence. A note whose
 // square already holds one is either re-sequenced/re-texted (a non-empty text)
