@@ -2656,6 +2656,108 @@ TEST_CASE("notes: DeleteANote's list walk and the removal helper", "[uimisc][not
     ::operator delete(storage);
 }
 
+// CGameAreaNotes::Add (0x47B330, the six-argument overload behind the
+// 0x47B090 wrapper): the list half the harness can reach honestly. With the
+// cell uninitialised the note is added, updated in place on the same square
+// (sub_47B150's non-empty path) or deleted there by an empty text; initialised
+// but off the map screen the same list update runs and field_8E is set; a
+// connected client sends and returns before touching the list. The map-screen
+// tail (AddButton, the grid, GetControl/SequenceSet, the TLK entry) needs the
+// live panel and is not faked.
+TEST_CASE("notes: Add writes and updates the list without the map screen", "[uimisc][notes]")
+{
+    CChitin* pSavedChitin = g_pChitin;
+    CBaldurChitin* pSavedBaldur = g_pBaldurChitin;
+    std::unique_ptr<unsigned char[]> chitinStorage(new unsigned char[sizeof(CBaldurChitin)]());
+    g_pChitin = reinterpret_cast<CChitin*>(chitinStorage.get());
+    g_pBaldurChitin = reinterpret_cast<CBaldurChitin*>(chitinStorage.get());
+    struct Restore {
+        CChitin* pChitin;
+        CBaldurChitin* pBaldur;
+        ~Restore()
+        {
+            g_pChitin = pChitin;
+            g_pBaldurChitin = pBaldur;
+        }
+    } restore { pSavedChitin, pSavedBaldur };
+
+    auto* storage = static_cast<unsigned char*>(::operator new(sizeof(CGameAreaNotes)));
+    std::memset(storage, 0, sizeof(CGameAreaNotes));
+    auto* notes = reinterpret_cast<CGameAreaNotes*>(storage);
+
+    // Uninitialised, no session: a new note in the list with the given text
+    // reference (a non--1 reference skips the TLK Add, whose files are shut).
+    notes->m_bInitialized = FALSE;
+    notes->Add(CString("AR1000"), 4, 6, CString("first"), 0x00020000, 42);
+    REQUIRE(notes->m_areaNoteList.GetCount() == 1);
+    {
+        CAreaUserNote* pNote = notes->m_areaNoteList.GetHead();
+        CHECK(pNote->m_startX == 4);
+        CHECK(pNote->m_startY == 6);
+        CHECK(pNote->m_note == 42);
+        CHECK(pNote->m_dwflags == 0x00020000);
+    }
+    // The same square again updates it in place: one note, the new flags and
+    // reference, the text replaced through sub_47B150.
+    notes->Add(CString("AR1000"), 4, 6, CString("second"), 0x00030000, 43);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+    {
+        CAreaUserNote* pNote = notes->m_areaNoteList.GetHead();
+        CHECK(pNote->m_dwflags == 0x00030000);
+        CHECK(pNote->m_note == 43);
+    }
+
+    // An empty text on that square is the helper's delete: the note goes.
+    notes->Add(CString("AR1000"), 4, 6, CString(), 0, 44);
+    CHECK(notes->m_areaNoteList.GetCount() == 0);
+
+    // Initialised, off the map screen (the active engine is not m_pEngineMap,
+    // which stays null): the note is added and field_8E marks the map stale.
+    notes->m_bInitialized = TRUE;
+    notes->m_ptCellSize.x = 1;
+    notes->m_ptCellSize.y = 1;
+    notes->m_ptButtonSize.x = 1;
+    notes->m_ptButtonSize.y = 1;
+    notes->m_areaNoteGrid = new DWORD*[1];
+    notes->m_areaNoteGrid[0] = new DWORD[1];
+    notes->m_areaNoteGrid[0][0] = -1;
+    static char sActiveEngine;
+    g_pChitin->cNetwork.m_bConnectionEstablished = TRUE;
+    g_pChitin->cNetwork.m_bIsHost = FALSE;
+    g_pChitin->pActiveEngine = reinterpret_cast<CWarp*>(&sActiveEngine);
+
+    // A client inside an announce: no send, so the list logic runs.
+    g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce = TRUE;
+
+    notes->Add(CString("AR1000"), 0, 0, CString("map off"), 0x00010000, 50);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+    CHECK(notes->field_8E == 1);
+    CHECK(notes->GetNoteButtonText(0) == 50);
+
+    // The same square now matches the helper first, so nothing is added (the
+    // grid stays -1: AddButton never ran) and field_8E is set again.
+    notes->Add(CString("AR1000"), 0, 0, CString("again"), 0x00010000, 51);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+
+    // A connected client with no announce in progress returns after the send,
+    // before the list: a new square adds nothing. (No host name in the zeroed
+    // session, so the send itself stops at its first name guard.)
+    g_pBaldurChitin->m_cBaldurMessage.m_bInOnAreaMapNoteAnnounce = FALSE;
+    g_pChitin->cNetwork.m_nHostPlayer = -1;
+    notes->Add(CString("AR1000"), 9, 9, CString("client"), 0x00010000, 52);
+    CHECK(notes->m_areaNoteList.GetCount() == 1);
+
+    // Ownership, without the destructor's map-screen path.
+    POSITION pos = notes->m_areaNoteList.GetHeadPosition();
+    while (pos != NULL) {
+        delete notes->m_areaNoteList.GetNext(pos);
+    }
+    notes->m_areaNoteList.RemoveAll();
+    delete[] notes->m_areaNoteGrid[0];
+    delete[] notes->m_areaNoteGrid;
+    ::operator delete(storage);
+}
+
 // CImm::sub_7C3020 (0x7C3020), the composition window's rect (report-T80.md
 // §2.10; WSO calls it GetCompositionWindowRect): the mosaic's size from a
 // synthetic MOS resource, the height three lines of the edit's font plus the
