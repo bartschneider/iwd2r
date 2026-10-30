@@ -40,8 +40,11 @@
 #include "CBaldurChitin.h"
 #include "CChitin.h"
 #include "CGameSprite.h"
+#include "CImm.h"
 #include "CInfGame.h"
+#include "CResMosaic.h"
 #include "CRuleTables.h"
+#include "CVidMosaic.h"
 #include "CUtil.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -55,6 +58,7 @@
 #include <cstring>
 #include <new>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -273,8 +277,190 @@ void HpConBonus(CaseContext& ctx)
     }
 }
 
+
+// CImm::sub_7C3020 (0x7C3020), the composition window's rect (report-T80.md
+// §2.10; WSO calls it GetCompositionWindowRect): the mosaic's size, three
+// lines of the edit's font plus the padding either side clamped to the
+// mosaic's height, placed against the panel and the edit. It reads the mosaic
+// through CVidMosaic::GetSize, whose Demand/Release go through the chitin's
+// resource manager: the synthetic CResMosaic is flagged loaded (0x4|0x10)
+// with a high m_nID, so CDimm::InternalDemand hands back m_pData without a
+// file, and a 0x40-byte MOS blob (the magic, the version and the sizes Parse
+// reads) is all the resource needs. The original's static PADDING
+// (0xA09FC0, 3/3, its startup's initializer at 0x7C2630) is written here:
+// the runner does not run the exe's static initializers.
+//
+// The CRect return travels by hidden pointer, which __thiscall puts first on
+// the stack as the original expects; the int-returning cases' __fastcall
+// shape would put it in edx instead.
+using CompositionWindowRectFn = CRect(__thiscall*)(void* self, const CPoint* ptPanel, const CSize* panelSize,
+    const CPoint* ptEdit, const CSize* editSize, int16_t nFontHeight);
+constexpr uintptr_t kCompositionWindowRect = 0x7C3020;
+constexpr uintptr_t kPadding = 0xA09FC0;
+constexpr size_t kImmBlockSize = 0x140;
+constexpr size_t kImmMosaicOffset = 0x13C;
+constexpr size_t kMosaicBlockSize = 0xC0;
+constexpr size_t kMosaicResOffset = 0xA4;
+constexpr size_t kMosaicDoubleOffset = 0xB0;
+constexpr size_t kResBlockSize = 0x80;
+constexpr size_t kResFlagsOffset = 0x04;
+constexpr size_t kResDataOffset = 0x08;
+constexpr size_t kResSizeOffset = 0x14;
+constexpr size_t kResField18Offset = 0x18;
+constexpr size_t kResField44Offset = 0x44;
+constexpr size_t kResIdOffset = 0x4C;
+constexpr size_t kMosSize = 0x40;
+constexpr size_t kChitinSize = 0x2000;
+
+// The mosaic's size in the MOS header (0x7805D0 reads it).
+void PutMosaicSize(uint8_t* at, uint16_t nWidth, uint16_t nHeight)
+{
+    std::memcpy(at + 8, &nWidth, 2);
+    std::memcpy(at + 0xA, &nHeight, 2);
+}
+
+// Mosaic sizes, panel and edit points/sizes and the font height swept in
+// the branches' directions (the mosaic smaller or larger than the panel, the
+// edit reaching past the panel or not, negative edit offsets); then
+// --iterations random ones. The four edges are compared.
+void CompositionWindowRect(CaseContext& ctx)
+{
+    uint8_t* chitin = nullptr;
+    uint8_t* imm = nullptr;
+    uint8_t* mosaic = nullptr;
+    uint8_t* res = nullptr;
+    uint8_t* mos = nullptr;
+    ctx.SetInputs("building the original's chitin, CImm, mosaic and resource");
+    ctx.CallOriginal([&] {
+        chitin = OriginalBlock(kChitinSize);
+        imm = OriginalBlock(kImmBlockSize);
+        mosaic = OriginalBlock(kMosaicBlockSize);
+        res = OriginalBlock(kResBlockSize);
+        mos = OriginalBlock(kMosSize);
+        SetOriginalPointer(kChitin, chitin);
+        const uint32_t mosaicPointer = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mosaic));
+        std::memcpy(imm + kImmMosaicOffset, &mosaicPointer, 4);
+        const uint32_t resPointer = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(res));
+        std::memcpy(mosaic + kMosaicResOffset, &resPointer, 4);
+        const uint32_t mosPointer = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mos));
+        std::memcpy(res + kResDataOffset, &mosPointer, 4);
+        const uint32_t flags = 0x04 | 0x10;
+        const uint32_t size = kMosSize;
+        const uint32_t one = 1;
+        const uint32_t id = 0xFF000000u;
+        const uint32_t zero = 0;
+        std::memcpy(res + kResFlagsOffset, &flags, 4);
+        std::memcpy(res + kResSizeOffset, &size, 4);
+        std::memcpy(res + kResField18Offset, &zero, 4);
+        std::memcpy(res + kResField44Offset, &one, 4);
+        std::memcpy(res + kResIdOffset, &id, 4);
+        std::memcpy(mos, "MOS ", 4);
+        std::memcpy(mos + 4, "V1  ", 4);
+        const uint16_t oneTile = 1;
+        const uint32_t paletteOffset = 0x18;
+        std::memcpy(mos + 0xC, &oneTile, 2);
+        std::memcpy(mos + 0xE, &oneTile, 2);
+        std::memcpy(mos + 0x14, &paletteOffset, 4);
+        const uint32_t padding = 3;
+        std::memcpy(reinterpret_cast<void*>(kPadding), &padding, 4);
+        std::memcpy(reinterpret_cast<void*>(kPadding + 4), &padding, 4);
+    });
+
+    std::unique_ptr<unsigned char[]> chitinStorage(new unsigned char[sizeof(CChitin)]());
+    std::unique_ptr<unsigned char[]> immStorage(new unsigned char[sizeof(CImm)]());
+    std::unique_ptr<unsigned char[]> mosaicStorage(new unsigned char[sizeof(CVidMosaic)]());
+    std::unique_ptr<unsigned char[]> resStorage(new unsigned char[sizeof(CResMosaic)]());
+    auto* oursImmPtr = reinterpret_cast<CImm*>(&*immStorage);
+    auto* oursMosaic = reinterpret_cast<CVidMosaic*>(&*mosaicStorage);
+    auto* oursRes = reinterpret_cast<CResMosaic*>(&*resStorage);
+    std::vector<uint8_t> oursMos(kMosSize, 0);
+    std::memcpy(oursMos.data(), "MOS ", 4);
+    std::memcpy(oursMos.data() + 4, "V1  ", 4);
+    const uint16_t oneTile = 1;
+    const uint32_t paletteOffset = 0x18;
+    std::memcpy(oursMos.data() + 0xC, &oneTile, 2);
+    std::memcpy(oursMos.data() + 0xE, &oneTile, 2);
+    std::memcpy(oursMos.data() + 0x14, &paletteOffset, 4);
+    oursRes->dwFlags = CRes::RES_FLAG_0x04 | CRes::RES_FLAG_0x10;
+    oursRes->m_pData = oursMos.data();
+    oursRes->nSize = kMosSize;
+    oursRes->field_18 = 0;
+    oursRes->field_44 = 1;
+    oursRes->m_nID = 0xFF000000;
+    oursMosaic->pRes = oursRes;
+    oursMosaic->m_bDoubleSize = FALSE;
+    oursImmPtr->field_13C = oursMosaic;
+    CChitin* savedChitin = g_pChitin;
+    g_pChitin = reinterpret_cast<CChitin*>(&*chitinStorage);
+
+    uint64_t state = ctx.seed ^ 0x7C3020ull;
+    auto next = [&]() { return static_cast<uint32_t>(oracle::SplitMix64(&state)); };
+
+    auto check = [&](uint16_t mosaicWidth, uint16_t mosaicHeight, const CPoint& ptPanel, const CSize& panelSize,
+                     const CPoint& ptEdit, const CSize& editSize, int16_t nFontHeight) {
+        char inputs[240];
+        std::snprintf(inputs, sizeof(inputs), // NOLINT
+            "mosaic %ux%u, panel (%d,%d) %dx%d, edit (%d,%d) %dx%d, font %d", mosaicWidth, mosaicHeight, ptPanel.x,
+            ptPanel.y, panelSize.cx, panelSize.cy, ptEdit.x, ptEdit.y, editSize.cx, editSize.cy, nFontHeight);
+        ctx.SetInputs(inputs);
+        CRect originalRect;
+        ctx.CallOriginal([&] {
+            PutMosaicSize(mos, mosaicWidth, mosaicHeight);
+            originalRect = reinterpret_cast<CompositionWindowRectFn>(kCompositionWindowRect)(imm, &ptPanel, &panelSize,
+                &ptEdit, &editSize, nFontHeight);
+        });
+        PutMosaicSize(oursMos.data(), mosaicWidth, mosaicHeight);
+        const CRect oursRect = oursImmPtr->sub_7C3020(ptPanel, panelSize, ptEdit, editSize, nFontHeight);
+        ctx.CountInputs(1);
+        oracle::Compare(ctx, originalRect.left, oursRect.left);
+        oracle::Compare(ctx, originalRect.top, oursRect.top);
+        oracle::Compare(ctx, originalRect.right, oursRect.right);
+        oracle::Compare(ctx, originalRect.bottom, oursRect.bottom);
+    };
+
+    // Panels and edits in each branch's direction: the mosaic smaller than
+    // the panel or not, the edit reaching past it or not, negative offsets.
+    const CPoint panels[] = { CPoint(0, 0), CPoint(10, 20), CPoint(-40, -30), CPoint(300, 200) };
+    const CSize panelSizes[] = { CSize(10, 10), CSize(200, 150), CSize(50, 100), CSize(1200, 900) };
+    const CPoint edits[] = { CPoint(0, 0), CPoint(30, 5), CPoint(0, 50), CPoint(-25, -60), CPoint(90, 40) };
+    const CSize editSizes[] = { CSize(0, 0), CSize(60, 20), CSize(10, 20), CSize(60, 60), CSize(400, 300) };
+    const uint16_t mosaicSizes[][2] = { { 40, 12 }, { 40, 8 }, { 60, 90 }, { 1, 1 }, { 400, 300 } };
+    const int16_t fonts[] = { 0, 2, 10, 40 };
+    for (const auto& mosaicSize : mosaicSizes) {
+        for (const CPoint& panel : panels) {
+            for (const CSize& panelSize : panelSizes) {
+                check(mosaicSize[0], mosaicSize[1], panel, panelSize, edits[1], editSizes[1], 2);
+            }
+        }
+    }
+    for (const CPoint& panel : panels) {
+        for (const CSize& panelSize : panelSizes) {
+            for (const CPoint& edit : edits) {
+                for (const CSize& editSize : editSizes) {
+                    for (int16_t font : fonts) {
+                        check(40, 12, panel, panelSize, edit, editSize, font);
+                    }
+                }
+            }
+        }
+    }
+    const int count = 400 + ctx.iterations / 20;
+    for (int n = 0; n < count; n++) {
+        const uint16_t mosaicWidth = static_cast<uint16_t>(1 + next() % 400);
+        const uint16_t mosaicHeight = static_cast<uint16_t>(1 + next() % 400);
+        const CPoint panel(static_cast<int32_t>(next() % 501), static_cast<int32_t>(next() % 501));
+        const CSize panelSize(static_cast<int32_t>(next() % 500), static_cast<int32_t>(next() % 500));
+        const CPoint edit(static_cast<int32_t>(next() % 601) - 100, static_cast<int32_t>(next() % 601) - 100);
+        const CSize editSize(static_cast<int32_t>(next() % 500), static_cast<int32_t>(next() % 500));
+        check(mosaicWidth, mosaicHeight, panel, panelSize, edit, editSize, static_cast<int16_t>(next() % 41));
+    }
+
+    g_pChitin = savedChitin;
+}
+
 } // namespace
 
 ORACLE_CASE("combat/dex_armor_class", DexArmorClass);
 ORACLE_CASE("util/find_one_of", FindOneOf);
 ORACLE_CASE("rules/hp_con_bonus", HpConBonus);
+ORACLE_CASE("ui/ime_composition_rect", CompositionWindowRect);
