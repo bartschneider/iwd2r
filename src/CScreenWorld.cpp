@@ -5,6 +5,7 @@
 #include "CDeathSound.h"
 #include "CGameArea.h"
 #include "CGameSprite.h"
+#include "CIcon.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
 #include "CScreenChapter.h"
@@ -5231,9 +5232,182 @@ void CUIControlButtonWorldContainerSlot::OnLButtonClick(CPoint pt)
 // 0x696140
 BOOL CUIControlButtonWorldContainerSlot::Render(BOOL bForce)
 {
-    // TODO: Incomplete.
+    CResRef cResIcon;
+    CResRef cResItem;
 
-    return FALSE;
+    if (!m_bActive && !m_bInactiveRender) {
+        return FALSE;
+    }
+
+    if (m_nRenderCount == 0 && !bForce) {
+        return FALSE;
+    }
+
+    if (!CUIControlButton::Render(bForce)) {
+        return FALSE;
+    }
+
+    CScreenWorld* pWorld = g_pBaldurChitin->m_pEngineWorld;
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10646
+    UTIL_ASSERT(pWorld != NULL);
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+    // __LINE__: 10648
+    UTIL_ASSERT(pGame != NULL);
+
+    SHORT nPortrait = pGame->GetCharacterPortraitNum(pGame->m_iContainerSprite);
+
+    CItem* pItem = NULL;
+    STRREF description = -1;
+    WORD wCount = 0;
+    BOOL bHasIcon = FALSE;
+
+    switch (m_nID) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
+    {
+        LONG nContainer = pGame->m_iContainer;
+
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 10673
+        UTIL_ASSERT(nContainer != CGameObjectArray::INVALID_INDEX);
+
+        // 5 = ground container columns per row (0x85a1f4).
+        SHORT nSlot = static_cast<SHORT>(pWorld->m_nTopContainerRow * 5 + m_nID);
+        pGame->InventoryInfoGround(nContainer,
+            nSlot,
+            pItem,
+            description,
+            cResIcon,
+            cResItem,
+            wCount);
+        bHasIcon = cResIcon != "";
+        break;
+    }
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    {
+        // 2 = personal columns per row (0x85a1fc); +8 maps button ids 10-13
+        // onto backpack slots (the looter's equipment occupies slots 0-17).
+        SHORT nSlot = static_cast<SHORT>(pWorld->m_nTopGroupRow * 2 + m_nID + 8);
+        pGame->InventoryInfoPersonal(nPortrait,
+            nSlot,
+            pItem,
+            description,
+            cResIcon,
+            cResItem,
+            wCount,
+            TRUE);
+        bHasIcon = cResIcon != "";
+        break;
+    }
+    default:
+        // __FILE__: C:\Projects\Icewind2\src\Baldur\InfScreenWorld.cpp
+        // __LINE__: 10709
+        UTIL_ASSERT(FALSE);
+        break;
+    }
+
+    if (bHasIcon) {
+        CRect rControlFrame(m_pPanel->m_ptOrigin + m_ptOrigin, m_size);
+        CRect rClip;
+        rClip.IntersectRect(rControlFrame, m_rDirty);
+
+        CIcon::RenderIcon(0,
+            rControlFrame.TopLeft(),
+            m_size,
+            rClip,
+            cResIcon,
+            m_pPanel->m_pManager->m_bDoubleSize,
+            0,
+            wCount,
+            FALSE,
+            0,
+            FALSE,
+            0);
+
+        if (pItem != NULL) {
+            CPoint pos = rControlFrame.TopLeft();
+            BOOL bDoubleSize = m_pPanel->m_pManager->m_bDoubleSize;
+            DWORD dwItemFlags = pItem->m_flags;
+            STRREF errorCode = -1;
+
+            if ((dwItemFlags & 0x1) == 0) {
+                CVidCell cState(CResRef("STORTIN2"), bDoubleSize);
+                cState.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+            } else if (pGame->CheckIfPlayerInPortraitSlotCanUseItem(nPortrait,
+                    pItem,
+                    &errorCode,
+                    FALSE)
+                    == 0) {
+                CVidCell cState(CResRef("STORTINT"), bDoubleSize);
+                cState.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+            } else {
+                SHORT nSelected = static_cast<SHORT>(pWorld->GetSelectedCharacter());
+                LONG nLooterId = CGameObjectArray::INVALID_INDEX;
+
+                if (nSelected < pGame->m_nCharacters) {
+                    nLooterId = pGame->m_characterPortraits[nSelected];
+                }
+
+                if (nLooterId != CGameObjectArray::INVALID_INDEX) {
+                    CGameSprite* pLooter;
+                    BYTE share;
+                    do {
+                        pLooter = NULL;
+                        share = pGame->GetObjectArray()->GetShare(nLooterId,
+                            CGameObjectArray::THREAD_ASYNCH,
+                            reinterpret_cast<CGameObject**>(&pLooter),
+                            INFINITE);
+                    } while (share == CGameObjectArray::SHARED
+                        || share == CGameObjectArray::DENIED);
+
+                    if (share == CGameObjectArray::SUCCESS) {
+                        INT nUsable = pGame->CheckItemUsable(pLooter, pItem);
+                        CResRef cStateOverlay;
+
+                        if (nUsable == 2) {
+                            cStateOverlay = CResRef("STORTIN4");
+                        } else if (nUsable == 0) {
+                            cStateOverlay = CResRef("STORTINT");
+                        }
+
+                        if (cStateOverlay != "") {
+                            CVidCell cTint(cStateOverlay, bDoubleSize);
+                            cTint.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+                        }
+
+                        pGame->GetObjectArray()->ReleaseShare(nLooterId,
+                            CGameObjectArray::THREAD_ASYNCH,
+                            INFINITE);
+                    }
+                }
+            }
+
+            if ((dwItemFlags & 0x8) != 0 && (dwItemFlags & 0x1) != 0) {
+                CVidCell cState(CResRef("STORTIN3"), bDoubleSize);
+                cState.Render(0, pos.x, pos.y, rClip, NULL, 0, 2, 0xC0);
+            }
+        }
+    }
+
+    SetToolTipStrRef(description, -1, -1);
+
+    return TRUE;
 }
 
 // -----------------------------------------------------------------------------
