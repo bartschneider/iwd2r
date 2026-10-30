@@ -13,14 +13,17 @@
 #   (SPPR503, projectile family 67) and Spike Stones (SPPR512, 213),
 #   whose projectile rows no scenario reaches yet.
 #
-# Spell arithmetic (task-50-report coordinator notes): the cast list is
-# built level by level ascending and only rows 1-2 arm (task-43), so the
-# imported druid's two chargen level-1 memorizations must be removed
-# before the two level-4 spells memorize -- then Flame Strike and Spike
-# Stones are rows 1 and 2, Flame Strike first (memorize order is the
-# cast-list order). No rest is needed: chr_raise_druid never rested, so
-# the file's level-4 slots are empty and filling an empty slot needs no
-# rest -- the casts never depend on the unported ACTION 96.
+# Spell arithmetic (task-50-report coordinator notes + run 20261030-140342):
+# the cast list is built level by level ascending and only rows 1-2 arm
+# (task-43), so the imported druid's two chargen level-1 memorizations
+# must be removed first -- but druid 7 has exactly ONE 4th-level slot
+# (its shots: L4 tab one slot, "Spell Slots Available 0"), so only one
+# level-4 spell can sit in the list at a time and row 2 never exists.
+# Flame Strike memorizes pre-fight (row 1); Spike Stones memorizes into
+# the slot between the casts (Flame Strike's slot is spent by then) and
+# is cast with F1 as well. No rest is needed: chr_raise_druid never
+# rested, so the file's level-4 slot is empty and filling an empty slot
+# needs no rest -- the casts never depend on the unported ACTION 96.
 #
 # Spellbook geometry (record_tour.txt + notes): key S opens it on the
 # sole member; the level tabs sit at x=761, level 1 (761,81) plus 39 per
@@ -148,20 +151,16 @@ click 456 257
 wait 30
 checkpoint level1_cleared
 shot level1_cleared
-# Level 4 (761,198): Flame Strike (510,222) into slot 1 (307,94) first,
-# then Spike Stones (510,390) into slot 2 (307,136) -- the memorize
-# order is the cast-list order, so Flame Strike must go in first.
+# Level 4 (761,198): Flame Strike (510,222) into slot 1 (307,94) --
+# the only slot druid 7 has (run 20261030-140342's spells_memorized
+# shot: one slot, "Spell Slots Available 0"; the old slot-2 clicks at
+# (307,136) hit nothing). Spike Stones memorizes into this slot later,
+# after Flame Strike is cast.
 click 761 198
 wait 20
 click 510 222
 wait 20
 click 307 94
-wait 20
-click 456 257
-wait 20
-click 510 390
-wait 20
-click 307 136
 wait 20
 click 456 257
 wait 30
@@ -302,8 +301,14 @@ wait 120
 checkpoint attacked
 # Centre on the druid (the view at 119,686 puts the goblin at 385,196)
 # and give the two casts. Each cycle: reselect the druid (resets the
-# action bar), F5 opens the cast list, F1/F2 arms row 1/2, the target,
-# Space, and a wait long enough for the cast to resolve and land.
+# action bar), F5 opens the cast list, F1 arms row 1 -- with one
+# 4th-level slot row 2 never exists (run 20261030-140342), so Spike
+# Stones must already sit in row 1 when its cast comes -- then the
+# target, and a Space burst: the Goblin Archer's every hit re-pauses
+# (Attacked), and run 20261030-140342 showed one Space does not
+# outlast it (the cast froze mid casting-time under the reticle).
+# Pausing never discards a pending cast, so spamming Space just
+# accumulates unpaused casting time.
 origin ui
 click 528 460
 click 528 460
@@ -326,26 +331,69 @@ wait 10
 click 390 188
 wait 10
 key SPACE
-wait 220
+wait 30
+key SPACE
+wait 30
+key SPACE
+wait 30
+key SPACE
+wait 30
+key SPACE
+wait 300
 checkpoint cast1_after
 shot cast1_after
-# Cast 2: Spike Stones (row 2) on the ground north of the party, where
-# Grease landed as a cast-at-point (action 95) in spell_showcase.
+# Cast 1 in run 20261030-140342 armed and targeted fine (the reticle
+# sat over the goblin in cast1_after) but froze under an Attacked
+# auto-pause; the burst above re-unpauses inside the casting time.
+# Between the casts: reopen the spellbook and memorize Spike Stones
+# into slot 1 -- druid 7's only 4th-level slot, spent or empty by now.
+# If Flame Strike is still there (the cast never started), the slot
+# click asks and Yes (456,257) removes it; if it is empty the slot
+# click no-ops and the Yes is the stray page click launch 1 already
+# showed harmless (two stray Yes clicks changed nothing there). Then
+# Spike Stones (510,390) into slot 1 (307,94), and row 1 is Spike
+# Stones. Escape closes.
+key S
+wait 60
+click 761 198
+wait 20
+click 307 94
+wait 20
+click 456 257
+wait 20
+click 510 390
+wait 20
+click 307 94
+wait 20
+click 456 257
+wait 30
+key ESCAPE
+wait 60
+checkpoint cast2_before
+# Cast 2: Spike Stones (row 1 now) on the ground north of the party,
+# where Grease landed as a cast-at-point (action 95) in spell_showcase.
 # CHECK: Spike Stones' delivery -- if the ground click walks (SPPR512
-# creature- or self-targeted), F2 + Space alone is the cast; read
+# creature- or self-targeted), F1 + Space alone is the cast; read
 # world.party x,y in cast2_after. The goblin is Flame Strike's kill by
 # then, so the click must not aim at its corpse.
-checkpoint cast2_before
 key 1
 wait 10
 key F5
 wait 10
-key F2
+key F1
 wait 10
 click 386 165
 wait 10
 key SPACE
-wait 220
+wait 30
+key SPACE
+wait 30
+key SPACE
+wait 30
+key SPACE
+wait 30
+key SPACE
+wait 300
 checkpoint cast2_after
 shot cast2_after
 # One more Space: the last queued cast resolves on the next toggle,
