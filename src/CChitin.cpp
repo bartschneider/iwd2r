@@ -454,7 +454,63 @@ BOOL CChitin::InitializeServices(HWND hWnd)
 // 0x791610
 void CChitin::OnDisplayChange()
 {
-    // TODO: Incomplete.
+    // The original reads the fullscreen flag through the global chitin
+    // (0x8CF6D8) rather than `this`, and returns when it is set (0x79162D).
+    if (g_pChitin->m_bFullscreen) {
+        return;
+    }
+
+    RECT rect;
+    GetWindowRect(cWnd.GetSafeHwnd(), &rect);
+    m_ptScreen.x = rect.left;
+    m_ptScreen.y = rect.top;
+
+    field_F8 = 1;
+    m_bReInitializing = TRUE;
+
+    if (pActiveEngine != NULL) {
+        pActiveEngine->EngineDeactivated();
+    }
+
+    INT nCurrentSong = cSoundMixer.m_nCurrentSong;
+    cSoundMixer.StopMusic(TRUE);
+
+    CVidMode* pCurrentVidMode = cVideo.m_pCurrentVidMode;
+    field_142 = 0;
+
+    cSoundMixer.CleanUp();
+    cVideo.CleanUp();
+
+    int nBpp = CUtil::GetCurrentBitsPerPixels();
+    if (nBpp != 16 && nBpp != 24 && nBpp != 32) {
+        CString s;
+        s.LoadStringA(GetIDSInvalidVideoMode());
+        MessageBoxA(NULL, s, m_sGameName, 0);
+        ShutDown(-1, NULL, NULL);
+        return;
+    }
+
+    cVideo.m_pCurrentVidMode = pCurrentVidMode;
+    if (!InitializeServices(cWnd.GetSafeHwnd())) {
+        ShutDown(-1, NULL, NULL);
+        return;
+    }
+
+    SetSoundVolumes();
+    cSoundMixer.StartSong(nCurrentSong, 1);
+
+    if (cDimm.m_bCDSwitchActivated) {
+        SetCDSwitchActivateEngine(TRUE);
+    } else if (cProgressBar.m_bProgressBarActivated) {
+        SetProgressBarActivateEngine(TRUE);
+    } else {
+        if (pActiveEngine != NULL) {
+            pActiveEngine->EngineActivated();
+        }
+    }
+
+    Resume();
+    field_F8 = 0;
 }
 
 // 0x7917F0
