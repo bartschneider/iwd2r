@@ -162,6 +162,10 @@ public:
     static const BYTE MSG_SUBTYPE_BIOGRAPHY_CHANGE;
     static const BYTE MSG_SUBTYPE_BIOGRAPHY_CHANGE_ANNOUNCE;
 
+    static const BYTE MSG_TYPE_AREAMAPNOTE;
+    static const BYTE MSG_SUBTYPE_AREAMAPNOTE_SEND;
+    static const BYTE MSG_SUBTYPE_AREAMAPNOTE_ANNOUNCE;
+
     static const BYTE MSG_TYPE_DELETEAREA;
     static const BYTE MSG_SUBTYPE_DELETEAREA_POLL;
     static const BYTE MSG_SUBTYPE_DELETEAREA_RESULT;
@@ -339,6 +343,8 @@ public:
     BOOLEAN OnSendEntryJournalChange(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
     BOOLEAN AnnounceJournalEntryChange(CString szText, BYTE nCharacter, INT nChapter, DWORD nIndex);
     BOOLEAN OnAnnounceJournalEntryChange(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
+    BOOLEAN SendAreaMapNoteToServer(CString sArea, WORD nStartX, WORD nStartY, CString sNote, DWORD dwFlags, STRREF strRef);
+    BOOLEAN AnnounceAreaMapNote(CString sArea, WORD nStartX, WORD nStartY, CString sNote, DWORD dwFlags, STRREF strRef);
     BOOLEAN SendBiographyToServer(BYTE nFixedPartyId, CString szBio);
     BOOLEAN OnSendBiography(INT nMsgFrom, BYTE* pByteMessage, DWORD dwSize);
     BOOLEAN AnnounceBiography(BYTE nFixedPartyId, CString szBio);
