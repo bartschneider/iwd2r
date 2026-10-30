@@ -372,12 +372,60 @@ CString CImm::sub_7C2ED0(HWND hWnd)
     return sString;
 }
 
+// The composition window's rect: three lines of the edit's font plus the
+// padding either side, clamped to the mosaic's height, and the mosaic's width;
+// placed against the panel and the edit. WSO calls it
+// GetCompositionWindowRect (report-T80.md §2.10); ours and Ghidra keep the
+// address-derived name.
+//
 // 0x7C3020
 CRect CImm::sub_7C3020(const CPoint& ptPanel, const CSize& panelSize, const CPoint& ptEdit, const CSize& editSize, SHORT nFontHeight)
 {
-    // TODO: Incomplete.
+    if (field_13C == NULL) {
+        return CRect(0, 0, 0, 0);
+    }
 
-    return CRect();
+    CSize mosaicSize;
+    field_13C->GetSize(mosaicSize, FALSE);
+
+    // Three lines of text and the padding above and below, clamped to the
+    // mosaic's own height (the original reads its static PADDING, 3).
+    LONG nHeight = nFontHeight * 3 + PADDING.cy * 2;
+    if (nHeight > mosaicSize.cy) {
+        nHeight = mosaicSize.cy;
+    }
+
+    LONG nTop;
+    if (nHeight < panelSize.cy) {
+        if (panelSize.cy < editSize.cy + ptEdit.y + nHeight) {
+            if (ptEdit.y - nHeight < 0) {
+                nTop = (panelSize.cy - nHeight) / 2 + ptPanel.y;
+            } else {
+                nTop = ptPanel.y - nHeight + ptEdit.y;
+            }
+        } else {
+            nTop = ptPanel.y + editSize.cy + ptEdit.y;
+        }
+    } else {
+        nTop = ptPanel.y;
+    }
+
+    LONG nLeft;
+    if (mosaicSize.cx < panelSize.cx) {
+        if ((editSize.cx - mosaicSize.cx) + ptEdit.x < 0) {
+            if (panelSize.cx < ptEdit.x + mosaicSize.cx) {
+                nLeft = ptPanel.x + (panelSize.cx - mosaicSize.cx) / 2;
+            } else {
+                nLeft = ptPanel.x + ptEdit.x;
+            }
+        } else {
+            nLeft = (ptPanel.x - mosaicSize.cx) + editSize.cx + ptEdit.x;
+        }
+    } else {
+        nLeft = ptPanel.x;
+    }
+
+    return CRect(nLeft, nTop, nLeft + mosaicSize.cx, nTop + nHeight);
 }
 
 // 0x7C3140
