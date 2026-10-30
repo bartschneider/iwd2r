@@ -659,6 +659,7 @@ public:
     SHORT EquipMostDamagingMelee();
     SHORT EquipRanged();
     SHORT GiveItem(CGameAIBase* pTarget);
+    SHORT StartStore(CGameSprite* pTarget);
     const CAIObjectType& GetLiveAIType();
     SHORT GetCasterLevel(CSpell* pSpell, BYTE nClass, DWORD nSpecialization);
     SHORT sub_75F240();
@@ -982,11 +983,11 @@ public:
     /* 5694 */ CPoint m_targetPoint;
     /* 569C */ short m_targetAreaSize;
     /* 569E */ BYTE m_nTempSelectedWeapon;
-    /* 56DF */ BYTE m_nTempSelectedWeaponAbility;
     /* 56A0 */ CButtonData m_currentUseButton;
+    /* 56DC */ CResRef m_dialog;
+    /* 56DF */ BYTE m_nTempSelectedWeaponAbility;
     /* 56E4 */ CResRef field_56E4;
     /* 56EC */ BOOLEAN m_sequenceTest;
-    /* 56DC */ CResRef m_dialog;
     /* 56EE */ STR_RES m_speech[64];
     /* 70EE */ int field_70EE;
     /* 70F2 */ int field_70F2;

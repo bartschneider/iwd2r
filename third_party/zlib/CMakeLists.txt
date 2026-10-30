@@ -3,6 +3,9 @@ include(FetchContent)
 FetchContent_Declare(zlib
     GIT_REPOSITORY "https://github.com/madler/zlib"
     GIT_TAG "v1.3.1"
+    # zlib's own CMake renames zconf.h inside its checkout, so a git update to a
+    # new tag cannot stash over it: a folder per version gets a clean clone.
+    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/zlib-src-v1.3.1"
 )
 
 FetchContent_GetProperties(zlib)
