@@ -4709,12 +4709,9 @@ void CScreenWorld::LeaveAreaLuaPanic(CPoint ptLocation, SHORT nDirection, CStrin
         pSprite->FeedBack(CGameSprite::FEEDBACK_CHARACTER_CONTROL_SEIZURE, 0, 0, 0, -1, 0, 0);
         pSprite->m_cLastSpriteUpdate.Initialize(TRUE);
 
-        CAIAction action(CAIAction::LEAVEAREALUA, sAreaName, ptLocation, 0);
-        action.m_specificID2 = 1;
-        // The original's inlined constructor zeroes m_specificID3; ours
-        // (CAIAction::CAIAction(SHORT, const CString&, CPoint, LONG)) zeroes
-        // m_specificID2 instead (a pre-existing port bug), so set it here.
-        action.m_specificID3 = 0;
+        // The 0x5BC220 constructor, which the exe inlines here (SetString1 at
+        // 0x6948B4; m_specificID3 and m_internalFlags zeroed, m_specificID2 = 1).
+        CAIAction action(CAIAction::LEAVEAREALUA, sAreaName, ptLocation, 0, 1);
 
         pSprite->ClearActions(FALSE);
         pSprite->m_interrupt = TRUE;
