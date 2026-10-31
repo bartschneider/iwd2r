@@ -1599,13 +1599,14 @@ checkpoint sor_l12_world
 key R
 wait 60
 checkpoint sor_level_check
-# Export (314,373) -> popup 13.  The name edit (397,283) PRE-FILLS with
-# the 7-char character name Ryssc12 (launch 1 wrote RYSSC12.CHR with the
-# unmodified fill); 8x BACK clears it, then Ryssc12C.  The mixed-case
-# typed name never matches the upper-cased on-disk export list, so a
-# stale RYSSC12C.CHR is overwritten directly (no overwrite popup).  Done
-# (467,465) writes RYSSC12C.CHR into the oracle game copy Characters
-# folder (CInfGame::CharacterExport, src/CInfGame.cpp:3049).
+# Export (314,373) -> popup 13.  ResetExportPanel sets the edit EMPTY
+# (src/CScreenCharacter.cpp:1088); type Ryssc12C.  Done (467,465) then hits
+# the "Overwrite existing character?" prompt (popup 10 — the typed name
+# upper-cases onto the stale attempt-1 RYSSC12C.CHR), so Overwrite
+# (click 329 291, src/CScreenCharacter.cpp:7335/7374
+# CharacterExport(nCharacterId, field_176E)) writes the live level-12
+# marshal over RYSSC12C.CHR in the oracle game copy Characters folder
+# (CInfGame::CharacterExport, src/CInfGame.cpp:3049).
 click 314 373
 wait 30
 checkpoint export_popup
@@ -1634,7 +1635,8 @@ click 467 465
 wait 90
 checkpoint exported
 shot exported
-key ESCAPE
+# Overwrite the stale RYSSC12C on popup 10 (attempt-3 ruling).
+click 329 291
 wait 60
 checkpoint world_end
 quit
