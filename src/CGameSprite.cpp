@@ -10227,6 +10227,139 @@ void CGameSprite::sub_71A550(CButtonData buttonData, BOOLEAN firstCall)
     }
 }
 
+// 0x7500F0
+SHORT CGameSprite::Rest()
+{
+    // The magical rest effect goes through the message handler like every
+    // other effect application.
+    ITEM_EFFECT effect;
+    CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_MAGICAL_REST);
+    // The original reads the duration type from a global (0x8491aa) that
+    // holds 1.
+    effect.durationType = 1;
+    CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, GetPos(), GetId(),
+        CPoint(-1, -1));
+    CMessage* pMessage = new CMessageAddEffect(pEffect, GetId(), GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+
+    RemovePortraitIcon(0x27);
+    field_722A = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    CAbilityId ability;
+    ability.m_itemType = 1; // spell
+
+    for (UINT nClass = 0; nClass < CSPELLLIST_NUM_CLASSES; nClass++) {
+        CGameSpriteGroupedSpellList& spells = m_spells.m_spellsByClass[nClass];
+
+        for (UINT nLevel = 0; nLevel < spells.m_nHighestLevel; nLevel++) {
+            CGameSpriteSpellList& levelList = spells.m_lists[nLevel];
+
+            if (nClass == 0 || nClass == 5) {
+                // Bard and sorcerer lists are restored per level.
+                INT changeAmount = (INT)levelList.field_14 - (INT)levelList.field_18;
+                if (changeAmount > 0) {
+                    spells.sub_726150(nLevel, 0, TRUE);
+                    ability.m_nClass = pGame->GetSpellcasterClass(nClass);
+                    ability.field_1D = (unsigned char)(nLevel + 1);
+                    ability.field_1E = 0;
+                    for (UINT j = 0; j < levelList.m_List.size(); j++) {
+                        ability.m_res = pGame->m_spells.Get636(levelList.m_List[j].m_nID);
+                        CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+                    }
+                }
+            } else {
+                for (UINT j = 0; j < levelList.m_List.size(); j++) {
+                    CGameSpriteSpellListEntry& entry = levelList.m_List[j];
+                    INT changeAmount = (INT)entry.field_4 - (INT)entry.field_8;
+                    if (changeAmount > 0) {
+                        spells.sub_726060(entry.m_nID, nLevel, 0, TRUE);
+                        ability.m_res = pGame->m_spells.Get636(entry.m_nID);
+                        ability.m_nClass = pGame->GetSpellcasterClass(nClass);
+                        ability.field_1D = (unsigned char)(nLevel + 1);
+                        ability.field_1E = 0;
+                        CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+                    }
+                }
+            }
+        }
+    }
+
+    // Domain spells. The list restore runs for every entry; the quick list
+    // update only when a use was actually regained.
+    for (UINT nLevel = 0; nLevel < m_domainSpells.m_nHighestLevel; nLevel++) {
+        CGameSpriteSpellList& levelList = m_domainSpells.m_lists[nLevel];
+
+        for (UINT j = 0; j < levelList.m_List.size(); j++) {
+            CGameSpriteSpellListEntry& entry = levelList.m_List[j];
+            INT changeAmount = (INT)entry.field_4 - (INT)entry.field_8;
+            m_domainSpells.sub_726060(entry.m_nID, nLevel, 0, TRUE);
+            if (changeAmount > 0) {
+                ability.m_res = pGame->m_spells.Get636(entry.m_nID);
+                ability.field_1D = (unsigned char)(nLevel + 1);
+                ability.m_nClass = CAIOBJECTTYPE_C_CLERIC;
+                ability.field_1E = pGame->GetRuleTables().GetSpecializationIndex(
+                    CAIOBJECTTYPE_C_CLERIC, m_baseStats.m_specialization);
+                CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+            }
+        }
+    }
+
+    // Innate abilities.
+    ability.m_nClass = 0;
+    ability.field_1D = 0;
+    ability.field_1E = 0;
+    for (UINT j = 0; j < m_innateSpells.m_List.size(); j++) {
+        CGameSpriteSpellListEntry& entry = m_innateSpells.m_List[j];
+        INT changeAmount = (INT)entry.field_4 - (INT)entry.field_8;
+        m_innateSpells.sub_725C50(entry.m_nID, 0, TRUE);
+        if (changeAmount > 0) {
+            ability.m_res = pGame->m_innateSpells.Get636(entry.m_nID);
+            CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+        }
+    }
+
+    m_shapeshifts.sub_725D30(0, TRUE);
+
+    // Items with a recharge-on-rest ability get their use counts refilled.
+    for (BYTE nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
+        CItem* pItem = m_equipment.m_items[nSlot];
+        if (nSlot == CGameSpriteEquipment::SLOT_FIST || pItem == NULL) {
+            continue;
+        }
+
+        for (INT nAbility = 0; nAbility < pItem->GetAbilityCount(); nAbility++) {
+            pItem->Demand();
+            ITEM_ABILITY* pAbility = pItem->GetAbility(nAbility);
+            if (pAbility != NULL && (pAbility->abilityFlags & 0x800) != 0) {
+                WORD nOldUseCount = pItem->GetUsageCount(nAbility);
+                pItem->SetUsageCount(nAbility, pAbility->maxUsageCount);
+
+                CAbilityId itemAbility;
+                itemAbility.m_itemType = 2; // item
+                itemAbility.m_itemNum = nSlot;
+                itemAbility.m_abilityNum = nAbility;
+                CheckQuickLists(&itemAbility,
+                    pItem->GetUsageCount(nAbility) - nOldUseCount,
+                    FALSE,
+                    FALSE);
+            }
+            pItem->Release();
+        }
+    }
+
+    // NOTE: The original tests the service provider (chitin +0x96E), not
+    // the session.
+    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
+        || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
+        CMessage* pUpdate = new CMessageSpriteUpdate(this, GetId(), GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pUpdate, FALSE);
+    }
+
+    return ACTION_DONE;
+}
+
 // 0x71ABA0
 void CGameSprite::CheckQuickLists(CAbilityId* ability, SHORT changeAmount, BOOL remove, BOOL removeSpellIfZero)
 {
@@ -12435,7 +12568,7 @@ void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 }
 
 // 0x723BF0
-void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2) // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     // dword_8E752C counts how many party members are currently hidden, so it
     // only moves on a real transition.
@@ -13765,8 +13898,7 @@ SHORT CGameSprite::ExecuteAction()
         goto done;
     case 96:
         // Rest
-        // TODO: 0x729E9F-0x729EAF not ported (0x7500F0).
-        returnValue = ACTION_ERROR;
+        returnValue = Rest();
         goto done;
     case 97:
         // UseItemPoint
@@ -15390,7 +15522,7 @@ void CGameSprite::CheckModal()
         // A party member looks for the secret doors around it.
         CTypedPtrList<CPtrList, LONG*> targets;
 
-        INT nSearch = sub_71F6E0();  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+        INT nSearch = sub_71F6E0(); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
         INT nRoll = CUtil::UtilRandInt(100, -m_derivedStats.m_nLuck);
         SHORT nRange = GetVisualRange() >> 1;
 
@@ -15532,15 +15664,14 @@ void CGameSprite::CheckModal()
                             pEffect->m_source.x = m_pos.x;
                             pEffect->m_source.y = m_pos.y;
                             pEffect->m_sourceID = m_id;
-                            IcewindMisc::sub_5860F0(this, pEffect);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+                            IcewindMisc::sub_5860F0(this, pEffect); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
                             // Re-tag a "Duration"-timed song effect so it expires
                             // a round later (game time + 100), keeping the
                             // per-cycle buff alive instead of letting
                             // ResolveEffect treat it as already past.
                             if (pEffect->m_durationType == 0 && pEffect->m_duration == 7) {
                                 pEffect->m_durationType = 0x1000;
-                                pEffect->m_duration =
-                                    g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime + 100;
+                                pEffect->m_duration = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime + 100;
                             }
 
                             messages.push_back(new CMessageAddEffect(pEffect, m_id, nAllyId));
@@ -15595,9 +15726,9 @@ void CGameSprite::CheckModal()
                             // "Search (detect traps) check. Search skill %d vs.
                             // trap's difficulty %d (searcher's %d INT bonus)."
                             FeedBack(FEEDBACK_ROLL, searchSkill, difficulty / 5,
-                                sub_763E40(CGAMESPRITE_SKILL_SEARCH), 39303, 0, 0);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+                                sub_763E40(CGAMESPRITE_SKILL_SEARCH), 39303, 0, 0); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
                             if (difficulty <= searchSkill * 7 && difficulty != 100
-                                && (pDoor->m_dwFlags & 0x8)) {  // TRAPDETECTABLE
+                                && (pDoor->m_dwFlags & 0x8)) { // TRAPDETECTABLE
                                 CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
                                 CMessage* message = new CMessageSetTrigger(trapFound,
                                     pDoor->m_id, m_id);
@@ -15622,7 +15753,7 @@ void CGameSprite::CheckModal()
                         if (pTrigger->m_trapDetected == 0) {
                             int difficulty = pTrigger->m_trapDetectionDifficulty;
                             if (difficulty <= searchSkill * 7 && difficulty != 100
-                                && (pTrigger->m_dwFlags & 0x8)) {  // TRAPDETECTABLE
+                                && (pTrigger->m_dwFlags & 0x8)) { // TRAPDETECTABLE
                                 CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
                                 CMessage* message = new CMessageSetTrigger(trapFound,
                                     pTrigger->m_id, m_id);
@@ -24446,7 +24577,7 @@ SHORT CGameSprite::RemoveTraps(CGameAIBase* pTarget)
 
     int skill = static_cast<char>(m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_DISABLE_DEVICE]);
     int roll = rand() % 20 + 1;
-    int skillModifier = sub_763E40(CGAMESPRITE_SKILL_DISABLE_DEVICE);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+    int skillModifier = sub_763E40(CGAMESPRITE_SKILL_DISABLE_DEVICE); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
     int check = roll + skill;
 
     if (pTarget->GetObjectType() == TYPE_DOOR
@@ -25215,7 +25346,7 @@ BOOLEAN CGameSprite::CanSaveGame(STRREF& strError)
 }
 
 // 0x75E930
-int CGameSprite::sub_75E930(int a1)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+int CGameSprite::sub_75E930(int a1) // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     // The shipped binary stubs this fighting-style feat query to zero
     // (xor eax, eax; ret 4), which disables the style-bonus branches above.
