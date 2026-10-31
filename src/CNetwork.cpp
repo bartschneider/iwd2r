@@ -2142,6 +2142,31 @@ void CNetwork::SlidingWindowReceive()
     }
 }
 
+// 0x7A77D0
+void CNetwork::SlidingWindowTimeouts()
+{
+    if (m_bConnectionEstablished == TRUE) {
+        for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+            if (m_pPlayerID[nPlayer] != 0 && m_pSlidingWindow[nPlayer].m_bInitialized == TRUE) {
+                m_pSlidingWindow[nPlayer].TimeoutCall();
+                if (m_nHostPlayer == m_nLocalPlayer) {
+                    if (m_nHostPlayer != nPlayer && m_pSlidingWindow[nPlayer].m_nPlayerTimeout < GetTickCount()) {
+                        KickPlayer(m_pPlayerID[nPlayer], FALSE);
+                    }
+                } else {
+                    if (m_nHostPlayer == nPlayer && m_pSlidingWindow[nPlayer].m_nPlayerTimeout < GetTickCount()) {
+                        g_pChitin->OnMultiplayerSessionToClose();
+                        SleepEx(1000, FALSE);
+                        if (m_bConnectionEstablished == TRUE) {
+                            OnCloseSession();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // 0x7A7890
 BYTE* CNetwork::FetchFrame(PLAYER_ID& dpIDFrom, DWORD& dwSize)
 {
