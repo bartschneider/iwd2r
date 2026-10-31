@@ -99,4 +99,24 @@ public:
     /* 0332 */ BOOLEAN m_bDelivered;
 };
 
+// The Icewind Dale II Scorcher. WillScarlettOhara models the family as
+// IcewindCProjectileScorcher < IcewindCProjectileTravellingVFX <
+// CProjectileTravelling; the exe ctor 0x57AEB0 bases it on
+// CProjectileSingleTarget (0x578110) with CResRef("AScorcT"), which is the
+// anchor used here. Only the static direction-table builder is imported so
+// far; the instance side (GatherTargets 0x57BE80, Strike 0x57C1D0, members
+// 02AE-02D2) is not part of that import.
+class IcewindCProjectileScorcher : public CProjectileSingleTarget {
+public:
+    // 0x57BBC0. Native static direction table.
+    static void InitializeOffsets();
+
+    // exe: _Myfirst/_Mylast/_Myend at 0x8E52D4/0x8E52D8/0x8E52DC; the vector
+    // helper thunks (0x582210 size, 0x57AB70 insert, 0x582230 erase) are
+    // called with the enclosing static base 0x8E52D0.
+    static std::vector<CPoint> m_offsets;
+    // 0x8E52E8
+    static BYTE m_offsetsInitialized;
+};
+
 #endif /* CPROJECTILESINGLETARGET_H_ */
