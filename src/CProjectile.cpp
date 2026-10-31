@@ -925,38 +925,6 @@ void CProjectileSprayCell::AddVisualToArea(CGameArea* pArea, const CPoint& pos, 
     }
 }
 
-// 0x533F40
-void CProjectileFollowUp::Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType)
-{
-    m_sourceId = source;
-    m_targetId = target;
-    m_targetPos = targetPos;
-    m_nDirection = 0;
-    POSITION pos = m_effectList.GetHeadPosition();
-    while (pos) {
-        CGameEffect* copy = m_effectList.GetNext(pos)->Copy();
-        copy->m_slotNum = m_nextProjectile->m_projectileType;
-        m_nextProjectile->m_effectList.AddTail(copy);
-    }
-    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->Add(&m_id, this, INFINITE);
-    if (rc != CGameObjectArray::SUCCESS) {
-        delete this;
-        return;
-    }
-    CGameObject::AddToArea(pArea, m_targetPos, nHeight, CGameObject::LIST_FRONT);
-    PlaySound(m_fireSoundRef, m_loopFireSound, FALSE);
-    m_pArea = pArea;
-    m_nextProjectile->m_callBackProjectile = m_id;
-    m_launchHeight = nHeight;
-    m_ready = FALSE;
-    m_nextProjectile->Fire(pArea, source, target, targetPos, nHeight, nType);
-    m_nextProjectile = CProjectile::DecodeProjectile(static_cast<WORD>(m_childType + 1), NULL, 0);
-    m_nextProjectile->m_nSpellLevel = m_nSpellLevel;
-    m_nextProjectile->m_sourceRes = m_sourceRes;
-    --m_remainingShots;
-    m_delay = m_interval;
-}
-
 // The exe keeps these in the zero-initialized virtual tail of .data — the
 // raw range ends at 0x8C6000, and the elements sit at 0x8E52D4/0x8E52D8/
 // 0x8E52DC with the flag at 0x8E52E8 — so the loaded image starts them all
