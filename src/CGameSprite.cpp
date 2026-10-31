@@ -18865,15 +18865,27 @@ SHORT CGameSprite::Swing(CGameSprite* target)
                             delete pEffect;
                             break;
                         case 4:
+                            GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, NULL);
+                            delete pEffect;
+                            break;
                         case 5:
+                            GetArea()->ApplyEffectToSprites(pEffect, TRUE, FALSE, 0, NULL);
+                            delete pEffect;
+                            break;
                         case 6:
+                            GetArea()->ApplyEffectToSprites(pEffect, FALSE, TRUE, GetAIType().m_nSpecific, NULL);
+                            delete pEffect;
+                            break;
                         case 7:
+                            // NOTE: the original skips the call when the
+                            // target is gone.
+                            if (target != NULL) {
+                                GetArea()->ApplyEffectToSprites(pEffect, FALSE, TRUE, target->GetAIType().m_nSpecific, NULL);
+                            }
+                            delete pEffect;
+                            break;
                         case 8:
-                            // TODO: The original gives the effect to the area's
-                            // creatures through CGameArea 0x46E130 (not ported):
-                            // 4 all, 5 the party, 6 those of the caster's
-                            // specific, 7 those of the target's specific, 8 all
-                            // but the caster.
+                            GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, this);
                             delete pEffect;
                             break;
                         default:
@@ -18903,15 +18915,27 @@ SHORT CGameSprite::Swing(CGameSprite* target)
                                 delete pEffect;
                                 break;
                             case 4:
+                                GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, NULL);
+                                delete pEffect;
+                                break;
                             case 5:
+                                GetArea()->ApplyEffectToSprites(pEffect, TRUE, FALSE, 0, NULL);
+                                delete pEffect;
+                                break;
                             case 6:
+                                GetArea()->ApplyEffectToSprites(pEffect, FALSE, TRUE, GetAIType().m_nSpecific, NULL);
+                                delete pEffect;
+                                break;
                             case 7:
+                                // NOTE: the original skips the call when the
+                                // target is gone.
+                                if (target != NULL) {
+                                    GetArea()->ApplyEffectToSprites(pEffect, FALSE, TRUE, target->GetAIType().m_nSpecific, NULL);
+                                }
+                                delete pEffect;
+                                break;
                             case 8:
-                                // TODO: The original gives the effect to the area's
-                                // creatures through CGameArea 0x46E130 (not ported):
-                                // 4 all, 5 the party, 6 those of the caster's
-                                // specific, 7 those of the target's specific, 8 all
-                                // but the caster.
+                                GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, this);
                                 delete pEffect;
                                 break;
                             default:
@@ -21753,12 +21777,23 @@ SHORT CGameSprite::Spell(CGameAIBase* target)
                 delete pEffect;
                 break;
             case 4:
+                GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, NULL);
+                delete pEffect;
+                break;
             case 5:
+                GetArea()->ApplyEffectToSprites(pEffect, TRUE, FALSE, 0, NULL);
+                delete pEffect;
+                break;
             case 6:
+                GetArea()->ApplyEffectToSprites(pEffect, FALSE, TRUE, GetAIType().m_nSpecific, NULL);
+                delete pEffect;
+                break;
             case 7:
+                GetArea()->ApplyEffectToSprites(pEffect, FALSE, TRUE, target->GetAIType().m_nSpecific, NULL);
+                delete pEffect;
+                break;
             case 8:
-                // TODO: The original gives the effect to the area's
-                // creatures through CGameArea 0x46E130 (not ported).
+                GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, this);
                 delete pEffect;
                 break;
             default:
@@ -22356,14 +22391,24 @@ SHORT CGameSprite::SpellPoint()
                 delete pEffect;
                 break;
             case 4:
+                GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, NULL);
+                delete pEffect;
+                break;
             case 5:
+                GetArea()->ApplyEffectToSprites(pEffect, TRUE, FALSE, 0, NULL);
+                delete pEffect;
+                break;
             case 6:
+                GetArea()->ApplyEffectToSprites(pEffect, FALSE, TRUE, GetAIType().m_nSpecific, NULL);
+                delete pEffect;
+                break;
             case 7:
+                // NOTE: no target at a point; the original just deletes it
+                // (jump table 0x7446D0 -> 0x74451A).
+                delete pEffect;
+                break;
             case 8:
-                // TODO: The original gives the effect to the area's
-                // creatures through CGameArea 0x46E130 (not ported), with a
-                // distinct argument shape per target type
-                // (0x744509/0x744520/0x74452A/0x74453C).
+                GetArea()->ApplyEffectToSprites(pEffect, FALSE, FALSE, 0, this);
                 delete pEffect;
                 break;
             default:
@@ -24807,12 +24852,25 @@ void CGameSprite::sub_755A70(CSpell* pSpell, const SPELL_ABILITY* pAbility, cons
             delete pCastingEffect;
             break;
         case 4:
+            GetArea()->ApplyEffectToSprites(pCastingEffect, FALSE, FALSE, 0, NULL);
+            delete pCastingEffect;
+            break;
         case 5:
+            GetArea()->ApplyEffectToSprites(pCastingEffect, TRUE, FALSE, 0, NULL);
+            delete pCastingEffect;
+            break;
         case 6:
+            GetArea()->ApplyEffectToSprites(pCastingEffect, FALSE, TRUE, GetAIType().m_nSpecific, NULL);
+            delete pCastingEffect;
+            break;
         case 7:
+            // NOTE: no target here; the original matches the caster's own
+            // specific, read through GetAIType (0x756385).
+            GetArea()->ApplyEffectToSprites(pCastingEffect, FALSE, TRUE, GetAIType().m_nSpecific, NULL);
+            delete pCastingEffect;
+            break;
         case 8:
-            // TODO: The original gives the effect to the area's creatures
-            // through CGameArea 0x46E130 (not ported).
+            GetArea()->ApplyEffectToSprites(pCastingEffect, FALSE, FALSE, 0, this);
             delete pCastingEffect;
             break;
         default:
