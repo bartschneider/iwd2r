@@ -6,6 +6,7 @@
 #include "CCreatureFile.h"
 #include "CGameContainer.h"
 #include "CGameDoor.h"
+#include "CGameEffect.h"
 #include "CGameObject.h"
 #include "CGameSound.h"
 #include "CGameSpawning.h"
@@ -15,6 +16,7 @@
 #include "CGameTrigger.h"
 #include "CInfCursor.h"
 #include "CInfGame.h"
+#include "CMessage.h"
 #include "CObjectMarker.h"
 #include "CPathSearch.h"
 #include "CProjectile.h"
@@ -1735,6 +1737,98 @@ LONG CGameArea::sub_46DDC0(INT x, INT y, const CAIObjectType& type, SHORT range,
     }
 
     return nIds[nNearest];
+}
+
+// 0x46E130
+void CGameArea::ApplyEffectToSprites(CGameEffect* pEffect, BOOL bNotParty, BOOL bMatchSpecific, BYTE nSpecific, CGameObject* pExclude)
+{
+    // Hands a copy of pEffect to every sprite of the area through a
+    // CMessageAddEffect, skipping it per the filters. The effect's target
+    // types 4-8 of the spell dispatchers all land here:
+    //   4 all creatures, 5 all but the party, 6 the caster's AI specific,
+    //   7 the target's AI specific, 8 all but the caster.
+    POSITION pos = m_lVertSort.GetHeadPosition();
+    while (pos != NULL) {
+        LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
+
+        CGameObject* pObject;
+        BYTE rc;
+        do {
+            rc = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+
+        if (rc != CGameObjectArray::SUCCESS) {
+            continue;
+        }
+
+        if (pObject->GetObjectType() != CGameObject::TYPE_SPRITE) {
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+        if (pSprite->GetBaseStats()->field_294 == 1) {
+            // The hidden (fork: stealth) flag set: not a candidate.
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        if (bNotParty && m_pGame->GetCharacterPortraitNum(nId) != -1) {
+            // A party member, which the callers of this path want skipped.
+            // NOTE: The original continues the party check on a DWORD at
+            // CInfGame+0x43D8 (m_gameSave.field_1AC, the fork's arena flag):
+            // when it is zero it drops the sprite WITHOUT the share release
+            // of the other skip paths; when it is non-zero it takes the
+            // share again and goes on to the network test below. A
+            // THREAD_ASYNCH share does no bookkeeping, so the missing
+            // release is unobservable; we keep one release per skip.
+            if (m_pGame->m_gameSave.field_1AC == 0) {
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                continue;
+            }
+
+            BYTE rcParty = m_pGame->GetObjectArray()->GetShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                &pObject,
+                INFINITE);
+            if (rcParty != CGameObjectArray::SUCCESS
+                || g_pChitin->cNetwork.m_nServiceProvider == 0
+                || g_pChitin->cNetwork.m_idLocalPlayer == pObject->m_remotePlayerID) {
+                m_pGame->GetObjectArray()->ReleaseShare(nId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+                continue;
+            }
+        }
+
+        if (bMatchSpecific && pObject->GetAIType().m_nSpecific != nSpecific) {
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        if (pExclude != NULL && pObject == pExclude) {
+            m_pGame->GetObjectArray()->ReleaseShare(nId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        // NOTE: The original does not release the share on this path; with
+        // THREAD_ASYNCH the release is a no-op, so it does not matter.
+        CMessageAddEffect* pMessage = new CMessageAddEffect(pEffect->Copy(), nId, nId);
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+    }
 }
 
 // 0x46F5A0
