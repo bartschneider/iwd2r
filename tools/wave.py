@@ -402,9 +402,21 @@ def kept_evidence(worktree, merge_base, address, name, text):
         at = subprocess.run(['git', '-C', worktree, 'show',
                              f'{merge_base}:{_evidence_rel(address)}'],
                             capture_output=True, text=True)
-        if at.returncode == 0 and at.stdout == text:
+        if at.returncode == 0 and _without_waiver(at.stdout) == _without_waiver(text):
             return 'unchanged since the merge base'
     return None
+
+
+def _without_waiver(text):
+    """An evidence text minus its front matter's parity_waiver line: a waiver
+    records a parity reading, not a measurement, so a batch that adds or
+    rewords one leaves evidence that stood at the merge base standing
+    (2026-10-30: i051/i052 added waivers to kind-replay ExecuteAction files)."""
+    head, sep, rest = text.partition('\n---\n')
+    if not sep:
+        return text
+    lines = [l for l in head.split('\n') if not l.startswith('parity_waiver:')]
+    return '\n'.join(lines) + sep + rest
 
 
 def _evidence_at(repo, ref, address):

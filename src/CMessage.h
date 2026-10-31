@@ -620,6 +620,8 @@ public:
     SHORT GetCommType() override;
     BYTE GetMsgType() override;
     BYTE GetMsgSubType() override;
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
     /* 000C */ CItem m_item;
@@ -1112,6 +1114,7 @@ public:
     BYTE GetMsgType() override { return CBaldurMessage::MSG_TYPE_CMESSAGE; }
     // NOTE: The BYTE at 0x84CF0C (53).
     BYTE GetMsgSubType() override { return 53; }
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
     BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
@@ -1652,6 +1655,8 @@ public:
     SHORT GetCommType() override;
     BYTE GetMsgType() override;
     BYTE GetMsgSubType() override;
+    void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
     /* 000C */ WORD m_projectileType;

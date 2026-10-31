@@ -3299,7 +3299,7 @@ void CScreenWorld::ConfigureContainer()
     // Open sound + container graphic (control 0x32) by container type.
     CResRef cContainerBam;
     switch (pGame->GetContainerType(pGame->m_iContainer)) {
-    case 1:  PlayGUISound(CResRef("GAM_12A"));  cContainerBam = CResRef("CONTSACK"); break;
+    case 1:  PlayGUISound(CResRef("GAM_12A1")); cContainerBam = CResRef("CONTSACK"); break;
     case 2:  PlayGUISound(CResRef("AMB_D05A")); cContainerBam = CResRef("CONTCHST"); break;
     case 3:  PlayGUISound(CResRef("AMB_D05A")); cContainerBam = CResRef("CONTDRWR"); break;
     case 4:  PlayGUISound(CResRef("AMB_D18"));  cContainerBam = CResRef("CONTGRND"); break;

@@ -8141,9 +8141,107 @@ CGameEffect* CGameEffectSpellMemorizationMage::Copy()
 // 0x4B1960
 BOOL CGameEffectSpellMemorizationMage::ApplyEffect(CGameSprite* pSprite)
 {
-    // TODO: Incomplete. Not ported yet (the wizard's extra memorisation
-    // slots); until then the override only keeps the effect from reaching the
-    // asserting base ApplyEffect.
+    const CAIObjectType& typeAI = pSprite->GetAIType();
+
+    // NOTE: The original calls CDerivedStats::sub_447B00 once, with the BARD
+    // class, and reuses the returned list for every class walk below.
+    CGameSpriteGroupedSpellList* pSpells = pSprite->m_derivedStats.sub_447B00(CAIObjectType::C_BARD);
+
+    if (typeAI.IsClassValid(CAIObjectType::C_BARD)) {
+        DWORD nMask = 1;
+
+        for (UINT nLevel = 0; nLevel < pSpells->m_nHighestLevel; nLevel++, nMask <<= 1) {
+            if ((m_dwFlags & nMask) == 0) {
+                continue;
+            }
+
+            CGameSpriteSpellList* pList = pSpells->GetSpellsAtLevel(nLevel);
+            if (pList->m_List.empty()) {
+                continue;
+            }
+
+            for (UINT nIndex = 0; nIndex < pList->m_List.size(); nIndex++) {
+                CGameSpriteSpellListEntry* pEntry = pList->Get(nIndex);
+                if (pEntry->field_4 == 0) {
+                    continue;
+                }
+
+                UINT nID = pEntry->m_nID;
+
+                // NOTE: Inlined CSpellResRefList::Get.
+                const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+
+                pSprite->AddKnownSpell(CAIObjectType::C_BARD, nLevel, resRef, m_effectAmount, m_effectAmount, 0);
+            }
+        }
+    }
+
+    if (typeAI.IsClassValid(CAIObjectType::C_SORCERER)) {
+        // NOTE: The original copies the grouped spell list through
+        // CGameSprite::GetSpells (0x724730) and 0x444D10 and destroys the copy
+        // (0x7E78DE); the result is unused, so it is not reproduced.
+        DWORD nMask = 1;
+
+        for (UINT nLevel = 0; nLevel < pSpells->m_nHighestLevel; nLevel++, nMask <<= 1) {
+            if ((m_dwFlags & nMask) == 0) {
+                continue;
+            }
+
+            CGameSpriteSpellList* pList = pSpells->GetSpellsAtLevel(nLevel);
+            if (pList->m_List.empty()) {
+                continue;
+            }
+
+            for (UINT nIndex = 0; nIndex < pList->m_List.size(); nIndex++) {
+                CGameSpriteSpellListEntry* pEntry = pList->Get(nIndex);
+                if (pEntry->field_4 == 0) {
+                    continue;
+                }
+
+                UINT nID = pEntry->m_nID;
+
+                // NOTE: Inlined CSpellResRefList::Get.
+                const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+
+                pSprite->AddKnownSpell(CAIObjectType::C_SORCERER, nLevel, resRef, m_effectAmount, m_effectAmount, 0);
+            }
+        }
+    }
+
+    if (typeAI.IsClassValid(CAIObjectType::C_WIZARD)) {
+        // NOTE: The original copies the grouped spell list through
+        // CGameSprite::GetSpells (0x724730) and 0x444D10 and destroys the copy
+        // (0x7E78DE); the result is unused, so it is not reproduced.
+        DWORD nMask = 1;
+
+        for (UINT nLevel = 0; nLevel < pSpells->m_nHighestLevel; nLevel++, nMask <<= 1) {
+            if ((m_dwFlags & nMask) == 0) {
+                continue;
+            }
+
+            CGameSpriteSpellList* pList = pSpells->GetSpellsAtLevel(nLevel);
+            if (pList->m_List.empty()) {
+                continue;
+            }
+
+            for (UINT nIndex = 0; nIndex < pList->m_List.size(); nIndex++) {
+                CGameSpriteSpellListEntry* pEntry = pList->Get(nIndex);
+                if (pEntry->field_4 == 0) {
+                    continue;
+                }
+
+                UINT nID = pEntry->m_nID;
+
+                // NOTE: Inlined CSpellResRefList::Get.
+                const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+
+                pSprite->AddKnownSpell(CAIObjectType::C_WIZARD, nLevel, resRef, m_effectAmount, m_effectAmount, 0);
+            }
+        }
+    }
+
+    // NOTE: The original does not set m_done.
+
     return TRUE;
 }
 
@@ -9537,9 +9635,139 @@ CGameEffect* CGameEffectSpellMemoizationCleric::Copy()
 // 0x4B41A0
 BOOL CGameEffectSpellMemoizationCleric::ApplyEffect(CGameSprite* pSprite)
 {
-    // TODO: Incomplete. Not ported yet (the priest's extra memorisation
-    // slots); until then the override only keeps the effect from reaching the
-    // asserting base ApplyEffect.
+    const CAIObjectType& typeAI = pSprite->GetAIType();
+
+    // NOTE: The original calls CDerivedStats::sub_447B00 once, with the
+    // CLERIC class, and reuses the returned list for every class walk below.
+    CGameSpriteGroupedSpellList* pSpells = pSprite->m_derivedStats.sub_447B00(CAIObjectType::C_CLERIC);
+
+    if (typeAI.IsClassValid(CAIObjectType::C_CLERIC)) {
+        DWORD nMask = 1;
+
+        for (UINT nLevel = 0; nLevel < pSpells->m_nHighestLevel; nLevel++, nMask <<= 1) {
+            if ((m_dwFlags & nMask) == 0) {
+                continue;
+            }
+
+            CGameSpriteSpellList* pList = pSpells->GetSpellsAtLevel(nLevel);
+            if (pList->m_List.empty()) {
+                continue;
+            }
+
+            for (UINT nIndex = 0; nIndex < pList->m_List.size(); nIndex++) {
+                CGameSpriteSpellListEntry* pEntry = pList->Get(nIndex);
+                if (pEntry->field_4 == 0) {
+                    continue;
+                }
+
+                UINT nID = pEntry->m_nID;
+
+                // NOTE: Inlined CSpellResRefList::Get.
+                const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+
+                pSprite->AddKnownSpell(CAIObjectType::C_CLERIC, nLevel, resRef, m_effectAmount, m_effectAmount, 0);
+            }
+        }
+    }
+
+    if (typeAI.IsClassValid(CAIObjectType::C_DRUID)) {
+        // NOTE: The original copies the grouped spell list through
+        // CGameSprite::GetSpells (0x724730) and 0x444D10 and destroys the copy
+        // (0x7E78DE); the result is unused, so it is not reproduced.
+        DWORD nMask = 1;
+
+        for (UINT nLevel = 0; nLevel < pSpells->m_nHighestLevel; nLevel++, nMask <<= 1) {
+            if ((m_dwFlags & nMask) == 0) {
+                continue;
+            }
+
+            CGameSpriteSpellList* pList = pSpells->GetSpellsAtLevel(nLevel);
+            if (pList->m_List.empty()) {
+                continue;
+            }
+
+            for (UINT nIndex = 0; nIndex < pList->m_List.size(); nIndex++) {
+                CGameSpriteSpellListEntry* pEntry = pList->Get(nIndex);
+                if (pEntry->field_4 == 0) {
+                    continue;
+                }
+
+                UINT nID = pEntry->m_nID;
+
+                // NOTE: Inlined CSpellResRefList::Get.
+                const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+
+                pSprite->AddKnownSpell(CAIObjectType::C_DRUID, nLevel, resRef, m_effectAmount, m_effectAmount, 0);
+            }
+        }
+    }
+
+    if (typeAI.IsClassValid(CAIObjectType::C_PALADIN)) {
+        // NOTE: The original copies the grouped spell list through
+        // CGameSprite::GetSpells (0x724730) and 0x444D10 and destroys the copy
+        // (0x7E78DE); the result is unused, so it is not reproduced.
+        DWORD nMask = 1;
+
+        for (UINT nLevel = 0; nLevel < pSpells->m_nHighestLevel; nLevel++, nMask <<= 1) {
+            if ((m_dwFlags & nMask) == 0) {
+                continue;
+            }
+
+            CGameSpriteSpellList* pList = pSpells->GetSpellsAtLevel(nLevel);
+            if (pList->m_List.empty()) {
+                continue;
+            }
+
+            for (UINT nIndex = 0; nIndex < pList->m_List.size(); nIndex++) {
+                CGameSpriteSpellListEntry* pEntry = pList->Get(nIndex);
+                if (pEntry->field_4 == 0) {
+                    continue;
+                }
+
+                UINT nID = pEntry->m_nID;
+
+                // NOTE: Inlined CSpellResRefList::Get.
+                const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+
+                pSprite->AddKnownSpell(CAIObjectType::C_PALADIN, nLevel, resRef, m_effectAmount, m_effectAmount, 0);
+            }
+        }
+    }
+
+    if (typeAI.IsClassValid(CAIObjectType::C_RANGER)) {
+        // NOTE: The original copies the grouped spell list through
+        // CGameSprite::GetSpells (0x724730) and 0x444D10 and destroys the copy
+        // (0x7E78DE); the result is unused, so it is not reproduced.
+        DWORD nMask = 1;
+
+        for (UINT nLevel = 0; nLevel < pSpells->m_nHighestLevel; nLevel++, nMask <<= 1) {
+            if ((m_dwFlags & nMask) == 0) {
+                continue;
+            }
+
+            CGameSpriteSpellList* pList = pSpells->GetSpellsAtLevel(nLevel);
+            if (pList->m_List.empty()) {
+                continue;
+            }
+
+            for (UINT nIndex = 0; nIndex < pList->m_List.size(); nIndex++) {
+                CGameSpriteSpellListEntry* pEntry = pList->Get(nIndex);
+                if (pEntry->field_4 == 0) {
+                    continue;
+                }
+
+                UINT nID = pEntry->m_nID;
+
+                // NOTE: Inlined CSpellResRefList::Get.
+                const CResRef& resRef = g_pBaldurChitin->GetObjectGame()->m_spells.Get(nID);
+
+                pSprite->AddKnownSpell(CAIObjectType::C_RANGER, nLevel, resRef, m_effectAmount, m_effectAmount, 0);
+            }
+        }
+    }
+
+    // NOTE: The original does not set m_done.
+
     return TRUE;
 }
 
@@ -13562,7 +13790,9 @@ CGameEffect* CGameEffectNon_CumulativeLuck::Copy()
 // 0x4BAFC0
 BOOL CGameEffectNon_CumulativeLuck::ApplyEffect(CGameSprite* pSprite)
 {
-    pSprite->GetDerivedStats()->m_nLuck += static_cast<BYTE>(m_effectAmount);
+    // The exe sign-extends the amount's low byte (movsx at 0x4BAFC0), so a
+    // negative luck lowers the stat.
+    pSprite->GetDerivedStats()->m_nLuck += static_cast<signed char>(m_effectAmount);
 
     return TRUE;
 }

@@ -7653,12 +7653,13 @@
     "i051": {
       "assigned_at": "2026-10-27T06:16:12+00:00",
       "branch": "p3/wso-i051",
-      "closed_at": null,
+      "closed_at": "2026-10-30T22:17:43+00:00",
       "files": [
         "src/CAIGroup.cpp",
         "src/CMessage.cpp",
         "src/CGameAIBase.cpp"
       ],
+      "gate": "full",
       "pool": "glm",
       "rows": [
         {
@@ -7694,7 +7695,353 @@
           "their_len": 1184
         }
       ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i052": {
+      "assigned_at": "2026-10-30T19:31:25+00:00",
+      "branch": "p3/wso-i052",
+      "closed_at": "2026-10-30T21:51:47+00:00",
+      "files": [
+        "src/CProjectile.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "gate": "full",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x52DD60",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileExploding::AIUpdate",
+          "our_len": 0,
+          "their_len": 2075
+        },
+        {
+          "address": "0x57D700",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileReboundingBolt::Fire",
+          "our_len": 0,
+          "their_len": 2017
+        },
+        {
+          "address": "0x57C7B0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileChainLightning::DeliverEffects",
+          "our_len": 0,
+          "their_len": 1554
+        },
+        {
+          "address": "0x57C1D0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::Strike",
+          "our_len": 0,
+          "their_len": 1419
+        },
+        {
+          "address": "0x7A2590",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::FrameSend",
+          "our_len": 0,
+          "their_len": 1294
+        },
+        {
+          "address": "0x75E630",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::StartStore",
+          "our_len": 0,
+          "their_len": 1253
+        },
+        {
+          "address": "0x52F9E0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSkullTrap::AIUpdate",
+          "our_len": 0,
+          "their_len": 1237
+        },
+        {
+          "address": "0x5329A0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSPFLMARR::AIUpdate",
+          "our_len": 0,
+          "their_len": 1073
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i053": {
+      "assigned_at": "2026-10-30T20:04:13+00:00",
+      "branch": "p3/wso-i053",
+      "closed_at": "2026-10-30T21:07:53+00:00",
+      "files": [
+        "src/IcewindCGameEffects.cpp"
+      ],
+      "gate": "full",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x55FA10",
+          "category": "only_theirs",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectSummon::AddSummonVisualHit",
+          "our_len": 0,
+          "their_len": 558
+        },
+        {
+          "address": "0x55F930",
+          "category": "only_theirs",
+          "file": "src/IcewindCGameEffects.cpp",
+          "name": "IcewindCGameEffectSummon::PlayGroupVFX",
+          "our_len": 0,
+          "their_len": 482
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i054": {
+      "assigned_at": "2026-10-30T22:11:59+00:00",
+      "branch": "p3/wso-i054",
+      "closed_at": null,
+      "files": [
+        "src/CProjectile.cpp",
+        "src/CNetwork.cpp",
+        "src/CGameSprite.cpp"
+      ],
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x533600",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileSPBRNHND::SpawnSpray",
+          "our_len": 0,
+          "their_len": 994
+        },
+        {
+          "address": "0x7A3DF0",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetworkWindow::TimeoutCall",
+          "our_len": 0,
+          "their_len": 954
+        },
+        {
+          "address": "0x75A4B0",
+          "category": "only_theirs",
+          "file": "src/CGameSprite.cpp",
+          "name": "CGameSprite::Berserk",
+          "our_len": 0,
+          "their_len": 952
+        },
+        {
+          "address": "0x533F40",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "CProjectileFollowUp::Fire",
+          "our_len": 0,
+          "their_len": 934
+        },
+        {
+          "address": "0x57BE80",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::GatherTargets",
+          "our_len": 0,
+          "their_len": 907
+        },
+        {
+          "address": "0x7A7670",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::SlidingWindowReceive",
+          "our_len": 0,
+          "their_len": 857
+        },
+        {
+          "address": "0x57BBC0",
+          "category": "only_theirs",
+          "file": "src/CProjectile.cpp",
+          "name": "IcewindCProjectileScorcher::InitializeOffsets",
+          "our_len": 0,
+          "their_len": 717
+        },
+        {
+          "address": "0x7A77D0",
+          "category": "only_theirs",
+          "file": "src/CNetwork.cpp",
+          "name": "CNetwork::SlidingWindowTimeouts",
+          "our_len": 0,
+          "their_len": 581
+        }
+      ],
       "status": "assigned",
+      "verdicts": {}
+    },
+    "i055": {
+      "assigned_at": "2026-10-30T22:18:44+00:00",
+      "branch": "p3/wso-i055",
+      "closed_at": "2026-10-30T23:40:46+00:00",
+      "files": [
+        "src/CGameAIBase.cpp",
+        "src/CMessage.cpp"
+      ],
+      "gate": "full",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x464950",
+          "category": "only_theirs",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::PlaceItem",
+          "our_len": 0,
+          "their_len": 2082
+        },
+        {
+          "address": "0x504250",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageRemoveItem::Run",
+          "our_len": 0,
+          "their_len": 1506
+        },
+        {
+          "address": "0x5004D0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageFireProjectile::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1355
+        },
+        {
+          "address": "0x50A4D0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetVariable::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1313
+        },
+        {
+          "address": "0x4F8D60",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddItem::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1224
+        },
+        {
+          "address": "0x5154E0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage105::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1213
+        },
+        {
+          "address": "0x515670",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage105::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 1125
+        },
+        {
+          "address": "0x516910",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage117::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1070
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
+    },
+    "i056": {
+      "assigned_at": "2026-10-30T23:41:55+00:00",
+      "branch": "p3/wso-i056",
+      "closed_at": "2026-10-31T01:01:57+00:00",
+      "files": [
+        "src/CMessage.cpp"
+      ],
+      "gate": "full",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x515010",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileImmumityUpdate::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1068
+        },
+        {
+          "address": "0x516D50",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSpellLevelImmumityUpdate::MarshalMessage",
+          "our_len": 0,
+          "their_len": 969
+        },
+        {
+          "address": "0x4F8FA0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddItem::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 924
+        },
+        {
+          "address": "0x5006C0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageFireProjectile::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 840
+        },
+        {
+          "address": "0x504070",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageRemoveItem::MarshalMessage",
+          "our_len": 0,
+          "their_len": 788
+        },
+        {
+          "address": "0x516B70",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage117::Run",
+          "our_len": 0,
+          "their_len": 709
+        },
+        {
+          "address": "0x516A80",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage117::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 655
+        },
+        {
+          "address": "0x515210",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileImmumityUpdate::Run",
+          "our_len": 0,
+          "their_len": 562
+        }
+      ],
+      "status": "closed",
       "verdicts": {}
     }
   }
