@@ -1,9 +1,9 @@
 #include "CProjectile.h"
 
 #include "CBaldurChitin.h"
+#include "CGameArea.h"
 #include "CGameContainer.h"
 #include "CGameDoor.h"
-#include "CGameArea.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
 #include "CGameTrigger.h"
