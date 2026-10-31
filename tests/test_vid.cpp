@@ -2833,7 +2833,7 @@ TEST_CASE("particle_render_16_and_24", "[vid]")
     const WORD color16 = static_cast<WORD>(color);
     const BYTE nThird = static_cast<BYTE>(color >> 16);
 
-    for (const int bpp : { 16, 24 }) {
+    for (const int bpp : { 16, 24, 32 }) {
         INFO("bpp " << bpp);
         g_pChitin->cVideo.m_nBpp = static_cast<WORD>(bpp);
 
@@ -2849,13 +2849,19 @@ TEST_CASE("particle_render_16_and_24", "[vid]")
                 std::vector<WORD> expected(8 * 8, 0xAAAA);
                 expected[(3 - 1) * 8 - 1 + 3] = color16;
                 CHECK(pixels == expected);
-            } else {
+            } else if (bpp == 24) {
                 std::vector<BYTE> pixels(8 * 8 * 3, 0xAA);
                 particle.Render(pixels.data(), 8 * 3, CRect(1, 1, 8, 8), CParticle::DOTS, 1);
                 std::vector<BYTE> expected(8 * 8 * 3, 0xAA);
                 BYTE* p = expected.data() + ((3 - 1) * 8 - 1 + 3) * 3;
                 std::memcpy(p, &color16, 2);
                 p[2] = nThird;
+                CHECK(pixels == expected);
+            } else {
+                std::vector<DWORD> pixels(8 * 8, 0xAAAAAAAA);
+                particle.Render(pixels.data(), 8 * 4, CRect(1, 1, 8, 8), CParticle::DOTS, 1);
+                std::vector<DWORD> expected(8 * 8, 0xAAAAAAAA);
+                expected[(3 - 1) * 8 - 1 + 3] = color;
                 CHECK(pixels == expected);
             }
         }
@@ -2875,6 +2881,15 @@ TEST_CASE("particle_render_16_and_24", "[vid]")
                 for (USHORT j = 1; j <= nBlobSize; j++) {
                     const CPoint& pt = blobPoints[j - 1];
                     expected[pt.y * 8 + pt.x] = color16;
+                }
+                CHECK(pixels == expected);
+            } else if (bpp == 32) {
+                std::vector<DWORD> pixels(8 * 8, 0xAAAAAAAA);
+                particle.Render(pixels.data(), 8 * 4, CRect(0, 0, 8, 8), CParticle::BLOB, nBlobSize);
+                std::vector<DWORD> expected(8 * 8, 0xAAAAAAAA);
+                // The 32-bit sibling has no size switch: the five-point cross.
+                for (const CPoint& pt : blobPoints) {
+                    expected[pt.y * 8 + pt.x] = color;
                 }
                 CHECK(pixels == expected);
             } else {
@@ -2903,7 +2918,7 @@ TEST_CASE("particle_render_16_and_24", "[vid]")
                 expected[0 + 1] = color16; // right
                 expected[1 * 4] = color16; // up
                 CHECK(pixels == expected);
-            } else {
+            } else if (bpp == 24) {
                 std::vector<BYTE> pixels(4 * 4 * 3, 0xAA);
                 particle.Render(pixels.data(), 4 * 3, CRect(0, 0, 4, 4), CParticle::BLOB, 5);
                 std::vector<BYTE> expected(4 * 4 * 3, 0xAA);
@@ -2911,6 +2926,14 @@ TEST_CASE("particle_render_16_and_24", "[vid]")
                     BYTE* p = expected.data() + i * 3;
                     std::memcpy(p, &color16, 2);
                     p[2] = nThird;
+                }
+                CHECK(pixels == expected);
+            } else {
+                std::vector<DWORD> pixels(4 * 4, 0xAAAAAAAA);
+                particle.Render(pixels.data(), 4 * 4, CRect(0, 0, 4, 4), CParticle::BLOB, 5);
+                std::vector<DWORD> expected(4 * 4, 0xAAAAAAAA);
+                for (int i : { 0, 1, 4 }) {
+                    expected[i] = color;
                 }
                 CHECK(pixels == expected);
             }
@@ -2931,11 +2954,17 @@ TEST_CASE("particle_render_16_and_24", "[vid]")
                 // x1 = (5 - 2), y1 = (5 - 4) * 3 / 4, x2 = 5, y2 = 5 * 3 / 4.
                 mode.DrawLine16(3, 0, 5, 3, expected.data(), 8, drawClip, color16, FALSE);
                 CHECK(pixels == expected);
-            } else {
+            } else if (bpp == 24) {
                 std::vector<BYTE> pixels(8 * 8 * 3, 0xAA);
                 particle.Render(pixels.data(), 8 * 3, clip, CParticle::CONNECT, 1);
                 std::vector<BYTE> expected(8 * 8 * 3, 0xAA);
                 mode.DrawLine24(3, 0, 5, 3, expected.data(), 8 * 3, drawClip, color, FALSE);
+                CHECK(pixels == expected);
+            } else {
+                std::vector<DWORD> pixels(8 * 8, 0xAAAAAAAA);
+                particle.Render(pixels.data(), 8 * 4, clip, CParticle::CONNECT, 1);
+                std::vector<DWORD> expected(8 * 8, 0xAAAAAAAA);
+                mode.DrawLine32(3, 0, 5, 3, expected.data(), 8, drawClip, color, FALSE);
                 CHECK(pixels == expected);
             }
         }
