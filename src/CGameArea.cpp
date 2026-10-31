@@ -27,8 +27,8 @@
 #include "CSpawn.h"
 #include "CTiledObject.h"
 #include "CUtil.h"
-#include "compat/marshal_ptr.h"
 #include "CVidPoly.h"
+#include "compat/marshal_ptr.h"
 #include "platform/replay.h"
 
 // 0x8D212C
@@ -1639,7 +1639,6 @@ LONG CGameArea::sub_46DAE0(INT x, INT y, const CAIObjectType& type, int a4, cons
     return nFound;
 }
 
-
 // 0x46DDC0
 LONG CGameArea::sub_46DDC0(INT x, INT y, const CAIObjectType& type, SHORT range, const BYTE* terrainTable, BOOL checkLOS, BOOL seeInvisible, BYTE nNearest, BOOL summonedOnly)
 {
@@ -1740,6 +1739,11 @@ LONG CGameArea::sub_46DDC0(INT x, INT y, const CAIObjectType& type, SHORT range,
 }
 
 // 0x46E130
+// NOTE: The original releases the share after the type and hidden checks and
+// takes it again for each later filter (party and network, specific,
+// exclude), releasing it before the message. A THREAD_ASYNCH share keeps no
+// count (ReleaseShare returns at once), so holding one share across the
+// filters is the same.
 void CGameArea::ApplyEffectToSprites(CGameEffect* pEffect, BOOL bNotParty, BOOL bMatchSpecific, BYTE nSpecific, CGameObject* pExclude)
 {
     // Hands a copy of pEffect to every sprite of the area through a
@@ -1781,14 +1785,9 @@ void CGameArea::ApplyEffectToSprites(CGameEffect* pEffect, BOOL bNotParty, BOOL 
         }
 
         if (bNotParty && m_pGame->GetCharacterPortraitNum(nId) != -1) {
-            // A party member, which the callers of this path want skipped.
-            // NOTE: The original continues the party check on a DWORD at
-            // CInfGame+0x43D8 (m_gameSave.field_1AC, the fork's arena flag):
-            // when it is zero it drops the sprite WITHOUT the share release
-            // of the other skip paths; when it is non-zero it takes the
-            // share again and goes on to the network test below. A
-            // THREAD_ASYNCH share does no bookkeeping, so the missing
-            // release is unobservable; we keep one release per skip.
+            // A party member, which the callers of this path want skipped
+            // unless m_gameSave.field_1AC (CInfGame +0x43D8, the fork's arena
+            // flag) is set and another player owns it.
             if (m_pGame->m_gameSave.field_1AC == 0) {
                 m_pGame->GetObjectArray()->ReleaseShare(nId,
                     CGameObjectArray::THREAD_ASYNCH,
@@ -1824,8 +1823,10 @@ void CGameArea::ApplyEffectToSprites(CGameEffect* pEffect, BOOL bNotParty, BOOL 
             continue;
         }
 
-        // NOTE: The original does not release the share on this path; with
-        // THREAD_ASYNCH the release is a no-op, so it does not matter.
+        m_pGame->GetObjectArray()->ReleaseShare(nId,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+
         CMessageAddEffect* pMessage = new CMessageAddEffect(pEffect->Copy(), nId, nId);
         g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
     }
