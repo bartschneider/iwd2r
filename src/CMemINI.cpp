@@ -46,7 +46,7 @@ CMemINISection::CMemINISection(const CString& sectionName)
 // 0x6A0DC0
 CMemINISection::~CMemINISection()
 {
-    // NOTE: Uninline.
+    ClearSection();
 }
 
 // NOTE: Inlined.

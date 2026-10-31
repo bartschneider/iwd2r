@@ -1,1 +1,1 @@
-{"address": "0x504250", "name": "CMessageRemoveItem::Run", "file": "src/CMessage.cpp", "batch": "i047", "needs": "world_entry, first_fight, walk_and_talk, action_bar, equip_shots, inventory, level_up, world_map, biography: not exercised"}
+{"address": "0x504250", "name": "CMessageRemoveItem::Run", "file": "src/CMessage.cpp", "batch": "i055", "needs": "dependency outside the batch's files: src/CMessage.h has no CMessageRemoveItem class; his Run body reads the message's item payload through that class, and the declaration-only header edit the batch is allowed cannot add it."}

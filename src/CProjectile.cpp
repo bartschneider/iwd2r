@@ -85,6 +85,20 @@ void CProjectile::AddEffect(CGameEffect* pEffect)
     m_effectList.AddTail(pEffect);
 }
 
+// 0x51EAB0
+void CProjectile::AddEffect2(CGameEffect* pEffect)
+{
+    // The original adds only when no session is up, or when this machine
+    // hosts it (chitin +0x1032/+0x1033: cNetwork.m_bConnectionEstablished
+    // and m_bIsHost).
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == FALSE
+        || (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+            && g_pChitin->cNetwork.m_bIsHost == TRUE)) {
+        pEffect->m_projectileType = m_projectileType;
+        m_effectList.AddTail(pEffect);
+    }
+}
+
 // 0x51EAF0
 CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pSprite, BYTE nUnknown)
 {
@@ -180,6 +194,10 @@ CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pS
     case 212:
         // Acid Fog.
         pProjectile = new CProjectileArea84F3AC();
+        break;
+    case 213:
+        // Spike Stones.
+        pProjectile = new CProjectileArea84FFDC();
         break;
     case 218:
         // One magic missile. NOTE: The WORD at 0x85E848 is 0.

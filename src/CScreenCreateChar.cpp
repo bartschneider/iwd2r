@@ -4969,7 +4969,16 @@ void CScreenCreateChar::ImportCharacter(const CString& sCharacter)
 
                     m_nCurrentStep = 5;
                 } else if ((nImportingBitField & CMultiplayerSettings::IMPORT_ITEMS) == 0) {
+                    // 0x613ccf: skills are completed only when IMPORT_ITEMS
+                    // is clear.
                     CompleteCharacterSkills(pSprite);
+
+                    m_nCurrentStep = 6;
+                } else {
+                    // 0x613ccd (jne 0x613cdb): a full import keeps the
+                    // character's items and still advances the step; leaving
+                    // it stale here stranded the main panel in the fresh
+                    // character state.
                     m_nCurrentStep = 6;
                 }
             } else {
@@ -4982,7 +4991,8 @@ void CScreenCreateChar::ImportCharacter(const CString& sCharacter)
                 CGameObjectArray::THREAD_ASYNCH,
                 INFINITE);
 
-            field_1628;
+            // 0x613d13: an imported character is not re-exported on Finish.
+            field_1628 = 1;
         }
     }
 }
@@ -5660,6 +5670,11 @@ void CScreenCreateChar::OnDoneButtonClick()
 
                     delete m_pCharacters;
                     m_pCharacters = NULL;
+
+                    // NOTE: ImportCharacter changed m_nGameSprite; the exe
+                    //  reloads its local here (0x616BAB) so the releases below
+                    //  target the imported sprite, not the deleted one.
+                    nGameSprite = m_nGameSprite;
 
                     BYTE rc;
                     do {

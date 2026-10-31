@@ -25,6 +25,7 @@
 #include "CProjectile.h"
 #include "CScreenChapter.h"
 #include "CScreenCharacter.h"
+#include "CScreenInventory.h"
 #include "CScreenWorld.h"
 #include "CSound.h"
 #include "CSpell.h"
@@ -420,8 +421,6 @@ SHORT CGameAIBase::ExecuteAction()
         returnValue = DoubleClickRButtonObject(pTarget);
         goto release;
     case 59:
-        // TODO: MoveCursorPoint reaches MoveCursor (0x45F6D0), still a stub
-        // that answers ACTION_DONE.
         returnValue = MoveCursorPoint();
         goto done;
     case 252:
@@ -1991,9 +1990,71 @@ SHORT CGameAIBase::MoveViewObject(CGameObject* target)
 // 0x45F6D0
 SHORT CGameAIBase::MoveCursor(CPoint dest, SHORT speed)
 {
-    // TODO: Incomplete.
+    CInfinity* pInfinity = GetArea()->GetInfinity();
 
-    return ACTION_DONE;
+    INT x;
+    INT y;
+    pInfinity->GetViewPosition(x, y);
+
+    CPoint pt;
+    GetCursorPos(&pt);
+
+    const SHORT nCursorStep = 4;
+    const SHORT nDiagonalStep = static_cast<SHORT>(3 * nCursorStep / 4);
+    const SHORT nDiagonalTolerance = static_cast<SHORT>(nDiagonalStep * speed);
+
+    if (m_curAction.m_specificID == 0) {
+        pInfinity->SetViewPosition(dest.x, dest.y, TRUE);
+        return ACTION_DONE;
+    }
+
+    const SHORT nStraightStep = static_cast<SHORT>(nCursorStep * speed);
+    // The exe computes the half-step in full 32-bit (imul eax,ecx with eax = 2);
+    // it is the only step amount without a 16-bit truncation.
+    const INT nHalfStep = nCursorStep / 2 * speed;
+    const INT dx = dest.x - pt.x;
+    const INT dy = dest.y - pt.y;
+
+    if (dx <= nStraightStep) {
+        if (dx >= -nStraightStep
+            && dy <= nDiagonalTolerance
+            && dy >= -nDiagonalTolerance) {
+            return ACTION_DONE;
+        }
+
+        if (dx >= -nStraightStep) {
+            if (dy > 0) {
+                pt.y += nDiagonalStep * speed;
+            } else if (dy < 0) {
+                pt.y -= nDiagonalStep * speed;
+            }
+
+            pInfinity->SetViewPosition(pt.x, pt.y, TRUE);
+            return ACTION_INTERRUPTABLE;
+        }
+    }
+
+    if (dx > 0 && dy <= 6 && dy >= -nDiagonalTolerance) {
+        pt.x += nCursorStep * speed;
+    } else if (dx < 0 && dy <= 6 && dy >= -nDiagonalTolerance) {
+        pt.x -= nCursorStep * speed;
+    } else if (dx > 0 && dy > 0) {
+        pt.x += nDiagonalStep * speed;
+        pt.y += nHalfStep;
+    } else if (dx < 0 && dy > 0) {
+        pt.x -= nDiagonalStep * speed;
+        pt.y += nHalfStep;
+    } else if (dx > 0 && dy < 0) {
+        pt.x += nDiagonalStep * speed;
+        pt.y -= nHalfStep;
+    } else if (dx < 0 && dy < 0) {
+        pt.x -= nDiagonalStep * speed;
+        pt.y -= nHalfStep;
+    }
+
+    pInfinity->SetViewPosition(pt.x, pt.y, TRUE);
+
+    return ACTION_INTERRUPTABLE;
 }
 
 // 0x45F900
@@ -2320,6 +2381,69 @@ SHORT CGameAIBase::ClearActions(CGameObject* target)
     g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
 
     return ACTION_DONE;
+}
+
+// 0x464950
+BOOL CGameAIBase::PlaceItem(CItem* item, BOOL deny, BOOL drop, DWORD count, BOOL feedback)
+{
+    if (item == NULL) return TRUE;
+    if (count > 1) PlaceItem(new CItem(*item), deny, drop, count - 1, TRUE);
+    item->m_flags |= 2;
+    CInfGame* game = g_pBaldurChitin->GetObjectGame();
+    CGameObjectArray* array = game->GetObjectArray();
+    if (game->m_familiars.Find(reinterpret_cast<int*>(m_id), NULL) != NULL) {
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(new CMessageAddItem(*item, m_id, game->GetProtagonist()), FALSE);
+        return TRUE;
+    }
+    BOOL party = game->GetCharacterPortraitNum(m_id) != -1;
+    if (!party && GetObjectType() != CGameObject::TYPE_SPRITE) {
+        if (GetObjectType() == CGameObject::TYPE_CONTAINER) {
+            static_cast<CGameContainer*>(this)->PlaceItemInBlankSlot(item, TRUE, SHORT_MAX);
+            return TRUE;
+        }
+        if (drop) delete item;
+        return FALSE;
+    }
+    CGameSprite* sprite = static_cast<CGameSprite*>(this);
+    int index;
+    if (party) {
+        for (index = 0; index < CScreenInventory::PERSONAL_INVENTORY_SIZE; index++) {
+            if (sprite->m_equipment.m_items[index + 18] == NULL) break;
+        }
+    } else {
+        if (feedback) game->FeedBack(CInfGame::FEEDBACK_ITEMLOST, 0, TRUE);
+        for (index = 27; index >= 0; index--) {
+            if (sprite->m_equipment.m_items[index + 15] == NULL) break;
+        }
+    }
+    if ((party && index < CScreenInventory::PERSONAL_INVENTORY_SIZE) || (!party && index >= 0)) {
+        if (deny) {
+            sprite->m_equipment.m_items[index + (party ? 18 : 15)] = item;
+            return TRUE;
+        }
+        CGameObject* object;
+        BYTE rc;
+        do {
+            rc = array->GetDeny(m_id, CGameObjectArray::THREAD_ASYNCH, &object, INFINITE);
+        } while (rc == CGameObjectArray::SHARED || rc == CGameObjectArray::DENIED);
+        if (rc == CGameObjectArray::SUCCESS) {
+            sprite->m_equipment.m_items[index + 18] = item;
+            array->ReleaseDeny(m_id, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+        if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL && g_pChitin->cNetwork.m_idLocalPlayer != m_remotePlayerID) {
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(new CMessageAddItem(*item, m_id, m_id), FALSE);
+        }
+        return TRUE;
+    }
+    if (drop) {
+        LONG pileId = game->GetGroundPile(m_id);
+        CGameContainer* pile;
+        if (pileId != CGameObjectArray::INVALID_INDEX && array->GetDeny(pileId, CGameObjectArray::THREAD_ASYNCH, reinterpret_cast<CGameObject**>(&pile), INFINITE) == CGameObjectArray::SUCCESS) {
+            pile->PlaceItemInBlankSlot(item, TRUE, SHORT_MAX);
+            array->ReleaseDeny(pileId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        }
+    }
+    return FALSE;
 }
 
 // 0x464EB0

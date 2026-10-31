@@ -186,6 +186,16 @@ TEST_CASE("stat modifier effects follow the original's modes", "[effects][data]"
         CHECK(pSprite->m_derivedStats.m_nNumberOfAttacks == 1);
     }
 
+    SECTION("non-cumulative luck (133) sign-extends the amount's low byte")
+    {
+        // 0x4BAFC0: movsx from the amount's low byte, added to the word.
+        pSprite->GetDerivedStats()->m_nLuck = 0;
+        Apply(pSprite, CGAMEEFFECT_NON_CUMULATIVELUCK, 0, -2, 0);
+        CHECK(pSprite->GetDerivedStats()->m_nLuck == -2);
+        Apply(pSprite, CGAMEEFFECT_NON_CUMULATIVELUCK, 0, 3, 0);
+        CHECK(pSprite->GetDerivedStats()->m_nLuck == 1);
+    }
+
     SECTION("charisma (6) counts a temporary bonus once, by its excess")
     {
         pSprite->m_derivedStats.field_13C = 0;
@@ -240,6 +250,104 @@ TEST_CASE("stat modifier effects follow the original's modes", "[effects][data]"
     }
 
     delete pSprite;
+}
+
+TEST_CASE("wizard spell slots (42) add known spells for the flagged level", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // The effect indexes the game's spell table by the memorised entry's id.
+    REQUIRE(pGame->m_spells.m_nCount >= 2);
+
+    // One memorised spell at level 0 with a slot (field_4 = 1), and one
+    // without any slot (field_4 = 0), which the original skips.
+    CGameSpriteGroupedSpellList* pSpells = pSprite->m_derivedStats.sub_447B00(CAIObjectType::C_BARD);
+    pSpells->Add(0, 0, 1, 1, 0);
+    pSpells->Add(1, 0, 0, 0, 0);
+    REQUIRE(pSpells->m_nHighestLevel == 1);
+
+    // The class walks test the AI type's class mask (one bit per class id).
+    new (&pSprite->m_typeAI) CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1 << (CAIObjectType::C_WIZARD - 1));
+
+    CGameSpriteSpellList* pKnown = pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_WIZARD)].GetSpellsAtLevel(0);
+
+    // Nothing flagged: nothing is added, and the original does not set m_done.
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMORIZATIONMAGE, 0, 2, 0) == FALSE);
+    CHECK(pKnown->m_List.size() == 0);
+
+    // Level 0 flagged: two extra slots per memorised spell, skipping the
+    // slotless entry.
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMORIZATIONMAGE, 1, 2, 0) == FALSE);
+
+    CHECK(pKnown->m_List.size() == 1);
+    CHECK(pKnown->m_List[0].m_nID == 0);
+    CHECK(pKnown->m_List[0].field_4 == 2);
+    CHECK(pKnown->m_List[0].field_8 == 2);
+    CHECK(pKnown->field_10 == 2);
+
+    // The other classes of the group are gated by the same mask.
+    CHECK(pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_SORCERER)].m_lists[0].m_List.size() == 0);
+}
+
+TEST_CASE("priest spell slots (62) add known spells for the flagged level", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    REQUIRE(pGame->m_spells.m_nCount >= 2);
+
+    // The priest effect reads the cleric's list (the group's lowest class).
+    CGameSpriteGroupedSpellList* pSpells = pSprite->m_derivedStats.sub_447B00(CAIObjectType::C_CLERIC);
+    pSpells->Add(0, 0, 1, 1, 0);
+    pSpells->Add(1, 0, 0, 0, 0);
+    REQUIRE(pSpells->m_nHighestLevel == 1);
+
+    new (&pSprite->m_typeAI) CAIObjectType(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1 << (CAIObjectType::C_CLERIC - 1));
+
+    CGameSpriteSpellList* pKnown = pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_CLERIC)].GetSpellsAtLevel(0);
+
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMOIZATIONCLERIC, 0, 2, 0) == FALSE);
+    CHECK(pKnown->m_List.size() == 0);
+
+    CHECK(Apply(pSprite, CGAMEEFFECT_SPELLMEMOIZATIONCLERIC, 1, 2, 0) == FALSE);
+
+    CHECK(pKnown->m_List.size() == 1);
+    CHECK(pKnown->m_List[0].m_nID == 0);
+    CHECK(pKnown->m_List[0].field_4 == 2);
+    CHECK(pKnown->m_List[0].field_8 == 2);
+    CHECK(pKnown->field_10 == 2);
+
+    CHECK(pSprite->m_spells.m_spellsByClass[pGame->GetSpellcasterIndex(CAIObjectType::C_DRUID)].m_lists[0].m_List.size() == 0);
+}
+
+TEST_CASE("find familiar (192) refuses non-protagonists and a second familiar", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    // A caster that is not the protagonist is refused after the strref 0x215a
+    // message, with m_done set and no familiar created (0x4b9eb0).
+    pSprite->m_id = pGame->GetProtagonist() + 1;
+    int nFamiliars = pGame->m_familiars.GetCount();
+    CHECK(Apply(pSprite, CGAMEEFFECT_FINDFAMILIAR, 0, 0, 0) == TRUE);
+    CHECK(pGame->m_familiars.GetCount() == nFamiliars);
+
+    // With the game-wide familiar flag (field_4204) set, even the protagonist
+    // is refused (strref 0x2159). The flag is restored afterwards: the summon
+    // path itself needs an area to place the familiar in and is not reachable
+    // from this fixture.
+    pSprite->m_id = pGame->GetProtagonist();
+    pGame->field_4204 = 1;
+    CHECK(Apply(pSprite, CGAMEEFFECT_FINDFAMILIAR, 0, 0, 0) == TRUE);
+    CHECK(pGame->m_familiars.GetCount() == nFamiliars);
+    pGame->field_4204 = 0;
 }
 
 TEST_CASE("maximum hit point effects (18)", "[effects][data]")

@@ -18,6 +18,9 @@ const SHORT CAIAction::MOVETOPOINT = 23;
 // 0x8477B4
 const SHORT CAIAction::PICKPOCKETS = 25;
 
+// 0x8477B8
+const SHORT CAIAction::PROTECTPOINT = 27;
+
 // 0x8477C0
 const SHORT CAIAction::SPELL = 31;
 

@@ -1,0 +1,1 @@
+{"address": "0x516910", "name": "CMessage117::MarshalMessage", "file": "src/CMessage.cpp", "batch": "i055", "needs": "dependency outside the batch's files: src/CMessage.h has no CMessage117 class; his marshal writes that message's payload through it, and the declaration-only header edit the batch is allowed cannot add it."}

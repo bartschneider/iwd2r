@@ -344,7 +344,9 @@ const CString CRuleTables::LORE("Lore");
 const CString CRuleTables::LORE_BONUS("LoreBon");
 
 // 0x8DEE74
-const CString CRuleTables::CHARISMA_STORE_MOD("CHRMODS");
+// NOTE: CHRMODST (the exe's string and the 2DA in the KEY); "CHRMODS" names
+// no resource, so the charisma store-mod table would load empty.
+const CString CRuleTables::CHARISMA_STORE_MOD("CHRMODST");
 
 // 0x8DF19C
 const CString CRuleTables::RAISE_DEAD_COST("RaisDead");
@@ -2317,7 +2319,10 @@ INT CRuleTables::GetMaxDruidShapeshifts(CCreatureFileHeader& BStats, INT nLevel)
     INT nShapeshifts = 0;
 
     if (BStats.m_druidLevel != 0) {
-        nShapeshifts = atol(m_tMaxDruidShapeshifts.GetAt(CPoint(nLevel - 1, 0)));
+        // NOTE: GetAt's CPoint is (column, row): the level selects the ROW,
+        // the column is 0 (the exe's inlined GetAt at 0x543770 strides
+        // nLevel - 1 by m_nSizeX and bounds it by m_nSizeY).
+        nShapeshifts = atol(m_tMaxDruidShapeshifts.GetAt(CPoint(0, nLevel - 1)));
 
         if (nShapeshifts != 0) {
             nShapeshifts += BStats.m_featExtraShapeshifting;
@@ -3166,9 +3171,13 @@ DWORD CRuleTables::GetReputationDescription(SHORT nReputation) const
 // 0x545310
 void CRuleTables::GetIntoxicationInfo(BYTE nCON, INT& nIntoxicationRate, INT& nRecoveryRate, INT& nIntoxicationCap) const
 {
-    nIntoxicationRate = atol(m_tReputationDescription.GetAt(CPoint(0, nCON - 1)));
-    nRecoveryRate = atol(m_tReputationDescription.GetAt(CPoint(1, nCON - 1)));
-    nIntoxicationCap = atol(m_tReputationDescription.GetAt(CPoint(2, nCON - 1)));
+    // NOTE: the exe's table here is IntoxCON (3 columns: INTOXICATION_RATE,
+    // RECOVERY_RATE, INTOXICATION_CAP), not the one-column RepTxt; the CON
+    // selects the row, columns 0-2 are the three rates (0x545310 strides
+    // nCON - 1 by m_nSizeX and bounds the columns by it).
+    nIntoxicationRate = atol(m_tIntoxication.GetAt(CPoint(0, nCON - 1)));
+    nRecoveryRate = atol(m_tIntoxication.GetAt(CPoint(1, nCON - 1)));
+    nIntoxicationCap = atol(m_tIntoxication.GetAt(CPoint(2, nCON - 1)));
 }
 
 // 0x5453F0
