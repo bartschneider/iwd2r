@@ -5596,6 +5596,10 @@ CMessage::CMessage(LONG caller, LONG target)
     m_targetId = target;
 }
 
+// NOTE: The marker's exe function (0x4051F0) is the compiler's scalar
+// deleting destructor: it tests the delete flag, runs the (empty) destructor
+// inline as a vtable store, conditionally calls operator_delete, and returns
+// with `ret 4`. No body to port.
 // 0x4051F0
 CMessage::~CMessage()
 {
