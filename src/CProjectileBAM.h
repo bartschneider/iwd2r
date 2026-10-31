@@ -116,4 +116,14 @@ public:
     /* 0088 */ virtual void AddVisualToArea(CGameArea* pArea, const CPoint& pos, LONG posZ);
 };
 
+// The SPBRNHND projectile itself (constructor 0x532CA0, chaining straight to
+// the CProjectileBAM constructor 0x52AD60): spawns the one-shot spray cells
+// around the impact point, a cell per 32 pixels of flight distance, mirrored
+// to both sides of the line of flight.
+class CProjectileSPBRNHND : public CProjectileSprayLifetime {
+public:
+    // 0x533600
+    void SpawnSpray(const CPoint& origin, LONG count, SHORT facing, BOOL oneSide);
+};
+
 #endif /* CPROJECTILEBAM_H_ */

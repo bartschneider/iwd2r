@@ -794,6 +794,62 @@ void CProjectile84D8B8::Fire(CGameArea* pArea, LONG source, LONG target, CPoint 
     delete this;
 }
 
+// -----------------------------------------------------------------------------
+
+// The signed-WORD direction tables SpawnSpray projects through, native
+// 0x84D6B8..0x84D798 in .rdata, one row per component in table order.
+namespace {
+
+const SHORT SPRAY_VECTORS[8][16] = {
+    { -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383, 0, -383, -707, -924 },
+    { 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383 },
+    { 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383 },
+    { 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924 },
+    { 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924 },
+    { 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383 },
+    { 0, 383, 707, 924, 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383 },
+    { 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924 },
+};
+
+// The exe does both in registers: the additions wrap as DWORD and the
+// projection divides the DWORD product by 1000 signed.
+LONG SprayAdd(LONG a, LONG b)
+{
+    return static_cast<LONG>(static_cast<DWORD>(a) + static_cast<DWORD>(b));
+}
+
+LONG SprayProjection(LONG a, SHORT av, LONG b, SHORT bv, SHORT count)
+{
+    DWORD sum = static_cast<DWORD>(a) * static_cast<DWORD>(av) + static_cast<DWORD>(b) * static_cast<DWORD>(bv);
+    return static_cast<LONG>(sum * static_cast<DWORD>(count)) / 1000;
+}
+
+}
+
+// 0x533600
+void CProjectileSPBRNHND::SpawnSpray(const CPoint& origin, LONG count, SHORT facing, BOOL oneSide)
+{
+    CPoint left(SprayAdd(origin.x, static_cast<SHORT>(SprayProjection(14, SPRAY_VECTORS[0][facing], 32, SPRAY_VECTORS[1][facing], 1))),
+        SprayAdd(origin.y, static_cast<SHORT>(SprayProjection(14, SPRAY_VECTORS[2][facing], 32, SPRAY_VECTORS[3][facing], 1))));
+    CPoint right(SprayAdd(origin.x, static_cast<SHORT>(SprayProjection(14, SPRAY_VECTORS[4][facing], 32, SPRAY_VECTORS[5][facing], 1))),
+        SprayAdd(origin.y, static_cast<SHORT>(SprayProjection(14, SPRAY_VECTORS[6][facing], 32, SPRAY_VECTORS[7][facing], 1))));
+    auto* first = new CProjectileSprayCell(m_animation->cResRef, m_animationLifetime, facing, m_palette);
+    first->m_bHasHeight = m_bHasHeight;
+    first->AddVisualToArea(m_pArea, left, m_posZ);
+    if (!oneSide) {
+        auto* second = new CProjectileSprayCell(m_animation->cResRef, m_animationLifetime, facing, m_palette);
+        second->m_bHasHeight = m_bHasHeight;
+        second->AddVisualToArea(m_pArea, right, m_posZ);
+    }
+    if (static_cast<SHORT>(count) - 1 > 0) {
+        LONG next = SprayAdd(count, -1);
+        SpawnSpray(left, next, facing, TRUE);
+        if (!oneSide) {
+            SpawnSpray(right, next, facing, FALSE);
+        }
+    }
+}
+
 // The compiler inlined this constructor at both news in SpawnSpray (0x533729
 // and 0x533806); there is no standalone exe body. After the base constructor
 // the exe itself stores the zeroes below, the lifetime and the direction
