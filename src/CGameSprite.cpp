@@ -13986,8 +13986,9 @@ SHORT CGameSprite::ExecuteAction()
         returnValue = DropInventory(FALSE, CString(""));
         goto done;
     case 124:
-        // Berserk (0x72A3E3-0x72A3F3: calls 0x75A4B0).
-        returnValue = Berserk();
+        // Berserk
+        // TODO: 0x72A3E3-0x72A3F3 not ported (0x75A4B0).
+        returnValue = ACTION_ERROR;
         goto done;
     case 127:
         // CutSceneId (0x72AE43-0x72AE54)
@@ -15367,55 +15368,6 @@ void CGameSprite::sub_72FBF0()
 }
 
 // 0x72DE60
-// 0x75A4B0
-SHORT CGameSprite::Berserk()
-{
-    // The exe decrements the DWORD at this+0x5AC — m_baseStats.m_flags — on
-    // every call, reading it as a signed int, whether or not berserk is
-    // active.
-    LONG countDown = static_cast<LONG>(m_baseStats.m_flags) - 1;
-    m_baseStats.m_flags = static_cast<DWORD>(countDown);
-
-    if (!m_berserkActive || countDown <= 0) {
-        return ACTION_DONE;
-    }
-
-    CAIObjectType target(0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0);
-    CAIAction action;
-    if (rand() % 100 < 25) {
-        SHORT range = GetVisualRange();
-        BOOL seeInvisible = GetCanSeeInvisible();
-        LONG nearest = m_pArea->GetNearest(m_id, CAIObjectType::ANYONE, range,
-            m_terrainTable, TRUE, seeInvisible, FALSE, 0, FALSE);
-        if (nearest != CGameObjectArray::INVALID_INDEX) {
-            AddAction(m_curAction);
-
-            target.m_nInstance = nearest;
-            action = CAIAction(CAIAction::ATTACK, target, 0, 0, 0);
-        }
-        AddAction(action);
-    } else {
-        CAIObjectType enemy = m_typeAI.GetEnemyOf();
-        SHORT range = GetVisualRange();
-        BOOL seeInvisible = GetCanSeeInvisible();
-        LONG nearest = m_pArea->GetNearest(m_id, enemy, range, m_terrainTable,
-            TRUE, seeInvisible, FALSE, 0, FALSE);
-        if (nearest == CGameObjectArray::INVALID_INDEX) {
-            AddAction(m_curAction);
-
-            action = CAIAction(CAIAction::WAIT, 6);
-        } else {
-            AddAction(m_curAction);
-
-            target.m_nInstance = nearest;
-            action = CAIAction(CAIAction::ATTACK, target, 0, 0, 0);
-        }
-        AddAction(action);
-    }
-
-    return ACTION_DONE;
-}
-
 BOOL CGameSprite::ProcessEffectList()
 {
     if (g_pChitin->cNetwork.GetServiceProvider() != CNetwork::SERV_PROV_NULL
