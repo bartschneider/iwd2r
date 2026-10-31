@@ -3,6 +3,7 @@
 #include "CBaldurChitin.h"
 #include "CGameContainer.h"
 #include "CGameDoor.h"
+#include "CGameArea.h"
 #include "CGameEffect.h"
 #include "CGameSprite.h"
 #include "CGameTrigger.h"
