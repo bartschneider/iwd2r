@@ -12568,7 +12568,7 @@ void CGameSpriteLastUpdate::Initialize(BOOL bFullUpdateRequired)
 }
 
 // 0x723BF0
-void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+void CGameSprite::sub_723BF0(BOOLEAN a1, BOOLEAN a2) // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     // dword_8E752C counts how many party members are currently hidden, so it
     // only moves on a real transition.
@@ -15522,7 +15522,7 @@ void CGameSprite::CheckModal()
         // A party member looks for the secret doors around it.
         CTypedPtrList<CPtrList, LONG*> targets;
 
-        INT nSearch = sub_71F6E0();  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+        INT nSearch = sub_71F6E0(); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
         INT nRoll = CUtil::UtilRandInt(100, -m_derivedStats.m_nLuck);
         SHORT nRange = GetVisualRange() >> 1;
 
@@ -15664,15 +15664,14 @@ void CGameSprite::CheckModal()
                             pEffect->m_source.x = m_pos.x;
                             pEffect->m_source.y = m_pos.y;
                             pEffect->m_sourceID = m_id;
-                            IcewindMisc::sub_5860F0(this, pEffect);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+                            IcewindMisc::sub_5860F0(this, pEffect); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
                             // Re-tag a "Duration"-timed song effect so it expires
                             // a round later (game time + 100), keeping the
                             // per-cycle buff alive instead of letting
                             // ResolveEffect treat it as already past.
                             if (pEffect->m_durationType == 0 && pEffect->m_duration == 7) {
                                 pEffect->m_durationType = 0x1000;
-                                pEffect->m_duration =
-                                    g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime + 100;
+                                pEffect->m_duration = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime + 100;
                             }
 
                             messages.push_back(new CMessageAddEffect(pEffect, m_id, nAllyId));
@@ -15727,9 +15726,9 @@ void CGameSprite::CheckModal()
                             // "Search (detect traps) check. Search skill %d vs.
                             // trap's difficulty %d (searcher's %d INT bonus)."
                             FeedBack(FEEDBACK_ROLL, searchSkill, difficulty / 5,
-                                sub_763E40(CGAMESPRITE_SKILL_SEARCH), 39303, 0, 0);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+                                sub_763E40(CGAMESPRITE_SKILL_SEARCH), 39303, 0, 0); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
                             if (difficulty <= searchSkill * 7 && difficulty != 100
-                                && (pDoor->m_dwFlags & 0x8)) {  // TRAPDETECTABLE
+                                && (pDoor->m_dwFlags & 0x8)) { // TRAPDETECTABLE
                                 CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
                                 CMessage* message = new CMessageSetTrigger(trapFound,
                                     pDoor->m_id, m_id);
@@ -15754,7 +15753,7 @@ void CGameSprite::CheckModal()
                         if (pTrigger->m_trapDetected == 0) {
                             int difficulty = pTrigger->m_trapDetectionDifficulty;
                             if (difficulty <= searchSkill * 7 && difficulty != 100
-                                && (pTrigger->m_dwFlags & 0x8)) {  // TRAPDETECTABLE
+                                && (pTrigger->m_dwFlags & 0x8)) { // TRAPDETECTABLE
                                 CAITrigger trapFound(CAITRIGGER_DETECTED, m_typeAI, 0);
                                 CMessage* message = new CMessageSetTrigger(trapFound,
                                     pTrigger->m_id, m_id);
@@ -24578,7 +24577,7 @@ SHORT CGameSprite::RemoveTraps(CGameAIBase* pTarget)
 
     int skill = static_cast<char>(m_derivedStats.m_nSkills[CGAMESPRITE_SKILL_DISABLE_DEVICE]);
     int roll = rand() % 20 + 1;
-    int skillModifier = sub_763E40(CGAMESPRITE_SKILL_DISABLE_DEVICE);  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+    int skillModifier = sub_763E40(CGAMESPRITE_SKILL_DISABLE_DEVICE); // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
     int check = roll + skill;
 
     if (pTarget->GetObjectType() == TYPE_DOOR
@@ -25347,7 +25346,7 @@ BOOLEAN CGameSprite::CanSaveGame(STRREF& strError)
 }
 
 // 0x75E930
-int CGameSprite::sub_75E930(int a1)  // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
+int CGameSprite::sub_75E930(int a1) // re-lint: disable RE004 (address-named in this tree; rename is Ghidra-first)
 {
     // The shipped binary stubs this fighting-style feat query to zero
     // (xor eax, eax; ret 4), which disables the style-bonus branches above.

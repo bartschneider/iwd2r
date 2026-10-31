@@ -1833,7 +1833,10 @@ TEST_CASE("sprite: Rest refills a memorized but spent spell", "[ai][data]")
 
     // The first spell entry of the character: class list, domain list or
     // innate list, whichever has one.
-    enum { KIND_CLASS, KIND_DOMAIN, KIND_INNATE } kind = KIND_CLASS;
+    enum { KIND_CLASS,
+        KIND_DOMAIN,
+        KIND_INNATE } kind
+        = KIND_CLASS;
     CGameSpriteSpellList* pLevelList = NULL;
     CGameSpriteSpellListEntry* pEntry = NULL;
     UINT nEntryClass = 0;
