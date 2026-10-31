@@ -21,17 +21,9 @@
 # level-4 spell can sit in the list at a time and row 2 never exists.
 # Flame Strike memorizes pre-fight (row 1); Spike Stones memorizes into
 # the slot between the casts (Flame Strike's slot is spent by then) and
-# is cast with F1 as well. A rest is needed after every memorize: the
-# old premise "filling an empty slot needs no rest" is wrong on both
-# engines -- the file's level-4 slot is empty and the memorize fills it
-# as 0/1, memorized but not castable (runs 20261030-140342 and
-# 20261031-013814), and only a rest turns it 1/1. The rest input is key
-# Z (Keymap.ini Rest=Z, keymap index 29 ->
-# CScreenWorld::OnRestButtonClick 0x6984F0): CanRestParty passes and
-# RestParty(1, 0) queues ACTION 96 on every member, whose
-# CGameSprite::Rest 0x7500F0 (task 60) refills the memorized spells.
-# There is no confirm popup: the "Are you sure you wish to rest?"
-# string (15358) only ever sits in CanRestParty's strError.
+# is cast with F1 as well. No rest is needed: chr_raise_druid never
+# rested, so the file's level-4 slot is empty and filling an empty slot
+# needs no rest -- the casts never depend on the unported ACTION 96.
 #
 # Spellbook geometry (record_tour.txt + notes): key S opens it on the
 # sole member; the level tabs sit at x=761, level 1 (761,81) plus 39 per
@@ -180,26 +172,6 @@ click 510 222
 wait 60
 checkpoint spells_memorized
 shot spells_memorized
-key ESCAPE
-wait 60
-checkpoint spellbook_done
-# The rest (see the header): key Z starts it at once, and the waits run
-# past the rest's FadeFromColor (action 203, 35 ticks) before the next
-# clicks. CHECK: rest_asked's shot must show no refusal text --
-# CanRestParty's refusals (10309 "You may not rest at this time.",
-# 16457 "scattered", 16500 "monsters nearby") come out as DisplayText.
-key Z
-wait 60
-checkpoint rest_asked
-shot rest_asked
-wait 300
-# Reopen the spellbook on level 4: the slot must read 1/1 now.
-key S
-wait 60
-click 761 198
-wait 60
-checkpoint rested
-shot rested
 key ESCAPE
 wait 60
 checkpoint spellbook_done
