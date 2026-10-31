@@ -181,13 +181,14 @@ void CParticle::Render(LPVOID pSurface, LONG lPitch, const CRect& rClipRect, USH
             break;
         case 32:
             if (nLoops > 0) {
+                CRect rDrawClip(rClipRect.left, rClipRect.top, rClipRect.right - 1, rClipRect.bottom - 1);
                 pVidMode->DrawLine32((nXPrev - m_vel.x) >> RESOLUTION_INC,
-                    (3 * (nYPrev - m_vel.y) / 4 - nZPrev + nZPrevVel) >> RESOLUTION_INC,
+                    (((nYPrev - m_vel.y) * 3 >> 2) - nZPrev + nZPrevVel) >> RESOLUTION_INC,
                     nXPrev >> RESOLUTION_INC,
-                    (3 * nYPrev / 4 - nZPrev) >> RESOLUTION_INC,
+                    ((nYPrev * 3) >> 2) - nZPrev >> RESOLUTION_INC,
                     reinterpret_cast<DWORD*>(pSurface),
                     lPitch / 4,
-                    rClipRect,
+                    rDrawClip,
                     color,
                     FALSE);
             }
