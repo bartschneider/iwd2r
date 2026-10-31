@@ -84,6 +84,20 @@ void CProjectile::AddEffect(CGameEffect* pEffect)
     m_effectList.AddTail(pEffect);
 }
 
+// 0x51EAB0
+void CProjectile::AddEffect2(CGameEffect* pEffect)
+{
+    // The original gates the add on two bytes at 0x1032/0x1033 in the
+    // global chitin (inside cNetwork): it adds only when byte 0x1032 is 0,
+    // or when both bytes are 1.
+    const BYTE* pChitinGate = reinterpret_cast<const BYTE*>(g_pChitin);
+    BYTE bGate = pChitinGate[0x1032];
+    if (bGate == 0 || (bGate == 1 && pChitinGate[0x1033] == 1)) {
+        pEffect->m_projectileType = m_projectileType;
+        m_effectList.AddTail(pEffect);
+    }
+}
+
 // 0x51EAF0
 CProjectile* CProjectile::DecodeProjectile(WORD nProjectileType, CGameAIBase* pSprite, BYTE nUnknown)
 {
