@@ -31,8 +31,8 @@
 #pragma warning(disable : 4121 4201)
 #endif
 #include "CChitin.h"
-#include "CResCell.h"
 #include "CParticle.h"
+#include "CResCell.h"
 #include "CVidBitmap.h"
 #include "CVidCell.h"
 #include "CVidInf.h"
