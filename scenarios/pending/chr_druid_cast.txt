@@ -202,7 +202,7 @@ checkpoint rested
 shot rested
 key ESCAPE
 wait 60
-checkpoint spellbook_done
+checkpoint rested_closed
 # Centre the view on the druid, as first_fight does: the legs need the
 # view exact.
 origin ui
