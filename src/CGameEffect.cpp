@@ -13790,7 +13790,9 @@ CGameEffect* CGameEffectNon_CumulativeLuck::Copy()
 // 0x4BAFC0
 BOOL CGameEffectNon_CumulativeLuck::ApplyEffect(CGameSprite* pSprite)
 {
-    pSprite->GetDerivedStats()->m_nLuck += static_cast<BYTE>(m_effectAmount);
+    // The exe sign-extends the amount's low byte (movsx at 0x4BAFC0), so a
+    // negative luck lowers the stat.
+    pSprite->GetDerivedStats()->m_nLuck += static_cast<signed char>(m_effectAmount);
 
     return TRUE;
 }

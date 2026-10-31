@@ -7886,6 +7886,85 @@
       ],
       "status": "assigned",
       "verdicts": {}
+    },
+    "i055": {
+      "assigned_at": "2026-10-30T22:18:44+00:00",
+      "branch": "p3/wso-i055",
+      "closed_at": "2026-10-30T23:40:46+00:00",
+      "files": [
+        "src/CGameAIBase.cpp",
+        "src/CMessage.cpp"
+      ],
+      "gate": "full",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x464950",
+          "category": "only_theirs",
+          "file": "src/CGameAIBase.cpp",
+          "name": "CGameAIBase::PlaceItem",
+          "our_len": 0,
+          "their_len": 2082
+        },
+        {
+          "address": "0x504250",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageRemoveItem::Run",
+          "our_len": 0,
+          "their_len": 1506
+        },
+        {
+          "address": "0x5004D0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageFireProjectile::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1355
+        },
+        {
+          "address": "0x50A4D0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSetVariable::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1313
+        },
+        {
+          "address": "0x4F8D60",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddItem::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1224
+        },
+        {
+          "address": "0x5154E0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage105::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1213
+        },
+        {
+          "address": "0x515670",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage105::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 1125
+        },
+        {
+          "address": "0x516910",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage117::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1070
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }

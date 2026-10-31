@@ -186,6 +186,16 @@ TEST_CASE("stat modifier effects follow the original's modes", "[effects][data]"
         CHECK(pSprite->m_derivedStats.m_nNumberOfAttacks == 1);
     }
 
+    SECTION("non-cumulative luck (133) sign-extends the amount's low byte")
+    {
+        // 0x4BAFC0: movsx from the amount's low byte, added to the word.
+        pSprite->GetDerivedStats()->m_nLuck = 0;
+        Apply(pSprite, CGAMEEFFECT_NON_CUMULATIVELUCK, 0, -2, 0);
+        CHECK(pSprite->GetDerivedStats()->m_nLuck == -2);
+        Apply(pSprite, CGAMEEFFECT_NON_CUMULATIVELUCK, 0, 3, 0);
+        CHECK(pSprite->GetDerivedStats()->m_nLuck == 1);
+    }
+
     SECTION("charisma (6) counts a temporary bonus once, by its excess")
     {
         pSprite->m_derivedStats.field_13C = 0;
