@@ -535,32 +535,38 @@ void Record(void* self, int32_t op, uint32_t nLines)
 // slot declares. The page calls take the DWORD nLines on both sides.
 void __fastcall RecordButtonOriginal(void* self, void* edx)
 {
+    (void)edx;
     Record(self, kCallButton, 0);
 }
 
 void __fastcall RecordButtonOurs(void* self, void* edx, unsigned char nDirection)
 {
+    (void)edx;
     (void)nDirection;
     Record(self, kCallButton, 0);
 }
 
 void __fastcall RecordPageUpOriginal(void* self, void* edx, uint32_t nLines)
 {
+    (void)edx;
     Record(self, kCallPageUp, nLines);
 }
 
 void __fastcall RecordPageUpOurs(void* self, void* edx, uint32_t nLines)
 {
+    (void)edx;
     Record(self, kCallPageUp, nLines);
 }
 
 void __fastcall RecordPageDownOriginal(void* self, void* edx, uint32_t nLines)
 {
+    (void)edx;
     Record(self, kCallPageDown, nLines);
 }
 
 void __fastcall RecordPageDownOurs(void* self, void* edx, uint32_t nLines)
 {
+    (void)edx;
     Record(self, kCallPageDown, nLines);
 }
 
