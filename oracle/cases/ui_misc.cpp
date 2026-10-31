@@ -505,13 +505,6 @@ constexpr size_t kCellFrameListOffset = 0x64;
 constexpr size_t kCellFrameListSizeOffset = 0x68;
 constexpr size_t kCellCacheHeaderOffset = 0x7E;
 
-uint16_t GetWord(const uint8_t* at, size_t offset)
-{
-    uint16_t value = 0;
-    std::memcpy(&value, at + offset, sizeof(value));
-    return value;
-}
-
 // The original CString: the buffer pointer is the member, the length word at
 // data - 8, the bytes at the pointer (messages_wire's ReadCString).
 std::string ReadCStringAt(const uint8_t* member)
@@ -526,7 +519,7 @@ std::string ReadCStringAt(const uint8_t* member)
     return length > 0 ? std::string(data, static_cast<size_t>(length)) : std::string();
 }
 
-void SplitString(CaseContext& ctx)
+void CaseSplitString(CaseContext& ctx)
 {
     OurGlobalsReset reset;
     uint8_t* chitin = nullptr;
@@ -623,8 +616,8 @@ void SplitString(CaseContext& ctx)
     auto next = [&]() { return static_cast<uint32_t>(oracle::SplitMix64(&state)); };
     const char alphabet[] = "ab c\r\n\x81\xE9";
 
-    auto check = [&](const std::string& source, uint16_t lineLength, uint8_t maxStrings, int32_t divideWords,
-                     int32_t checkRemainder, uint16_t suggested) {
+    auto checkInput = [&](const std::string& source, uint16_t lineLength, uint8_t maxStrings, int32_t divideWords,
+                          int32_t checkRemainder, uint16_t suggested) {
         char inputs[160];
         std::snprintf(inputs, sizeof(inputs), "\"%s\" len %u max %u divide %d rem %d suggested %u",
             source.c_str(), lineLength, maxStrings, divideWords, checkRemainder, suggested);
@@ -667,8 +660,8 @@ void SplitString(CaseContext& ctx)
     for (const char* source : fixed) {
         for (uint16_t lineLength : lengths) {
             for (uint8_t maxStrings : maxima) {
-                check(source, lineLength, maxStrings, 1, 0, 0);
-                check(source, lineLength, maxStrings, 0, 1, 10);
+                checkInput(source, lineLength, maxStrings, 1, 0, 0);
+                checkInput(source, lineLength, maxStrings, 0, 1, 10);
             }
         }
     }
@@ -678,12 +671,12 @@ void SplitString(CaseContext& ctx)
         for (uint32_t i = 0; i < length; i++) {
             source += alphabet[next() % (sizeof(alphabet) - 1)];
         }
-        check(source, static_cast<uint16_t>(next() % 41), static_cast<uint8_t>(next() % 6),
+        checkInput(source, static_cast<uint16_t>(next() % 41), static_cast<uint8_t>(next() % 6),
             static_cast<int32_t>(next() % 2), static_cast<int32_t>(next() % 2), static_cast<uint16_t>(next() % 41));
     }
 }
 
 ORACLE_CASE("util/find_one_of", FindOneOf);
-ORACLE_CASE("util/split_string", SplitString);
+ORACLE_CASE("util/split_string", CaseSplitString);
 ORACLE_CASE("rules/hp_con_bonus", HpConBonus);
 ORACLE_CASE("ui/ime_composition_rect", CompositionWindowRect);
