@@ -794,6 +794,46 @@ void CProjectile84D8B8::Fire(CGameArea* pArea, LONG source, LONG target, CPoint 
     delete this;
 }
 
+// The compiler inlined this constructor at both news in SpawnSpray (0x533729
+// and 0x533806); there is no standalone exe body. After the base constructor
+// the exe itself stores the zeroes below, the lifetime and the direction
+// word, and leaves every other field exactly as the base left it.
+// 0x533729 (first inline site)
+CProjectileSprayCell::CProjectileSprayCell(CResRef resRef, SHORT nLifetime, SHORT nFacing, const CVidPalette& cPalette)
+    : CProjectileSprayLifetime(resRef)
+{
+    m_animationLifetime = nLifetime;
+    field_1BE = 0;
+    field_1C2 = FALSE;
+    field_1C6 = 0;
+    field_1D4 = 0;
+    field_1D8 = 0x10;
+    m_nDirection = nFacing;
+    SetSequenceDirection(NULL);
+    m_animation->SetPalette(cPalette);
+}
+
+// 0x533AE0
+void CProjectileSprayCell::AddVisualToArea(CGameArea* pArea, const CPoint& pos, LONG posZ)
+{
+    m_pArea = pArea;
+    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->Add(&m_id, this, INFINITE);
+    if (rc != CGameObjectArray::SUCCESS) {
+        delete this;
+        return;
+    }
+    CGameObject::AddToArea(pArea, pos, posZ, CGameObject::LIST_FRONT);
+    m_sound.Stop();
+    if (m_fireSoundRef != "") {
+        m_sound.SetResRef(m_fireSoundRef, TRUE, TRUE);
+        if (m_loopFireSound) {
+            m_sound.SetLoopingFlag(TRUE);
+        }
+        m_sound.SetChannel(15, reinterpret_cast<DWORD_PTR>(m_pArea));
+        m_sound.Play(m_pos.x, m_pos.y, 0, FALSE);
+    }
+}
+
 // The exe keeps these in the zero-initialized virtual tail of .data — the
 // raw range ends at 0x8C6000, and the elements sit at 0x8E52D4/0x8E52D8/
 // 0x8E52DC with the flag at 0x8E52E8 — so the loaded image starts them all

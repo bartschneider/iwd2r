@@ -89,4 +89,31 @@ public:
     CProjectile8510A4(WORD nPaletteType);
 };
 
+// The shared tail of the SPBRNHND spray family: a CProjectileBAM whose
+// +0x2A0 word is the spray animation lifetime. WillScarlettOhara models the
+// family as CProjectileSprayLifetime < CProjectileTravelling; the exe
+// constructors chain to the CProjectileBAM constructor 0x52AD60 (SPBRNHND's
+// 0x532CA0 calls it directly), which is the anchor used here.
+class CProjectileSprayLifetime : public CProjectileBAM {
+protected:
+    // No separate exe function: the family constructors call 0x52AD60
+    // directly.
+    CProjectileSprayLifetime(CResRef resRef)
+        : CProjectileBAM(resRef)
+    {
+    }
+
+public:
+    /* 02A0 */ SHORT m_animationLifetime;
+};
+
+// One spray cell a SPBRNHND spawns into its area (vtable 0x84E724). The
+// constructor has no standalone exe body: the compiler inlined it at both
+// news in SpawnSpray (0x533729 and 0x533806).
+class CProjectileSprayCell : public CProjectileSprayLifetime {
+public:
+    CProjectileSprayCell(CResRef resRef, SHORT nLifetime, SHORT nFacing, const CVidPalette& cPalette);
+    /* 0088 */ virtual void AddVisualToArea(CGameArea* pArea, const CPoint& pos, LONG posZ);
+};
+
 #endif /* CPROJECTILEBAM_H_ */
