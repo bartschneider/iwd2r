@@ -1346,6 +1346,197 @@ void BltBmp24To16(CaseContext& ctx)
     ::operator delete(oursStorage);
 }
 
+// CVidBitmap::BltBmp8To16 has no address of its own: CVidBitmap::RenderDirect
+// (0x7B3190) carries it inlined in its 16-bpp branch, 0x7B362D-0x7B3735
+// (SetPalette at 0x7B3660, Realize at 0x7B3680, then the loop). The original
+// is therefore reached by calling RenderDirect itself, with an 8-bit
+// CResBitmap in a constructed original CVidBitmap and a fake video mode whose
+// one surface is a fabricated IDirectDrawSurface: its Lock (+0x64) hands back
+// the locked rect's first row in the canvas and the canvas pitch, its Unlock
+// (+0x80) does nothing - all LockSurface (0x799FA0) and UnLockSurface
+// (0x79A820) call. The resource is not demanded (bDemanded = TRUE), so Parse
+// never runs and the case fills the members it would set.
+constexpr uintptr_t kRenderDirect = 0x7B3190;
+// CVidBitmap::CVidBitmap() (0x7B2A40), plain ret: it builds the palette and
+// the palette-affect defaults the arm's SetPalette/Realize read.
+constexpr uintptr_t kVidBitmapCtor = 0x7B2A40;
+constexpr size_t kVidBitmapSize = 0x100;
+constexpr size_t kVidBitmapResOffset = 0xA4;
+constexpr size_t kVidBitmapDoubleSizeOffset = 0xB6;
+// CResBitmap members Parse fills.
+constexpr size_t kResColorsOffset = 0x50;
+constexpr size_t kResParsedOffset = 0x58;
+constexpr size_t kResDataOffset = 0x5C;
+constexpr size_t kResBitmapInfoOffset = 0x64;
+constexpr size_t kResColorTableOffset = 0x68;
+constexpr size_t kResBlockSize = 0x80;
+constexpr size_t kBitmapInfoSize = 0x28;
+constexpr size_t kModeSurfacesOffset = 0x9C;
+constexpr size_t kModeSurfaceArrayOffset = 0xA0;
+// DDSURFACEDESC (DX3): lPitch at 0x10, lpSurface at 0x24.
+constexpr size_t kDescPitchOffset = 0x10;
+constexpr size_t kDescSurfaceOffset = 0x24;
+
+using VidBitmapCtorFn = void*(__fastcall*)(void* self, void* edx);
+using RenderDirectFn = int32_t(__fastcall*)(void* self, void* edx, int32_t nSurface, int32_t x, int32_t y,
+    const int32_t* rClip, uint32_t dwFlags, uint8_t bDemanded);
+
+// The canvas the fabricated surface locks, and its geometry: the locked rect
+// starts at (left, top) and rows are lPitch bytes.
+uint8_t* g_lockedCanvas = nullptr;
+int32_t g_lockedStride = 0;
+int32_t g_lockedPitch = 0;
+
+// IDirectDrawSurface::Lock(rect, desc, flags, hEvent) and Unlock(lpSurface),
+// __stdcall as COM spells them, returning DD_OK.
+int32_t __stdcall FakeLock(void*, const int32_t* rect, void* desc, uint32_t, void*)
+{
+    auto* at = static_cast<uint8_t*>(desc);
+    Put<int32_t>(at, kDescPitchOffset, g_lockedPitch);
+    Put<uint32_t>(at, kDescSurfaceOffset,
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_lockedCanvas)
+            + (rect[1] * g_lockedStride + rect[0]) * 2));
+    return 0;
+}
+
+int32_t __stdcall FakeUnlock(void*, void*) { return 0; }
+
+// Slot +0x64 is Lock and +0x80 Unlock; no other slot is called.
+uintptr_t g_fakeSurfaceVTable[0x84 / 4];
+
+void ResetFakeSurfaceVTable()
+{
+    for (uintptr_t& slot : g_fakeSurfaceVTable) {
+        slot = reinterpret_cast<uintptr_t>(&FakeUnlock);
+    }
+    g_fakeSurfaceVTable[0x64 / 4] = reinterpret_cast<uintptr_t>(&FakeLock);
+}
+
+// 8-bit bitmaps 1 to 32 wide - width 1 takes the original's single-pixel
+// path, 2 the pairs, wider odd widths the leading pixel then pairs - and 1 to
+// 32 high, drawn upward from the last row of a 64x40 16-bit canvas of random
+// bytes, on 5-6-5 and 5-5-5 alternating. The source rows are as long as
+// RenderDirect's own nDataJump makes them; the 256-entry palette is random
+// apart from a pure red, green and blue, so the realized entries exercise the
+// rounding as well as the packing. The whole canvas and the result compare.
+void BltBmp8To16(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    constexpr int kW = 64;
+    constexpr int kH = 40;
+    constexpr size_t kSize = kW * kH * 2;
+    constexpr size_t kDataSize = 64 * 32;
+    constexpr int kColors = 256;
+
+    uint8_t* self = nullptr;
+    uint8_t* res = nullptr;
+    uint8_t* info = nullptr;
+    uint8_t* colorTable = nullptr;
+    uint8_t* canvas = nullptr;
+    uint8_t* data = nullptr;
+    uint8_t* surface = nullptr;
+    uint8_t* surfaces = nullptr;
+    ctx.SetInputs("building the original's bitmap, surface and canvas");
+    ctx.CallOriginal([&] {
+        self = OriginalBlock(kVidBitmapSize);
+        reinterpret_cast<VidBitmapCtorFn>(kVidBitmapCtor)(self, nullptr);
+        res = OriginalBlock(kResBlockSize);
+        info = OriginalBlock(kBitmapInfoSize);
+        colorTable = OriginalBlock(kColors * 4);
+        canvas = OriginalBlock(kSize);
+        data = OriginalBlock(kDataSize);
+        surface = OriginalBlock(4);
+        surfaces = OriginalBlock(4);
+        ResetFakeSurfaceVTable();
+        Put<uint32_t>(surface, 0, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_fakeSurfaceVTable)));
+        Put<uint32_t>(surfaces, 0, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(surface)));
+        Put<uint32_t>(video.mode, kModeSurfacesOffset, 1);
+        Put<uint32_t>(video.mode, kModeSurfaceArrayOffset,
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(surfaces)));
+        Put<uint32_t>(res, kResParsedOffset, TRUE);
+        Put<int32_t>(res, kResColorsOffset, kColors);
+        Put<uint32_t>(res, kResDataOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(data)));
+        Put<uint32_t>(res, kResBitmapInfoOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(info)));
+        Put<uint32_t>(res, kResColorTableOffset,
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(colorTable)));
+        Put<uint16_t>(info, 0x0E, 8); // biBitCount
+        Put<uint32_t>(self, kVidBitmapResOffset, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(res)));
+        Put<uint32_t>(self, kVidBitmapDoubleSizeOffset, 0);
+    });
+
+    // Ours: the resource outlives the call and everything is leaked, as the
+    // other vid cases do.
+    auto* oursStorage = static_cast<unsigned char*>(::operator new(sizeof(CVidBitmap)));
+    auto* ours = new (oursStorage) CVidBitmap;
+    auto* oursRes = new CResBitmap;
+    oursRes->bParsed = TRUE;
+    oursRes->nColors = kColors;
+    RGBQUAD colors[kColors];
+    oursRes->pColorTable = colors;
+    ours->SetRes(oursRes);
+
+    std::vector<uint8_t> mine(kSize);
+    std::vector<uint8_t> pixels(kDataSize);
+    Picks picks(ctx.seed, 0x426D703816000000ull); // "Bmp8"
+    const int count = 600 + ctx.iterations / 10;
+
+    // The same palette on both sides: three pure channels and 253 random.
+    for (int i = 0; i < kColors; ++i) {
+        const uint32_t bits = (i == 0 ? 0x0000FFu : i == 1 ? 0x00FF00u
+                : i == 2                                   ? 0xFF0000u
+                                                           : picks.Bits());
+        std::memcpy(&colors[i], &bits, sizeof(colors[i]));
+    }
+    ctx.CallOriginal([&] { std::memcpy(colorTable, colors, sizeof(colors)); });
+
+    for (int n = 0; n < count; ++n) {
+        SetMode16(video, ctx, (n & 1) == 0);
+        const int32_t cx = picks.Between(1, 32);
+        const int32_t cy = picks.Between(1, 32);
+        const int32_t x = picks.Between(0, kW - cx);
+        const int32_t y = picks.Between(0, kH - cy);
+        // RenderDirect's nDataJump for a 1-byte-per-pixel source.
+        const int32_t jump = (-((cx * 1) & 3)) & 3;
+        for (uint8_t& index : pixels) {
+            index = static_cast<uint8_t>(picks.Bits());
+        }
+        for (uint8_t& b : mine) {
+            b = static_cast<uint8_t>(picks.Bits());
+        }
+        char inputs[200];
+        std::snprintf(inputs, sizeof(inputs),
+            "input %d (%s): %dx%d at (%d,%d), data jump %d, palette entry 0 red", n,
+            (n & 1) == 0 ? "5-6-5" : "5-5-5", cx, cy, x, y, jump);
+        ctx.SetInputs(inputs);
+        const int32_t rClip[4] = { 0, 0, kW, kH };
+        int32_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            std::memcpy(canvas, mine.data(), kSize);
+            std::memcpy(data, pixels.data(), kDataSize);
+            Put<int32_t>(info, 4, cx); // biWidth
+            Put<int32_t>(info, 8, cy); // biHeight
+            g_lockedCanvas = canvas;
+            g_lockedStride = kW;
+            g_lockedPitch = kW * 2;
+            originalResult = reinterpret_cast<RenderDirectFn>(kRenderDirect)(
+                self, nullptr, 0, x, y, rClip, 0, 1);
+        });
+        const BOOL oursResult = ours->BltBmp8To16(
+            reinterpret_cast<WORD*>(mine.data() + ((y + cy - 1) * kW + x) * 2), kW * 2,
+            pixels.data(), CSize(cx, cy), jump, 0);
+        ctx.CountInputs(1);
+        if (oracle::Compare(ctx, originalResult, static_cast<int32_t>(oursResult))) {
+            for (size_t i = 0; i < kSize; ++i) {
+                if (canvas[i] != mine[i]) {
+                    ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                    break;
+                }
+            }
+        }
+    }
+    ::operator delete(oursStorage);
+}
+
 // CVidBitmap::BltBmp24To16Tint(pSurface, lPitch, pData, bmpSize,
 // nDataJump, dwFlags) (0x7B3B70), `ret 0x18`: the tinted 24-to-16 blit. It
 // reads the mode's shifts, masks, global tint (0xA4), brightness (0xA8) and
@@ -4554,6 +4745,7 @@ ORACLE_CASE("vid/blt_tile8to24", BltTile8To24);
 ORACLE_CASE("vid/blt_stencil_tile8to24", BltStencilTile8To24);
 ORACLE_CASE("vid/blt_bmp24to24", BltBmp24To24);
 ORACLE_CASE("vid/blt_bmp24to24_tint", BltBmp24To24Tint);
+ORACLE_CASE("vid/blt_bmp8to16", BltBmp8To16);
 ORACLE_CASE("vid/blt_bmp24to16", BltBmp24To16);
 ORACLE_CASE("vid/blt_bmp24to16_tint", BltBmp24To16Tint);
 ORACLE_CASE("vid/draw_ellipse32", Ellipse32);

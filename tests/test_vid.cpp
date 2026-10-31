@@ -3478,8 +3478,6 @@ TEST_CASE("vid: BltBmp24To16 converts 24-bit pixels into the mode's 16-bit field
     CHECK(canvas[index(2, 2)] == 0x001F);
     // The row step of that path is one pixel forward then a full row back.
     CHECK(canvas[index(3, 1)] == 0x07E0);
-
-    ::operator delete(storage);
 }
 
 // CVidBitmap::BltBmp24To24Tint (0x7CCE80): a 24-bit BMP (three bytes, B then
@@ -3866,4 +3864,105 @@ TEST_CASE("vid: BltBmp24To16Tint packs the unkeyed light overflow into the neigh
     CHECK(canvas[3] == 0x3BEE);
 
     ::operator delete(storage);
+}
+
+// CVidBitmap::BltBmp8To16, which has no address of its own: the original
+// inlines it in RenderDirect (0x7B3190, the 16-bpp branch at
+// 0x7B362D-0x7B3735). An 8-bit paletted bitmap is realized into
+// CVidImage::rgbTempPal at 16 bpp and each index's word written to the
+// surface, rows bottom-up; the inlined code stores two pixels per dword
+// (second in the high word), writes an odd width's leading pixel before the
+// pairs, and one pixel per row below width 2.
+TEST_CASE("vid: BltBmp8To16 paints 8-bit indices through the palette into 16-bit fields", "[vid]")
+{
+    // Leaked on purpose: the 24-to-16 tests' harness keeps engine objects out
+    // of destructors, and these own a resource. This path does realize a
+    // palette, so the bitmap is constructed (not the zeroed block those tests
+    // use).
+    const auto& pal = CVidImage::rgbTempPal;
+
+    RGBQUAD colors[4] = {};
+    colors[0].rgbRed = 0xFF; // pure red
+    colors[1].rgbGreen = 0xFF; // pure green
+    colors[2].rgbBlue = 0xFF; // pure blue
+    colors[3].rgbRed = colors[3].rgbGreen = colors[3].rgbBlue = 0x80; // grey
+    auto* res = new CResBitmap;
+    res->bParsed = TRUE;
+    res->nColors = 4;
+    res->pColorTable = colors;
+    auto* bitmap = new CVidBitmap;
+    bitmap->SetRes(res);
+
+    ChitinScope scope;
+    CVidInf mode;
+    ActiveModeScope active(&mode);
+    const auto setMode16 = [&mode](bool green6) {
+        const int gBits = green6 ? 6 : 5;
+        const DWORD rShift = 5 + gBits;
+        mode.m_dwRBitMask = 0x1Fu << rShift;
+        mode.m_dwGBitMask = ((1u << gBits) - 1) << 5;
+        mode.m_dwBBitMask = 0x1F;
+        mode.m_dwRBitShift = rShift;
+        mode.m_dwGBitShift = 5;
+        mode.m_dwBBitShift = 0;
+        mode.field_C2 = 3;
+        mode.field_C6 = 8 - gBits;
+        mode.field_CA = 3;
+        mode.rgbGlobalTint = RGB(255, 255, 255);
+        mode.m_nBrightnessCorrection = 0;
+        mode.m_nGammaCorrection = 0;
+    };
+
+    constexpr int kW = 4;
+    constexpr size_t kPitch = kW * 2;
+    const auto index = [](int x, int y) { return static_cast<size_t>(y) * kW + x; };
+    // Row 0's indices are 0,1,2,3; row 1's are 3,2,1,0.
+    const BYTE data[8] = { 0, 1, 2, 3, 3, 2, 1, 0 };
+
+    // 5-6-5, even width: pairs of indices, rows bottom-up from the pointer
+    // handed in (row 1 first, then row 0). Each pixel is the low WORD of the
+    // realized palette entry - the inlined code reads `word [pal + 4*i]`.
+    setMode16(true);
+    std::vector<WORD> canvas(kW * 2, 0x1111);
+    CHECK(bitmap->BltBmp8To16(&canvas[index(0, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(4, 2), 0, 0));
+    CHECK(canvas[index(0, 1)] == static_cast<WORD>(pal[0]));
+    CHECK(canvas[index(1, 1)] == static_cast<WORD>(pal[1]));
+    CHECK(canvas[index(2, 1)] == static_cast<WORD>(pal[2]));
+    CHECK(canvas[index(3, 1)] == static_cast<WORD>(pal[3]));
+    CHECK(canvas[index(0, 0)] == static_cast<WORD>(pal[3])); // the next source row, one row up
+    CHECK(canvas[index(3, 0)] == static_cast<WORD>(pal[0]));
+    CHECK(canvas[index(0, 1)] == 0xF800); // the pack itself: pure red
+
+    // An odd width writes its leading pixel, then pairs through a dword
+    // store; the pixel right of the blit keeps the destination.
+    std::fill(canvas.begin(), canvas.end(), 0x1111);
+    CHECK(bitmap->BltBmp8To16(&canvas[index(0, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(3, 2), 0, 0));
+    CHECK(canvas[index(0, 1)] == static_cast<WORD>(pal[0]));
+    CHECK(canvas[index(1, 1)] == static_cast<WORD>(pal[1]));
+    CHECK(canvas[index(2, 1)] == static_cast<WORD>(pal[2]));
+    CHECK(canvas[index(3, 1)] == 0x1111);
+    // Row 0 continues where row 1 stopped: indices 3, 3, 2.
+    CHECK(canvas[index(0, 0)] == static_cast<WORD>(pal[3]));
+    CHECK(canvas[index(2, 0)] == static_cast<WORD>(pal[2]));
+
+    // Below width 2 the original writes one pixel per row whatever the width.
+    std::fill(canvas.begin(), canvas.end(), 0x1111);
+    CHECK(bitmap->BltBmp8To16(&canvas[index(1, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(1, 2), 0, 0));
+    CHECK(canvas[index(1, 1)] == static_cast<WORD>(pal[0]));
+    CHECK(canvas[index(0, 1)] == 0x1111);
+    CHECK(canvas[index(1, 0)] == static_cast<WORD>(pal[1]));
+
+    // 5-5-5: the same palette in five bits each.
+    setMode16(false);
+    std::fill(canvas.begin(), canvas.end(), 0x1111);
+    CHECK(bitmap->BltBmp8To16(&canvas[index(0, 1)], static_cast<LONG>(kPitch), const_cast<BYTE*>(data),
+        CSize(4, 2), 0, 0));
+    CHECK(canvas[index(0, 1)] == static_cast<WORD>(pal[0]));
+    CHECK(canvas[index(1, 1)] == static_cast<WORD>(pal[1]));
+    CHECK(canvas[index(2, 1)] == static_cast<WORD>(pal[2]));
+    CHECK(canvas[index(3, 1)] == static_cast<WORD>(pal[3]));
+    CHECK(canvas[index(0, 1)] == 0x7C00); // the pack: pure red, five bits
 }
