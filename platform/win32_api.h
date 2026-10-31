@@ -565,11 +565,14 @@ constexpr int WSANO_DATA = 11004;
 
 // The calls CGameSpy makes, so a test can drive the heartbeat without a
 // network. htons/ntohs stay the real (byte-swapping) implementations.
+typedef SOCKET (*IWD2R_GameSpySocketFn)(int af, int type, int protocol);
+typedef HANDLE (*IWD2R_GameSpyAsyncGetHostByNameFn)(HWND window, unsigned message,
+    const char* name, char* buffer, int bufferLength);
+
 struct IWD2R_GameSpySockets {
     int (*WSAStartup)(WORD versionRequested, WSADATA* data);
     int (*WSACleanup)();
-    SOCKET (*socket)
-    (int af, int type, int protocol);
+    IWD2R_GameSpySocketFn socket;
     int (*ioctlsocket)(SOCKET socket, long command, unsigned long* argument);
     int (*bind)(SOCKET socket, const struct sockaddr_in* address, int length);
     int (*sendto)(SOCKET socket, const char* buffer, int length, int flags,
@@ -577,9 +580,7 @@ struct IWD2R_GameSpySockets {
     int (*recvfrom)(SOCKET socket, char* buffer, int length, int flags,
         struct sockaddr_in* from, int* fromLength);
     int (*closesocket)(SOCKET socket);
-    HANDLE (*WSAAsyncGetHostByName)
-    (HWND window, unsigned message, const char* name,
-        char* buffer, int bufferLength);
+    IWD2R_GameSpyAsyncGetHostByNameFn WSAAsyncGetHostByName;
     int (*WSACancelAsyncRequest)(HANDLE taskHandle);
 };
 
