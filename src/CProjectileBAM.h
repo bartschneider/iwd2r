@@ -126,4 +126,26 @@ public:
     void SpawnSpray(const CPoint& origin, LONG count, SHORT facing, BOOL oneSide);
 };
 
+// The follow-up projectile (Magic Missile's second and later missiles,
+// vtable 0x84E7B0): on Fire it launches a child projectile of one type
+// higher and hands it the effects, then keeps re-firing refreshed children
+// from CallBack/AIUpdate while shots remain. The exe constructor 0x533CB0
+// chains straight to the CProjectileBAM constructor 0x52AD60; WillScarlettOhara
+// models the family under CProjectileTravelling, the anchor used here is the
+// exe's actual base. His separate m_targetX/m_targetY are this tree's
+// CPoint m_targetPos.
+class CProjectileFollowUp : public CProjectileBAM {
+public:
+    /* 02A0 */ WORD m_remainingShots;
+    /* 02A2 */ WORD m_interval;
+    /* 02A8 */ WORD m_childType;
+    /* 02AA */ CProjectile* m_nextProjectile;
+    /* 02AE */ BOOL m_ready;
+    /* 02EE */ LONG m_launchHeight;
+    /* 02F8 */ WORD m_delay;
+
+    // 0x533F40
+    void Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType) override;
+};
+
 #endif /* CPROJECTILEBAM_H_ */
