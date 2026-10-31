@@ -1,0 +1,1 @@
+{"address": "0x515670", "name": "CMessage105::UnmarshalMessage", "file": "src/CMessage.cpp", "batch": "i055", "needs": "dependency outside the batch's files: src/CMessage.h has no CMessage105 class; his unmarshal reads that message's payload through it, and the declaration-only header edit the batch is allowed cannot add it."}

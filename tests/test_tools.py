@@ -15394,6 +15394,28 @@ class DriverTest(unittest.TestCase):
             self.assertIsNone(wave.kept_evidence(self.wt, mb, addr, name, _slurp(
                 os.path.join(ev, addr[2:] + '.md'))), addr)
 
+    def test_kept_evidence_ignores_an_added_parity_waiver(self):
+        """2026-10-30 (i051/i052): evidence that stood at the merge base keeps
+        standing when the batch only adds a parity_waiver line; a changed
+        body line is still measured."""
+        d, batch = self._import_phase_driver()
+        ev = os.path.join(self.wt, 'docs', 'evidence')
+        base = self.git('show', 'first:docs/evidence/403000.md').stdout
+        head, sep, rest = base.partition('\n---\n')
+        _write(os.path.join(ev, '403000.md'),
+               head + '\nparity_waiver: "asm: a reading"' + sep + rest)
+        self.git('add', '-A', cwd=self.wt)
+        self.git('commit', '-qm', 'waiver', cwd=self.wt)
+        wave = driver._tool('wave')
+        mb = wave.merge_base_sha(self.wt, 'first')
+        path = os.path.join(ev, '403000.md')
+        self.assertEqual(wave.kept_evidence(self.wt, mb, '0x403000', 'Rules::Tick',
+                                            _slurp(path)), 'unchanged since the merge base')
+        with open(path, 'a') as f:
+            f.write('one more line\n')
+        self.assertIsNone(wave.kept_evidence(self.wt, mb, '0x403000', 'Rules::Tick',
+                                             _slurp(path)))
+
     def test_kept_evidence_accepts_a_pending_case_registration(self):
         """Task 41: an `oracle_case: pending/...` names a registration the
         family's other spellings write too (a pending case stands as

@@ -1,6 +1,6 @@
 # iwd2r
 
-iwd2r (Icewind Dale 2 Resurrected) is a cross-platform port of the decompiled Icewind Dale II engine from [alexbatalov/iwd2-re](https://github.com/alexbatalov/iwd2-re). It builds natively on Linux, Windows and macOS (Apple silicon), runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and the IWD2EE mod built in. iwd2r is a modified version of iwd2-re.
+iwd2r (Icewind Dale 2 Resurrected) is a cross-platform decompilation project of the Icewind Dale II engine. It builds natively on Linux, Windows and macOS (Apple silicon), runs the original simulation underneath, and is meant to grow a high-fidelity renderer with a runtime toggle back to the classic 2D look and the IWD2EE mod built in.
 
 **Want to help?** The recovery runs as batches of functions measured against the original game; [Contributing: running the recovery pipeline](#contributing-running-the-recovery-pipeline) lists what you need (a Windows 11 PC with the game, WSL2, and Claude Code for the workers, on an Anthropic subscription or on Z.ai's cheaper GLM plan), how a batch is cut, checked and landed, and the house rules. Readings of single functions, oracle cases for the rows no scenario reaches, and new game scenarios are the easiest places to start.
 
@@ -13,17 +13,19 @@ Bring your own copy of Icewind Dale II: Complete from GOG. The DRM-free GOG vers
 
 ## Status
 
+Projects keep the numbers they were started with, which other documents refer to; the table lists them by state (done, in progress, not started in roadmap order).
+
 | # | Project | State |
 |---|---|---|
 | 1 | Portability foundation | Done |
 | 2 | Verification harness | Done |
-| 3 | Finish the simulation | In progress: milestones 1 to 3 done, each matched against the original (a new party enters the world; moves and interacts; wins its first fight); milestone 4 (save, load and rest) and milestone 5 (the remaining screens and rendering) next |
 | 4 | Render API and classic renderer | Done (classic presenter default; SDL3 GPU presenter opt-in with nearest/sharp/smooth/FSR/NIS filters; the HD classic renderer is a later project) |
-| 5 | IEex native layer and Lua API | Not started |
+| 3 | Finish the simulation | In progress: milestones 1 to 3 done, each matched against the original (a new party enters the world; moves and interacts; wins its first fight). Milestone 4 (save, load and rest) is under way: the save and load screens match the original; resting's spell refill (action 96) is not ported yet. Character import is proven on the original (a druid 7 exported from it imports at its level and plays to the first fight); in ours the import loads the character but the creation screen does not yet move to its imported state, and that fix is in review. Milestone 5 (the remaining screens and rendering) follows |
+| 7 | Cross-recovery with [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re) | In progress ([design](docs/superpowers/specs/2026-10-17-wso-integration-design.md), [summary](docs/wso/README.md)). Wave 1 done: the 558 functions both trees recovered differently are settled against the original (533 ours, 15 his, 10 neither; [tally](docs/wso/xrec-report.md)). Importing what only his tree has: 239 rows left, mostly `CProjectile.cpp` |
 | 6 | Remaster renderer | Not started; waits for project 3. The plan, phase by phase, is in [docs/hd-plan.md](docs/hd-plan.md): built natively on the SDL3 GPU presenter (Vulkan through SDL3, never raw), with the IWD2EE OpenGL/HD work read for ideas only, since its author never finished it |
-| 7 | Cross-recovery with [WillScarlettOhara/iwd2-re](https://github.com/WillScarlettOhara/iwd2-re) | In progress: [design](docs/superpowers/specs/2026-10-17-wso-integration-design.md), [plan](docs/superpowers/plans/2026-10-17-wso-integration.md), [summary](docs/wso/README.md). A second recovery of the same engine, five months deep. Wave 0 (the tooling) is on `main`: `tools/xrec.py` compares the two trees function by function, the fork's differential Frida tracing and structural parity checks run in our gate, its context tools and the BG2:EE symbol carry-over are in `tools/`, and `tools/wave.py` drives the batches. Wave 1 is running: of the 406 functions both trees recovered differently, 259 are settled in 14 batches of 20 (241 for ours, 10 for the fork, 8 for neither), each adjudicated against the original with the verdict and its deciding evidence in the function's evidence file and the tally in [docs/wso/xrec-report.md](docs/wso/xrec-report.md). A seeded audit probed ten of the verdicts that rested on reading the decompile: none flipped. His function-level imports (33 functions he recovered where ours were stubs) wait on measured evidence: a traced import closes, an unexercised one is parked, and the differential tracer is being calibrated for that. His tree moves daily; the comparison is re-run at his tip at each wave boundary |
+| 5 | IEex native layer and Lua API | Not started |
 
-Current numbers: five presets build (`macos-clang` too); 749 engine tests and 696 tool tests pass on Linux; 1,342 evidence files; 8,661 functions across the 201 source files shared with the parallel recovery are compared, 406 of them disagree and 259 are settled against the original; character generation matches the original field for field through party formation; the scenarios with recorded original state dumps match them at every checkpoint (190 of 190 on the first fight), on Linux and in Windows Sandbox; the count is in the Recovery status block below. Not playable end to end yet.
+Current numbers: five presets build (`macos-clang` too); 795 engine tests and 1,284 tool tests pass on Linux; 1,623 evidence files; the parity gate checks every changed function against the exe (callees, the strings it uses, vtable slots, class layout, member offsets); character generation matches the original field for field through party formation; 13 scenarios with recorded original state dumps match them at every checkpoint (190 of 190 on the first fight), on Linux and in Windows Sandbox; an outside contributor has landed 48 pull requests, most with oracle cases run against the original. The count is in the Recovery status block below. Not playable end to end yet.
 
 ### Recovery status
 
@@ -47,6 +49,8 @@ In this order, because each step is what makes the next one verifiable:
 3. Presentation ([the HD plan](docs/hd-plan.md)): the SDL3 GPU presenter draws the world from an atlas, fog as a texture, HD UI and sprites from packs the player installs in `override/`, zoom, and later lighting over the same pre-rendered scenes, with the original look one toggle away. A 2.5D remaster in the Pillars of Eternity sense, not a 3D one.
 4. Native IEex layer and Lua API (project 5), so IWD2EE runs without an injected DLL.
 5. Fixes to original bugs, 3e rule corrections and additions, and quality-of-life features, each as a switchable option so vanilla stays available for comparison. WeiDU mods and the `override/` folder keep working as they do today.
+
+Where the recovery stands (October 30): about 1,650 game functions (roughly 500K bytes of code) have no port yet; the other unrecovered functions the Recovery status counts are statically linked MFC and C runtime code, which our platform layer replaces rather than ports. They are worked in three streams at once: the import of the parallel recovery's bodies (above), areas taken by contributors (the next ones: the video layer's largest unported functions, then the multiplayer message layer), and batches of the small functions. Verification against the original runs behind them, scenario by scenario.
 
 Engine sites that still truncate pointers to 32 bits on 64-bit targets are listed for project 3 in [docs/64bit-cast-sites.md](docs/64bit-cast-sites.md).
 
