@@ -20,6 +20,12 @@ public:
     CGameSpy();
     ~CGameSpy();
     BOOLEAN sub_4D0980();
+    BOOLEAN sub_4D0B80(SOCKET hSocket, unsigned long* pAddress, unsigned short* pPort, BYTE** ppData, DWORD* pLength);
+    BOOLEAN sub_4D0C70(unsigned long nAddress, unsigned short nPort);
+    BOOLEAN sub_4D0DA0(const char* pData, DWORD nLength, const CString& sKey, BYTE** ppValue, DWORD* pValueLength);
+    BOOLEAN sub_4D0F40(unsigned long nAddress, unsigned short nPort, const BYTE* pSecure);
+    BOOLEAN sub_4D1220(unsigned long nAddress, unsigned short nPort, const BYTE* pSecure);
+    BOOLEAN sub_4D15D0(unsigned long nAddress, unsigned short nPort, const BYTE* pData, DWORD nLength);
     BOOLEAN sub_4D1EC0(BOOL a1);
     BOOLEAN sub_4D2060();
     BOOLEAN sub_4D2210();

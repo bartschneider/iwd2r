@@ -36,9 +36,29 @@ public:
     void MusicThreadMain(void*) override { }
 
     void GetGameSpyGameName(CString& sGameSpyName) override { sGameSpyName = "IWDTEST"; }
+    void GetGameSpyCode(CString& sGameSpyCode) override { sGameSpyCode = "IWDTST"; }
     WORD GetMultiplayerGameSpyPort() override { return m_nGameSpyPort; }
 
+    // What the reply handler's GetGameSpyResponse call returns per type.
+    BOOLEAN GetGameSpyResponse(BYTE type, BYTE** pData, DWORD* dwSize) override
+    {
+        m_nResponseTypes[m_nResponseCalls++] = type;
+        if (type > 3) {
+            return FALSE;
+        }
+        *dwSize = static_cast<DWORD>(m_sResponse[type].size());
+        *pData = NULL;
+        if (*dwSize != 0) {
+            *pData = new BYTE[*dwSize];
+            std::memcpy(*pData, m_sResponse[type].data(), *dwSize);
+        }
+        return TRUE;
+    }
+
     WORD m_nGameSpyPort = 8000;
+    std::string m_sResponse[4] = { "R0", "R1", "R2", "R3" };
+    BYTE m_nResponseTypes[8] = {};
+    int m_nResponseCalls = 0;
 };
 
 class ChitinScope {
@@ -74,9 +94,22 @@ struct SocketLog {
     int nBoundPort = -1;
     SOCKET nBoundSocket = 0;
     std::string sSent;
+    std::vector<std::string> sent;
+    SOCKET nSentSocket = 0;
     int nSentFlags = -1;
     unsigned short nSentPort = 0;
     unsigned long nSentAddress = 0;
+    // The datagrams the fake recvfrom serves, in order; the peek does not
+    // consume one, the read does.
+    struct Packet {
+        std::string data;
+        unsigned long nAddress = 0;
+        unsigned short nPort = 0;
+    };
+    std::vector<Packet> recvPackets;
+    size_t nRecvIndex = 0;
+    int nRecvfromCalls = 0;
+    int nRecvfromPeekFlags = -1;
     int nAsyncCalls = 0;
     int nAsyncCancelCalls = 0;
     // Filled by WSAAsyncGetHostByName; the resolved HOSTENT the port reads.
@@ -130,22 +163,49 @@ int FakeBind(SOCKET handle, const struct sockaddr_in* address, int length)
     return 0;
 }
 
-int FakeSendto(SOCKET, const char* buffer, int length, int flags, const struct sockaddr_in* to,
+int FakeSendto(SOCKET handle, const char* buffer, int length, int flags, const struct sockaddr_in* to,
     int toLength)
 {
     if (length < 0 || to == nullptr || toLength != static_cast<int>(sizeof(*to))) {
         return SOCKET_ERROR;
     }
     g_log.sSent.assign(buffer, static_cast<size_t>(length));
+    g_log.sent.push_back(g_log.sSent);
+    g_log.nSentSocket = handle;
     g_log.nSentFlags = flags;
     g_log.nSentPort = to->sin_port;
     g_log.nSentAddress = to->sin_addr.s_addr;
     return length;
 }
 
-int FakeRecvfrom(SOCKET, char*, int, int, struct sockaddr_in*, int*)
+int FakeRecvfrom(SOCKET, char* buffer, int length, int flags, struct sockaddr_in* from,
+    int* fromLength)
 {
-    return SOCKET_ERROR;
+    g_log.nRecvfromCalls++;
+    if (g_log.nRecvIndex >= g_log.recvPackets.size()) {
+        return SOCKET_ERROR;
+    }
+    const SocketLog::Packet& packet = g_log.recvPackets[g_log.nRecvIndex];
+    if (static_cast<int>(packet.data.size()) > length) {
+        return SOCKET_ERROR;
+    }
+    if (flags == 2) {
+        // The queued datagram is pending: report its size, consume nothing.
+        g_log.nRecvfromPeekFlags = flags;
+        return static_cast<int>(packet.data.size());
+    }
+    std::memcpy(buffer, packet.data.data(), packet.data.size());
+    if (from != nullptr) {
+        std::memset(from, 0, sizeof(*from));
+        from->sin_family = AF_INET;
+        from->sin_port = htons(packet.nPort);
+        from->sin_addr.s_addr = packet.nAddress;
+    }
+    if (fromLength != nullptr) {
+        *fromLength = static_cast<int>(sizeof(*from));
+    }
+    g_log.nRecvIndex++;
+    return static_cast<int>(packet.data.size());
 }
 
 int FakeClosesocket(SOCKET handle)
@@ -370,4 +430,244 @@ TEST_CASE("gamespy: a heartbeat that is off or not from the host is not sent", "
     chitin.Chitin().cNetwork.m_bIsHost = FALSE;
     CHECK(spy.sub_4D1EC0(FALSE) == FALSE);
     CHECK(g_log.sSent.empty());
+}
+
+TEST_CASE("gamespy: the query extractor finds a key's value between backslashes", "[gamespy]")
+{
+    ChitinScope chitin;
+    CGameSpy spy;
+    InitSpy(spy);
+
+    const char* packet = "\\secure\\ABCDEF\\basic\\\\info\\1\\";
+    DWORD nLength = static_cast<DWORD>(std::strlen(packet));
+    BYTE* pValue = NULL;
+    DWORD nValueLength = 0;
+
+    REQUIRE(spy.sub_4D0DA0(packet, nLength, CString("secure"), &pValue, &nValueLength) == TRUE);
+    CHECK(nValueLength == 6);
+    REQUIRE(pValue != NULL);
+    CHECK(std::memcmp(pValue, "ABCDEF", 6) == 0);
+    delete[] pValue;
+
+    // An empty value is found, with no buffer.
+    REQUIRE(spy.sub_4D0DA0(packet, nLength, CString("basic"), &pValue, &nValueLength) == TRUE);
+    CHECK(nValueLength == 0);
+    CHECK(pValue == NULL);
+
+    REQUIRE(spy.sub_4D0DA0(packet, nLength, CString("info"), &pValue, &nValueLength) == TRUE);
+    CHECK(nValueLength == 1);
+    REQUIRE(pValue != NULL);
+    CHECK(pValue[0] == '1');
+    delete[] pValue;
+
+    // A missing key.
+    CHECK(spy.sub_4D0DA0(packet, nLength, CString("rules"), &pValue, &nValueLength) == FALSE);
+    CHECK(nValueLength == 0);
+    CHECK(pValue == NULL);
+}
+
+TEST_CASE("gamespy: a flush appends the query id and sends the reply buffer", "[gamespy]")
+{
+    ChitinScope chitin;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+    spy.m_hQuerySocket = 42;
+    spy.m_nQueryId = 7;
+    spy.m_nQueryCounter = 0;
+    spy.m_pResponse = new BYTE[0x578];
+    std::memset(spy.m_pResponse, 0, 0x578);
+    std::memcpy(spy.m_pResponse, "HELLO", 5);
+    spy.m_nResponseLength = 5;
+
+    REQUIRE(spy.sub_4D0C70(0x01020304, 0x1F40) == TRUE);
+    CHECK(g_log.sSent == "HELLO\\queryid\\7.1\n");
+    CHECK(g_log.nSentSocket == 42);
+    CHECK(g_log.nSentPort == htons(0x1F40));
+    CHECK(g_log.nSentAddress == 0x01020304);
+    CHECK(g_log.nSentFlags == 0);
+    CHECK(spy.m_nResponseLength == 0);
+    CHECK(spy.m_pResponse[0] == 0); // zeroed for the next reply
+
+    delete[] spy.m_pResponse;
+    spy.m_pResponse = NULL;
+}
+
+TEST_CASE("gamespy: the validate answer encodes the secure challenge with the game code", "[gamespy]")
+{
+    ChitinScope chitin;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+    spy.m_hQuerySocket = 42;
+    spy.m_nQueryId = 3;
+    spy.m_nQueryCounter = 0;
+    spy.m_pResponse = new BYTE[0x578];
+    std::memset(spy.m_pResponse, 0, 0x578);
+    spy.m_nResponseLength = 0;
+
+    // The eight characters below are an independent model of the arm's
+    // RC4 semantics (key "IWDTST", challenge 01..06): crypt bb 0d c9 13 ac 40,
+    // which the 6-bit encoding writes as "uw3JE6xA".
+    const BYTE secure[6] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06 };
+    REQUIRE(spy.sub_4D0F40(0x01020304, 0x1F40, secure) == TRUE);
+    CHECK(g_log.sSent == "\\validate\\uw3JE6xA\\queryid\\3.1\n");
+    CHECK(g_log.nSentSocket == 42);
+    CHECK(spy.m_nResponseLength == 0);
+
+    delete[] spy.m_pResponse;
+    spy.m_pResponse = NULL;
+}
+
+TEST_CASE("gamespy: the validate-and-final answer flushes once", "[gamespy]")
+{
+    ChitinScope chitin;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+    spy.m_hQuerySocket = 42;
+    spy.m_nQueryId = 3;
+    spy.m_nQueryCounter = 0;
+    spy.m_pResponse = new BYTE[0x578];
+    std::memset(spy.m_pResponse, 0, 0x578);
+    spy.m_nResponseLength = 0;
+
+    const BYTE secure[6] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06 };
+    REQUIRE(spy.sub_4D1220(0x01020304, 0x1F40, secure) == TRUE);
+    REQUIRE(g_log.sent.size() == 1);
+    CHECK(g_log.sent[0] == "\\validate\\uw3JE6xA\\final\\\\queryid\\3.1\n");
+
+    // Without a challenge the answer is just \final\.
+    g_log.sent.clear();
+    spy.m_nQueryId = 3;
+    spy.m_nQueryCounter = 0;
+    REQUIRE(spy.sub_4D1220(0x01020304, 0x1F40, NULL) == TRUE);
+    REQUIRE(g_log.sent.size() == 1);
+    CHECK(g_log.sent[0] == "\\final\\\\queryid\\3.1\n");
+
+    delete[] spy.m_pResponse;
+    spy.m_pResponse = NULL;
+}
+
+TEST_CASE("gamespy: the dequeue takes a datagram and its sender", "[gamespy]")
+{
+    ChitinScope chitin;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+    g_log.recvPackets.push_back({ "\\basic\\", 0x0A0B0C0D, 0x1234 });
+
+    unsigned long nAddress = 0;
+    unsigned short nPort = 0;
+    BYTE* pData = NULL;
+    DWORD nLength = 0;
+    REQUIRE(spy.sub_4D0B80(42, &nAddress, &nPort, &pData, &nLength) == TRUE);
+    CHECK(g_log.nRecvfromCalls == 2); // the peek, then the read
+    CHECK(g_log.nRecvfromPeekFlags == 2);
+    CHECK(nLength == 7);
+    REQUIRE(pData != NULL);
+    CHECK(std::memcmp(pData, "\\basic\\", 7) == 0);
+    CHECK(nAddress == 0x0A0B0C0D);
+    CHECK(nPort == 0x1234);
+    delete[] pData;
+
+    // Nothing queued any more.
+    CHECK(spy.sub_4D0B80(42, &nAddress, &nPort, &pData, &nLength) == FALSE);
+}
+
+TEST_CASE("gamespy: the reply handler answers a basic query", "[gamespy]")
+{
+    ChitinScope chitin;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+    spy.m_hQuerySocket = 42;
+
+    std::string packet = "\\secure\\";
+    packet.append("\x01\x02\x03\x04\x05\x06", 6);
+    packet += "\\basic\\";
+    REQUIRE(spy.sub_4D15D0(0x01020304, 0x1F40, reinterpret_cast<const BYTE*>(packet.data()),
+                static_cast<DWORD>(packet.size()))
+        == TRUE);
+
+    // basic's answer, then the validate (for the secure challenge) and
+    // \final\ before the flush.
+    REQUIRE(g_log.sent.size() == 1);
+    CHECK(g_log.sent[0] == "R0\\validate\\uw3JE6xA\\final\\\\queryid\\1.1\n");
+    CHECK(chitin.Chitin().m_nResponseCalls == 1);
+    CHECK(chitin.Chitin().m_nResponseTypes[0] == 0);
+    CHECK(spy.m_pResponse != NULL); // the handler frees it, but the member keeps the pointer
+    CHECK(spy.m_nQueryId == 1);
+}
+
+TEST_CASE("gamespy: the reply handler answers status with all four responses", "[gamespy]")
+{
+    ChitinScope chitin;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+    spy.m_hQuerySocket = 42;
+
+    std::string packet = "\\secure\\";
+    packet.append("\x01\x02\x03\x04\x05\x06", 6);
+    packet += "\\status\\";
+    REQUIRE(spy.sub_4D15D0(0x01020304, 0x1F40, reinterpret_cast<const BYTE*>(packet.data()),
+                static_cast<DWORD>(packet.size()))
+        == TRUE);
+
+    // R0 goes out alone; each later response flushes behind its validate, and
+    // the last one carries the final.
+    REQUIRE(g_log.sent.size() == 4);
+    CHECK(g_log.sent[0] == "R0\\validate\\uw3JE6xA\\queryid\\1.1\n");
+    CHECK(g_log.sent[1] == "R1\\validate\\uw3JE6xA\\queryid\\1.2\n");
+    CHECK(g_log.sent[2] == "R2\\validate\\uw3JE6xA\\queryid\\1.3\n");
+    CHECK(g_log.sent[3] == "R3\\validate\\uw3JE6xA\\final\\\\queryid\\1.4\n");
+    CHECK(chitin.Chitin().m_nResponseCalls == 4);
+    CHECK(chitin.Chitin().m_nResponseTypes[0] == 0);
+    CHECK(chitin.Chitin().m_nResponseTypes[1] == 1);
+    CHECK(chitin.Chitin().m_nResponseTypes[2] == 2);
+    CHECK(chitin.Chitin().m_nResponseTypes[3] == 3);
+}
+
+TEST_CASE("gamespy: the pump resends the heartbeat and dispatches a queued query", "[gamespy]")
+{
+    ChitinScope chitin;
+    chitin.Chitin().cNetwork.m_bIsHost = TRUE;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+    spy.m_bHeartbeatActive = TRUE;
+    spy.m_bWSAStarted = TRUE;
+    spy.m_nPort = 8000;
+    spy.m_nMasterAddress = 0x7F000001;
+    spy.m_hSendSocket = 1;
+    spy.m_hQuerySocket = 2;
+    spy.m_dwLastHeartbeat = GetTickCount() - 0x7531;
+
+    g_log.recvPackets.push_back({ "\\basic\\", 0x01020304, 0x1F40 });
+
+    REQUIRE(spy.sub_4D2210() == TRUE);
+    CHECK(spy.m_nRetries == 1);
+    REQUIRE(g_log.sent.size() == 2);
+    CHECK(g_log.sent[0] == "\\heartbeat\\8000\\gamename\\IWDTEST\\\n");
+    CHECK(g_log.sent[1] == "R0\\final\\\\queryid\\1.1\n");
+    CHECK(g_log.nSentSocket == 2); // the reply goes out on the query socket
+}
+
+TEST_CASE("gamespy: the pump does nothing when the heartbeat is off or not the host", "[gamespy]")
+{
+    ChitinScope chitin;
+    SocketScope sockets;
+    CGameSpy spy;
+    InitSpy(spy);
+
+    // Off.
+    CHECK(spy.sub_4D2210() == FALSE);
+
+    // On, but not the host.
+    spy.m_bHeartbeatActive = TRUE;
+    chitin.Chitin().cNetwork.m_bIsHost = FALSE;
+    CHECK(spy.sub_4D2210() == FALSE);
+    CHECK(g_log.sent.empty());
+    CHECK(g_log.nRecvfromCalls == 0);
 }
