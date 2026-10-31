@@ -21,9 +21,13 @@
 # level-4 spell can sit in the list at a time and row 2 never exists.
 # Flame Strike memorizes pre-fight (row 1); Spike Stones memorizes into
 # the slot between the casts (Flame Strike's slot is spent by then) and
-# is cast with F1 as well. No rest is needed: chr_raise_druid never
-# rested, so the file's level-4 slot is empty and filling an empty slot
-# needs no rest -- the casts never depend on the unported ACTION 96.
+# is cast with F1 as well. KNOWN BLOCKER (Task 59c): a newly memorized
+# spell reads 0/1 (memorized, not castable) on both engines until a rest,
+# and AR1000 forbids resting (area flags 0x2; CanRestParty 0x5C1E30 ->
+# "You may not rest at this time.", on ours and by the same test in the
+# exe). So these casts cannot land in AR1000 as written: the fix is a
+# druid file exported after a rest with the spells memorized, or a rest
+# in another area. The scenario stays pending until then.
 #
 # Spellbook geometry (record_tour.txt + notes): key S opens it on the
 # sole member; the level tabs sit at x=761, level 1 (761,81) plus 39 per
