@@ -1739,11 +1739,6 @@ LONG CGameArea::sub_46DDC0(INT x, INT y, const CAIObjectType& type, SHORT range,
 }
 
 // 0x46E130
-// NOTE: The original releases the share after the type and hidden checks and
-// takes it again for each later filter (party and network, specific,
-// exclude), releasing it before the message. A THREAD_ASYNCH share keeps no
-// count (ReleaseShare returns at once), so holding one share across the
-// filters is the same.
 void CGameArea::ApplyEffectToSprites(CGameEffect* pEffect, BOOL bNotParty, BOOL bMatchSpecific, BYTE nSpecific, CGameObject* pExclude)
 {
     // Hands a copy of pEffect to every sprite of the area through a
@@ -1751,6 +1746,12 @@ void CGameArea::ApplyEffectToSprites(CGameEffect* pEffect, BOOL bNotParty, BOOL 
     // types 4-8 of the spell dispatchers all land here:
     //   4 all creatures, 5 all but the party, 6 the caster's AI specific,
     //   7 the target's AI specific, 8 all but the caster.
+    //
+    // NOTE: The original releases the share after the type and hidden checks
+    // and takes it again for each later filter (party and network, specific,
+    // exclude), releasing it before the message. A THREAD_ASYNCH share keeps
+    // no count (ReleaseShare returns at once), so holding one share across the
+    // filters is the same.
     POSITION pos = m_lVertSort.GetHeadPosition();
     while (pos != NULL) {
         LONG nId = static_cast<LONG>(reinterpret_cast<INT_PTR>(m_lVertSort.GetNext(pos)));
