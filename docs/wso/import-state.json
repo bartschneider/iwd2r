@@ -7965,6 +7965,84 @@
       ],
       "status": "closed",
       "verdicts": {}
+    },
+    "i056": {
+      "assigned_at": "2026-10-30T23:41:55+00:00",
+      "branch": "p3/wso-i056",
+      "closed_at": "2026-10-31T01:01:57+00:00",
+      "files": [
+        "src/CMessage.cpp"
+      ],
+      "gate": "full",
+      "pool": "glm",
+      "rows": [
+        {
+          "address": "0x515010",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileImmumityUpdate::MarshalMessage",
+          "our_len": 0,
+          "their_len": 1068
+        },
+        {
+          "address": "0x516D50",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageSpellLevelImmumityUpdate::MarshalMessage",
+          "our_len": 0,
+          "their_len": 969
+        },
+        {
+          "address": "0x4F8FA0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageAddItem::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 924
+        },
+        {
+          "address": "0x5006C0",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageFireProjectile::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 840
+        },
+        {
+          "address": "0x504070",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageRemoveItem::MarshalMessage",
+          "our_len": 0,
+          "their_len": 788
+        },
+        {
+          "address": "0x516B70",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage117::Run",
+          "our_len": 0,
+          "their_len": 709
+        },
+        {
+          "address": "0x516A80",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessage117::UnmarshalMessage",
+          "our_len": 0,
+          "their_len": 655
+        },
+        {
+          "address": "0x515210",
+          "category": "only_theirs",
+          "file": "src/CMessage.cpp",
+          "name": "CMessageProjectileImmumityUpdate::Run",
+          "our_len": 0,
+          "their_len": 562
+        }
+      ],
+      "status": "closed",
+      "verdicts": {}
     }
   }
 }
