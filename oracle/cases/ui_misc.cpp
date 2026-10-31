@@ -470,6 +470,13 @@ void CompositionWindowRect(CaseContext& ctx)
     g_pChitin = savedChitin;
 }
 
+// Writes a value into an original block at a byte offset.
+template <class T>
+void Put(uint8_t* at, size_t offset, T value)
+{
+    std::memcpy(at + offset, &value, sizeof(value));
+}
+
 // CBaldurEngine::OnMouseWheel (0x4289C0), the tail after the scroll-bar loop
 // (report-T95.md section 2.6): with no current scroll bar the two remembered
 // bars at 0xFE/0x102 take the wheel - both must be non-null, then bForward
