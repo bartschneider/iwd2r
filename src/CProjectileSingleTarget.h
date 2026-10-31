@@ -7,6 +7,7 @@
 #include "CVidPalette.h"
 #include "IcewindCVisualEffect.h"
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -99,13 +100,14 @@ public:
     /* 0332 */ BOOLEAN m_bDelivered;
 };
 
-// The Icewind Dale II Scorcher. WillScarlettOhara models the family as
-// IcewindCProjectileScorcher < IcewindCProjectileTravellingVFX <
-// CProjectileTravelling; the exe ctor 0x57AEB0 bases it on
+// The Icewind Dale II Scorcher (vtable 0x850E84). WillScarlettOhara models
+// the family as IcewindCProjectileScorcher < IcewindCProjectileTravellingVFX
+// < CProjectileTravelling; the exe ctor 0x57AEB0 bases it on
 // CProjectileSingleTarget (0x578110) with CResRef("AScorcT"), which is the
-// anchor used here. Only the static direction-table builder is imported so
-// far; the instance side (GatherTargets 0x57BE80, Strike 0x57C1D0, members
-// 02AE-02D2) is not part of that import.
+// anchor used here. Its own virtuals are the two Strike-related slots the
+// exe adds past the base vtable; the rest of the instance side (members
+// 02AE-02B5, the Fire/Render/DeliverEffects overrides) is not part of this
+// import.
 class IcewindCProjectileScorcher : public CProjectileSingleTarget {
 public:
     // 0x57BBC0. Native static direction table.
@@ -117,6 +119,13 @@ public:
     static std::vector<CPoint> m_offsets;
     // 0x8E52E8
     static BYTE m_offsetsInitialized;
+
+    /* 0088 */ virtual void GatherTargets();
+    /* 008C */ virtual void Strike(LONG target, BYTE initial);
+
+    // The ids this wave has already struck (exe std::set internals: _Myhead
+    // 0x2BA, _Multi 0x2BE, NIL sentinel 0x8E28C8).
+    /* 02B6 */ std::set<DWORD> m_struckTargets;
 };
 
 #endif /* CPROJECTILESINGLETARGET_H_ */

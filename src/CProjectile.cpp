@@ -983,3 +983,50 @@ void IcewindCProjectileScorcher::InitializeOffsets()
         m_offsetsInitialized = TRUE;
     }
 }
+
+// 0x57C1D0
+void IcewindCProjectileScorcher::Strike(LONG target, BYTE initial)
+{
+    CGameObjectArray* objects = g_pBaldurChitin->GetObjectGame()->GetObjectArray();
+    CGameObject* victim;
+    if (objects->GetShare(target, CGameObjectArray::THREAD_ASYNCH, &victim, INFINITE)
+        != CGameObjectArray::SUCCESS) {
+        return;
+    }
+
+    if ((victim->GetObjectType() & CGameObject::TYPE_AIBASE) == 0) {
+        objects->ReleaseShare(target, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        return;
+    }
+
+    if (victim->GetObjectType() == CGameObject::TYPE_SPRITE
+        && IsTargetImmune(static_cast<CGameSprite*>(victim)) == TRUE) {
+        CGameEffect::FeedBackImmuneToResource(static_cast<CGameSprite*>(victim), m_sourceRes);
+        objects->ReleaseShare(target, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        return;
+    }
+
+    CGameObject* source;
+    if (objects->GetShare(m_sourceId, CGameObjectArray::THREAD_ASYNCH, &source, INFINITE)
+        != CGameObjectArray::SUCCESS) {
+        objects->ReleaseShare(target, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+        return;
+    }
+
+    CPoint origin;
+    GetSourcePosition(m_sourceId, origin, TRUE);
+    if (m_pArea->CheckLOS(origin, victim->GetPos(), m_terrainTable, FALSE)) {
+        std::list<CGameEffect*> effects = IcewindMisc::GetSpellResrefEffects(source,
+            reinterpret_cast<const BYTE*>(initial == TRUE ? "EffAS1" : "EffAS2"),
+            1);
+        for (std::list<CGameEffect*>::iterator it = effects.begin(); it != effects.end(); it++) {
+            CGameEffect* effect = *it;
+            effect->m_sourceRes = CResRef("SpWi217");
+            CMessage* message = new CMessageAddEffect(effect, m_sourceId, target);
+            g_pBaldurChitin->GetMessageHandler()->AddMessage(message, FALSE);
+        }
+    }
+
+    objects->ReleaseShare(target, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+    objects->ReleaseShare(m_sourceId, CGameObjectArray::THREAD_ASYNCH, INFINITE);
+}
