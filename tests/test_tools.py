@@ -14264,6 +14264,22 @@ class DriverTest(unittest.TestCase):
         # nothing the batch changed: nothing unparked
         self.assertEqual(d._unpark_imported('b011', batch, self.wt, left, set()), (left, {}))
 
+    def test_driver_prior_categories_reads_rows_and_unparked_lists(self):
+        # A row unparked before the Frida phase (wave.py unpark) keeps the
+        # category its batch was cut with, so rule 1 can mark it unmeasured.
+        d, _batch = self._import_phase_driver()
+        with open(d.state_path) as f:
+            state = json.load(f)
+        state['batches']['i001'] = {'status': 'closed', 'rows': [
+            {'address': '0x405000', 'category': 'only_theirs'}],
+            'unparked': [{'address': '0x406000', 'category': 'theirs_real_ours_stub'}]}
+        with open(d.state_path, 'w') as f:
+            json.dump(state, f)
+        prior = d._prior_categories()
+        self.assertEqual(prior.get('405000'), 'only_theirs')
+        self.assertEqual(prior.get('406000'), 'theirs_real_ours_stub')
+        self.assertNotIn('407000', prior)
+
     def _frida_file_run_all(self):
         trace = TruthTest._trace
         files = os.path.join(self.tmp_dir(), 'traces')

@@ -4033,16 +4033,20 @@ class Driver:
                          or (r.get('category') == 'only_theirs'
                              and wave._labelled_at(worktree, mb_sha, r['address'])))):
                 r['kept'] = True
+        prior = self._prior_categories() if touched else {}
         for path, addr, name in touched:
             k = key('0x%X' % addr)
             if k not in seen:
                 seen.add(k)
                 row = {'address': '0x%X' % addr, 'name': name, 'file': path,
                        'dependency': True}
-                if cats.get(k):
+                cat = cats.get(k) or prior.get(k)
+                if cat:
                     # the category the row was parked under: a stub or
                     # only-theirs row can be marked unmeasured, not measured
-                    row['category'] = cats[k]
+                    # (a row unparked before this phase keeps the category
+                    # its batch was cut with)
+                    row['category'] = cat
                 rows.append(row)
                 self.log('%s: frida: 0x%X %s imported with the batch; measured like a row'
                          % (batch_id, addr, name))
@@ -4081,6 +4085,23 @@ class Driver:
                     self._record_kept(batch_id, [r['address']])
             else:
                 out.append(r)
+        return out
+
+    def _prior_categories(self):
+        """The category each address was cut with in any batch of the state
+        (its rows or its unparked list).  A row the batch imported that an
+        earlier batch parked and someone unparked before this phase (wave.py
+        unpark) keeps that category, so rule 1 can mark it unmeasured."""
+        key = _tool('wave')._addr_key
+        out = {}
+        try:
+            state = self.load_state(self.state_path)
+        except Exception:
+            return out
+        for b in (state.get('batches') or {}).values():
+            for e in list(b.get('rows') or []) + list(b.get('unparked') or []):
+                if e.get('address') and e.get('category'):
+                    out.setdefault(key(e['address']), e['category'])
         return out
 
     def _unpark_imported(self, batch_id, batch, worktree, parked, moved):
