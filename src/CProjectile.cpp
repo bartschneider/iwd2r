@@ -87,12 +87,12 @@ void CProjectile::AddEffect(CGameEffect* pEffect)
 // 0x51EAB0
 void CProjectile::AddEffect2(CGameEffect* pEffect)
 {
-    // The original gates the add on two bytes at 0x1032/0x1033 in the
-    // global chitin (inside cNetwork): it adds only when byte 0x1032 is 0,
-    // or when both bytes are 1.
-    const BYTE* pChitinGate = reinterpret_cast<const BYTE*>(g_pChitin);
-    BYTE bGate = pChitinGate[0x1032];
-    if (bGate == 0 || (bGate == 1 && pChitinGate[0x1033] == 1)) {
+    // The original adds only when no session is up, or when this machine
+    // hosts it (chitin +0x1032/+0x1033: cNetwork.m_bConnectionEstablished
+    // and m_bIsHost).
+    if (g_pChitin->cNetwork.m_bConnectionEstablished == FALSE
+        || (g_pChitin->cNetwork.m_bConnectionEstablished == TRUE
+            && g_pChitin->cNetwork.m_bIsHost == TRUE)) {
         pEffect->m_projectileType = m_projectileType;
         m_effectList.AddTail(pEffect);
     }
