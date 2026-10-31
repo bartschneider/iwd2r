@@ -1,0 +1,1 @@
+{"address": "0x516B70", "name": "CMessage117::Run", "file": "src/CMessage.cpp", "batch": "i056", "needs": "dependency outside the batch's files: src/CMessage.h has no CMessage117 class; his Run body drives that class's members and CircularLinkedList helpers (0x44AD80, 0x4C5B20) that are not in src either, and the declaration-only header edit the batch is allowed cannot add it."}
