@@ -5,6 +5,7 @@
 #include "CAIScriptFile.h"
 #include "CAITrigger.h"
 #include "CBaldurChitin.h"
+#include "CBaldurEngine.h"
 #include "CButtonData.h"
 #include "CChitin.h"
 #include "CDerivedStats.h"
@@ -33,6 +34,7 @@
 #include "CScreenWorld.h"
 #include "CScreenWorldMap.h"
 #include "CTimerWorld.h"
+#include "CUIControlScrollBar.h"
 #include "CUIControlTextDisplay.h"
 #include "CUIManager.h"
 #include "CUIPanel.h"
@@ -2863,4 +2865,134 @@ TEST_CASE("ime: the composition window's rect follows the font, the mosaic and t
     // down to the mosaic's own.
     setMosaic(40, 8);
     CHECK(rect(CPoint(0, 0), CSize(200, 50), CPoint(0, 0), CSize(60, 10), 2) == CRect(20, 10, 60, 18));
+}
+
+// CBaldurEngine::OnMouseWheel (0x4289C0): the tail after the scroll-bar loop.
+// With no current scroll bar the two remembered bars (0xFE/0x102) take the
+// wheel when both exist - the forward one for a forward tick, the backward one
+// otherwise - and only when the chosen bar's panel and the bar itself are
+// active and nTicks is positive; each tick then calls the bar's +0x78 slot
+// twice. The object's vtable is a synthetic array whose entries all point at
+// the recorder below (the oracle case does the same on the original's side):
+// the slot index is the class's own, so this also pins that the port calls
+// OnScrollButtonUp's slot and passes the repaired direction 0. The guards are
+// pinned by poisoned pointers that a wrong branch would dereference.
+namespace {
+
+int sBarCalls;
+const void* sCalledBar;
+int sCalledDirection;
+
+#if defined(_MSC_VER)
+void __fastcall OnScrollButtonUpProbe(void* self, void*, unsigned char nDirection)
+#else
+void OnScrollButtonUpProbe(void* self, unsigned char nDirection)
+#endif
+{
+    sBarCalls++;
+    sCalledBar = self;
+    sCalledDirection = nDirection;
+}
+
+} // namespace
+
+TEST_CASE("engine: OnMouseWheel's remembered scroll bars", "[uimisc][engine]")
+{
+    std::vector<unsigned char> engineStorage(sizeof(CBaldurEngine), 0);
+    auto* engine = reinterpret_cast<CBaldurEngine*>(engineStorage.data());
+    std::vector<unsigned char> panelStorage(sizeof(CUIPanel), 0);
+    auto* panel = reinterpret_cast<CUIPanel*>(panelStorage.data());
+    std::vector<unsigned char> barStorage(sizeof(CUIControlScrollBar), 0);
+    auto* bar = reinterpret_cast<CUIControlScrollBar*>(barStorage.data());
+    auto* barBase = reinterpret_cast<CUIControlBase*>(bar);
+    barBase->m_pPanel = panel;
+
+    void* vtable[33] = {};
+    for (void*& entry : vtable) {
+        entry = reinterpret_cast<void*>(&OnScrollButtonUpProbe);
+    }
+    *reinterpret_cast<void***>(barStorage.data()) = vtable;
+
+    auto* poison = reinterpret_cast<CUIControlScrollBar*>(static_cast<uintptr_t>(1));
+
+    // nLines == 0 returns before anything is read.
+    engine->m_pCurrentScrollBar = poison;
+    engine->field_FE = poison;
+    engine->field_102 = poison;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 2, 0, 0);
+    CHECK(sBarCalls == 0);
+
+    // A current scroll bar returns after its own loop even when it is inactive:
+    // the tail must not look at the poisoned 0xFE/0x102.
+    engine->m_pCurrentScrollBar = bar;
+    panel->m_bActive = FALSE;
+    barBase->m_bActive = TRUE;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 2, 1, 0);
+    CHECK(sBarCalls == 0);
+
+    // The tail needs both remembered bars.
+    engine->m_pCurrentScrollBar = NULL;
+    engine->field_FE = bar;
+    engine->field_102 = NULL;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 2, 1, 0);
+    CHECK(sBarCalls == 0);
+    engine->field_FE = NULL;
+    engine->field_102 = bar;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 2, 1, 0);
+    CHECK(sBarCalls == 0);
+
+    // A forward tick consults field_FE, a backward one field_102: the other is
+    // poisoned and must not be dereferenced.
+    panel->m_bActive = FALSE;
+    barBase->m_bActive = TRUE;
+    engine->field_FE = bar;
+    engine->field_102 = poison;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 2, 1, 0);
+    engine->field_FE = poison;
+    engine->field_102 = bar;
+    engine->CBaldurEngine::OnMouseWheel(FALSE, 2, 1, 0);
+    CHECK(sBarCalls == 0);
+
+    // The call path: an active panel and bar with a positive tick count calls
+    // the slot twice a tick, on the bar the direction selects, with the
+    // direction the port passes (0: the exe pushes nothing there).
+    engine->field_FE = bar;
+    engine->field_102 = poison;
+    panel->m_bActive = TRUE;
+    barBase->m_bActive = TRUE;
+    sBarCalls = 0;
+    sCalledBar = NULL;
+    sCalledDirection = -1;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 3, 2, 0);
+    CHECK(sBarCalls == 6);
+    CHECK(sCalledBar == bar);
+    CHECK(sCalledDirection == 0);
+
+    engine->field_FE = poison;
+    engine->field_102 = bar;
+    sBarCalls = 0;
+    engine->CBaldurEngine::OnMouseWheel(FALSE, 2, 2, 0);
+    CHECK(sBarCalls == 4);
+    CHECK(sCalledBar == bar);
+
+    // Neither an inactive panel, nor an inactive bar, nor a non-positive tick
+    // count reaches the calls.
+    sBarCalls = 0;
+    engine->field_FE = bar;
+    engine->field_102 = bar;
+    panel->m_bActive = FALSE;
+    barBase->m_bActive = TRUE;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 2, 1, 0);
+    panel->m_bActive = TRUE;
+    barBase->m_bActive = FALSE;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 2, 1, 0);
+    barBase->m_bActive = TRUE;
+    engine->CBaldurEngine::OnMouseWheel(TRUE, 0, 1, 0);
+    engine->CBaldurEngine::OnMouseWheel(TRUE, -3, 1, 0);
+    CHECK(sBarCalls == 0);
+
+    // The fields and the bar are left as they were.
+    CHECK(engine->field_FE == bar);
+    CHECK(engine->field_102 == bar);
+    CHECK(barBase->m_bActive == TRUE);
 }
