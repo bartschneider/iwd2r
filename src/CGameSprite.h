@@ -629,6 +629,7 @@ public:
     SHORT UseDoor();
     SHORT ReturnToStartLoc();
     SHORT Spell(CGameAIBase* target);
+    SHORT SpellPoint();
     SHORT OneSwing();
     void sub_6F50A0();
     void sub_6F5330();
