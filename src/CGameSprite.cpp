@@ -10323,9 +10323,9 @@ SHORT CGameSprite::Rest()
     m_shapeshifts.sub_725D30(0, TRUE);
 
     // Items with a recharge-on-rest ability get their use counts refilled.
-    for (BYTE nSlot = 0; nSlot < 51; nSlot++) {
+    for (BYTE nSlot = 0; nSlot < CGameSpriteEquipment::NUM_SLOT; nSlot++) {
         CItem* pItem = m_equipment.m_items[nSlot];
-        if (nSlot == 10 || pItem == NULL) {
+        if (nSlot == CGameSpriteEquipment::SLOT_FIST || pItem == NULL) {
             continue;
         }
 
@@ -10349,7 +10349,9 @@ SHORT CGameSprite::Rest()
         }
     }
 
-    if (g_pChitin->cNetwork.GetSessionOpen() == FALSE
+    // NOTE: The original tests the service provider (chitin +0x96E), not
+    // the session.
+    if (g_pChitin->cNetwork.GetServiceProvider() == CNetwork::SERV_PROV_NULL
         || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
         CMessage* pUpdate = new CMessageSpriteUpdate(this, GetId(), GetId());
         g_pBaldurChitin->GetMessageHandler()->AddMessage(pUpdate, FALSE);
