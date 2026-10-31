@@ -621,6 +621,7 @@ public:
     BYTE GetMsgType() override;
     BYTE GetMsgSubType() override;
     void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
     /* 000C */ CItem m_item;
@@ -1655,6 +1656,7 @@ public:
     BYTE GetMsgType() override;
     BYTE GetMsgSubType() override;
     void MarshalMessage(BYTE** pData, DWORD* dwSize) override;
+    BOOL UnmarshalMessage(BYTE* pData, DWORD dwSize) override;
     void Run() override;
 
     /* 000C */ WORD m_projectileType;
