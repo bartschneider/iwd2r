@@ -31,6 +31,7 @@
 #pragma warning(disable : 4121 4201)
 #endif
 #include "CChitin.h"
+#include "CParticle.h"
 #include "CResCell.h"
 #include "CVidBitmap.h"
 #include "CVidCell.h"
@@ -4343,6 +4344,158 @@ void PackColor(CaseContext& ctx)
     run("16 bpp, 5-5-5");
 }
 
+// CParticle::Render (0x7C36A0) at 16, 24 and 32 bpp: CONNECT through the
+// mode's DrawLine16/24/32 virtuals (ours against the original's), DOTS and
+// BLOB as plain buffer writes, the two blob helpers (0x7C3CC0, 0x7C3E20) new
+// with the 16/24 arms. A zeroed CParticle block with only the members Render
+// reads - the timestamp and tail length at 0/2, the colour at 6, the position
+// and velocity at 0x12/0x1E - the 3d flag off, and a canvas of random bytes;
+// the clip rect, the flag and the blob size vary. The whole canvas is
+// compared.
+using ParticleRenderFn = void(__fastcall*)(void* self, void* edx, void* pSurface, int32_t lPitch,
+    const void* rClipRect, uint32_t nFlag, uint32_t nBlobSize);
+constexpr uintptr_t kParticleRender = 0x7C36A0;
+constexpr size_t kParticleTimeStampOffset = 0x00;
+constexpr size_t kParticleTailLengthOffset = 0x02;
+constexpr size_t kParticleColorOffset = 0x06;
+constexpr size_t kParticlePosOffset = 0x12;
+constexpr size_t kParticleVelOffset = 0x1E;
+constexpr int kParticleCanvas = 64;
+
+void ParticleRender(CaseContext& ctx)
+{
+    VideoFixture video(ctx);
+    uint8_t* particle = nullptr;
+    uint8_t* rect = nullptr;
+    uint8_t* canvas = nullptr;
+    constexpr int kMaxCanvasBytes = kParticleCanvas * kParticleCanvas * 4;
+    ctx.SetInputs("building the original's particle and canvas");
+    ctx.CallOriginal([&] {
+        particle = OriginalBlock(0x40);
+        rect = OriginalBlock(16);
+        canvas = OriginalBlock(kMaxCanvasBytes);
+    });
+
+    auto* oursStorage = static_cast<unsigned char*>(::operator new(sizeof(CParticle)));
+    std::memset(oursStorage, 0, sizeof(CParticle));
+    auto* ours = reinterpret_cast<CParticle*>(oursStorage);
+    std::vector<uint8_t> mine(kMaxCanvasBytes);
+
+    Picks picks(ctx.seed, 0x5061727469630000ull); // "Partic"
+    const int count = 400 + ctx.iterations / 20;
+    const int32_t kPositions[] = { -2, -1, 0, 1, 3, 7, 30, 62, 65 };
+
+    const auto setDepth = [&](uint16_t nBpp, uint32_t rShift, uint32_t gShift, uint32_t bShift) {
+        ctx.CallOriginal([&] {
+            Put<uint16_t>(video.chitin, kBppOffset, nBpp);
+            Put<uint32_t>(video.mode, kRShiftOffset, rShift);
+            Put<uint32_t>(video.mode, kGShiftOffset, gShift);
+            Put<uint32_t>(video.mode, kBShiftOffset, bShift);
+        });
+        video.oursChitin->cVideo.m_nBpp = nBpp;
+        video.oursMode->m_dwRBitShift = rShift;
+        video.oursMode->m_dwGBitShift = gShift;
+        video.oursMode->m_dwBBitShift = bShift;
+    };
+
+    for (const int bpp : { 16, 24, 32 }) {
+        const int bytes = bpp / 8;
+        const int32_t pitch = kParticleCanvas * bytes;
+        const size_t canvasBytes = static_cast<size_t>(pitch) * kParticleCanvas;
+        if (bpp == 16) {
+            // 5-6-5, as CVidInf::CreateSurfaces sets it.
+            ctx.CallOriginal([&] {
+                Put<uint32_t>(video.mode, kRMaskOffset, 0xF800);
+                Put<uint32_t>(video.mode, kGMaskOffset, 0x07E0);
+                Put<uint32_t>(video.mode, kBMaskOffset, 0x001F);
+                Put<uint32_t>(video.mode, kRDropOffset, 3);
+                Put<uint32_t>(video.mode, kGDropOffset, 2);
+                Put<uint32_t>(video.mode, kBDropOffset, 3);
+                Put<uint16_t>(video.chitin, kBppOffset, 16);
+                Put<uint32_t>(video.mode, kRShiftOffset, 11);
+                Put<uint32_t>(video.mode, kGShiftOffset, 5);
+                Put<uint32_t>(video.mode, kBShiftOffset, 0);
+            });
+            video.oursMode->m_dwRBitMask = 0xF800;
+            video.oursMode->m_dwGBitMask = 0x07E0;
+            video.oursMode->m_dwBBitMask = 0x001F;
+            video.oursMode->field_C2 = 3;
+            video.oursMode->field_C6 = 2;
+            video.oursMode->field_CA = 3;
+            video.oursMode->m_dwRBitShift = 11;
+            video.oursMode->m_dwGBitShift = 5;
+            video.oursMode->m_dwBBitShift = 0;
+            video.oursChitin->cVideo.m_nBpp = 16;
+        } else {
+            setDepth(static_cast<uint16_t>(bpp), 16, 8, 0);
+        }
+
+        for (int n = 0; n < count; n++) {
+            const int16_t nTimeStamp = static_cast<int16_t>(picks.Between(0, 6));
+            const int16_t nTailLength = static_cast<int16_t>(picks.Between(0, 6));
+            const uint32_t rgb = picks.Bits() & 0xFFFFFF;
+            const int32_t x = (kPositions[picks.Between(0, 8)] << 10) | static_cast<int32_t>(picks.Bits() & 0x3FF);
+            const int32_t y = (kPositions[picks.Between(0, 8)] << 10) | static_cast<int32_t>(picks.Bits() & 0x3FF);
+            const int32_t z = picks.Between(-3000, 3000);
+            const int32_t vx = picks.Between(-4000, 4000);
+            const int32_t vy = picks.Between(-4000, 4000);
+            const int32_t vz = picks.Between(-2000, 2000);
+            const int32_t left = picks.Between(0, kParticleCanvas - 1);
+            const int32_t top = picks.Between(0, kParticleCanvas - 1);
+            const int32_t right = picks.Between(left, kParticleCanvas);
+            const int32_t bottom = picks.Between(top, kParticleCanvas);
+            const uint32_t nFlag = static_cast<uint32_t>(picks.Between(0, 2));
+            const uint32_t nBlobSize = static_cast<uint32_t>(picks.Between(1, 5));
+            for (size_t i = 0; i < canvasBytes; i++) {
+                mine[i] = static_cast<uint8_t>(picks.Bits());
+            }
+
+            char inputs[240];
+            std::snprintf(inputs, sizeof(inputs),
+                "%d bpp: input %d, timestamp %d, tail %d, colour 0x%06X, pos (%d,%d,%d), vel (%d,%d,%d), "
+                "clip (%d,%d,%d,%d), flag %u, blob %u",
+                bpp, n, nTimeStamp, nTailLength, rgb, x, y, z, vx, vy, vz, left, top, right, bottom, nFlag, nBlobSize);
+            ctx.SetInputs(inputs);
+            ctx.CallOriginal([&] {
+                Put<int16_t>(particle, kParticleTimeStampOffset, nTimeStamp);
+                Put<int16_t>(particle, kParticleTailLengthOffset, nTailLength);
+                Put<uint32_t>(particle, kParticleColorOffset, rgb);
+                Put<int32_t>(particle, kParticlePosOffset, x);
+                Put<int32_t>(particle, kParticlePosOffset + 4, y);
+                Put<int32_t>(particle, kParticlePosOffset + 8, z);
+                Put<int32_t>(particle, kParticleVelOffset, vx);
+                Put<int32_t>(particle, kParticleVelOffset + 4, vy);
+                Put<int32_t>(particle, kParticleVelOffset + 8, vz);
+                const int32_t r[4] = { left, top, right, bottom };
+                std::memcpy(rect, r, 16);
+                std::memcpy(canvas, mine.data(), canvasBytes);
+                reinterpret_cast<ParticleRenderFn>(kParticleRender)(particle, nullptr, canvas, pitch, rect, nFlag,
+                    nBlobSize);
+            });
+            ours->m_nTimeStamp = nTimeStamp;
+            ours->m_nTailLength = nTailLength;
+            ours->m_rgbColor = rgb;
+            ours->m_pos.x = x;
+            ours->m_pos.y = y;
+            ours->m_pos.z = z;
+            ours->m_vel.x = vx;
+            ours->m_vel.y = vy;
+            ours->m_vel.z = vz;
+            ours->Render(mine.data(), pitch, CRect(left, top, right, bottom), static_cast<USHORT>(nFlag),
+                static_cast<USHORT>(nBlobSize));
+            ctx.CountInputs(1);
+            for (size_t i = 0; i < canvasBytes; i++) {
+                if (canvas[i] != mine[i]) {
+                    ctx.Fail(ctx.Inputs() + ", byte " + std::to_string(i), Hex(canvas[i]), Hex(mine[i]));
+                    break;
+                }
+            }
+        }
+    }
+
+    ::operator delete(oursStorage);
+}
+
 } // namespace
 
 ORACLE_CASE("vid/hline_shaded32", HLineShaded32);
@@ -4408,3 +4561,4 @@ ORACLE_CASE("vid/draw_recticle32", Recticle32);
 ORACLE_CASE("vid/draw_recticle16", Recticle16);
 ORACLE_CASE("vid/draw_recticle24", Recticle24);
 ORACLE_CASE("vid/pack_color", PackColor);
+ORACLE_CASE("vid/particle_render", ParticleRender);
