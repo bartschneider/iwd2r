@@ -1016,6 +1016,100 @@ void CNetworkWindow::SetNoMessageTimeout()
     m_nNoMessageTimeout = dwMaxTickCount;
 }
 
+// 0x7A3B50
+void CNetworkWindow::ReceiveCall(BYTE* pData, DWORD dwSize)
+{
+    BOOLEAN v1 = FALSE;
+
+    EnterCriticalSection(&(g_pChitin->cNetwork.field_F52));
+
+    BOOLEAN v2 = TRUE;
+    m_bSomethingHappened = TRUE;
+
+    if (pData[0] == 3) {
+        AddToIncomingQueue(g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber),
+            g_pChitin->cNetwork.m_idLocalPlayer,
+            pData,
+            dwSize);
+    } else {
+        WORD nFrame = pData[2] + (pData[1] << 8);
+        WORD nAck = pData[4] + (pData[3] << 8);
+
+        if (pData[0] == 0) {
+            if (nFrame != m_nFrameExpected && m_bNoNak == TRUE) {
+                FrameSend(2, 0);
+            }
+
+            if ((m_nFrameExpected <= nFrame && nFrame < m_nTooFar)
+                || (m_nTooFar < m_nFrameExpected && m_nFrameExpected <= nFrame)
+                || (nFrame < m_nTooFar && m_nTooFar < m_nFrameExpected)) {
+                if (!m_pbArrived[0]) {
+                    m_pbArrived[0] = TRUE;
+                    m_pIncomingBuffers[0].idFrom = g_pChitin->cNetwork.GetPlayerID(m_nPlayerNumber);
+                    m_pIncomingBuffers[0].idTo = g_pChitin->cNetwork.m_idLocalPlayer;
+                    m_pIncomingBuffers[0].pData = pData;
+                    m_pIncomingBuffers[0].dwSize = dwSize;
+
+                    v1 = TRUE;
+
+                    while (m_pbArrived[0] == TRUE) {
+                        AddToIncomingQueue(m_pIncomingBuffers[0].idFrom,
+                            m_pIncomingBuffers[0].idTo,
+                            m_pIncomingBuffers[0].pData,
+                            m_pIncomingBuffers[0].dwSize);
+                        m_bNoNak = TRUE;
+                        m_pbArrived[0] = FALSE;
+                        m_pIncomingBuffers[0].pData = NULL;
+                        m_pIncomingBuffers[0].dwSize = 0;
+                        m_nFrameExpected++;
+                        m_nTooFar++;
+                        m_bAckTimerSet = TRUE;
+                        m_nAckTimer = m_nPacketTimeout + GetTickCount();
+                        if (m_nAckTimer > CNetworkWindow::MAX_TIMEOUT_TICK_COUNT) {
+                            m_nAckTimer = 0;
+                        }
+                    }
+                }
+            }
+        } else if (pData[0] == 2) {
+            WORD nAckNext = nAck + 1;
+
+            if ((m_nAckExpected <= nAckNext && nAckNext < m_nNextFrameToSend)
+                || (m_nNextFrameToSend < m_nAckExpected && m_nAckExpected <= nAckNext)
+                || (nAckNext < m_nNextFrameToSend && m_nNextFrameToSend < m_nAckExpected)) {
+                FrameSend(0, nAckNext);
+            }
+        }
+
+        while ((m_nAckExpected <= nAck && nAck < m_nNextFrameToSend)
+            || (m_nNextFrameToSend < m_nAckExpected && m_nAckExpected <= nAck)
+            || (nAck < m_nNextFrameToSend && m_nNextFrameToSend < m_nAckExpected)) {
+            m_nNumBuffered--;
+            m_pbTimeOutSet[0] = FALSE;
+            m_pnTimeOut[0] = 0;
+
+            if (m_pOutgoingBuffers[0].pData != NULL) {
+                delete m_pOutgoingBuffers[0].pData;
+                m_pOutgoingBuffers[0].pData = NULL;
+            }
+
+            m_pOutgoingBuffers[0].dwSize = 0;
+            m_nAckExpected++;
+        }
+
+        v2 = v1;
+    }
+
+    LeaveCriticalSection(&(g_pChitin->cNetwork.field_F52));
+
+    // NOTE: Uninline.
+    SetPlayerTimeout();
+
+    if (!v2) {
+        delete pData;
+    }
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x7A3FD0
