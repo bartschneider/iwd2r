@@ -666,6 +666,7 @@ public:
     SHORT sub_75F3D0(int a1);
     SHORT LeaveArea();
     SHORT LeaveAreaName();
+    SHORT Rest();
     SHORT SetAtOffset(DWORD stat, DWORD value, BOOL modify);
     SHORT ForceHide(CGameSprite* pSprite);
     SHORT sub_7615F0(int a1);

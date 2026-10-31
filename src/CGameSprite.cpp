@@ -10227,6 +10227,137 @@ void CGameSprite::sub_71A550(CButtonData buttonData, BOOLEAN firstCall)
     }
 }
 
+// 0x7500F0
+SHORT CGameSprite::Rest()
+{
+    // The magical rest effect goes through the message handler like every
+    // other effect application.
+    ITEM_EFFECT effect;
+    CGameEffect::ClearItemEffect(&effect, CGAMEEFFECT_MAGICAL_REST);
+    // The original reads the duration type from a global (0x8491aa) that
+    // holds 1.
+    effect.durationType = 1;
+    CGameEffect* pEffect = CGameEffect::DecodeEffect(&effect, GetPos(), GetId(),
+        CPoint(-1, -1));
+    CMessage* pMessage = new CMessageAddEffect(pEffect, GetId(), GetId());
+    g_pBaldurChitin->GetMessageHandler()->AddMessage(pMessage, FALSE);
+
+    RemovePortraitIcon(0x27);
+    field_722A = g_pBaldurChitin->GetObjectGame()->GetWorldTimer()->m_gameTime;
+
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    CAbilityId ability;
+    ability.m_itemType = 1; // spell
+
+    for (UINT nClass = 0; nClass < CSPELLLIST_NUM_CLASSES; nClass++) {
+        CGameSpriteGroupedSpellList& spells = m_spells.m_spellsByClass[nClass];
+
+        for (UINT nLevel = 0; nLevel < spells.m_nHighestLevel; nLevel++) {
+            CGameSpriteSpellList& levelList = spells.m_lists[nLevel];
+
+            if (nClass == 0 || nClass == 5) {
+                // Bard and sorcerer lists are restored per level.
+                INT changeAmount = (INT)levelList.field_14 - (INT)levelList.field_18;
+                if (changeAmount > 0) {
+                    spells.sub_726150(nLevel, 0, TRUE);
+                    ability.m_nClass = pGame->GetSpellcasterClass(nClass);
+                    ability.field_1D = (unsigned char)(nLevel + 1);
+                    ability.field_1E = 0;
+                    for (UINT j = 0; j < levelList.m_List.size(); j++) {
+                        ability.m_res = pGame->m_spells.Get636(levelList.m_List[j].m_nID);
+                        CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+                    }
+                }
+            } else {
+                for (UINT j = 0; j < levelList.m_List.size(); j++) {
+                    CGameSpriteSpellListEntry& entry = levelList.m_List[j];
+                    INT changeAmount = (INT)entry.field_4 - (INT)entry.field_8;
+                    if (changeAmount > 0) {
+                        spells.sub_726060(entry.m_nID, nLevel, 0, TRUE);
+                        ability.m_res = pGame->m_spells.Get636(entry.m_nID);
+                        ability.m_nClass = pGame->GetSpellcasterClass(nClass);
+                        ability.field_1D = (unsigned char)(nLevel + 1);
+                        ability.field_1E = 0;
+                        CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+                    }
+                }
+            }
+        }
+    }
+
+    // Domain spells. The list restore runs for every entry; the quick list
+    // update only when a use was actually regained.
+    for (UINT nLevel = 0; nLevel < m_domainSpells.m_nHighestLevel; nLevel++) {
+        CGameSpriteSpellList& levelList = m_domainSpells.m_lists[nLevel];
+
+        for (UINT j = 0; j < levelList.m_List.size(); j++) {
+            CGameSpriteSpellListEntry& entry = levelList.m_List[j];
+            INT changeAmount = (INT)entry.field_4 - (INT)entry.field_8;
+            m_domainSpells.sub_726060(entry.m_nID, nLevel, 0, TRUE);
+            if (changeAmount > 0) {
+                ability.m_res = pGame->m_spells.Get636(entry.m_nID);
+                ability.field_1D = (unsigned char)(nLevel + 1);
+                ability.m_nClass = CAIOBJECTTYPE_C_CLERIC;
+                ability.field_1E = pGame->GetRuleTables().GetSpecializationIndex(
+                    CAIOBJECTTYPE_C_CLERIC, m_baseStats.m_specialization);
+                CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+            }
+        }
+    }
+
+    // Innate abilities.
+    ability.m_nClass = 0;
+    ability.field_1D = 0;
+    ability.field_1E = 0;
+    for (UINT j = 0; j < m_innateSpells.m_List.size(); j++) {
+        CGameSpriteSpellListEntry& entry = m_innateSpells.m_List[j];
+        INT changeAmount = (INT)entry.field_4 - (INT)entry.field_8;
+        m_innateSpells.sub_725C50(entry.m_nID, 0, TRUE);
+        if (changeAmount > 0) {
+            ability.m_res = pGame->m_innateSpells.Get636(entry.m_nID);
+            CheckQuickLists(&ability, changeAmount, FALSE, FALSE);
+        }
+    }
+
+    m_shapeshifts.sub_725D30(0, TRUE);
+
+    // Items with a recharge-on-rest ability get their use counts refilled.
+    for (BYTE nSlot = 0; nSlot < 51; nSlot++) {
+        CItem* pItem = m_equipment.m_items[nSlot];
+        if (nSlot == 10 || pItem == NULL) {
+            continue;
+        }
+
+        for (INT nAbility = 0; nAbility < pItem->GetAbilityCount(); nAbility++) {
+            pItem->Demand();
+            ITEM_ABILITY* pAbility = pItem->GetAbility(nAbility);
+            if (pAbility != NULL && (pAbility->abilityFlags & 0x800) != 0) {
+                WORD nOldUseCount = pItem->GetUsageCount(nAbility);
+                pItem->SetUsageCount(nAbility, pAbility->maxUsageCount);
+
+                CAbilityId itemAbility;
+                itemAbility.m_itemType = 2; // item
+                itemAbility.m_itemNum = nSlot;
+                itemAbility.m_abilityNum = nAbility;
+                CheckQuickLists(&itemAbility,
+                    pItem->GetUsageCount(nAbility) - nOldUseCount,
+                    FALSE,
+                    FALSE);
+            }
+            pItem->Release();
+        }
+    }
+
+    if (g_pChitin->cNetwork.GetSessionOpen() == FALSE
+        || g_pChitin->cNetwork.m_idLocalPlayer == m_remotePlayerID) {
+        CMessage* pUpdate = new CMessageSpriteUpdate(this, GetId(), GetId());
+        g_pBaldurChitin->GetMessageHandler()->AddMessage(pUpdate, FALSE);
+    }
+
+    return ACTION_DONE;
+}
+
 // 0x71ABA0
 void CGameSprite::CheckQuickLists(CAbilityId* ability, SHORT changeAmount, BOOL remove, BOOL removeSpellIfZero)
 {
@@ -13765,8 +13896,7 @@ SHORT CGameSprite::ExecuteAction()
         goto done;
     case 96:
         // Rest
-        // TODO: 0x729E9F-0x729EAF not ported (0x7500F0).
-        returnValue = ACTION_ERROR;
+        returnValue = Rest();
         goto done;
     case 97:
         // UseItemPoint
