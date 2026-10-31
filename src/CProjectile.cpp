@@ -984,6 +984,37 @@ void IcewindCProjectileScorcher::InitializeOffsets()
     }
 }
 
+// 0x57BE80
+void IcewindCProjectileScorcher::GatherTargets()
+{
+    const CPoint& offset = m_offsets[m_nDirection];
+    CPoint polygon[4] = {
+        CPoint(m_pos.x + offset.x, m_pos.y + offset.y),
+        CPoint(m_pos.x - offset.x, m_pos.y - offset.y),
+        CPoint(m_targetPos.x - offset.x, m_targetPos.y - offset.y),
+        CPoint(m_targetPos.x + offset.x, m_targetPos.y + offset.y)
+    };
+    CRect bounds(polygon[0], polygon[0]);
+    for (INT i = 1; i < 4; ++i) {
+        bounds.left = min(bounds.left, polygon[i].x);
+        bounds.top = min(bounds.top, polygon[i].y);
+        bounds.right = max(bounds.right, polygon[i].x);
+        bounds.bottom = max(bounds.bottom, polygon[i].y);
+    }
+    CTypedPtrList<CPtrList, LONG*> targets;
+    m_pArea->GetAllInPoly(bounds, polygon, 4, CAIObjectType::ANYONE,
+        m_pArea->m_visibleTerrainTable, targets, TRUE);
+    POSITION position = targets.GetHeadPosition();
+    while (position != NULL) {
+        LONG target = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(position)));
+        if (m_struckTargets.find(static_cast<DWORD>(target)) == m_struckTargets.end()
+            && target != m_sourceId) {
+            Strike(target, FALSE);
+            m_struckTargets.insert(static_cast<DWORD>(target));
+        }
+    }
+}
+
 // 0x57C1D0
 void IcewindCProjectileScorcher::Strike(LONG target, BYTE initial)
 {
