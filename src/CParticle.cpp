@@ -440,6 +440,13 @@ void CParticle::RenderBlob32(DWORD* pSurface, LONG lPitch, LONG lX, LONG lY, con
     if (rBlob.PtInRect(pt4)) {
         pSurface[pt4.x + lPitch * pt4.y] = color;
     }
+
+    CPoint pt5;
+    pt5.x = lX - rClipRect.left;
+    pt5.y = lY - rClipRect.top;
+    if (rBlob.PtInRect(pt5)) {
+        pSurface[pt5.x + lPitch * pt5.y] = color;
+    }
 }
 
 // 0x7CC340
