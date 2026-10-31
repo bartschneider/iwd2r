@@ -165,6 +165,7 @@ public:
     INT FindPlayerLocationByName(const CString& sPlayerName, BOOLEAN bInvisible);
     void sub_7A73D0(CString& a1);
     INT ThreadLoop();
+    void SlidingWindowReceive();
     BYTE* FetchFrame(PLAYER_ID& dpIDFrom, DWORD& dwSize);
     BOOLEAN HandleSystemMessage(BYTE* pData, DWORD dwSize);
     void AddMessageToWindow(PLAYER_ID idTo, DWORD dwFlags, BYTE* pData, DWORD dwSize);

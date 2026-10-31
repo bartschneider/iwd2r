@@ -2097,6 +2097,51 @@ INT CNetwork::ThreadLoop()
     return nDelta;
 }
 
+// 0x7A7670
+void CNetwork::SlidingWindowReceive()
+{
+    PLAYER_ID dpIDFrom;
+    DWORD dwSize;
+    BYTE* pData = FetchFrame(dpIDFrom, dwSize);
+    while (pData != NULL) {
+        BOOLEAN bDeleted = FALSE;
+        // NOTE: iwd2r: The original compares dpIDFrom against DPID_SYSMSG
+        // (the DirectPlay system-player id, 0); dplay.h is gone, so the
+        // literal stands in.
+        if (dpIDFrom != 0) {
+            if (dwSize >= 10) {
+                DWORD dwReceivedCrc = pData[9] + (pData[8] << 8) + (pData[7] << 16) + (pData[6] << 24);
+                DWORD dwExpectedCrc = 0;
+                pData[6] = 0;
+                pData[7] = 0;
+                pData[8] = 0;
+                pData[9] = 0;
+                for (DWORD k = 0; k < dwSize; k++) {
+                    dwExpectedCrc = m_dwCRC32[(dwExpectedCrc & 0xFF) ^ pData[k]] ^ (dwExpectedCrc >> 8);
+                }
+                if (dwReceivedCrc == dwExpectedCrc) {
+                    for (INT nPlayer = 0; nPlayer < CNETWORK_MAX_PLAYERS; nPlayer++) {
+                        if (m_pPlayerID[nPlayer] == dpIDFrom && m_pPlayerID[nPlayer] != 0
+                            && m_pSlidingWindow[nPlayer].m_bInitialized == TRUE) {
+                            // __FILE__: C:\Projects\Icewind2\src\chitin\ChNetwork.cpp
+                            // __LINE__: 7940
+                            UTIL_ASSERT_MSG(dpIDFrom != 0, "CNetwork::SlidingWindowReceive:  System message in application read.");
+                            m_pSlidingWindow[nPlayer].ReceiveCall(pData, dwSize);
+                            bDeleted = TRUE;
+                        }
+                    }
+                }
+            }
+        } else {
+            HandleSystemMessage(pData, dwSize);
+        }
+        if (!bDeleted) {
+            delete pData;
+        }
+        pData = FetchFrame(dpIDFrom, dwSize);
+    }
+}
+
 // 0x7A7890
 BYTE* CNetwork::FetchFrame(PLAYER_ID& dpIDFrom, DWORD& dwSize)
 {
