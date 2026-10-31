@@ -2428,13 +2428,15 @@ def status_lock(status_path):
     return _tool('filelock').hold(status_path + '.lock', 'wave.py run')
 
 
-def clear_exception(status_path, batch_id, rerun=False):
+def clear_exception(status_path, batch_id, rerun=False, rerun_frida=False):
     """Remove status['exceptions'][batch_id] under the status lock:
     (0, the removed entry), or (2, None) when there is no such entry.
-    StatusError when the file cannot be read.  The removed stage, problems
-    and `rerun` are kept under status['cleared'][batch_id] for the driver's
-    retry (Task 25: a checks or review exception is re-checked, not
-    re-run, unless `rerun`); the reserved `first` entry keeps none."""
+    StatusError when the file cannot be read.  The removed stage, problems,
+    `rerun` and `rerun_frida` are kept under status['cleared'][batch_id] for
+    the driver's retry (Task 25: a checks or review exception is re-checked,
+    not re-run, unless `rerun`; Task 63: a record or close exception on the
+    import queue re-runs the batch's Frida phase first, only when
+    `rerun_frida`); the reserved `first` entry keeps none."""
     if not os.path.isfile(status_path):
         return 2, None
     with status_lock(status_path):
@@ -2445,6 +2447,7 @@ def clear_exception(status_path, batch_id, rerun=False):
         if batch_id != BASE_TESTS_KEY and isinstance(entry, dict):
             status.setdefault('cleared', {})[batch_id] = {
                 'stage': entry.get('stage'), 'rerun': bool(rerun),
+                'rerun_frida': bool(rerun_frida),
                 'problems': list(entry.get('problems') or [])}
         status['updated_at'] = _now()
         _tool('wave')._save_json(status_path, status)
@@ -2658,6 +2661,7 @@ class Driver:
                  status_path, aoe_session=None, seed=DEFAULT_SEED, budget=None,
                  workers=1, *, push=None, send=None, dry_run=False, gate=True,
                  base='first', log=None, frida=False, frida_map=None,
+                 rerun_frida=False,
                  oracle_run=None, frida_run=None, frida_build=None, pools=None,
                  workers_by_pool=None, reviewers_by_pool=None, budgets=None,
                  queue='wave1', runner=None, clock=None, max_batches=None,
@@ -2728,6 +2732,9 @@ class Driver:
         self.calibration_path = os.path.join(docs, 'truth-calibration.json')
         truth = _tool('truth')
         self.frida = frida
+        # Task 63: --rerun-frida, and nothing else (a plain --clear keeps
+        # R71), makes a record/close retry re-run the batch's Frida phase.
+        self.rerun_frida = rerun_frida
         self.exports_dir = None
         # The host taskkill of the sandbox, behind one seam: tests replace it.
         self._taskkill = _tool('winsandbox').taskkill_sandbox
@@ -2777,6 +2784,7 @@ class Driver:
         self._retry_stage = {}     # cleared batch id -> the stage it failed at
         self._retry_kind = {}      # cleared batch id -> 'recheck' | 'rerun' (checks/review only)
         self._retry_problems = {}  # cleared batch id -> the problems its exception recorded
+        self._retry_frida = {}     # cleared batch id -> --rerun-frida was on at --clear time
         self._halt = False
         self._batch_credits = []   # this run's batches: credits or None
         self._no_transcript = 0    # batch exceptions in a row without one
@@ -5774,8 +5782,9 @@ class Driver:
                      'are not run again' % (batch_id, stage))
             if self.kind == 'verdicts':
                 self._undecided = self._saved_undecided(batch_id, batch)
-            if self.kind == 'import' and self.frida:
-                # With --frida (Task 63) the phase runs again on the
+            if self.kind == 'import' and (
+                    self.rerun_frida or self._retry_frida.pop(batch_id, False)):
+                # With --rerun-frida (Task 63) the phase runs again on the
                 # worktree as the worker left it: what the close check asks
                 # for -- a trace, or the unmeasured WSO marking, for a row
                 # the batch imported anyway -- only that phase writes, and
@@ -6375,6 +6384,10 @@ class Driver:
                 out.append(bid)
                 note = (status.get('cleared') or {}).get(bid)
                 note = note if isinstance(note, dict) else {}
+                if stage in ('record', 'close') and note.get('rerun_frida'):
+                    # --rerun-frida was on at --clear time: that batch's
+                    # retry re-runs its Frida phase (ruling R71 without it)
+                    self._retry_frida[bid] = True
                 if stage in RECHECK_STAGES and note:
                     # plain --clear re-checks the last report; --rerun, or an
                     # exception removed by hand (no note), re-enters at the
@@ -7090,6 +7103,12 @@ def _parse(argv):
     p.add_argument('--rerun', action='store_true',
                    help='with --clear: re-enter a checks or review exception at '
                         'the worker stage (the default re-checks the last report)')
+    p.add_argument('--rerun-frida', action='store_true',
+                   help='with --clear on the import queue: a record or close '
+                        'exception re-runs the batch\'s Frida phase on its '
+                        'worktree before it lands (a plain --clear keeps R71: '
+                        'straight to the stage, no phase, no worker); without '
+                        '--clear it sets the same trigger for that run')
     try:
         args, extra = p.parse_known_args(argv)
     except SystemExit as e:
@@ -7194,7 +7213,8 @@ def _build(args, repo):
         d = Driver(repo, state, worker, reviewer, ledger, status,
                    aoe_session=args.aoe_session, seed=args.seed,
                    budget=args.budget, dry_run=args.dry_run, frida=frida,
-                   frida_map=args.frida_map, frida_cache=args.frida_cache, pools=pools,
+                   frida_map=args.frida_map, rerun_frida=args.rerun_frida,
+                   frida_cache=args.frida_cache, pools=pools,
                    workers_by_pool=workers_by_pool,
                    reviewers_by_pool=reviewers_by_pool,
                    budgets=args.budgets, queue=queue,
@@ -7215,12 +7235,12 @@ def driver_from_args(argv, repo=None):
     return _build(args, repo or _tool('wave').ROOT)
 
 
-def _clear(batch_id, repo, queue='wave1', rerun=False):
+def _clear(batch_id, repo, queue='wave1', rerun=False, rerun_frida=False):
     """`wave.py run --clear <batch_id>`: 0, 2 when the status file holds
     no exception for it, 1 when the file cannot be read."""
     path = os.path.join(repo, status_rel(queue))
     try:
-        rc, entry = clear_exception(path, batch_id, rerun)
+        rc, entry = clear_exception(path, batch_id, rerun, rerun_frida)
     except StatusError as e:
         print('wave.py run --clear: the status file cannot be read: %s' % e,
               file=sys.stderr)
@@ -7286,7 +7306,8 @@ def main(argv=None, repo=None):
     args, err = _parse(sys.argv[1:] if argv is None else argv)
     if err is None:
         if args.clear is not None:
-            return _clear(args.clear, repo, args.queue, args.rerun)
+            return _clear(args.clear, repo, args.queue, args.rerun,
+                          args.rerun_frida)
         d, err = _build(args, repo)
     if err:
         if err[1]:
