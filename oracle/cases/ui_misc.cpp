@@ -42,9 +42,11 @@
 #include "CGameSprite.h"
 #include "CImm.h"
 #include "CInfGame.h"
+#include "CResCell.h"
 #include "CResMosaic.h"
 #include "CRuleTables.h"
 #include "CUtil.h"
+#include "CVidFont.h"
 #include "CVidMosaic.h"
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -470,6 +472,218 @@ void CompositionWindowRect(CaseContext& ctx)
 } // namespace
 
 ORACLE_CASE("combat/dex_armor_class", DexArmorClass);
+
+// CUtil::SplitString (0x780CF0): the line loop, including its double-byte
+// handling. __cdecl, nine arguments pushed right to left (the suggested split
+// length, the remainder flag, bDemanded, bDivideWords, the output array, the
+// maximum count, the line length, the source CString and the font).
+//
+// The font is a synthetic one: a zeroed CVidFont whose pRes (+0xA8) points at
+// a zeroed CResCell whose parsed flag (+0x50), BAM header (+0x54), frames
+// (+0x5C), sequences (+0x60) and frame list (+0x64) describe one 5x7 frame, so
+// every character is 5 px wide (CVidFont::GetStringLength 0x792D40 reads the
+// frame). The chitin's font name (+0x2E8) points at an empty string so the
+// font takes the BAM path (strcmp at 0x792D5A). bDemanded is TRUE so nothing
+// goes through the resource manager.
+//
+// Only the single-byte arm is oracle-tested: IsDBCSLeadByte (the host's) uses
+// the ANSI code page, so with the flag on a Western rig the original would
+// treat no byte as a lead byte while our shim returns FALSE for every byte;
+// the double-byte branch has the unit test (tests/test_ui_misc.cpp, whose
+// lead-byte table makes a pair straddle the budget).
+using SplitStringFn = uint8_t(__cdecl*)(const void* pFont, const void* sSource, uint16_t nLineLength,
+    uint8_t nMaxStrings, void* pStringsOut, int32_t bDivideWords, int32_t bDemanded,
+    int32_t bCheckRemainderForNewLine, uint16_t nSuggestedSplitLength);
+constexpr uintptr_t kSplitString = 0x780CF0;
+constexpr size_t kFontNameOffset = 0x2E8; // CChitin::m_sFontName
+constexpr size_t kFontResOffset = 0xA8; // CVidCell::pRes
+constexpr size_t kCellParsedOffset = 0x50;
+constexpr size_t kCellBamHeaderOffset = 0x54;
+constexpr size_t kCellFramesOffset = 0x5C;
+constexpr size_t kCellSequencesOffset = 0x60;
+constexpr size_t kCellFrameListOffset = 0x64;
+constexpr size_t kCellFrameListSizeOffset = 0x68;
+constexpr size_t kCellCacheHeaderOffset = 0x7E;
+
+uint16_t GetWord(const uint8_t* at, size_t offset)
+{
+    uint16_t value = 0;
+    std::memcpy(&value, at + offset, sizeof(value));
+    return value;
+}
+
+// The original CString: the buffer pointer is the member, the length word at
+// data - 8, the bytes at the pointer (messages_wire's ReadCString).
+std::string ReadCStringAt(const uint8_t* member)
+{
+    const char* data = nullptr;
+    std::memcpy(&data, member, sizeof(data));
+    if (data == nullptr) {
+        return std::string();
+    }
+    int32_t length = 0;
+    std::memcpy(&length, data - 8, sizeof(length));
+    return length > 0 ? std::string(data, static_cast<size_t>(length)) : std::string();
+}
+
+void SplitString(CaseContext& ctx)
+{
+    OurGlobalsReset reset;
+    uint8_t* chitin = nullptr;
+    uint8_t* font = nullptr;
+    uint8_t* cell = nullptr;
+    uint8_t* bam = nullptr;
+    uint8_t* frame = nullptr;
+    uint8_t* sequence = nullptr;
+    uint8_t* frameList = nullptr;
+    uint8_t* empty = nullptr;
+    ctx.SetInputs("building the original's chitin and font");
+    ctx.CallOriginal([&] {
+        chitin = OriginalBlock(0x1000);
+        font = OriginalBlock(0x1000);
+        cell = OriginalBlock(0x100);
+        bam = OriginalBlock(0x20);
+        frame = OriginalBlock(0x10);
+        sequence = OriginalBlock(8);
+        frameList = OriginalBlock(8);
+        empty = OriginalBlock(1);
+        SetOriginalPointer(kChitin, chitin);
+
+        auto putPointer = [](uint8_t* at, size_t offset, const void* value) {
+            const uint32_t pointer = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(value));
+            std::memcpy(at + offset, &pointer, 4);
+        };
+        putPointer(chitin, kFontNameOffset, empty);
+        const uint16_t noDbcs = 0;
+        std::memcpy(chitin + kDbcsOffset, &noDbcs, 2);
+        putPointer(font, kFontResOffset, cell);
+        const uint8_t parsed = 1;
+        std::memcpy(cell + kCellParsedOffset, &parsed, 1);
+        putPointer(cell, kCellBamHeaderOffset, bam);
+        putPointer(cell, kCellFramesOffset, frame);
+        putPointer(cell, kCellSequencesOffset, sequence);
+        putPointer(cell, kCellFrameListOffset, frameList);
+        const uint16_t frameListSize = 1;
+        std::memcpy(cell + kCellFrameListSizeOffset, &frameListSize, 2);
+        const uint8_t cacheHeader = 0;
+        std::memcpy(cell + kCellCacheHeaderOffset, &cacheHeader, 1);
+
+        // BAMHEADER: nFrames (8), nSequences (10).
+        const uint16_t oneFrame = 1;
+        std::memcpy(bam + 8, &oneFrame, 2);
+        const uint8_t oneSequence = 1;
+        std::memcpy(bam + 10, &oneSequence, 1);
+        // FRAMEENTRY: nWidth (0) 5, nHeight (2) 7.
+        const uint16_t five = 5;
+        const uint16_t seven = 7;
+        std::memcpy(frame, &five, 2);
+        std::memcpy(frame + 2, &seven, 2);
+        // SEQUENCEENTRY: nFrames (0) 1, nStartingFrame (2) 0.
+        std::memcpy(sequence, &oneFrame, 2);
+        // The frame list's single index 0.
+        const uint16_t zero = 0;
+        std::memcpy(frameList, &zero, 2);
+    });
+
+    std::vector<uint8_t> ourChitinStorage(sizeof(CChitin), 0);
+    auto* ourChitin = reinterpret_cast<CChitin*>(ourChitinStorage.data());
+    // SplitString's font reads the chitin's font name, a CString (a bare
+    // zeroed CChitin cannot hold one), so construct just that member.
+    new (&ourChitin->m_sFontName) CString();
+    struct FontNameReset {
+        CString* pName;
+        ~FontNameReset() { pName->~CString(); }
+    } nameReset { &ourChitin->m_sFontName };
+    ourChitin->m_sFontName = "";
+    ourChitin->field_1A0 = 0;
+    g_pChitin = ourChitin;
+
+    std::vector<uint8_t> ourFontStorage(sizeof(CVidFont), 0);
+    std::vector<uint8_t> ourCellStorage(sizeof(CResCell), 0);
+    auto* ourFont = reinterpret_cast<CVidFont*>(ourFontStorage.data());
+    auto* ourCell = reinterpret_cast<CResCell*>(ourCellStorage.data());
+    BAMHEADER ourBam = {};
+    ourBam.nFrames = 1;
+    ourBam.nSequences = 1;
+    FRAMEENTRY ourFrame = {};
+    ourFrame.nWidth = 5;
+    ourFrame.nHeight = 7;
+    SEQUENCEENTRY ourSequence = { 1, 0 };
+    WORD ourFrameList = 0;
+    ourCell->m_bParsed = TRUE;
+    ourCell->m_pBamHeader = &ourBam;
+    ourCell->m_pFrames = &ourFrame;
+    ourCell->m_pSequences = &ourSequence;
+    ourCell->m_pFrameList = &ourFrameList;
+    ourCell->m_nFrameListSize = 1;
+    ourCell->m_bCacheHeader = FALSE;
+    static_cast<CResHelper<CResCell, 1000>&>(*ourFont).pRes = ourCell;
+
+    uint64_t state = ctx.seed ^ 0x780CF0ull;
+    auto next = [&]() { return static_cast<uint32_t>(oracle::SplitMix64(&state)); };
+    const char alphabet[] = "ab c\r\n\x81\xE9";
+
+    auto check = [&](const std::string& source, uint16_t lineLength, uint8_t maxStrings, int32_t divideWords,
+                     int32_t checkRemainder, uint16_t suggested) {
+        char inputs[160];
+        std::snprintf(inputs, sizeof(inputs), "\"%s\" len %u max %u divide %d rem %d suggested %u",
+            source.c_str(), lineLength, maxStrings, divideWords, checkRemainder, suggested);
+        ctx.SetInputs(inputs);
+
+        std::vector<std::string> originalLines(8);
+        uint8_t originalResult = 0;
+        ctx.CallOriginal([&] {
+            void* sSource = reinterpret_cast<OriginalNewFn>(kOriginalNew)(4);
+            reinterpret_cast<OriginalCStringFn>(kOriginalCString)(sSource, nullptr, source.c_str());
+            uint8_t* out = static_cast<uint8_t*>(reinterpret_cast<OriginalNewFn>(kOriginalNew)(4 * 8));
+            for (int i = 0; i < 8; i++) {
+                reinterpret_cast<OriginalCStringFn>(kOriginalCString)(out + i * 4, nullptr, "");
+            }
+            originalResult = reinterpret_cast<SplitStringFn>(kSplitString)(font, sSource, lineLength, maxStrings,
+                out, divideWords, TRUE, checkRemainder, suggested);
+            for (int i = 0; i < originalResult && i < 8; i++) {
+                originalLines[i] = ReadCStringAt(out + i * 4);
+            }
+        });
+
+        CString ourLines[8];
+        const BYTE ourResult = CUtil::SplitString(ourFont, CString(source.c_str()), lineLength, maxStrings, ourLines,
+            divideWords, TRUE, checkRemainder, suggested);
+        ctx.CountInputs(1);
+
+        oracle::Compare(ctx, static_cast<int32_t>(originalResult), static_cast<int32_t>(ourResult));
+        for (int i = 0; i < originalResult && i < 8; i++) {
+            oracle::Compare(ctx, originalLines[i], std::string(static_cast<const char*>(ourLines[i])));
+        }
+    };
+
+    const char* fixed[] = { "", "a", "ab", "abc", "abcdef", "ab cd", "ab\ncd", "a\r\nb", "   ", "\x81"
+                                                                                                "A",
+        "a\xE9"
+        "b\x81",
+        "abcdefghij" };
+    const uint16_t lengths[] = { 0, 1, 5, 10, 15, 20, 40 };
+    const uint8_t maxima[] = { 0, 1, 2, 3, 5 };
+    for (const char* source : fixed) {
+        for (uint16_t lineLength : lengths) {
+            for (uint8_t maxStrings : maxima) {
+                check(source, lineLength, maxStrings, 1, 0, 0);
+                check(source, lineLength, maxStrings, 0, 1, 10);
+            }
+        }
+    }
+    for (long long n = 0; n < ctx.iterations; n++) {
+        std::string source;
+        const uint32_t length = next() % 26;
+        for (uint32_t i = 0; i < length; i++) {
+            source += alphabet[next() % (sizeof(alphabet) - 1)];
+        }
+        check(source, static_cast<uint16_t>(next() % 41), static_cast<uint8_t>(next() % 6),
+            static_cast<int32_t>(next() % 2), static_cast<int32_t>(next() % 2), static_cast<uint16_t>(next() % 41));
+    }
+}
+
 ORACLE_CASE("util/find_one_of", FindOneOf);
+ORACLE_CASE("util/split_string", SplitString);
 ORACLE_CASE("rules/hp_con_bonus", HpConBonus);
 ORACLE_CASE("ui/ime_composition_rect", CompositionWindowRect);
