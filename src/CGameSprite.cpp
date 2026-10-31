@@ -21758,7 +21758,7 @@ SHORT CGameSprite::SpellPoint()
 {
     CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
     SHORT nSequence = m_nSequence;
-    CString sResRef("");
+    CString sResRef;
     CMessage* message;
     CPoint pt = m_curAction.m_dest;
 
