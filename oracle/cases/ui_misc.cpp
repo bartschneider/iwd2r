@@ -38,6 +38,7 @@
 #pragma warning(disable : 4121 4201)
 #endif
 #include "CBaldurChitin.h"
+#include "CBaldurEngine.h"
 #include "CChitin.h"
 #include "CGameSprite.h"
 #include "CImm.h"
@@ -45,6 +46,8 @@
 #include "CResCell.h"
 #include "CResMosaic.h"
 #include "CRuleTables.h"
+#include "CUIControlScrollBar.h"
+#include "CUIPanel.h"
 #include "CUtil.h"
 #include "CVidFont.h"
 #include "CVidMosaic.h"
@@ -469,6 +472,261 @@ void CompositionWindowRect(CaseContext& ctx)
     g_pChitin = savedChitin;
 }
 
+// Writes a value into an original block at a byte offset.
+template <class T>
+void Put(uint8_t* at, size_t offset, T value)
+{
+    std::memcpy(at + offset, &value, sizeof(value));
+}
+
+// CBaldurEngine::OnMouseWheel (0x4289C0), the tail after the scroll-bar loop
+// (report-T95.md section 2.6): with no current scroll bar the two remembered
+// bars at 0xFE/0x102 take the wheel - both must be non-null, then bForward
+// selects the forward one and the other direction the backward one - each tick
+// calling its vtable +0x78 twice. The exe calls that slot with no argument (the
+// slot's function is `ret 4`, so the shipped path would unbalance the stack; it
+// never runs because nothing assigns 0xFE/0x102). The case builds synthetic
+// bars, their panels and their vtables on both sides: the original's at the
+// binary's packed offsets (vptr +0, panel +6, active +0x1E, panel active
+// +0xF4), ours through the members, and puts host callbacks in the vtable slots
+// the function uses (+0x78 the button, +0x7C/+0x80 the page calls) to record
+// which bar was called, which operation and the page count. The full call
+// sequences are compared; no engine global or surface is involved.
+using OnMouseWheelFn = void(__fastcall*)(void* self, void* edx, int32_t bForward, int32_t nTicks, uint32_t nLines,
+    uint32_t wFlags);
+constexpr uintptr_t kOnMouseWheel = 0x4289C0;
+
+constexpr uint32_t kEngineBarCurrent = 0xFA;
+constexpr uint32_t kEngineBarForward = 0xFE;
+constexpr uint32_t kEngineBarBackward = 0x102;
+constexpr uint32_t kOriginalBarPanel = 0x6;
+constexpr uint32_t kOriginalBarActive = 0x1E;
+constexpr uint32_t kOriginalPanelActive = 0xF4;
+constexpr size_t kOriginalEngineSize = 0x140;
+constexpr size_t kOriginalBarSize = 0x40;
+constexpr size_t kOriginalPanelSize = 0x100;
+
+constexpr int kVtableBytes = 0x84;
+constexpr int kMaxCalls = 16;
+
+// Which bar (0 forward, 1 backward, 2 current, 3 unknown) in bits 16+, the
+// operation (0 button, 1 page up, 2 page down) in bits 8+ and the page count in
+// the low byte.
+enum {
+    kCallButton = 0,
+    kCallPageUp = 1,
+    kCallPageDown = 2,
+};
+
+int32_t sSequence[kMaxCalls];
+int sSequenceLength;
+void* sBarForward;
+void* sBarBackward;
+void* sBarCurrent;
+
+void Record(void* self, int32_t op, uint32_t nLines)
+{
+    const int32_t which = self == sBarForward ? 0 : (self == sBarBackward ? 1 : (self == sBarCurrent ? 2 : 3));
+    if (sSequenceLength < kMaxCalls) {
+        sSequence[sSequenceLength] = (which << 16) + (op << 8) + static_cast<int32_t>(nLines & 0xFF);
+    }
+    sSequenceLength++;
+}
+
+// The exe's +0x78 call passes no argument; ours passes the BYTE our header's
+// slot declares. The page calls take the DWORD nLines on both sides.
+void __fastcall RecordButtonOriginal(void* self, void* edx)
+{
+    (void)edx;
+    Record(self, kCallButton, 0);
+}
+
+void __fastcall RecordButtonOurs(void* self, void* edx, unsigned char nDirection)
+{
+    (void)edx;
+    (void)nDirection;
+    Record(self, kCallButton, 0);
+}
+
+void __fastcall RecordPageUpOriginal(void* self, void* edx, uint32_t nLines)
+{
+    (void)edx;
+    Record(self, kCallPageUp, nLines);
+}
+
+void __fastcall RecordPageUpOurs(void* self, void* edx, uint32_t nLines)
+{
+    (void)edx;
+    Record(self, kCallPageUp, nLines);
+}
+
+void __fastcall RecordPageDownOriginal(void* self, void* edx, uint32_t nLines)
+{
+    (void)edx;
+    Record(self, kCallPageDown, nLines);
+}
+
+void __fastcall RecordPageDownOurs(void* self, void* edx, uint32_t nLines)
+{
+    (void)edx;
+    Record(self, kCallPageDown, nLines);
+}
+
+uint32_t sOriginalVtable[kVtableBytes / 4];
+uint32_t sOursVtable[kVtableBytes / 4];
+
+// OnMouseWheel over synthetic bars: the current bar (0xFA) and the two
+// remembered ones (0xFE/0x102), their panels' and their own active flags,
+// bForward, nTicks and nLines. The head, the tail and their separation are all
+// compared through the recorded sequences.
+void EngineOnMouseWheel(CaseContext& ctx)
+{
+    for (int i = 0; i < kVtableBytes / 4; i++) {
+        sOriginalVtable[i] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordButtonOriginal));
+        sOursVtable[i] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordButtonOurs));
+    }
+    sOriginalVtable[0x78 / 4] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordButtonOriginal));
+    sOriginalVtable[0x7C / 4] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordPageUpOriginal));
+    sOriginalVtable[0x80 / 4] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordPageDownOriginal));
+    sOursVtable[0x78 / 4] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordButtonOurs));
+    sOursVtable[0x7C / 4] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordPageUpOurs));
+    sOursVtable[0x80 / 4] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&RecordPageDownOurs));
+
+    uint8_t* originalEngine = nullptr;
+    uint8_t* originalCurrent = nullptr;
+    uint8_t* originalForward = nullptr;
+    uint8_t* originalBackward = nullptr;
+    uint8_t* originalCurrentPanel = nullptr;
+    uint8_t* originalForwardPanel = nullptr;
+    uint8_t* originalBackwardPanel = nullptr;
+    ctx.SetInputs("building the original's blocks");
+    ctx.CallOriginal([&] {
+        originalEngine = OriginalBlock(kOriginalEngineSize);
+        originalCurrent = OriginalBlock(kOriginalBarSize);
+        originalForward = OriginalBlock(kOriginalBarSize);
+        originalBackward = OriginalBlock(kOriginalBarSize);
+        originalCurrentPanel = OriginalBlock(kOriginalPanelSize);
+        originalForwardPanel = OriginalBlock(kOriginalPanelSize);
+        originalBackwardPanel = OriginalBlock(kOriginalPanelSize);
+    });
+
+    std::vector<unsigned char> oursEngineStorage(sizeof(CBaldurEngine), 0);
+    std::vector<unsigned char> oursCurrentStorage(sizeof(CUIControlScrollBar), 0);
+    std::vector<unsigned char> oursForwardStorage(sizeof(CUIControlScrollBar), 0);
+    std::vector<unsigned char> oursBackwardStorage(sizeof(CUIControlScrollBar), 0);
+    std::vector<unsigned char> oursCurrentPanelStorage(sizeof(CUIPanel), 0);
+    std::vector<unsigned char> oursForwardPanelStorage(sizeof(CUIPanel), 0);
+    std::vector<unsigned char> oursBackwardPanelStorage(sizeof(CUIPanel), 0);
+    auto* oursEngine = reinterpret_cast<CBaldurEngine*>(oursEngineStorage.data());
+    auto* oursCurrent = reinterpret_cast<CUIControlScrollBar*>(oursCurrentStorage.data());
+    auto* oursForward = reinterpret_cast<CUIControlScrollBar*>(oursForwardStorage.data());
+    auto* oursBackward = reinterpret_cast<CUIControlScrollBar*>(oursBackwardStorage.data());
+    auto* oursCurrentBase = reinterpret_cast<CUIControlBase*>(oursCurrent);
+    auto* oursForwardBase = reinterpret_cast<CUIControlBase*>(oursForward);
+    auto* oursBackwardBase = reinterpret_cast<CUIControlBase*>(oursBackward);
+    auto* oursCurrentPanel = reinterpret_cast<CUIPanel*>(oursCurrentPanelStorage.data());
+    auto* oursForwardPanel = reinterpret_cast<CUIPanel*>(oursForwardPanelStorage.data());
+    auto* oursBackwardPanel = reinterpret_cast<CUIPanel*>(oursBackwardPanelStorage.data());
+
+    uint64_t state = ctx.seed ^ 0x4289C0ull;
+    auto next = [&]() { return static_cast<uint32_t>(oracle::SplitMix64(&state)); };
+
+    auto check = [&](bool currentPresent, bool currentPanelActive, bool currentBarActive, bool forwardPresent,
+                     bool forwardPanelActive, bool forwardBarActive, bool backwardPresent, bool backwardPanelActive,
+                     bool backwardBarActive, int32_t bForwardDir, int32_t nTicks, int32_t nLines) {
+        char inputs[260];
+        std::snprintf(inputs, sizeof(inputs),
+            "current %d/%d/%d, forward %d/%d/%d, backward %d/%d/%d, bForward %d, nTicks %d, nLines %d",
+            currentPresent ? 1 : 0, currentPanelActive ? 1 : 0, currentBarActive ? 1 : 0, forwardPresent ? 1 : 0,
+            forwardPanelActive ? 1 : 0, forwardBarActive ? 1 : 0, backwardPresent ? 1 : 0,
+            backwardPanelActive ? 1 : 0, backwardBarActive ? 1 : 0, bForwardDir, nTicks, nLines);
+        ctx.SetInputs(inputs);
+
+        int32_t originalSequence[kMaxCalls];
+        int originalLength = 0;
+        sSequenceLength = 0;
+        sBarCurrent = currentPresent ? originalCurrent : nullptr;
+        sBarForward = forwardPresent ? originalForward : nullptr;
+        sBarBackward = backwardPresent ? originalBackward : nullptr;
+        ctx.CallOriginal([&] {
+            *reinterpret_cast<uint32_t*>(originalCurrent) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sOriginalVtable));
+            *reinterpret_cast<uint32_t*>(originalForward) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sOriginalVtable));
+            *reinterpret_cast<uint32_t*>(originalBackward) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sOriginalVtable));
+            Put<uint32_t>(originalCurrent, kOriginalBarPanel, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(originalCurrentPanel)));
+            Put<uint32_t>(originalForward, kOriginalBarPanel, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(originalForwardPanel)));
+            Put<uint32_t>(originalBackward, kOriginalBarPanel, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(originalBackwardPanel)));
+            Put<uint8_t>(originalCurrentPanel, kOriginalPanelActive, currentPanelActive);
+            Put<uint8_t>(originalForwardPanel, kOriginalPanelActive, forwardPanelActive);
+            Put<uint8_t>(originalBackwardPanel, kOriginalPanelActive, backwardPanelActive);
+            Put<uint8_t>(originalCurrent, kOriginalBarActive, currentBarActive);
+            Put<uint8_t>(originalForward, kOriginalBarActive, forwardBarActive);
+            Put<uint8_t>(originalBackward, kOriginalBarActive, backwardBarActive);
+            Put<uint32_t>(originalEngine, kEngineBarCurrent,
+                currentPresent ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(originalCurrent)) : 0);
+            Put<uint32_t>(originalEngine, kEngineBarForward,
+                forwardPresent ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(originalForward)) : 0);
+            Put<uint32_t>(originalEngine, kEngineBarBackward,
+                backwardPresent ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(originalBackward)) : 0);
+            reinterpret_cast<OnMouseWheelFn>(kOnMouseWheel)(originalEngine, nullptr, bForwardDir, nTicks,
+                static_cast<uint32_t>(nLines), 0);
+        });
+        std::memcpy(originalSequence, sSequence, sizeof(originalSequence));
+        originalLength = sSequenceLength;
+
+        sSequenceLength = 0;
+        sBarCurrent = currentPresent ? oursCurrent : nullptr;
+        sBarForward = forwardPresent ? oursForward : nullptr;
+        sBarBackward = backwardPresent ? oursBackward : nullptr;
+        *reinterpret_cast<uint32_t*>(oursCurrentStorage.data()) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sOursVtable));
+        *reinterpret_cast<uint32_t*>(oursForwardStorage.data()) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sOursVtable));
+        *reinterpret_cast<uint32_t*>(oursBackwardStorage.data()) = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sOursVtable));
+        oursCurrentBase->m_pPanel = oursCurrentPanel;
+        oursForwardBase->m_pPanel = oursForwardPanel;
+        oursBackwardBase->m_pPanel = oursBackwardPanel;
+        oursCurrentPanel->m_bActive = currentPanelActive;
+        oursForwardPanel->m_bActive = forwardPanelActive;
+        oursBackwardPanel->m_bActive = backwardPanelActive;
+        oursCurrentBase->m_bActive = currentBarActive;
+        oursForwardBase->m_bActive = forwardBarActive;
+        oursBackwardBase->m_bActive = backwardBarActive;
+        oursEngine->m_pCurrentScrollBar = currentPresent ? oursCurrent : nullptr;
+        oursEngine->field_FE = forwardPresent ? oursForward : nullptr;
+        oursEngine->field_102 = backwardPresent ? oursBackward : nullptr;
+        oursEngine->CBaldurEngine::OnMouseWheel(bForwardDir, nTicks, static_cast<uint32_t>(nLines), 0);
+
+        ctx.CountInputs(1);
+        oracle::Compare(ctx, originalLength, sSequenceLength);
+        const int common = originalLength < sSequenceLength ? originalLength : sSequenceLength;
+        for (int i = 0; i < common; i++) {
+            oracle::Compare(ctx, originalSequence[i], sSequence[i]);
+        }
+    };
+
+    for (int32_t nLines = 0; nLines <= 3; nLines++) {
+        for (int32_t nTicks = -2; nTicks <= 3; nTicks++) {
+            for (int32_t bForward = 0; bForward <= 1; bForward++) {
+                check(false, false, false, true, true, true, true, true, true, bForward, nTicks, nLines);
+                check(false, false, false, true, false, true, true, true, true, bForward, nTicks, nLines);
+                check(false, false, false, true, true, false, true, true, true, bForward, nTicks, nLines);
+                check(false, false, false, true, true, true, true, false, true, bForward, nTicks, nLines);
+                check(false, false, false, true, true, true, true, true, false, bForward, nTicks, nLines);
+                check(false, false, false, true, true, true, false, false, false, bForward, nTicks, nLines);
+                check(false, false, false, false, false, false, true, true, true, bForward, nTicks, nLines);
+                check(false, false, false, false, false, false, false, false, false, bForward, nTicks, nLines);
+                check(true, true, true, true, true, true, true, true, true, bForward, nTicks, nLines);
+                check(true, false, true, true, true, true, true, true, true, bForward, nTicks, nLines);
+                check(true, true, false, true, true, true, true, true, true, bForward, nTicks, nLines);
+            }
+        }
+    }
+    const int count = 400 + ctx.iterations / 20;
+    for (int n = 0; n < count; n++) {
+        check((next() & 1) != 0, (next() & 1) != 0, (next() & 1) != 0, (next() & 1) != 0, (next() & 1) != 0,
+            (next() & 1) != 0, (next() & 1) != 0, (next() & 1) != 0, (next() & 1) != 0,
+            static_cast<int32_t>(next() & 1), static_cast<int32_t>(next() % 6) - 2, static_cast<int32_t>(next() % 4));
+    }
+}
+
 } // namespace
 
 ORACLE_CASE("combat/dex_armor_class", DexArmorClass);
@@ -680,3 +938,4 @@ ORACLE_CASE("util/find_one_of", FindOneOf);
 ORACLE_CASE("util/split_string", CaseSplitString);
 ORACLE_CASE("rules/hp_con_bonus", HpConBonus);
 ORACLE_CASE("ui/ime_composition_rect", CompositionWindowRect);
+ORACLE_CASE("ui/on_mouse_wheel", EngineOnMouseWheel);
