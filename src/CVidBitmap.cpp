@@ -353,17 +353,21 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
     return bResult;
 }
 
-// NOTE: Inlined. The original has no body for this function: CVidBitmap::
-// RenderDirect (0x7B3190) carries the 8-bpp to 16-bpp loop inside its own
-// 16-bpp branch, at 0x7B362D-0x7B3735, so the label below is that arm's first
-// instruction rather than a function entry. The port keeps it as a function -
-// the inlining is the compiler's choice - and the three paths here are the
-// inlined ones: pairs of pixels per dword store (second in the high word), an
-// odd width's leading pixel before the pairs, and a sub-2 width's one pixel
-// per row (a do-while there, so a zero-width blit still writes one pixel, as
-// in BltBmp24To16). The palette goes through SetPalette/Realize exactly as
-// BltBmp8To32 does (0x7B3660 and 0x7B3680 in the arm) and each pixel is the
-// low word of the realized entry, `word [rgbTempPal + 4 * index]`.
+// NOTE: Inlined. The original has no body of its own for this function:
+// CVidBitmap::RenderDirect (0x7B3190) carries the 8-bpp to 16-bpp loop inside
+// its own 16-bpp branch, the inlined arm at RenderDirect+0x49D (0x7B362D)
+// through +0x5A5 (0x7B3735), so it has no address of its own to mark here:
+// the address 0x7B362D is not a function entry, and a `// 0xADDR` comment
+// there would fail the parity marker check. The port keeps it as a function -
+// the inlining is
+// the compiler's choice - and the three paths here are the inlined ones: pairs
+// of pixels per dword store (second in the high word), an odd width's leading
+// pixel before the pairs, and a sub-2 width's one pixel per row (a do-while
+// there, so a zero-width blit still writes one pixel, as in BltBmp24To16).
+// The palette goes through SetPalette/Realize exactly as BltBmp8To32 does
+// (0x7B3660 and 0x7B3680 in the arm) and each pixel is the low word of the
+// realized entry, `word [rgbTempPal + 4 * index]`. Its evidence is
+// docs/evidence/7B362D.md, keyed by the arm's address.
 //
 // NOTE: The original halves the pair count of an even width with a byte shift
 // (`shr byte ptr [ebp+0x14]` at 0x7B36B4) while the odd path shifts the whole
@@ -372,8 +376,6 @@ BOOL CVidBitmap::RenderDirect(INT nSurface, INT x, INT y, const CRect& rClip, DW
 // pairs, reading past the source row and writing past the surface row. This
 // halves the whole width instead - identical below 256, and the only widths
 // the game blits - rather than reproduce the overrun.
-//
-// 0x7B362D
 BOOL CVidBitmap::BltBmp8To16(WORD* pSurface, LONG lPitch, BYTE* pData, const CSize& bmpSize, LONG nDataJump, DWORD dwFlags)
 {
     m_cPalette.SetPalette(pRes->GetColorTable(), pRes->GetColorCount(), CVidPalette::TYPE_RESOURCE);
