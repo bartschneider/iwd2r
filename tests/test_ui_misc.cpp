@@ -22,6 +22,7 @@
 #include "CMessage.h"
 #include "CParticle.h"
 #include "CPathSearch.h"
+#include "CResCell.h"
 #include "CResMosaic.h"
 #include "CRuleTables.h"
 #include "CScreenCharacter.h"
@@ -37,6 +38,7 @@
 #include "CUIManager.h"
 #include "CUIPanel.h"
 #include "CUtil.h"
+#include "CVidFont.h"
 #include "CVidMosaic.h"
 #include "CWarp.h"
 #include "CWeather.h"
@@ -2863,4 +2865,123 @@ TEST_CASE("ime: the composition window's rect follows the font, the mosaic and t
     // down to the mosaic's own.
     setMosaic(40, 8);
     CHECK(rect(CPoint(0, 0), CSize(200, 50), CPoint(0, 0), CSize(60, 10), 2) == CRect(20, 10, 60, 18));
+}
+
+// CUtil::SplitString (0x780CF0): the line loop's Double Byte Character
+// Support. With g_pChitin->field_1A0 on, a lead byte takes its trail byte with
+// it (the pair is measured as one unit, and the trail byte is never tested for
+// a break), and the line budget loses 10 px. The font fixture is a BAM with
+// 256 frames: frame 0 (what every single byte uses) is 5 px, frame 0x40 (a
+// lead byte whose trail is 'A') is 100 px, so a pair can overrun the budget
+// while the string left of it does not.
+TEST_CASE("util: SplitString keeps a double-byte pair together and budgets 10 px less", "[uimisc][util]")
+{
+    // A chitin with a constructed m_sFontName: SplitString asks the font's
+    // GetStringLength, which reads the chitin's font name to choose the BAM
+    // path (the table lookup needs the engine's threads, which do not run
+    // here, so a bare chitin like FindOneOf's cannot hold its CString).
+    class SplitStringChitin : public CChitin {
+    public:
+        void MessageThreadMain(void*) override { }
+        void RSThreadMain(void*) override { }
+        void MainAIThread(void*) override { }
+        void MusicThreadMain(void*) override { }
+    };
+    SplitStringChitin chitin;
+    CChitin* pSaved = g_pChitin;
+    g_pChitin = &chitin;
+    struct Restore {
+        CChitin* pChitin;
+        ~Restore()
+        {
+            iwd2r_SetTestLeadBytes(nullptr);
+            g_pChitin = pChitin;
+        }
+    } restore { pSaved };
+    chitin.m_sFontName = "";
+    chitin.field_1A0 = 0;
+
+    const int kFrames = 256;
+    const DWORD nTable = 0x18;
+    const DWORD nSequences = nTable + kFrames * sizeof(FRAMEENTRY);
+    const DWORD nFrameList = nSequences + sizeof(SEQUENCEENTRY);
+    const DWORD nPalette = nFrameList + kFrames * sizeof(WORD);
+    std::vector<BYTE> bytes(nPalette + 1024, 0);
+    BAMHEADER header = {};
+    std::memcpy(&header.nFileType, "BAM ", 4);
+    std::memcpy(&header.nFileVersion, "V1  ", 4);
+    header.nFrames = kFrames;
+    header.nSequences = 1;
+    header.nTableOffset = nTable;
+    header.nPaletteOffset = nPalette;
+    header.nFrameListOffset = nFrameList;
+    std::memcpy(bytes.data(), &header, sizeof(header));
+    for (int i = 0; i < kFrames; i++) {
+        FRAMEENTRY frame = {};
+        frame.nWidth = i == 0x40 ? 100 : 5;
+        frame.nHeight = 7;
+        std::memcpy(bytes.data() + nTable + i * sizeof(FRAMEENTRY), &frame, sizeof(frame));
+        const WORD nFrame = static_cast<WORD>(i);
+        std::memcpy(bytes.data() + nFrameList + i * sizeof(WORD), &nFrame, sizeof(nFrame));
+    }
+    SEQUENCEENTRY sequence = { static_cast<SHORT>(kFrames), 0 };
+    std::memcpy(bytes.data() + nSequences, &sequence, sizeof(sequence));
+
+    CResCell res;
+    res.m_bCacheHeader = FALSE;
+    REQUIRE(res.Parse(bytes.data()));
+    CVidFont font;
+    static_cast<CResHelper<CResCell, 1000>&>(font).pRes = &res;
+
+    // Shift-JIS's lead bytes (0x81-0x9F, 0xE0-0xFC), for the pair below.
+    static bool leadBytes[256] = {};
+    for (int c = 0x81; c <= 0x9F; c++)
+        leadBytes[c] = true;
+    for (int c = 0xE0; c <= 0xFC; c++)
+        leadBytes[c] = true;
+
+    auto split = [&](const char* text, WORD lineLength, BYTE maxStrings, BOOL divideWords, BOOL checkRemainder,
+                     WORD suggested) {
+        CString out[8];
+        const BYTE n = CUtil::SplitString(&font, CString(text), lineLength, maxStrings, out, divideWords, TRUE,
+            checkRemainder, suggested);
+        std::vector<std::string> lines;
+        for (BYTE i = 0; i < n; i++) {
+            lines.push_back(static_cast<const char*>(out[i]));
+        }
+        return lines;
+    };
+
+    // The single-byte arm: 5 px per character.
+    iwd2r_SetTestLeadBytes(nullptr);
+    CHECK(split("abcdef", 10, 3, TRUE, FALSE, 0) == std::vector<std::string> { "ab", "cd", "ef" });
+    CHECK(split("ab\ncd", 100, 3, TRUE, FALSE, 0) == std::vector<std::string> { "ab", "cd" });
+
+    // Double Byte Character Support reserves 10 px: the same string fits two
+    // characters per 15 px instead of three.
+    chitin.field_1A0 = 0;
+    CHECK(split("abcdef", 15, 2, TRUE, FALSE, 0) == std::vector<std::string> { "abc", "def" });
+    chitin.field_1A0 = 1;
+    CHECK(split("abcdef", 15, 2, TRUE, FALSE, 0) == std::vector<std::string> { "a", "bcdef" });
+
+    // Shift-JIS lead byte 0x81 with trail 'A': as a pair it is 100 px, so
+    // with the 5 px budget left it moves to the next line whole. Without the
+    // support the loop would stop on 'A' (the pair measures 100 px there) and
+    // break it into "\x81" and "A"; with the flag off the two bytes are just
+    // 5 px each and both fit.
+    iwd2r_SetTestLeadBytes(leadBytes);
+    chitin.field_1A0 = 1;
+    CHECK(split("\x81"
+                "A",
+              15, 2, TRUE, FALSE, 0)
+        == std::vector<std::string> { "", "\x81"
+                                          "A" });
+    chitin.field_1A0 = 0;
+    CHECK(split("\x81"
+                "A",
+              15, 2, TRUE, FALSE, 0)
+        == std::vector<std::string> { "\x81"
+                                      "A" });
+
+    static_cast<CResHelper<CResCell, 1000>&>(font).pRes = NULL;
 }
