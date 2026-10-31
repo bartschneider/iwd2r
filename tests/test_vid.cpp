@@ -2814,6 +2814,136 @@ TEST_CASE("bk_render_particle_returns_true", "[vid]")
     CHECK(mode.BKRender(&particle, CRect(0, 0, 8, 8), CParticle::DOTS, 1) == FALSE);
 }
 
+// CParticle::Render's 16- and 24-bpp arms (0x7C36A0): the same walk as the
+// 32-bit arms with the drawers' pitch units, the inlined dot writes and the
+// two new blob helpers (0x7C3CC0, 0x7C3E20), whose plus grows with nBlobSize
+// from the centre out (1 centre, 2 + down, 3 + left, 4 + right, 5 + up), each
+// point clipped by the rect moved to its own origin.
+TEST_CASE("particle_render_16_and_24", "[vid]")
+{
+    ChitinScope scope;
+    CVidInf mode;
+    mode.m_dwRBitShift = 16;
+    mode.m_dwGBitShift = 8;
+    mode.m_dwBBitShift = 0;
+    ActiveModeScope active(&mode);
+
+    const COLORREF rgb = RGB(0x11, 0x22, 0x33);
+    const DWORD color = mode.ReduceColor(rgb);
+    const WORD color16 = static_cast<WORD>(color);
+    const BYTE nThird = static_cast<BYTE>(color >> 16);
+
+    for (const int bpp : { 16, 24 }) {
+        INFO("bpp " << bpp);
+        g_pChitin->cVideo.m_nBpp = static_cast<WORD>(bpp);
+
+        // DOTS: a particle at (3, 3) (y = (3 * posY / 4 - posZ) >> 10), one
+        // loop, inside the clip at (1, 1): 16 bpp writes the WORD at
+        // (y - top) * (lPitch >> 1) - left + x, 24 bpp three bytes at
+        // (x - left) * 3 + (y - top) * lPitch.
+        {
+            CParticle particle(3 << 10, 4 << 10, 0, 0, 0, 0, rgb, 0, 0, CParticle::DOTS);
+            if (bpp == 16) {
+                std::vector<WORD> pixels(8 * 8, 0xAAAA);
+                particle.Render(pixels.data(), 8 * 2, CRect(1, 1, 8, 8), CParticle::DOTS, 1);
+                std::vector<WORD> expected(8 * 8, 0xAAAA);
+                expected[(3 - 1) * 8 - 1 + 3] = color16;
+                CHECK(pixels == expected);
+            } else {
+                std::vector<BYTE> pixels(8 * 8 * 3, 0xAA);
+                particle.Render(pixels.data(), 8 * 3, CRect(1, 1, 8, 8), CParticle::DOTS, 1);
+                std::vector<BYTE> expected(8 * 8 * 3, 0xAA);
+                BYTE* p = expected.data() + ((3 - 1) * 8 - 1 + 3) * 3;
+                std::memcpy(p, &color16, 2);
+                p[2] = nThird;
+                CHECK(pixels == expected);
+            }
+        }
+
+        // BLOB: the plus at (3, 3) of the clip's own origin; each size adds
+        // one point to the previous one's set.
+        const CPoint blobPoints[] = { CPoint(3, 3), CPoint(3, 2), CPoint(2, 3), CPoint(4, 3), CPoint(3, 4) };
+        for (USHORT nBlobSize = 1; nBlobSize <= 5; nBlobSize++) {
+            INFO("blob size " << nBlobSize);
+            CParticle particle(3 << 10, 4 << 10, 0, 0, 0, 0, rgb, 0, 0, CParticle::BLOB);
+            if (bpp == 16) {
+                std::vector<WORD> pixels(8 * 8, 0xAAAA);
+                particle.Render(pixels.data(), 8 * 2, CRect(0, 0, 8, 8), CParticle::BLOB, nBlobSize);
+                std::vector<WORD> expected(8 * 8, 0xAAAA);
+                // Sizes 5,4,3,2,1 fall through to the smaller sets, so a size
+                // draws the points of every case from itself down to 1.
+                for (USHORT j = 1; j <= nBlobSize; j++) {
+                    const CPoint& pt = blobPoints[j - 1];
+                    expected[pt.y * 8 + pt.x] = color16;
+                }
+                CHECK(pixels == expected);
+            } else {
+                std::vector<BYTE> pixels(8 * 8 * 3, 0xAA);
+                particle.Render(pixels.data(), 8 * 3, CRect(0, 0, 8, 8), CParticle::BLOB, nBlobSize);
+                std::vector<BYTE> expected(8 * 8 * 3, 0xAA);
+                for (USHORT j = 1; j <= nBlobSize; j++) {
+                    const CPoint& pt = blobPoints[j - 1];
+                    BYTE* p = expected.data() + (pt.y * 8 + pt.x) * 3;
+                    std::memcpy(p, &color16, 2);
+                    p[2] = nThird;
+                }
+                CHECK(pixels == expected);
+            }
+        }
+
+        // BLOB at the clip's origin: the left, down and centre points at x or
+        // y -1 fall outside and leave the destination.
+        {
+            CParticle particle(0, 0, 0, 0, 0, 0, rgb, 0, 0, CParticle::BLOB);
+            if (bpp == 16) {
+                std::vector<WORD> pixels(4 * 4, 0xAAAA);
+                particle.Render(pixels.data(), 4 * 2, CRect(0, 0, 4, 4), CParticle::BLOB, 5);
+                std::vector<WORD> expected(4 * 4, 0xAAAA);
+                expected[0] = color16; // the centre
+                expected[0 + 1] = color16; // right
+                expected[1 * 4] = color16; // up
+                CHECK(pixels == expected);
+            } else {
+                std::vector<BYTE> pixels(4 * 4 * 3, 0xAA);
+                particle.Render(pixels.data(), 4 * 3, CRect(0, 0, 4, 4), CParticle::BLOB, 5);
+                std::vector<BYTE> expected(4 * 4 * 3, 0xAA);
+                for (int i : { 0, 1, 4 }) {
+                    BYTE* p = expected.data() + i * 3;
+                    std::memcpy(p, &color16, 2);
+                    p[2] = nThird;
+                }
+                CHECK(pixels == expected);
+            }
+        }
+
+        // CONNECT: the line the arm hands to the mode's drawer, from
+        // (pos - vel) to pos, clipped by the rect moved in one on its far
+        // edges. The drawers are oracle-proven; this pins the wiring and the
+        // pitch unit.
+        {
+            CParticle particle(5 << 10, 5 << 10, 0, 2 << 10, 4 << 10, 0, rgb, 0, 0, CParticle::CONNECT);
+            const CRect clip(0, 0, 8, 8);
+            const CRect drawClip(0, 0, 7, 7);
+            if (bpp == 16) {
+                std::vector<WORD> pixels(8 * 8, 0xAAAA);
+                particle.Render(pixels.data(), 8 * 2, clip, CParticle::CONNECT, 1);
+                std::vector<WORD> expected(8 * 8, 0xAAAA);
+                // x1 = (5 - 2), y1 = (5 - 4) * 3 / 4, x2 = 5, y2 = 5 * 3 / 4.
+                mode.DrawLine16(3, 0, 5, 3, expected.data(), 8, drawClip, color16, FALSE);
+                CHECK(pixels == expected);
+            } else {
+                std::vector<BYTE> pixels(8 * 8 * 3, 0xAA);
+                particle.Render(pixels.data(), 8 * 3, clip, CParticle::CONNECT, 1);
+                std::vector<BYTE> expected(8 * 8 * 3, 0xAA);
+                mode.DrawLine24(3, 0, 5, 3, expected.data(), 8 * 3, drawClip, color, FALSE);
+                CHECK(pixels == expected);
+            }
+        }
+    }
+
+    g_pChitin->cVideo.m_nBpp = 32;
+}
+
 // CVisibilityMap::GetSubTileCode (0x5525C0) puts the corners that are not
 // visible in the high nibble (`shl bl, 4` at 0x552668) and the unexplored
 // ones in the low nibble: bit 0x1 the tile, 0x2 the one below, 0x4 below
