@@ -732,6 +732,150 @@ void CProjectileBAM::UpdateBasedOnTargetPoint(LONG x, LONG y)
     }
 }
 
+// 0x52D430
+BOOL CProjectileExploding::AreaEffect(BOOLEAN bForce)
+{
+    CTypedPtrList<CPtrList, LONG*> targets;
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    BOOL bHit = FALSE;
+    BOOL bResult;
+
+    if (m_bPreScan == 0) {
+        // No pre-scan: the original reports success and fires unconditionally.
+        bResult = TRUE;
+        bHit = TRUE;
+    } else {
+        m_pArea->GetAllInRange(m_posVertList,
+            m_pos,
+            m_targetType,
+            m_preCheckRange,
+            m_terrainTable,
+            targets,
+            TRUE,
+            m_bCheckNonSprites);
+
+        m_pArea->GetAllInRangeBack(m_pos,
+            m_targetType,
+            m_preCheckRange,
+            m_terrainTable,
+            targets,
+            TRUE,
+            FALSE,
+            m_bCheckNonSprites);
+
+        bResult = targets.GetCount() != 0;
+        if (!bResult) {
+            return bResult;
+        }
+    }
+
+    targets.RemoveAll();
+
+    m_pArea->GetAllInRange(m_posVertList,
+        m_pos,
+        m_targetType,
+        m_strikeRange,
+        m_terrainTable,
+        targets,
+        TRUE,
+        m_bCheckNonSprites);
+
+    m_pArea->GetAllInRangeBack(m_pos,
+        m_targetType,
+        m_strikeRange,
+        m_terrainTable,
+        targets,
+        TRUE,
+        FALSE,
+        m_bCheckNonSprites);
+
+    POSITION pos = targets.GetHeadPosition();
+    while (pos != NULL) {
+        LONG nTargetId = static_cast<LONG>(reinterpret_cast<INT_PTR>(targets.GetNext(pos)));
+
+        CGameObject* pObject;
+
+        BYTE rc = pGame->GetObjectArray()->GetShare(nTargetId,
+            CGameObjectArray::THREAD_ASYNCH,
+            &pObject,
+            INFINITE);
+        if (rc != CGameObjectArray::SUCCESS) {
+            return bResult;
+        }
+
+        if ((pObject->GetObjectType() & CGameObject::TYPE_AIBASE) == 0) {
+            pGame->GetObjectArray()->ReleaseShare(nTargetId,
+                CGameObjectArray::THREAD_ASYNCH,
+                INFINITE);
+            continue;
+        }
+
+        CPoint ptTarget;
+        if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+            ptTarget = static_cast<CGameSprite*>(pObject)->m_posOld;
+        } else {
+            ptTarget = pObject->GetPos();
+        }
+
+        BOOL bFire;
+        if (bForce == FALSE) {
+            bFire = TRUE;
+        } else {
+            LONG nDY = ptTarget.y - m_pos.y;
+            LONG nDX = ptTarget.x - m_pos.x;
+            if (((nDY * nDY * 0x10) / 9 + nDX * nDX) < (m_strikeRange * m_strikeRange)) {
+                bFire = TRUE;
+            } else {
+                bFire = m_pArea->CheckLOS(m_pos, ptTarget, m_terrainTable, FALSE);
+            }
+        }
+
+        if (bFire) {
+            if (pObject->GetObjectType() == CGameObject::TYPE_SPRITE) {
+                static_cast<CGameSprite*>(pObject)->m_posOld = pObject->GetPos();
+            }
+
+            bHit = TRUE;
+
+            CProjectile* pChild = DecodeProjectile(static_cast<WORD>(m_childProjectileType + 1), NULL, 0);
+            pChild->m_nSpellLevel = m_nSpellLevel;
+            pChild->m_sourceRes = m_sourceRes;
+            pChild->m_fireSoundRef = CResRef("");
+
+            for (POSITION posEffect = m_effectList.GetHeadPosition(); posEffect != NULL;) {
+                CGameEffect* pEffect = m_effectList.GetNext(posEffect);
+                CGameEffect* pCopy = pEffect->Copy();
+                pCopy->m_slotNum = pChild->m_projectileType;
+
+                pChild->m_effectList.AddTail(pCopy);
+            }
+
+            CPoint ptFire = pObject->GetPos();
+            pChild->Fire(m_pArea, m_id, nTargetId, ptFire, 0x32, 0);
+        }
+
+        // NOTE: The original releases m_callBackProjectile here, not the
+        // target it just shared, so the target's share leaks and an id that
+        // was never shared is released (an original defect, kept).
+        pGame->GetObjectArray()->ReleaseShare(m_callBackProjectile,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
+
+    if (bHit) {
+        Explode();
+    }
+
+    return bResult;
+}
+
+// 0x78E730 (COMDAT-folded empty body: the same ret as the other empty
+// virtuals; the exploding intermediate never does anything on Explode).
+void CProjectileExploding::Explode()
+{
+}
+
 // 0x52E160
 void CProjectileSparkleExplosion::Explode()
 {

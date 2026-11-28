@@ -75,20 +75,26 @@ public:
 // The exploding-projectile intermediate (vtable 0x84DBDC): the delayed-burst
 // carrier. The ctor arms a child projectile (type 78) with an anyone filter
 // and a 0x100 strike and pre-check range, and readies two CVidCell explosion
-// slots; the parked virtuals (Render 0x52CF80, AIUpdate 0x52DD60, Fire
-// 0x52D9F0, OnArrival 0x52D7F0, AreaEffect 0x52D430 — all in
-// docs/wso/import-parked/) decode and fire the child in bursts around the
-// hit. WillScarlettOhara models it as CProjectileExploding <
-// CProjectileTravelling < CProjectileBAM; the exe ctor 0x52CCE0 bases
-// directly on CProjectileBAM (0x52AD60 — the resref by value, ret 0x8),
-// which is the anchor used here. None of the fork's virtual set (nor its
-// slot 0x0088 Explode override, COMDAT-folded with 0x78E730 in the exe) is
-// declared: a declared-but-undefined virtual would become the key function
-// and leave the vtable unemitted, so ours inherits the base slots.
+// slots. The still-parked virtuals are Render 0x52CF80, AIUpdate 0x52DD60,
+// Fire 0x52D9F0 and OnArrival 0x52D7F0 (docs/wso/import-parked/); its
+// AreaEffect scan is ported below. WillScarlettOhara models the class as
+// CProjectileExploding < CProjectileTravelling < CProjectileBAM; the exe ctor
+// 0x52CCE0 bases directly on CProjectileBAM (0x52AD60 — the resref by
+// value, ret 0x8), which is the anchor used here. Slot 0x0088 Explode is the
+// exe's COMDAT-folded empty body (0x78E730), declared here so the ported
+// AreaEffect can call it; the undeclared parked virtuals above stay inherited
+// from the base classes.
 class CProjectileExploding : public CProjectileBAM {
 public:
     // 0x52CCE0 (the resref is passed by value in the exe — ret 0x8)
     CProjectileExploding(CResRef resRef);
+
+    // 0x52D430: the burst scan the family's AIUpdates share. It fills a
+    // target list from the area twice (pre-check range when m_bPreScan is
+    // set, then strike range), fires the child projectile at each surviving
+    // AIBase target and returns whether the pre-scan found anything.
+    BOOL AreaEffect(BOOLEAN bForce);
+    /* 0088 */ virtual void Explode();
 
     // Native exe offsets; ours lay out after sizeof(CProjectileBAM) = 0x2A2
     // under the reduced packing — the same drift as CProjectile84E030's
@@ -136,9 +142,8 @@ public:
 // the fireball burst (CGameObject85BFE8, 0x7105B0) at the missile position —
 // the strike range around, expanding at half the flight speed — coloured by
 // the leaf's own explosion colour range byte. The exe vtable also overrides
-// slots 0x000C (AIUpdate 0x52E4D0, docs/wso/import-parked/52E4D0.json) and
-// +0x98 (0x52EC80, docs/wso/import-parked/52EC80.json); both stay parked, so
-// ours inherits the base virtuals for them and declares only Explode.
+// slot 0x000C (AIUpdate 0x52E4D0, ported here) and +0x98 (0x52EC80, still
+// parked, docs/wso/import-parked/52EC80.json).
 class CProjectileExplodingWeapon : public CProjectileExploding {
 public:
     // 0x52E230: the SPFIREBL burst carrier on the exploding intermediate,
@@ -159,9 +164,6 @@ public:
 };
 
 // The exploding flame missile (vtable 0x84DCF4): Explode (slot 0x0088) is
-// the same fireball burst with the colour ranges hardwired to 0x43. The exe
-// vtable also overrides slot 0x000C (AIUpdate 0x52EC80, parked); ours
-// inherits the base virtual there. The trail members are the weapon
 // missile's two, minus its explosion colour byte.
 class CProjectileExplodingFlame : public CProjectileExploding {
 public:
@@ -185,7 +187,6 @@ public:
 // The skull trap missile (vtable 0x84DD80): Explode (slot 0x0088) is the
 // ShSkull burst sound fire-and-forget on channel 14 followed by the bone
 // chunk spray the shatter effect throws (CGameChunk, sized by the trap's
-// own child type). AIUpdate (0x52F9E0) stays parked from i065 on this
 // class, so that slot inherits the base virtual.
 class CProjectileSkullTrap : public CProjectileExploding {
 public:
