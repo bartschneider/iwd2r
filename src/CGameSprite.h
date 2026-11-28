@@ -21,6 +21,12 @@
 
 #include <bitset>
 
+// 0x4E7000: the weighted checksum the unported ProcessEffectList tail
+// (0x72E759-0x72FB24) takes over nine DWORDs before deciding to queue the
+// sprite-update message. pValues points at the first of the nine values (the
+// exe's caller passes the block base, whose first DWORD is skipped).
+LONG ComputeSpriteUpdateChecksum(const DWORD* pValues);
+
 // SEQUENCE.IDS
 
 #define CGAMESPRITE_SEQ_ATTACK 0

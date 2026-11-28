@@ -16883,6 +16883,28 @@ void CGameSprite::sub_72FBF0()
     }
 }
 
+// 0x4E7000
+//
+// Weighted checksum over nine DWORDs: value i (i = 0..8) is multiplied by
+// 2^i (the exe starts at weight 1 and doubles it each iteration) and the
+// 32-bit products are summed. The exe's caller (ProcessEffectList's tail at
+// 0x72FA5D and 0x72FAB2) passes CGameSprite+0xAF8, so the nine values it
+// hashes live at +0xB00..+0xB24, and compares the result with field_9D10 to
+// decide whether to queue the update message at 0x516CD0 and store the new
+// checksum in field_9D10. That tail (0x72E759-0x72FB24) is still TODO here,
+// and the CGameSprite members at +0xAF8..+0xB28 are not declared yet, so no
+// tree code calls this function; the unit test pins the arithmetic.
+LONG ComputeSpriteUpdateChecksum(const DWORD *pValues) {
+  LONG nChecksum = 0;
+  DWORD dwWeight = 1;
+
+  for (INT i = 0; i < 9; i++) {
+    nChecksum += static_cast<LONG>(pValues[i] * dwWeight);
+    dwWeight += dwWeight;
+  }
+
+  return nChecksum;
+}
 // 0x72DE60
 BOOL CGameSprite::ProcessEffectList()
 {

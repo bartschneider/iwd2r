@@ -395,6 +395,15 @@ class CPersistantEffect;
 #pragma pack(push)
 #pragma pack(2)
 
+// Two ten-entry arrays of opaque 8-byte values live at +0x328 and +0x378.
+// The exe only zeroes (0x4E7050), copies (0x4E7070) and clears them; no
+// reader touches their contents, so the element type cannot be recovered
+// beyond "8 bytes, no destructor".
+struct CDerivedStatsValue8 {
+    DWORD field_0;
+    DWORD field_4;
+};
+
 class CDerivedStatsTemplate {
 public:
     /* 0000 */ DWORD m_generalState;
@@ -604,6 +613,11 @@ public:
     /* 02C8 */ CImmunitiesProjectile m_cBounceProjectile;
     /* 02E4 */ CImmunitiesEffect m_cBounceEffect;
     /* 0300 */ CImmunitiesSpellLevel m_cBounceSpellLevel;
+    // NOTE: Zeroed by the member initializers (the exe zeroes them inline at
+    // 0x443CA3/0x443CB9) and emptied again by ClearValue8Array (0x4E7050)
+    // after BonusInit, in Reload and in the copy.
+    /* 0328 */ CDerivedStatsValue8 field_328[10] = {};
+    /* 0378 */ CDerivedStatsValue8 field_378[10] = {};
     /* 03C8 */ CImmunitiesProjectile field_3C8;
     /* 03E4 */ CImmunitiesProjectile field_3E4;
     /* 0400 */ CImmunitiesProjectile field_400;
@@ -617,12 +631,15 @@ public:
     // +0x498.
     /* 0490 */ std::list<CWhenStruckEntry> m_whenStruckList;
     /* 049C */ CDamageReductionList m_damageReductions;
-    /* 04AC */ CPtrList field_4AC;
-    /* 04C8 */ CPtrList field_4C8;
-    /* 04E4 */ CPtrList field_4E4;
-    /* 0500 */ CPtrList field_500;
-    /* 051C */ CPtrList field_51C;
-    /* 0538 */ CPtrList field_538;
+    // Lists of owned 8-byte values; the copy allocates a fresh value per
+    // node. The first pair holds CResRefs (0x4E7680), the other four hold
+    // the opaque CDerivedStatsValue8 (0x4E7720).
+    /* 04AC */ CTypedPtrList<CPtrList, CResRef*> field_4AC;
+    /* 04C8 */ CTypedPtrList<CPtrList, CResRef*> field_4C8;
+    /* 04E4 */ CTypedPtrList<CPtrList, CDerivedStatsValue8*> field_4E4;
+    /* 0500 */ CTypedPtrList<CPtrList, CDerivedStatsValue8*> field_500;
+    /* 051C */ CTypedPtrList<CPtrList, CDerivedStatsValue8*> field_51C;
+    /* 0538 */ CTypedPtrList<CPtrList, CDerivedStatsValue8*> field_538;
     /* 0554 */ CTypedPtrList<CPtrList, CPersistantEffect*> m_cRegeneratedPersistantEffectList;
     /* 0574 */ CColorRanges m_appliedColorRanges;
     /* 0590 */ CColorEffects m_appliedColorEffects;

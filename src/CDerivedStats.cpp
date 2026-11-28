@@ -7,15 +7,21 @@
 #include "CInfGame.h"
 #include "CUtil.h"
 
+// Defined below with the other CDerivedStats helpers, after the functions
+// that call them.
+static void ClearValue8Array(CDerivedStatsValue8* pEntries); // 0x4E7050
+static void CopyValue8Array(CDerivedStatsValue8* pDst, const CDerivedStatsValue8* pSrc); // 0x4E7070
+static void CopyValue8List(CPtrList& listDst, const CPtrList& listSrc); // 0x4E7720
+
 // 0x443B30
 CDerivedStats::CDerivedStats()
 {
     // NOTE: The members are constructed by their own constructors.
 
-    // TODO: Incomplete. Members our header does not declare yet: the two
-    // 10-entry arrays at +0x328 and +0x378 (zeroed at 0x443CA3 and
-    // 0x443CB9), and, after BonusInit, their emptying (0x443FD5 and
-    // 0x443FE0 with 0x4E7050).
+    // NOTE: The two ten-entry arrays at +0x328 and +0x378 are zeroed by
+    // their member initializers (the exe zeroes them inline at 0x443CA3 and
+    // 0x443CB9) and emptied again after BonusInit below (0x443FD5 and
+    // 0x443FE0 call ClearValue8Array, 0x4E7050).
 
     BonusInit();
 
@@ -37,6 +43,11 @@ CDerivedStats::CDerivedStats()
     m_cBounceProjectile.RemoveAll();
     m_cBounceEffect.ClearAll();
     m_cBounceSpellLevel.ClearAll();
+
+    // 0x4E7050, at 0x443FD5 and 0x443FE0.
+    ClearValue8Array(field_328);
+    ClearValue8Array(field_378);
+
     field_3C8.RemoveAll();
     field_3E4.RemoveAll();
     field_400.RemoveAll();
@@ -238,8 +249,9 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     m_cBounceEffect.ClearAll();
     m_cBounceSpellLevel.ClearAll();
 
-    // TODO: Incomplete. The arrays at +0x328 and +0x378 (ClearAll 0x4E7050
-    // at 0x4446C9 and 0x4446D4), not declared in our header.
+    // 0x4E7050, at 0x4446C9 and 0x4446D4.
+    ClearValue8Array(field_328);
+    ClearValue8Array(field_378);
 
     field_3C8.RemoveAll();
     field_3E4.RemoveAll();
@@ -407,6 +419,32 @@ void CDerivedStats::Reload(CGameSprite* pSprite, CCreatureFileHeader* pCreature,
     }
 }
 
+// Zeroes the ten opaque 8-byte entries of one of the +0x328/+0x378 arrays
+// (the exe's loop writes two zero dwords per entry).
+//
+// 0x4E7050
+static void ClearValue8Array(CDerivedStatsValue8* pEntries)
+{
+    for (INT i = 0; i < 10; i++) {
+        pEntries[i].field_0 = 0;
+        pEntries[i].field_4 = 0;
+    }
+}
+
+// Copies one of the +0x328/+0x378 arrays.
+//
+// NOTE: The original's loop counter is 9 (0x4E707C), so it copies the first
+// nine entries only and leaves the tenth at its zero-initialized value. Kept
+// as the binary has it; the test pins the missing tenth entry.
+//
+// 0x4E7070
+static void CopyValue8Array(CDerivedStatsValue8* pDst, const CDerivedStatsValue8* pSrc)
+{
+    for (INT i = 0; i < 9; i++) {
+        pDst[i] = pSrc[i];
+    }
+}
+
 // Copies a list of owned CResRef objects: walks the source list node by
 // node, allocates a new 8-byte CResRef for each entry, copies the value
 // with CResRef::operator= (0x78AC30) and appends the copy to the
@@ -420,6 +458,23 @@ static void CopyResRefList(CPtrList& listDst, const CPtrList& listSrc)
     for (POSITION pos = listSrc.GetHeadPosition(); pos != NULL;) {
         CResRef* pData = static_cast<CResRef*>(listSrc.GetNext(pos));
         CResRef* pCopy = new CResRef();
+        *pCopy = *pData;
+        listDst.AddTail(pCopy);
+    }
+}
+
+// Copies a list of owned opaque 8-byte values (the +0x4E4..+0x538 lists):
+// walks the source node by node, allocates a fresh 8-byte value, copies the
+// value raw (two dwords) and appends it to the destination. The original is
+// a __thiscall on the destination list taking the source by reference and
+// returning the destination; here both lists are explicit arguments.
+//
+// 0x4E7720
+static void CopyValue8List(CPtrList& listDst, const CPtrList& listSrc)
+{
+    for (POSITION pos = listSrc.GetHeadPosition(); pos != NULL;) {
+        CDerivedStatsValue8* pData = static_cast<CDerivedStatsValue8*>(listSrc.GetNext(pos));
+        CDerivedStatsValue8* pCopy = new CDerivedStatsValue8();
         *pCopy = *pData;
         listDst.AddTail(pCopy);
     }
@@ -546,8 +601,9 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     m_cBounceEffect = other.m_cBounceEffect;
     m_cBounceSpellLevel = other.m_cBounceSpellLevel;
 
-    // TODO: Incomplete. The arrays at +0x328 and +0x378 (0x4E7070), not
-    // declared in our header.
+    // 0x4E7070, at 0x4459FA and 0x445A0C.
+    CopyValue8Array(field_328, other.field_328);
+    CopyValue8Array(field_378, other.field_378);
 
     field_3C8 = other.field_3C8;
     field_3E4 = other.field_3E4;
@@ -563,9 +619,11 @@ CDerivedStats& CDerivedStats::operator=(const CDerivedStats& other)
     CopyResRefList(field_4AC, other.field_4AC);
     CopyResRefList(field_4C8, other.field_4C8);
 
-    // TODO: Incomplete. The four lists at +0x4E4 to +0x538 go through a
-    // second helper (0x4E7720; 0x445CE8-0x445D1E) whose elements are
-    // copied as plain 8-byte values, not covered in the tree.
+    // 0x4E7720, at 0x445CE8-0x445D1E.
+    CopyValue8List(field_4E4, other.field_4E4);
+    CopyValue8List(field_500, other.field_500);
+    CopyValue8List(field_51C, other.field_51C);
+    CopyValue8List(field_538, other.field_538);
 
     field_128 = other.field_128;
     field_12C = other.field_12C;
@@ -725,8 +783,9 @@ void CDerivedStats::BonusInit()
     m_cBounceEffect.ClearAll();
     m_cBounceSpellLevel.ClearAll();
 
-    // TODO: Incomplete. Two 10-entry arrays of 8-byte entries at +0x328
-    // and +0x378 (ClearAll 0x4E7050), not declared in our header.
+    // 0x4E7050, at 0x446191 and 0x44619C.
+    ClearValue8Array(field_328);
+    ClearValue8Array(field_378);
 
     field_3C8.RemoveAll();
     field_3E4.RemoveAll();

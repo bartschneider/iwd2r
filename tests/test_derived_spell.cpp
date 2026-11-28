@@ -531,3 +531,96 @@ TEST_CASE("spell resref effects", "[spell][data]")
         CHECK(IcewindMisc::GetSpellResrefEffects(pSprite, resRef, spell.GetAbility(0)->minCasterLevel - 1).empty());
     }
 }
+
+TEST_CASE("derived stats copy and clear the ten-entry arrays and the 8-byte lists", "[derived]")
+{
+    CDerivedStats stats;
+    for (INT i = 0; i < 10; i++) {
+        stats.field_328[i].field_0 = 0x100 + i;
+        stats.field_328[i].field_4 = 0x200 + i;
+        stats.field_378[i].field_0 = 0x300 + i;
+        stats.field_378[i].field_4 = 0x400 + i;
+    }
+
+    for (INT i = 0; i < 3; i++) {
+        CDerivedStatsValue8* pValue = new CDerivedStatsValue8();
+        pValue->field_0 = 0x500 + i;
+        pValue->field_4 = 0x600 + i;
+        stats.field_4E4.AddTail(pValue);
+    }
+    CDerivedStatsValue8* p500 = new CDerivedStatsValue8();
+    p500->field_0 = 0x700;
+    p500->field_4 = 0x701;
+    stats.field_500.AddTail(p500);
+
+    CDerivedStats copy;
+    copy.field_328[0].field_0 = 0xDEAD;
+    copy.field_328[9].field_0 = 0xBEEF;
+    copy = stats;
+
+    // The nine-entry copy loop (0x4E7070) fills entries 0..8 ...
+    for (INT i = 0; i < 9; i++) {
+        CHECK(copy.field_328[i].field_0 == 0x100u + static_cast<DWORD>(i));
+        CHECK(copy.field_328[i].field_4 == 0x200u + static_cast<DWORD>(i));
+        CHECK(copy.field_378[i].field_0 == 0x300u + static_cast<DWORD>(i));
+        CHECK(copy.field_378[i].field_4 == 0x400u + static_cast<DWORD>(i));
+    }
+    // ... and leaves the tenth alone, as the original's nine-iteration loop
+    // does (the destination keeps what it had: 0xBEEF in field_328, zero in
+    // field_378).
+    CHECK(copy.field_328[9].field_0 == 0xBEEF);
+    CHECK(copy.field_378[9].field_0 == 0);
+    CHECK(copy.field_378[9].field_4 == 0);
+
+    // The four 8-byte lists are copied with fresh nodes and equal values.
+    REQUIRE(copy.field_4E4.GetCount() == 3);
+    POSITION copyPos = copy.field_4E4.GetHeadPosition();
+    CDerivedStatsValue8* pFirstCopy = copy.field_4E4.GetNext(copyPos);
+    POSITION srcPos = stats.field_4E4.GetHeadPosition();
+    CDerivedStatsValue8* pFirstSrc = stats.field_4E4.GetNext(srcPos);
+    CHECK(pFirstCopy != pFirstSrc);
+    CHECK(pFirstCopy->field_0 == 0x500);
+    CHECK(pFirstCopy->field_4 == 0x600);
+    REQUIRE(copy.field_500.GetCount() == 1);
+    CHECK(copy.field_500.GetHead()->field_0 == 0x700);
+
+    // BonusInit empties both arrays and all six lists (0x4E7050 and the
+    // RemoveAll sweep).
+    copy.BonusInit();
+    for (INT i = 0; i < 10; i++) {
+        CHECK(copy.field_328[i].field_0 == 0);
+        CHECK(copy.field_328[i].field_4 == 0);
+        CHECK(copy.field_378[i].field_0 == 0);
+        CHECK(copy.field_378[i].field_4 == 0);
+    }
+    CHECK(copy.field_4AC.GetCount() == 0);
+    CHECK(copy.field_4C8.GetCount() == 0);
+    CHECK(copy.field_4E4.GetCount() == 0);
+    CHECK(copy.field_500.GetCount() == 0);
+    CHECK(copy.field_51C.GetCount() == 0);
+    CHECK(copy.field_538.GetCount() == 0);
+
+    // The source is untouched.
+    CHECK(stats.field_328[0].field_0 == 0x100);
+    CHECK(stats.field_4E4.GetCount() == 3);
+}
+
+TEST_CASE("the sprite-update checksum weights nine values by powers of two", "[derived]")
+{
+    // value i is multiplied by 2^i and the 32-bit products are summed:
+    // 1*1 + 2*2 + 3*4 + 4*8 + 5*16 + 6*32 + 7*64 + 8*128 + 9*256 = 4097.
+    DWORD values[10] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xDEADBEEF };
+    CHECK(ComputeSpriteUpdateChecksum(values) == 4097);
+
+    // The tenth value is not part of the sum.
+    values[9] = 0;
+    CHECK(ComputeSpriteUpdateChecksum(values) == 4097);
+
+    DWORD zeros[9] = {};
+    CHECK(ComputeSpriteUpdateChecksum(zeros) == 0);
+
+    // A single value in the last hashed slot weighs 256.
+    DWORD last[9] = {};
+    last[8] = 3;
+    CHECK(ComputeSpriteUpdateChecksum(last) == 768);
+}
