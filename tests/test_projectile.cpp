@@ -1160,7 +1160,7 @@ TEST_CASE("screen shake send factory fills the tremor message", "[projectile][da
     CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
     const INT nBefore = handler.m_messageList.GetCount();
 
-    sub_5705D0(1234);
+    SendScreenShakeMessage(1234);
 
     REQUIRE(handler.m_messageList.GetCount() == nBefore + 1);
     CMessage* pMessage = handler.m_messageList.GetTail();

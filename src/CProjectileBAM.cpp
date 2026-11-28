@@ -1042,7 +1042,7 @@ CProjectileSprayCell::CProjectileSprayCell(CResRef resRef)
 }
 
 // 0x533600
-void CProjectileSprayCell::sub_533600(const CPoint& pt, SHORT nCount, SHORT nDirection, BOOL bSecondRow)
+void CProjectileSprayCell::SpawnSprayCells(const CPoint& pt, SHORT nCount, SHORT nDirection, BOOL bSecondRow)
 {
     // The exe divides by 100 with the 0x10624DD3 magic constant (signed
     // division, truncated toward zero), then sign-extends the low WORD of the
@@ -1085,10 +1085,10 @@ void CProjectileSprayCell::sub_533600(const CPoint& pt, SHORT nCount, SHORT nDir
     }
 
     if (nCount - 1 > 0) {
-        sub_533600(pt1, nCount - 1, nDirection, TRUE);
+        SpawnSprayCells(pt1, nCount - 1, nDirection, TRUE);
 
         if (!bSecondRow) {
-            sub_533600(pt2, nCount - 1, nDirection, FALSE);
+            SpawnSprayCells(pt2, nCount - 1, nDirection, FALSE);
         }
     }
 }
