@@ -423,7 +423,15 @@ public:
 // them.
 class CProjectileSprayCell : public CProjectileBAM {
 public:
+    // NOTE: The exe inlines this ctor into both of its call sites (the spray
+    // spawner 0x533600 and the unexported 0x532F00-0x5335FF chunk), so it has
+    // no address of its own.
+    CProjectileSprayCell(CResRef resRef);
     /* 0088 */ virtual void AddVisualToArea(CGameArea* pArea, const CPoint& point, LONG height);
+    // 0x533600: spawns a row of cells outward from `pt`, then recurses for the
+    // remaining `nCount` steps. The only exe caller (0x5331DE) is in the
+    // unexported chunk 0x532F00-0x5335FF, so the name is address-derived.
+    void sub_533600(const CPoint& pt, SHORT nCount, SHORT nDirection, BOOL bSecondRow);
 };
 
 // The projectile that fires child projectiles of type m_childType + 1 on an

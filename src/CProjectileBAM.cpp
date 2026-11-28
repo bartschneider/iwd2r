@@ -1021,6 +1021,78 @@ CProjectileSPBRNHND::CProjectileSPBRNHND()
     field_178 = 50;
 }
 
+// The eight 16-entry SHORT tables at 0x84D6B8 (0x20 bytes each; sine/cosine
+// style values scaled by 1000). Only the spray spawner (0x533600) and its
+// unexported caller (0x53320C) read them.
+static const SHORT s_sprayDirections[8][16] = {
+    { -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383, 0, -383, -707, -924 },
+    { 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383 },
+    { 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383 },
+    { 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924 },
+    { 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924 },
+    { 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924, 1000, 924, 707, 383 },
+    { 0, 383, 707, 924, 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383 },
+    { 1000, 924, 707, 383, 0, -383, -707, -924, -1000, -924, -707, -383, 0, 383, 707, 924 },
+};
+
+// NOTE: The exe inlines this ctor into its call sites, so it has no address.
+CProjectileSprayCell::CProjectileSprayCell(CResRef resRef)
+    : CProjectileBAM(resRef)
+{
+}
+
+// 0x533600
+void CProjectileSprayCell::sub_533600(const CPoint& pt, SHORT nCount, SHORT nDirection, BOOL bSecondRow)
+{
+    // The exe divides by 100 with the 0x10624DD3 magic constant (signed
+    // division, truncated toward zero), then sign-extends the low WORD of the
+    // quotient; the arithmetic below keeps both properties.
+    CPoint pt1;
+    pt1.x = pt.x + static_cast<SHORT>((32 * s_sprayDirections[1][nDirection] + 14 * s_sprayDirections[0][nDirection]) / 100);
+    pt1.y = pt.y + static_cast<SHORT>((32 * s_sprayDirections[3][nDirection] + 14 * s_sprayDirections[2][nDirection]) / 100);
+    CPoint pt2;
+    pt2.x = pt.x + static_cast<SHORT>((32 * s_sprayDirections[5][nDirection] + 14 * s_sprayDirections[4][nDirection]) / 100);
+    pt2.y = pt.y + static_cast<SHORT>((32 * s_sprayDirections[7][nDirection] + 14 * s_sprayDirections[6][nDirection]) / 100);
+
+    CProjectileSprayCell* pCell = new CProjectileSprayCell(m_animation->cResRef);
+    pCell->field_1BE = 0;
+    pCell->field_1C2 = FALSE;
+    pCell->field_1C6 = 0;
+    pCell->field_1D4 = 0;
+    pCell->field_1D8 = 0x10;
+    pCell->field_2A0 = field_2A0;
+    pCell->field_2A1 = field_2A1;
+    pCell->m_nDirection = nDirection;
+    pCell->SetSequenceDirection(NULL);
+    pCell->m_animation->SetPalette(m_palette);
+    pCell->m_bHasHeight = m_bHasHeight;
+    pCell->AddVisualToArea(m_pArea, pt1, m_posZ);
+
+    if (!bSecondRow) {
+        pCell = new CProjectileSprayCell(m_animation->cResRef);
+        pCell->field_1BE = 0;
+        pCell->field_1C2 = FALSE;
+        pCell->field_1C6 = 0;
+        pCell->field_1D4 = 0;
+        pCell->field_1D8 = 0x10;
+        pCell->field_2A0 = field_2A0;
+        pCell->field_2A1 = field_2A1;
+        pCell->m_nDirection = nDirection;
+        pCell->SetSequenceDirection(NULL);
+        pCell->m_animation->SetPalette(m_palette);
+        pCell->m_bHasHeight = m_bHasHeight;
+        pCell->AddVisualToArea(m_pArea, pt2, m_posZ);
+    }
+
+    if (nCount - 1 > 0) {
+        sub_533600(pt1, nCount - 1, nDirection, TRUE);
+
+        if (!bSecondRow) {
+            sub_533600(pt2, nCount - 1, nDirection, FALSE);
+        }
+    }
+}
+
 // 0x533AE0
 void CProjectileSprayCell::AddVisualToArea(CGameArea* pArea, const CPoint& point, LONG height)
 {

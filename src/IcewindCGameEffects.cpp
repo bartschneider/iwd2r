@@ -1477,6 +1477,12 @@ CGameEffect* IcewindCGameEffectDominate::Copy()
     return copy;
 }
 
+// 0x564580
+void IcewindCGameEffectDominate::OnRemove(CGameSprite* pSprite)
+{
+    Icewind586B70::Instance()->Remove(pSprite);
+}
+
 // 0x5645A0
 BOOL IcewindCGameEffectDominate::ApplyEffect(CGameSprite* pSprite)
 {

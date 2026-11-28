@@ -72,6 +72,11 @@ public:
 // reaches (vtable 0x84F1C4). Once it has exploded it fires its secondary
 // projectile (type m_nSecondaryType + 1) with a copy of its effects at each
 // target found, every m_nHitModulus-th time a target is found.
+// NOTE: 0x5705D0 (send factory for the screen-shake message). Its only exe
+// caller (0x575C99) sits in the unexported chunk 0x532F00-0x5335FF, so no
+// ported function calls it yet; the address-derived name is kept.
+void sub_5705D0(LONG nId);
+
 class CProjectileArea : public CProjectileSingleTarget {
 public:
     CProjectileArea(WORD nRadius);

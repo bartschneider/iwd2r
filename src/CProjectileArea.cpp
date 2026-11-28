@@ -454,6 +454,13 @@ void CProjectileArea::TargetFriend(CGameAIBase* pCaster)
     }
 }
 
+// 0x5705D0
+void sub_5705D0(LONG nId)
+{
+    CMessageScreenShake* pMessage = new CMessageScreenShake(30, 10, -20, FALSE, nId, nId);
+    g_pBaldurChitin->m_cMessageHandler.AddMessage(pMessage, TRUE);
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x571E80

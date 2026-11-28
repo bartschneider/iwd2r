@@ -1152,3 +1152,29 @@ TEST_CASE("projectile: the secondary spell-hit message Run fires its decoded pro
 
     ClearMessages();
 }
+
+TEST_CASE("screen shake send factory fills the tremor message", "[projectile][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    static_cast<void>(pSprite);
+    CMessageHandler& handler = g_pBaldurChitin->m_cMessageHandler;
+    const INT nBefore = handler.m_messageList.GetCount();
+
+    sub_5705D0(1234);
+
+    REQUIRE(handler.m_messageList.GetCount() == nBefore + 1);
+    CMessage* pMessage = handler.m_messageList.GetTail();
+    REQUIRE(pMessage != NULL);
+    CHECK(pMessage->GetCommType() == CMessage::BROADCAST_FORCED);
+    CMessageScreenShake* pShake = dynamic_cast<CMessageScreenShake*>(pMessage);
+    REQUIRE(pShake != NULL);
+    CHECK(pShake->m_duration == 30);
+    CHECK(pShake->m_magnitudeX == 10);
+    CHECK(pShake->m_magnitudeY == -20);
+    CHECK(pShake->m_bOverride == FALSE);
+    CHECK(pShake->m_sourceId == 1234);
+    CHECK(pShake->m_targetId == 1234);
+
+    handler.m_messageList.RemoveTail();
+    delete pShake;
+}

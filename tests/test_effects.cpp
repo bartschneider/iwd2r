@@ -12,6 +12,7 @@
 #include "CMemINI.h"
 #include "CScreenCreateChar.h"
 #include "CSpawn.h"
+#include "Icewind586B70.h"
 #include "IcewindCGameEffects.h"
 #include "ScreenLayout.h"
 #include "data_view.h"
@@ -1241,4 +1242,29 @@ TEST_CASE("spawn lists count the last item of a comma list", "[spawn]")
     CStringArray trailing;
     CHECK(list.ParseData(CString("A,B,"), trailing) == 2);
     CHECK(trailing.GetSize() == 2);
+}
+
+TEST_CASE("dominate (263) removal clears the list entry of the dominated sprite", "[effects][data]")
+{
+    REQUIRE_ENGINE();
+    CGameSprite* pSprite = MakeSprite();
+    CGameEffect* pEffect = Make(ICEWIND_CGAMEEFFECT_DOMINATE, 0, 0, 0);
+
+    Icewind586B70* pList = Icewind586B70::Instance();
+    std::vector<Icewind586B70::Entry> oldEntries = pList->mEntries;
+    pList->mEntries.assign(2, Icewind586B70::Entry());
+    pList->mEntries[1].field_0 = pSprite->GetId();
+    pList->mEntries[1].field_4 = 7;
+    pList->mEntries[1].field_8 = true;
+
+    pEffect->OnRemove(pSprite);
+
+    CHECK(pList->mEntries[0].field_0 == 0);
+    CHECK(pList->mEntries[1].field_0 == 0);
+    CHECK(pList->mEntries[1].field_4 == 0);
+    CHECK(pList->mEntries[1].field_8 == false);
+
+    pList->mEntries = oldEntries;
+    delete pEffect;
+    delete pSprite;
 }
