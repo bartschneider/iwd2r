@@ -1011,6 +1011,126 @@ void CProjectileExplodingWeapon::AIUpdate()
     }
 }
 
+// 0x52EC80
+void CProjectileExplodingFlame::AIUpdate()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (pGame->m_nTimeStop != 0 && pGame->m_nTimeStopCaster != m_id) {
+        return;
+    }
+
+    CString sEmpty;
+
+    if (m_nState == 0) {
+        m_animation->FrameAdvance();
+
+        LONG nDY = m_targetPos.y - m_pos.y;
+        LONG nDX = m_targetPos.x - m_pos.x;
+        LONG nSpeed = m_speed + 1;
+
+        if (((nDY * nDY * 0x10) / 9 + nDX * nDX) > nSpeed * nSpeed) {
+            // Track the live target while it is in this area; otherwise the
+            // missile removes itself (the original's own fallback).
+            if (m_targetId == CGameObjectArray::INVALID_INDEX) {
+                UpdateBasedOnTargetPoint(m_targetPos.x, m_targetPos.y);
+            } else {
+                CGameObject* pTarget;
+
+                BYTE rc = pGame->GetObjectArray()->GetShare(m_targetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    &pTarget,
+                    INFINITE);
+                if (rc != CGameObjectArray::SUCCESS) {
+                    RemoveSelf();
+                    return;
+                }
+
+                if (m_pArea != pTarget->m_pArea) {
+                    RemoveSelf();
+                    pGame->GetObjectArray()->ReleaseShare(m_targetId,
+                        CGameObjectArray::THREAD_ASYNCH,
+                        INFINITE);
+                    return;
+                }
+
+                CPoint ptTarget = pTarget->GetPos();
+
+                pGame->GetObjectArray()->ReleaseShare(m_targetId,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    INFINITE);
+
+                UpdateBasedOnTargetPoint(ptTarget.x, ptTarget.y);
+            }
+
+            if (++m_trailTick == 1) {
+                m_trailTick = 0;
+
+                for (int nChunk = 0; nChunk < 3; nChunk++) {
+                    LONG nRandX = rand();
+                    LONG nRandY = rand();
+
+                    LONG nDivisor = nChunk == 0 ? (m_deltaX << 2) / 3
+                                   : nChunk == 1 ? m_deltaX
+                                                 : (m_deltaX << 1) / 3;
+                    LONG nDivisorY = nChunk == 0 ? (m_deltaY << 2) / 3
+                                    : nChunk == 1 ? m_deltaY
+                                                  : (m_deltaY << 1) / 3;
+
+                    LONG nX = (m_pos.x - 2 + nRandY % 5) * 0x400 - nDivisor;
+                    LONG nY = (m_pos.y - 2 + nRandX % 5) * 0x400 - nDivisorY;
+
+                    new CGameObject85BF7C(0x300,
+                        m_trailColorRanges,
+                        sEmpty,
+                        m_pArea,
+                        CPoint(nX, nY),
+                        -m_posZ,
+                        CPoint(0, 0),
+                        0,
+                        0,
+                        1);
+                }
+            }
+
+            if (m_bSparkle != 0) {
+                CGameObject84D624* pSparkle = new CGameObject84D624(m_nSparkleColour,
+                    CGameObject84D624::TYPE_SPARKLE,
+                    0x19);
+                pSparkle->AddToArea(m_pArea, m_pos, m_posZ, 0);
+            }
+
+            m_sound.SetCoordinates(m_pos.x, m_pos.y, m_posZ);
+        } else {
+            OnArrival();
+        }
+    } else {
+        if (m_lingerCountdown == 0) {
+            m_lingerCountdown = m_lingerPeriod;
+
+            if (AreaEffect(FALSE)) {
+                m_strikesLeft--;
+            }
+
+            if (m_strikesLeft < 1) {
+                RemoveFromArea();
+
+                BYTE rc = pGame->GetObjectArray()->Delete(m_id,
+                    CGameObjectArray::THREAD_ASYNCH,
+                    NULL,
+                    INFINITE);
+                if (rc == FALSE) {
+                    delete this;
+                }
+
+                return;
+            }
+        }
+
+        m_lingerCountdown--;
+    }
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x5300E0

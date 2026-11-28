@@ -181,6 +181,7 @@ public:
     // stored it).
     CProjectileExplodingFlame();
 
+    /* 000C */ void AIUpdate() override;
     /* 0088 */ virtual void Explode();
 
     // Native exe offsets, past the tail of m_explodeCell2; ours lay out after
@@ -192,6 +193,8 @@ public:
 // The skull trap missile (vtable 0x84DD80): Explode (slot 0x0088) is the
 // ShSkull burst sound fire-and-forget on channel 14 followed by the bone
 // chunk spray the shatter effect throws (CGameChunk, sized by the trap's
+// own child type). AIUpdate (0x52F9E0, ported here) advances the two
+// explosion cells while the trap lingers and runs the AreaEffect scan.
 // class, so that slot inherits the base virtual.
 class CProjectileSkullTrap : public CProjectileExploding {
 public:
