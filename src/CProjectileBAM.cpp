@@ -1131,6 +1131,72 @@ void CProjectileExplodingFlame::AIUpdate()
     }
 }
 
+// 0x52F9E0
+void CProjectileSkullTrap::AIUpdate()
+{
+    CInfGame* pGame = g_pBaldurChitin->GetObjectGame();
+
+    if (pGame->m_nTimeStop != 0 && pGame->m_nTimeStopCaster != m_id) {
+        return;
+    }
+
+    if (m_nState == 0) {
+        m_animation->FrameAdvance();
+
+        LONG nDY = m_targetPos.y - m_pos.y;
+        LONG nDX = m_targetPos.x - m_pos.x;
+        LONG nSpeed = m_speed + 1;
+
+        if (((nDY * nDY * 0x10) / 9 + nDX * nDX) <= nSpeed * nSpeed) {
+            OnArrival();
+            return;
+        }
+
+        UpdateBasedOnTargetPoint(m_targetPos.x, m_targetPos.y);
+
+        if (m_bSparkle != 0) {
+            CGameObject84D624* pSparkle = new CGameObject84D624(m_nSparkleColour,
+                CGameObject84D624::TYPE_SPARKLE,
+                0x19);
+            pSparkle->AddToArea(m_pArea, m_pos, m_posZ, 0);
+        }
+
+        m_sound.SetCoordinates(m_pos.x, m_pos.y, m_posZ);
+        return;
+    }
+
+    if (m_bExplodeCell1Active != 0) {
+        m_explodeCell1.FrameAdvance();
+    }
+
+    if (m_bExplodeCell2Active != 0) {
+        m_explodeCell2.FrameAdvance();
+    }
+
+    if (m_lingerCountdown == 0) {
+        if (AreaEffect(FALSE)) {
+            m_strikesLeft--;
+            m_lingerCountdown = m_lingerPeriod;
+        }
+
+        if (m_strikesLeft < 1) {
+            RemoveFromArea();
+
+            BYTE rc = pGame->GetObjectArray()->Delete(m_id,
+                CGameObjectArray::THREAD_ASYNCH,
+                NULL,
+                INFINITE);
+            if (rc == FALSE) {
+                delete this;
+            }
+
+            return;
+        }
+    } else {
+        m_lingerCountdown--;
+    }
+}
+
 // -----------------------------------------------------------------------------
 
 // 0x5300E0

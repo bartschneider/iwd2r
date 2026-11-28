@@ -209,6 +209,7 @@ public:
     // types 96 (Skull Trap) and 100 (Glyph of Warding) build this.
     CProjectileSkullTrap(const CResRef& cMissileRef, const CResRef& cExplodeRef,
         SHORT nType);
+    /* 000C */ void AIUpdate() override;
     /* 0088 */ virtual void Explode();
 
     // Native exe offsets, past the tail of m_explodeCell2; ours lay out after
