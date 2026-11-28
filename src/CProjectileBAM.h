@@ -154,6 +154,7 @@ public:
     // seven trail colours 'A' with the trail tick cleared, and child type 78
     // again (the base ctor already stored it).
     CProjectileExplodingWeapon();
+    /* 000C */ void AIUpdate() override;
     /* 0088 */ virtual void Explode();
 
     // Native exe offsets, past the tail of m_explodeCell2; ours lay out after
@@ -164,6 +165,10 @@ public:
 };
 
 // The exploding flame missile (vtable 0x84DCF4): Explode (slot 0x0088) is
+// the same fireball burst with the colour ranges hardwired to 0x43; the exe
+// vtable also overrides slot 0x000C (AIUpdate 0x52EC80, ported here), which
+// tracks a live target instead of always steering at m_targetPos. The trail
+// members are the weapon
 // missile's two, minus its explosion colour byte.
 class CProjectileExplodingFlame : public CProjectileExploding {
 public:
