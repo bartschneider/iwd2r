@@ -418,18 +418,41 @@ std::ptrdiff_t MsvcSlot(std::ptrdiff_t abiOffset)
 
 } // namespace
 
-TEST_CASE("effects-iwd: the summon class adds its share loop at vtable slot 10, before SpawnFromResRef", "[effects][vtable]")
+TEST_CASE("effects-iwd: the summon class overrides all four exe slots and keeps its two new virtuals", "[effects][vtable]")
 {
 #if defined(_MSC_VER)
     SKIP("[iwd2r-skip] the MSVC pointer-to-member representation carries no vtable offset");
 #else
     REQUIRE(MsvcSlot(VtableSlot(&CGameEffect::Copy)) == 0x04);
+    REQUIRE(MsvcSlot(VtableSlot(&CGameEffect::ApplyEffect)) == 0x08);
+    REQUIRE(MsvcSlot(VtableSlot(&CGameEffect::UsesDice)) == 0x1C);
     REQUIRE(MsvcSlot(VtableSlot(&CGameEffect::DisplayString)) == 0x20);
     REQUIRE(MsvcSlot(VtableSlot(&CGameEffect::OnRemove)) == 0x24);
+
+    // The four slots the exe vtable overrides: +0x04 Copy, +0x08
+    // ApplyEffect, +0x1C UsesDice, +0x28 ResolveSourceSprite and +0x2C
+    // SpawnFromResRef (+0x00 is the compiler-generated dtor and stays
+    // implicit). Declaring a new virtual before ResolveSourceSprite, or
+    // dropping one of the two, moves one of these and fails here.
     REQUIRE(MsvcSlot(VtableSlot(&IcewindCGameEffectSummon::Copy)) == 0x04);
+    REQUIRE(MsvcSlot(VtableSlot(&IcewindCGameEffectSummon::ApplyEffect)) == 0x08);
+    REQUIRE(MsvcSlot(VtableSlot(&IcewindCGameEffectSummon::UsesDice)) == 0x1C);
     REQUIRE(MsvcSlot(VtableSlot(&IcewindCGameEffectSummon::ResolveSourceSprite)) == 0x28);
     REQUIRE(MsvcSlot(VtableSlot(&IcewindCGameEffectSummon::SpawnFromResRef)) == 0x2C);
 #endif
+}
+
+// The slot-7 UsesDice and slot-2 ApplyEffect overrides on a real decode: the
+// summon effect reports that it uses dice, and a zero-count summon (no dice,
+// no amount) walks the guard path and finishes without touching a spawn.
+TEST_CASE("effects-iwd: summon (67) uses dice and its empty ApplyEffect returns done", "[effects][data]")
+{
+    PROBE_OR_SKIP(pSprite);
+    std::unique_ptr<CGameEffect> pEffect = Decode(pSprite, CGAMEEFFECT_SUMMON, 0, 0);
+    REQUIRE(pEffect != nullptr);
+    CHECK(pEffect->UsesDice() == TRUE);
+    CHECK(pEffect->ApplyEffect(pSprite) == TRUE);
+    CHECK(static_cast<IcewindCGameEffectSummon*>(pEffect.get())->m_done == TRUE);
 }
 
 TEST_CASE("effects-iwd: immunity to effect (261) adds the opcode to the natural immunities", "[effects][data]")
