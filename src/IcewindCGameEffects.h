@@ -210,16 +210,25 @@ public:
 class IcewindCGameEffectSummon : public CGameEffect {
 public:
     IcewindCGameEffectSummon(ITEM_EFFECT* effect, const CPoint& source, LONG sourceID, CPoint target);
-    CGameEffect* Copy() override;
+
+    // Slot 0x00 is the compiler-generated scalar deleting destructor
+    // (exe 0x55F6D0); its out-of-line body 0x55F6F0 only resets the vtable
+    // to CGameEffect's and destroys the CSound at +0x124. Our dtor body is
+    // empty: the same members and base chain run, in the same order.
+    /* 0000 */ virtual ~IcewindCGameEffectSummon();
+    /* 0004 */ CGameEffect* Copy() override;
+    /* 0008 */ BOOL ApplyEffect(CGameSprite* pSprite) override;
 
     void sub_49DB60(int a1);
+
+    /* 001C */ BOOL UsesDice() override;
 
     // vtable 0x84F0A8: the share loop is slot 10 (+0x28) and
     // SpawnFromResRef below is slot 11 (+0x2C); this declaration order keeps
     // the class's two new virtuals on the exe's slots.
-    virtual void ResolveSourceSprite();
+    /* 0028 */ virtual void ResolveSourceSprite();
 
-    virtual CGameSprite* SpawnFromResRef(const CString& resRef, const CPoint* pTarget);
+    /* 002C */ virtual CGameSprite* SpawnFromResRef(const CString& resRef, const CPoint* pTarget);
 
     void AddSummonVisualHit(CGameSprite* pSpawned, int mode);
     void PlayGroupVFX(int vfxId);
