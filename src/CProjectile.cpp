@@ -1,6 +1,8 @@
 #include "CProjectile.h"
 
 #include "CBaldurChitin.h"
+#include "CCreatureFile.h"
+#include "CGameAnimationType.h"
 #include "CGameArea.h"
 #include "CGameChunk.h"
 #include "CGameContainer.h"
@@ -11,6 +13,7 @@
 #include "CInfGame.h"
 #include "CMessage.h"
 #include "CParticle.h"
+#include "CPathSearch.h"
 #include "CProjectile84DFA4.h"
 #include "CProjectile84E940.h"
 #include "CProjectile84E9C0.h"
@@ -5324,6 +5327,98 @@ CProjectile8515DC::CProjectile8515DC()
     field_1C2 = 1;
     m_nSegments = 0;
     m_lifeSpan = 10;
+}
+
+static void SpawnCorcatCreature(CGameArea* pArea, const CPoint& pt, SHORT nDirection);
+
+// 0x5818F0
+// Type 352's Fire: a host-only routine that spawns five fixed "corcat"
+// creature sprites at grid positions around 0xB00/0x800 with facings 14/14/
+// 14/12/12. It ignores every argument but pArea. The exe's first check is
+// `g_pChitin+0x1033 == 1` (CNetwork::m_bIsHost), so a client skips it; single
+// player does host the null-provider session (CScreenConnection::
+// OnNewGameButtonClick -> CNetwork::HostNewSession sets m_bIsHost), so the
+// body runs in SP. This is not a CInfinity render path: the helper below is
+// a creature-file/sprite/object-array routine (see 5819B0.md).
+void CProjectile84DAD4::Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType)
+{
+    (void)source;
+    (void)target;
+    (void)targetPos;
+    (void)nHeight;
+    (void)nType;
+
+    if (g_pChitin->cNetwork.GetSessionHosting() != TRUE) {
+        return;
+    }
+
+    SpawnCorcatCreature(pArea, CPoint(0xB72, 0x737), 14);
+    SpawnCorcatCreature(pArea, CPoint(0xAE1, 0x6FA), 14);
+    SpawnCorcatCreature(pArea, CPoint(0xAE8, 0x772), 14);
+    SpawnCorcatCreature(pArea, CPoint(0xA61, 0x7F5), 12);
+    SpawnCorcatCreature(pArea, CPoint(0xB00, 0x814), 12);
+}
+
+// 0x5819B0
+// The unnamed spawner Fire calls: it builds a throwaway CGameSprite from the
+// fixed CRE "corcat" through a one-time CCreatureFile load, re-sets the
+// resref, takes the sprite back from the object array by id, asserts its
+// animation, adds it to the area on the given search-grid point with the
+// animation list type, and sets the facing. The exe's static CString
+// (0x8E52C0, guarded by 0x8E4EB0, destructor registered at 0x581C90) is the
+// function-local `static CString` below.
+void SpawnCorcatCreature(CGameArea* pArea, const CPoint& pt, SHORT nDirection)
+{
+    static CString s_corcat = "corcat";
+
+    CCreatureFile creatureFile;
+    creatureFile.SetResRef(CResRef(s_corcat), TRUE, TRUE);
+
+    CGameSprite* pNewSprite = new CGameSprite(creatureFile.GetData(),
+        creatureFile.GetDataSize(),
+        0,
+        0,
+        static_cast<DWORD>(-1),
+        0,
+        0,
+        0x7FFFFFFF,
+        CPoint(-1, -1),
+        0);
+    // NOTE: the exe has no null branch between the allocation and the
+    // SetResRef below (an OOM would dereference NULL there); the port stops
+    // here instead, keeping the CRE release on the way out.
+    if (pNewSprite == NULL) {
+        creatureFile.ReleaseData();
+        return;
+    }
+
+    pNewSprite->SetResRef(CResRef(creatureFile.GetResRef().GetResRefStr()));
+    creatureFile.ReleaseData();
+
+    pNewSprite->SetResRef(CResRef(s_corcat));
+
+    LONG nID = pNewSprite->m_id;
+    CGameObject* pObject;
+    BYTE rc = g_pBaldurChitin->GetObjectGame()->GetObjectArray()->GetDeny(nID,
+        CGameObjectArray::THREAD_ASYNCH,
+        &pObject,
+        INFINITE);
+    if (rc == CGameObjectArray::SUCCESS) {
+        CGameSprite* pSprite = static_cast<CGameSprite*>(pObject);
+
+        UTIL_ASSERT(pSprite->m_animation.m_animation != NULL);
+
+        BYTE nListType = pSprite->m_animation.m_animation->GetListType();
+        CPoint pos(pt.x * CPathSearch::GRID_SQUARE_SIZEX,
+            pt.y * CPathSearch::GRID_SQUARE_SIZEY);
+
+        pSprite->AddToArea(pArea, pos, 0, nListType);
+        pSprite->SetFacing(nDirection);
+
+        g_pBaldurChitin->GetObjectGame()->GetObjectArray()->ReleaseDeny(nID,
+            CGameObjectArray::THREAD_ASYNCH,
+            INFINITE);
+    }
 }
 
 // 0x581CA0

@@ -92,12 +92,17 @@ public:
 // subclass — the decoder news exactly sizeof(CProjectile) (0x192), calls the
 // constructor and nothing else. Its ctor stamps the base vtable 0x84D7B8
 // mid-construction before installing its own. Against CProjectile's
-// 32-entry vtable 0x84D7B8 it overrides only the deleting dtor (0x529E30 —
-// ours implicit, the class adds no members) and Fire (0x5818F0, not in
-// tree, left undeclared per the IcewindCProjectileScorcher precedent).
+// 32-entry vtable 0x84D7B8 it overrides only the deleting dtor (0x529E30,
+// the compiler-generated half of an empty memberless dtor) and Fire
+// (0x5818F0 — a host-only routine that spawns the fixed "corcat" creature
+// sprites; ported as Fire/0x5818F0 and its helper 0x5819B0).
 class CProjectile84DAD4 : public CProjectile {
 public:
     CProjectile84DAD4();
+    // Slot 0x6C: the host-only "corcat" spawner. Slot 0x00 stays the
+    // compiler-generated scalar deleting destructor (the class has no
+    // member of its own), so it is not declared.
+    /* 006C */ void Fire(CGameArea* pArea, LONG source, LONG target, CPoint targetPos, LONG nHeight, SHORT nType) override;
 };
 
 // Type 261's projectile (vtable 0x85112C): a memberless direct

@@ -7,10 +7,10 @@ Survey for thierbig/iwd2r#163: 349 functions / 59,088 bytes. Read-only analysis 
 
 | disposition | rows |
 |---|---:|
-| **PORT** (single-player-reachable, missing in the tree) | **12** |
+| **PORT** (single-player-reachable, missing in the tree) | **13** |
 | COVERED (already ported, compiler-generated, or a template/container instance the tree provides) | 302 |
 | DROP (multiplayer-only under ADR 0002, or dead) | 34 |
-| UNSURE (0x5819B0, caller not in `functions.tsv`) | 1 |
+| UNSURE (0x5819B0, caller not in `functions.tsv`) | 0 |
 | **total** | **349** |
 
 The issue's 349 "unported functions" contains 175 rows under 64 bytes and several clusters that
@@ -36,9 +36,11 @@ collapse on inspection:
 - **The five part-D projectile/effect rows also collapse**: two are compiler-generated destructors of
   modelled classes (vptr store + base-dtor tail call), two are `std::set` NIL-bound lookup
   instantiations the tree's own NOTES already cover, and one is a `_Tree` erase/insert-under-lock
-  internal. Part D therefore has **no port work** — the only open item there is 0x5819B0.
+  internal. Part D's one real row, **0x5819B0**, is ported with its unlisted caller `0x5818F0`
+  (`CProjectile84DAD4::Fire`, SP-reachable through the null-provider hosting path; see judgement
+  call 3 and `docs/evidence/5818F0.md`).
 
-So the area's real work is **12 rows in three clusters**, listed under "What actually needs porting".
+So the area's real work is **13 rows in four clusters**, listed under "What actually needs porting".
 
 ## SP-neutrality of the removed lobby sync points (issue's first item)
 
@@ -48,16 +50,17 @@ create-char case-3 cast artifact, already reproduced with `StartSinglePlayer`). 
 correction from it, carried into `docs/survey-159.md`: `0x64DDB0` is
 `CScreenMultiPlayer::StartMultiPlayer`, not `UpdateMainPanel`.
 
-## What actually needs porting (12 rows, ~17 KB)
+## What actually needs porting (13 rows, ~18 KB)
 
 | cluster | rows | bytes | where |
 |---|---|---:|---|
 | **A** `CDerivedStats` arrays + `ProcessEffectList` helper | 0x4E7000, 0x4E7050, 0x4E7070, 0x4E7720 | 185 | `src/CDerivedStats.*`, `src/CGameSprite.cpp` |
 | **B** `CProjectileExploding` family | 0x52D430 `AreaEffect`, 0x52E4D0 / 0x52EC80 / 0x52F9E0 `AIUpdate`s | 3,999 | `src/CProjectileBAM.*` |
 | **C** effects/helpers | 0x55F710 Summon `ApplyEffect`, 0x564580 Dominate `OnRemove`, 0x5705D0 `CMessageScreenShake` send, 0x533600 spray-cell spawner | 1,374 | `src/IcewindCGameEffects.*`, `src/CMessage.cpp`, `src/CProjectileBAM.cpp` |
+| **D** type-352 host Fire + corcat spawner | 0x5818F0 `CProjectile84DAD4::Fire` (unlisted in `functions.tsv`), 0x5819B0 spawner | 917 | `src/CProjectile.*` |
 
-Part D's five candidate rows verified as compiler/library output and the only open item there is
-**0x5819B0** (see judgement calls).
+Part D's five candidate rows verified as compiler/library output; its one real row **0x5819B0**
+now has a final disposition: PORT, together with its caller (see judgement call 3).
 
 The highest-value row is **0x55F710**: it is SP-reachable (opcode `CGAMEEFFECT_SUMMON` = 67 decoded
 at `src/CGameEffect.cpp:407`, applied through `ProcessEffectList`) and it is the missing vtable slot
@@ -543,20 +546,30 @@ Read-only survey of area thirteen (effects/messages/game-object helpers), part D
 Box: origin/main `53063343`. Method: `functions.tsv`/`callgraph.tsv`, address markers in `src/`
 (case-insensitive), vtable pointers/stores, annotate; ADR 0002 for the MP rule. No commits.
 
+**Revision 3 (task-48, the 0x5819B0 caller pass).** The unlisted caller is recovered:
+`0x5818F0 CProjectile84DAD4::Fire` (vtable 0x84DAD4 slot 0x6C, 192 bytes, `ret 0x1C`). It is not a
+CInfinity render routine — it is a host-gated Fire that spawns five fixed "corcat" CGameSprites via
+0x5819B0 — and it is SP-reachable because single player hosts the null-provider session
+(`CScreenConnection::OnNewGameButtonClick` -> `CNetwork::HostNewSession` sets `m_bIsHost`, so the
+`g_pChitin+0x1033 == 1` guard passes in SP). Both are ported; the caller is added to
+`docs/followups.md` as missing from `functions.tsv`. Final ledger: **1 PORT, 87 COVERED, 0 DROP, 0
+UNSURE**.
+
 **Revision 2 (final after task-44 verification).** Revision 1 booked 16 `CInfButtonArray` rows PORT (they are
 `std::deque<int>` internals) and 6 projectile/effect rows PORT. Both are now corrected: the five "projectile
 methods" are compiler-generated class destructors / MSVC STL container internals too. Final ledger: **0 PORT,
 87 COVERED, 0 DROP, 1 UNSURE**. The range is entirely already-ported rows + compiler/library output; the one
-real-game body left is 0x5819B0, unconfirmed (see caveat).
+real-game body 0x5819B0 is ported together with its recovered caller (revision 3; see judgement
+call 3).
 
 ## Summary (revision 2)
 
 | Disposition | Rows |
 |---|---|
-| **PORT** | **0** |
+| **PORT** | **1** (0x5819B0 with its caller 0x5818F0 `CProjectile84DAD4::Fire`; revision 3) |
 | **COVERED** | **87** (23 already ported; 15 more scalar dtors; 49 template/library/compiler) |
 | **DROP** | **0** |
-| **UNSURE** | **1** (0x5819B0 — real game body, caller unconfirmed; left out) |
+| **UNSURE** | **0** |
 
 **23 rows are already ported** (address markers present at the box) — the issue's unported-function
 enumeration is stale here, exactly as in part A.
@@ -648,7 +661,8 @@ targeted pass on the 0x581900 caller (it is absent from `functions.tsv`, so its 
 23 already-ported rows (16 non-scalar + 7 scalar dtors*), 15 other scalar dtors, 16 deque internals,
 18 STL lock/container instances, 3 circular-list instances, 5 string/list container instances,
 2 other compiler/ported rows (0x57D4E0, 0x57E1A0), 5 previously-PORT rows now COVERED
-(0x5776D0, 0x577D60, 0x577D90, 0x57C680, 0x582270), 1 UNSURE (0x5819B0) = 88.
+(0x5776D0, 0x577D60, 0x577D90, 0x57C680, 0x582270), 1 PORT (0x5819B0, with its unlisted caller
+0x5818F0 `CProjectile84DAD4::Fire`) = 88.
 
 
 ## Judgement calls, for the maintainer
@@ -664,15 +678,17 @@ targeted pass on the 0x581900 caller (it is absent from `functions.tsv`, so its 
    site as behaviour-neutral, so they are booked DROP-as-MP-only. If you read "SP-reachable =
    executes in SP" literally they would be PORT with no in-tree caller. Say which convention you
    want and I'll rebook if needed.
-3. **`0x5819B0` (part D, 725 B) — the area's only open row.** Part D's verification says it is a
-   real game body (a static "corcat" `CResRef` cache with an init guard, `CCreatureFile` →
-   `new CGameSprite` → `CGameAnimationType::GetEllipseRect` → `CGameObjectArray::GetDeny` →
-   animation vtable calls + `SetFacing`), with no callgraph callers and no pointer-table reference.
-   A rel32 scan found five call sites (0x581927/46/65/84/A3) inside the **preceding function at
-   ~0x581900**, which is not in `functions.tsv` — an unlisted render routine
-   (`CInfinity::FXBltFrom`/`FXUnlock`, `CGameArea::GetHeightOffset`, object animation fields). Its
-   reachability looks SP but is unproven. Needs a targeted pass on that caller before any decision;
-   it is not ported on speculation.
+3. **`0x5819B0` (part D, 725 B) — resolved: PORT, with its caller.** The unlisted caller is
+   **`0x5818F0 CProjectile84DAD4::Fire`** (vtable 0x84DAD4 slot 0x6C, 192 bytes, `ret 0x1C`; absent
+   from `functions.tsv`, recovered from the five rel32 call sites). It is *not* a render routine —
+   the `CInfinity`/`GetHeightOffset` reading was wrong; the helper loads the fixed "corcat" CRE,
+   creates a `CGameSprite`, takes it back from the object array, adds it to the area on a search-grid
+   point and sets the facing. It is SP-reachable: the first test is `g_pChitin+0x1033 == 1`
+   (`CNetwork::m_bIsHost`), and single player hosts the null-provider session
+   (`CScreenConnection::OnNewGameButtonClick` → `CNetwork::HostNewSession` → `m_bIsHost = TRUE`,
+   before `CInfGame::NewGame`), so the guard passes in SP; only MP clients skip it. Both are ported
+   (`src/CProjectile.cpp`), with evidence 5818F0.md / 5819B0.md, and the caller is recorded in
+   `docs/followups.md` as missing from `functions.tsv`. Final disposition: **PORT**, not UNSURE.
 4. **Will's tree** (7820ef22) is not available in this checkout. If you want the part-C imported
    body treated as an import in the 0x55F710 PR, the `Imported-From:` trailer will cite
    `WillScarlettOhara/iwd2-re` per `docs/wso/README.md`; a Will-tree cross-check of the remaining
